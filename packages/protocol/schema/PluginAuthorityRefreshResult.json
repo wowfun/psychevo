@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "PluginAuthorityRuntimeView": {
+      "properties": {
+        "auth": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibilityProfile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inventoryReady": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateHome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedBinary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "securityNotes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "$ref": "#/definitions/PluginAuthorityRuntimeView"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "authority",
+    "success"
+  ],
+  "title": "PluginAuthorityRefreshResult",
+  "type": "object"
+}

@@ -4,7 +4,9 @@ mod init;
 mod live;
 mod paths;
 
-use anyhow::Result;
+use std::process::Command as ProcessCommand;
+
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -41,11 +43,33 @@ fn main() -> Result<()> {
     let root = paths::repo_root()?;
     match xtask.command {
         Command::GatewayProtocol(GatewayProtocolCommand::Generate { check }) => {
-            psychevo_gateway_protocol::generate_typescript_and_schema(&root, check)
+            generate_gateway_protocol(&root, check)
         }
         Command::Ci(command) => ci::run(command, &root),
         Command::Doctor(command) => doctor::run(command, &root),
         Command::Init(command) => init::run(command, &root),
         Command::Live(command) => live::run(command, &root),
     }
+}
+
+fn generate_gateway_protocol(root: &std::path::Path, check: bool) -> Result<()> {
+    psychevo_gateway_protocol::generate_typescript_and_schema(root, check)?;
+    let mut command = ProcessCommand::new("pnpm");
+    command.current_dir(root).args([
+        "--dir",
+        "packages/protocol",
+        "exec",
+        "tsx",
+        "scripts/generate-validators.ts",
+    ]);
+    if check {
+        command.arg("--check");
+    }
+    let status = command
+        .status()
+        .context("run Gateway standalone validator generation")?;
+    if !status.success() {
+        bail!("Gateway standalone validator generation failed with {status}");
+    }
+    Ok(())
 }

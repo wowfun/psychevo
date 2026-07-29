@@ -1,0 +1,299 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginInterfaceView": {
+      "properties": {
+        "brandColor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "composerIcon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultPrompt": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "developerName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logo": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoDark": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "longDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacyPolicyUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "screenshots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "shortDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "termsOfServiceUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "websiteUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PluginStageDiagnosticView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "stage",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "canonical_id": {
+      "type": "string"
+    },
+    "compatibility_profile": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "declared_lanes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/PluginDiagnosticView"
+      },
+      "type": "array"
+    },
+    "framework": {
+      "type": "string"
+    },
+    "interface": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginInterfaceView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest_path": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "package_root": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/definitions/PluginStageDiagnosticView"
+      },
+      "type": "array"
+    },
+    "support": {
+      "type": "string"
+    },
+    "unsupported_lanes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "canonical_id",
+    "declared_lanes",
+    "diagnostics",
+    "framework",
+    "manifest_path",
+    "name",
+    "package_root",
+    "source_id",
+    "source_kind",
+    "stages",
+    "support",
+    "unsupported_lanes"
+  ],
+  "title": "PluginInspectionView",
+  "type": "object"
+}

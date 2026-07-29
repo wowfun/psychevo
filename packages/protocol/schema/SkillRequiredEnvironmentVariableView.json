@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "help": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "optional": {
+      "default": false,
+      "type": "boolean"
+    },
+    "prompt": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "required_for": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "SkillRequiredEnvironmentVariableView",
+  "type": "object"
+}

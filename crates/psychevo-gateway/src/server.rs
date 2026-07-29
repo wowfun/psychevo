@@ -40,20 +40,20 @@ use psychevo::__product::persistence::{
 };
 use psychevo::{
     __product::capabilities::AgentBackendConfig, __product::capabilities::AgentCatalog,
-    __product::capabilities::AgentDefinition, __product::capabilities::AgentDiagnostic,
-    __product::capabilities::AgentDiscoveryOptions, __product::capabilities::AgentEntrypoint,
-    __product::capabilities::AgentRunRecord, __product::capabilities::AgentSource,
-    __product::capabilities::AgentTeamCatalog, __product::capabilities::AgentTeamDefinition,
-    __product::capabilities::AgentTeamMember, __product::capabilities::AgentTeamSource,
-    __product::capabilities::InstallOptions, __product::capabilities::ListSkillsOptions,
-    __product::capabilities::LoadedMainAgent, __product::capabilities::MAX_AGENT_SPAWN_DEPTH_CAP,
+    __product::capabilities::AgentControl, __product::capabilities::AgentDefinition,
+    __product::capabilities::AgentDiagnostic, __product::capabilities::AgentDiscoveryOptions,
+    __product::capabilities::AgentEntrypoint, __product::capabilities::AgentRunRecord,
+    __product::capabilities::AgentSource, __product::capabilities::AgentTeamCatalog,
+    __product::capabilities::AgentTeamDefinition, __product::capabilities::AgentTeamMember,
+    __product::capabilities::AgentTeamSource, __product::capabilities::InstallOptions,
+    __product::capabilities::ListSkillsOptions, __product::capabilities::LoadedMainAgent,
+    __product::capabilities::MAX_AGENT_SPAWN_DEPTH_CAP,
     __product::capabilities::MAX_TEAM_PARALLEL_AGENTS_CAP,
     __product::capabilities::PluginInspectOptions, __product::capabilities::PluginInstallOptions,
     __product::capabilities::PluginMarketplaceEntry, __product::capabilities::PluginScope,
     __product::capabilities::PluginSourceKind,
     __product::capabilities::SESSION_MAIN_AGENT_METADATA_KEY,
     __product::capabilities::SkillDiscoveryOptions, __product::capabilities::SkillTarget,
-    __product::capabilities::agent_spawn_paused, __product::capabilities::agent_status_records,
     __product::capabilities::codex_plugin_set_enabled_value,
     __product::capabilities::discover_agent_teams_with_catalog,
     __product::capabilities::discover_agents, __product::capabilities::discover_skills,
@@ -76,9 +76,7 @@ use psychevo::{
     __product::capabilities::remove_installed_skill,
     __product::capabilities::resolve_agent_definition,
     __product::capabilities::resolve_agent_team_definition,
-    __product::capabilities::resume_agent_id, __product::capabilities::send_agent_message,
-    __product::capabilities::set_agent_spawn_paused, __product::capabilities::set_skill_enabled,
-    __product::capabilities::stop_agent_id_with_grace, __product::capabilities::valid_agent_name,
+    __product::capabilities::set_skill_enabled, __product::capabilities::valid_agent_name,
     __product::capabilities::view_skill_value_selected,
     __product::capabilities::write_installed_skill, __product::configuration::McpServerConfigInput,
     __product::configuration::McpToolPolicyInput,
@@ -165,6 +163,7 @@ use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};
 
 mod agents;
 mod automations;
+mod browser_session_store;
 mod channel_runtime;
 mod channels;
 mod codex_capability_broker;
@@ -194,6 +193,7 @@ use automations::{
     automation_delete_result, automation_draft_result, automation_list_result,
     automation_run_result, automation_set_enabled_result, automation_write_result,
 };
+use browser_session_store::{BrowserSessionStore, browser_session_cookie};
 use channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
     channel_list_result_for_cwd, channel_list_result_for_scope, channel_show_result,

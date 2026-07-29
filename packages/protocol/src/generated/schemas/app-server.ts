@@ -753,6 +753,63 @@ export const appServerSchemas = {
 },
   AppApprovalRequestParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppFilesystemApprovalRequest": {
+      "properties": {
+        "scopeCandidates": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/definitions/AppFilesystemApprovalTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "scopeCandidates",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "AppFilesystemApprovalTarget": {
+      "properties": {
+        "requestedPath": {
+          "type": "string"
+        },
+        "resolvedPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestedPath",
+        "resolvedPath"
+      ],
+      "type": "object"
+    },
+    "AppMcpStartupApprovalRequest": {
+      "properties": {
+        "descriptorFingerprint": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "descriptorFingerprint",
+        "server",
+        "transport"
+      ],
+      "type": "object"
+    }
+  },
   "properties": {
     "allowAlways": {
       "type": "boolean"
@@ -760,12 +817,32 @@ export const appServerSchemas = {
     "callId": {
       "type": "string"
     },
-    "filesystem": true,
+    "filesystem": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AppFilesystemApprovalRequest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "matchedRule": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "mcpStartup": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AppMcpStartupApprovalRequest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "reason": {
       "type": "string"
@@ -803,6 +880,84 @@ export const appServerSchemas = {
     "turnId"
   ],
   "title": "AppApprovalRequestParams",
+  "type": "object"
+},
+  AppFilesystemApprovalTarget: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "requestedPath": {
+      "type": "string"
+    },
+    "resolvedPath": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "requestedPath",
+    "resolvedPath"
+  ],
+  "title": "AppFilesystemApprovalTarget",
+  "type": "object"
+},
+  AppFilesystemApprovalRequest: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppFilesystemApprovalTarget": {
+      "properties": {
+        "requestedPath": {
+          "type": "string"
+        },
+        "resolvedPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestedPath",
+        "resolvedPath"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "scopeCandidates": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "targets": {
+      "items": {
+        "$ref": "#/definitions/AppFilesystemApprovalTarget"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scopeCandidates",
+    "targets"
+  ],
+  "title": "AppFilesystemApprovalRequest",
+  "type": "object"
+},
+  AppMcpStartupApprovalRequest: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "descriptorFingerprint": {
+      "type": "string"
+    },
+    "server": {
+      "type": "string"
+    },
+    "transport": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "descriptorFingerprint",
+    "server",
+    "transport"
+  ],
+  "title": "AppMcpStartupApprovalRequest",
   "type": "object"
 },
   AppApprovalOutcome: {

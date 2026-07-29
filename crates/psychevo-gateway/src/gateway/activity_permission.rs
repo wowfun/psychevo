@@ -73,7 +73,6 @@ pub struct ThreadTurnPolicy {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<psychevo::__product::runtime::ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
@@ -135,7 +134,6 @@ impl Default for ThreadTurnPolicy {
             include_reasoning: false,
             mode: RunMode::Default,
             permission_mode: None,
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: false,
             inherited_env: None,
@@ -335,11 +333,7 @@ impl ThreadTurnIntent {
             .with_runtime(policy.runtime_profile_ref, policy.control_values)
             .with_reasoning_output(policy.include_reasoning)
             .with_execution_policy(policy.mode, policy.permission_mode, policy.config_path)
-            .with_approval(
-                policy.approval_mode,
-                policy.approval_handler,
-                policy.clarify_enabled,
-            )
+            .with_approval(policy.approval_handler, policy.clarify_enabled)
             .with_environment(
                 policy.inherited_env,
                 policy.project_context_override,

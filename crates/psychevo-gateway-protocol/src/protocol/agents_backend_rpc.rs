@@ -202,6 +202,8 @@ pub struct TeamStatusParams {
 #[ts(rename_all = "camelCase")]
 pub struct AgentControlParams {
     pub action: String,
+    #[serde(default, rename = "threadId")]
+    pub thread_id: Option<String>,
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
@@ -667,7 +669,7 @@ pub struct RuntimeProfileSetEnabledParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileWriteParams {
     pub id: String,
@@ -685,8 +687,6 @@ pub struct RuntimeProfileWriteParams {
     pub default_mode: Option<String>,
     #[serde(default, rename = "defaultAgent")]
     pub default_agent: Option<String>,
-    #[serde(default, rename = "approvalMode")]
-    pub approval_mode: Option<String>,
     #[serde(default)]
     pub sandbox: Option<String>,
     #[serde(default, rename = "workspaceRoots")]
@@ -1354,8 +1354,6 @@ pub struct RuntimeProfileView {
     pub default_mode: Option<String>,
     #[serde(default, rename = "defaultAgent")]
     pub default_agent: Option<String>,
-    #[serde(default, rename = "approvalMode")]
-    pub approval_mode: Option<String>,
     #[serde(default)]
     pub sandbox: Option<String>,
     #[serde(default, rename = "workspaceRoots")]

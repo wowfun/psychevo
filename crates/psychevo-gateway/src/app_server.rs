@@ -577,7 +577,24 @@ impl ApprovalHandler for RemoteApprovalHandler {
                 allow_always: request.allow_always,
                 filesystem: request
                     .filesystem
-                    .and_then(|value| serde_json::to_value(value).ok()),
+                    .map(|value| wire::AppFilesystemApprovalRequest {
+                        targets: value
+                            .targets
+                            .into_iter()
+                            .map(|target| wire::AppFilesystemApprovalTarget {
+                                requested_path: target.requested_path,
+                                resolved_path: target.resolved_path,
+                            })
+                            .collect(),
+                        scope_candidates: value.scope_candidates,
+                    }),
+                mcp_startup: request
+                    .mcp_startup
+                    .map(|value| wire::AppMcpStartupApprovalRequest {
+                        server: value.server,
+                        transport: value.transport,
+                        descriptor_fingerprint: value.descriptor_fingerprint,
+                    }),
             };
             let timeout = Duration::from_secs(request.timeout_secs.max(1));
             let Ok(value) = serde_json::to_value(params) else {
@@ -907,7 +924,7 @@ impl AppServerConnection {
                     .with_model(params.model, params.reasoning_effort)
                     .with_agent(None, params.no_agents, params.no_skills)
                     .with_environment(params.inherited_env, None, None)
-                    .with_approval(None, approval_handler, true);
+                    .with_approval(approval_handler, true);
                 input.__set_turn_id(params.turn_id);
                 for registration in registrations.tools {
                     input = input.tool(Arc::new(RemoteTool {
@@ -2398,6 +2415,7 @@ mod tests {
                     suggested_rule: Some("allow exec_command".to_string()),
                     allow_always: true,
                     filesystem: None,
+                    mcp_startup: None,
                     timeout_secs: 1,
                 })
                 .await
@@ -2440,6 +2458,7 @@ mod tests {
                     suggested_rule: None,
                     allow_always: false,
                     filesystem: None,
+                    mcp_startup: None,
                     timeout_secs: 60,
                 })
                 .await

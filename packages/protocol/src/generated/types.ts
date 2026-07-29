@@ -44,7 +44,13 @@ export type AppToolCallParams = { callId: string, toolName: string, arguments: u
 
 export type AppToolCallResult = { result: unknown, modelContent?: string | null, isError?: boolean, };
 
-export type AppApprovalRequestParams = { callId: string, threadId: string, turnId: string, toolCallId: string, toolName: string, summary: string, reason: string, matchedRule?: string | null, suggestedRule?: string | null, allowAlways: boolean, filesystem?: unknown, };
+export type AppApprovalRequestParams = { callId: string, threadId: string, turnId: string, toolCallId: string, toolName: string, summary: string, reason: string, matchedRule?: string | null, suggestedRule?: string | null, allowAlways: boolean, filesystem?: AppFilesystemApprovalRequest | null, mcpStartup?: AppMcpStartupApprovalRequest | null, };
+
+export type AppFilesystemApprovalTarget = { requestedPath: string, resolvedPath: string, };
+
+export type AppFilesystemApprovalRequest = { targets: Array<AppFilesystemApprovalTarget>, scopeCandidates: Array<string>, };
+
+export type AppMcpStartupApprovalRequest = { server: string, transport: string, descriptorFingerprint: string, };
 
 export type AppApprovalOutcome = "allow_once" | "allow_turn" | "allow_session" | "allow_always" | "deny";
 
@@ -256,7 +262,7 @@ export type TeamSetEnabledParams = { name: string, enabled: boolean, target?: Ag
 
 export type TeamStatusParams = { scope?: GatewayRequestScope | null, threadId?: string | null, };
 
-export type AgentControlParams = { action: string, target?: string | null, message?: string | null, scope?: GatewayRequestScope | null, };
+export type AgentControlParams = { action: string, threadId?: string | null, target?: string | null, message?: string | null, scope?: GatewayRequestScope | null, };
 
 export type AgentBackendRefView = { ref: string, };
 
@@ -322,7 +328,7 @@ export type RuntimeProfileReadParams = { id: string, scope?: GatewayRequestScope
 
 export type RuntimeProfileSetEnabledParams = { id: string, target: BackendConfigTarget, enabled: boolean, scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled?: boolean | null, label?: string | null, backendRef?: string | null, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, approvalMode?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, options?: unknown | null, scope?: GatewayRequestScope | null, };
+export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled?: boolean | null, label?: string | null, backendRef?: string | null, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, options?: unknown | null, scope?: GatewayRequestScope | null, };
 
 export type RuntimeProfileDeleteParams = { id: string, target: BackendConfigTarget, scope?: GatewayRequestScope | null, };
 
@@ -390,6 +396,100 @@ export type PluginConnectStartParams = { selector: string, componentId: string, 
 
 export type PluginConnectStatusParams = { sessionId: string, scope?: GatewayRequestScope | null, };
 
+export type PluginAuthorityIdentityView = { "kind": "psychevo", selector: string, } | { "kind": "codex", plugin: string, marketplace: string, };
+
+export type PluginComponentStatusView = { component: string, compatibilityProfile: string, highestLevel: string, executionOwner: string, readiness: string, reason: string, };
+
+export type PluginDiagnosticView = { kind: string, message: string, path?: string | null, };
+
+export type PluginPolicyView = { profileEnabled: boolean, projectOverride?: boolean | null, effectiveEnabled: boolean, };
+
+export type PluginTrustView = { required: boolean, status: string, fingerprint: string, trustedFingerprint?: string | null, trustedAtMs?: number | null, };
+
+export type PsychevoPluginView = { name: string, selector: string, scope_name: string, enablement_scope_name: string, removable: boolean, package_mutable: boolean, enablement_mutable: boolean, version?: string | null, description?: string | null, source_id: string, source: string, source_kind: string, scope: string, manifest_kind: string, enabled: boolean, authority?: PluginAuthorityIdentityView | null, canonical_id?: string | null, npm_registry?: string | null, package_root?: string | null, data_root?: string | null, manifest_path?: string | null, compatibility_profile?: string | null, component_statuses?: Array<PluginComponentStatusView>, manifest_resources?: Array<string>, psychevo_extensions?: Array<string>, readiness?: string | null, status?: string | null, installed?: boolean | null, interface?: unknown, keywords?: Array<string>, contributions?: unknown, diagnostics?: Array<PluginDiagnosticView>, policy?: PluginPolicyView | null, trust?: PluginTrustView | null, };
+
+export type CodexPluginView = { name: string, selector: string, canonical_id: string, authority: PluginAuthorityIdentityView, version?: string | null, description?: string | null, source_id: string, scope_name: string, manifest_kind: string, compatibility_profile?: string | null, component_statuses?: Array<PluginComponentStatusView>, installed?: boolean | null, enabled: boolean, readiness?: string | null, status?: string | null, interface?: unknown, policy?: PluginPolicyView | null, trust?: PluginTrustView | null, enablement_mutable?: boolean | null, };
+
+export type PluginView = PsychevoPluginView | CodexPluginView;
+
+export type PluginAuthorityRuntimeView = { kind: string, enabled?: boolean | null, runtime?: string | null, auth?: string | null, readiness?: string | null, owner?: string | null, reason?: string | null, resolvedBinary?: string | null, version?: string | null, compatibilityProfile?: string | null, privateHome?: string | null, platform?: string | null, generation?: number | null, inventoryReady?: boolean | null, securityNotes?: Array<string>, };
+
+export type PluginListResult = { plugins: Array<PluginView>, count: number, codex_authority: PluginAuthorityRuntimeView, authorities: Array<PluginAuthorityRuntimeView>, };
+
+export type PluginReadResult = { plugin: PluginView, manifest: unknown, inspection: unknown, };
+
+export type PluginDoctorEntryView = { plugin: PluginView, manifest: unknown, inspection: unknown, worker?: unknown, sandbox?: unknown, };
+
+export type PluginDoctorResult = { plugins: Array<PluginDoctorEntryView>, apps?: unknown, };
+
+export type PluginStageDiagnosticView = { stage: string, status: string, message: string, path?: string | null, };
+
+export type PluginInterfaceView = { displayName?: string | null, shortDescription?: string | null, longDescription?: string | null, developerName?: string | null, category?: string | null, defaultPrompt?: Array<string>, capabilities?: Array<string>, websiteUrl?: string | null, privacyPolicyUrl?: string | null, termsOfServiceUrl?: string | null, brandColor?: string | null, composerIcon?: string | null, logo?: string | null, logoDark?: string | null, screenshots?: Array<string>, };
+
+export type PluginInspectionView = { source_kind: string, source_id: string, framework: string, canonical_id: string, compatibility_profile?: string | null, name: string, version?: string | null, description?: string | null, manifest_path: string, package_root: string, support: string, declared_lanes: Array<string>, component_statuses?: Array<PluginComponentStatusView>, unsupported_lanes: Array<string>, diagnostics: Array<PluginDiagnosticView>, stages: Array<PluginStageDiagnosticView>, interface?: PluginInterfaceView | null, };
+
+export type PluginInspectResult = { success: boolean, inspection: PluginInspectionView, };
+
+export type PluginInstallRecordView = { name: string, version: string, description: string, source_id: string, source_slug: string, source_kind: string, npm_registry?: string | null, scope: string, package_root: string, data_root: string, manifest_path: string, manifest_kind: string, compatibility_profile: string, component_statuses?: Array<PluginComponentStatusView>, manifest_resources: Array<string>, psychevo_extensions: Array<string>, diagnostics: Array<PluginDiagnosticView>, };
+
+export type PluginInstallResult = { success?: boolean | null, plugin?: PluginInstallRecordView | null, authority?: PluginAuthorityIdentityView | null, partial?: boolean | null, completedSteps?: Array<string>, failedStep?: string | null, reason?: string | null, safeState?: string | null, materialization?: unknown, fingerprint?: string | null, policy?: PluginPolicyView | null, trust?: PluginTrustView | null, generation?: number | null, };
+
+export type PluginUninstallResult = { success: boolean, scope?: string | null, plugin?: string | null, source?: string | null, authority?: PluginAuthorityIdentityView | null, result?: unknown, };
+
+export type PluginSetEnabledResult = { success: boolean, scope: string, path?: string | null, plugin?: string | null, source?: string | null, selector?: string | null, enabled?: boolean | null, manifest_resources?: Array<string>, psychevo_extensions?: Array<string>, policy?: PluginPolicyView | null, };
+
+export type PluginAuthorityWriteResult = { success: boolean, write: unknown, authority: PluginAuthorityRuntimeView, };
+
+export type PluginAuthorityRefreshResult = { success: boolean, authority: PluginAuthorityRuntimeView, };
+
+export type PluginAuthoritySetTrustResult = { success: boolean, selector: string, trusted: boolean, trust: PluginTrustView, };
+
+export type PluginMarketplaceView = { name: string, source?: string | null, kind?: string | null, git_ref?: string | null, npm_version?: string | null, npm_registry?: string | null, path?: string | null, plugins?: Array<unknown>, };
+
+export type PluginCatalogListResult = { scope?: string | null, marketplaces: Array<PluginMarketplaceView>, };
+
+export type PluginCatalogPsychevoAddResult = { success: boolean, scope: string, marketplace: PluginMarketplaceView, };
+
+export type PluginCatalogPsychevoRemoveResult = { success: boolean, scope: string, removed: boolean, name: string, };
+
+export type PluginCatalogCodexAddResult = { marketplaceName: string, installedRoot: string, alreadyAdded: boolean, };
+
+export type PluginCatalogCodexRemoveResult = { marketplaceName: string, installedRoot: string | null, };
+
+export type PluginCatalogUpgradeError = { marketplaceName: string, message: string, };
+
+export type PluginCatalogUpgradeResult = { selectedMarketplaces: Array<string>, upgradedRoots: Array<string>, errors: Array<PluginCatalogUpgradeError>, };
+
+export type PluginCatalogAddResult = PluginCatalogPsychevoAddResult | PluginCatalogCodexAddResult;
+
+export type PluginCatalogRemoveResult = PluginCatalogPsychevoRemoveResult | PluginCatalogCodexRemoveResult;
+
+export type PluginConnectStartResult = { sessionId: string, status: string, installUrl?: string | null, authorizationUrl?: string | null, expiresInSeconds: number, };
+
+export type PluginConnectStatusResult = { sessionId: string, status: string, selector?: string | null, componentId?: string | null, kind?: string | null, authorizationUrl?: string | null, };
+
+export type SkillDiagnosticView = { kind: string, message: string, path?: string | null, };
+
+export type SkillRequiredEnvironmentVariableView = { name: string, prompt?: string | null, help?: string | null, required_for?: string | null, optional?: boolean, };
+
+export type SkillSummaryView = { id: string, name: string, description: string, location: string, source: string, source_label: string, category?: string | null, enabled: boolean, prompt_visible: boolean, readiness_status: string, supported_on_current_platform: boolean, disable_model_invocation: boolean, issues: Array<string>, collision_group?: Array<string>, skill_dir?: string | null, tags?: Array<string>, related_skills?: Array<string>, platforms?: Array<string>, required_environment_variables?: Array<SkillRequiredEnvironmentVariableView>, missing_required_environment_variables?: Array<string>, missing_credential_files?: Array<string>, compatibility?: string | null, license?: string | null, allowed_tools?: Array<string>, required_tools?: Array<string>, fallback_for_tools?: Array<string>, required_toolsets?: Array<string>, fallback_for_toolsets?: Array<string>, };
+
+export type SkillListResult = { success: boolean, skills: Array<SkillSummaryView>, diagnostics: Array<SkillDiagnosticView>, collisions: { [key in string]?: Array<string> }, count: number, };
+
+export type SkillReadResult = { success: boolean, name: string, error?: string | null, id?: string | null, enabled?: boolean | null, prompt_visible?: boolean | null, file?: string | null, path?: string | null, skill_dir?: string | null, description?: string | null, source?: string | null, source_label?: string | null, category?: string | null, tags?: Array<string>, related_skills?: Array<string>, platforms?: Array<string>, platform_status?: string | null, issues?: Array<string>, collision_group?: Array<string>, required_environment_variables?: Array<SkillRequiredEnvironmentVariableView>, missing_required_environment_variables?: Array<string>, missing_credential_files?: Array<string>, setup_needed?: boolean | null, readiness_status?: string | null, setup_help?: string | null, compatibility?: string | null, license?: string | null, allowed_tools?: Array<string>, required_tools?: Array<string>, fallback_for_tools?: Array<string>, required_toolsets?: Array<string>, fallback_for_toolsets?: Array<string>, content?: string | null, preview_content?: string | null, linked_files?: { [key in string]?: Array<string> }, available_files?: Array<string>, is_binary?: boolean | null, size?: number | null, };
+
+export type SkillScanFindingView = { category: string, severity: string, file: string, pattern: string, };
+
+export type SkillScanResultView = { verdict: string, findings: Array<SkillScanFindingView>, };
+
+export type SkillInstalledView = { name: string, path: string, scan: SkillScanResultView, };
+
+export type SkillInstallResult = { success: boolean, installed: Array<SkillInstalledView>, };
+
+export type SkillUninstallResult = { success: boolean, name: string, scope: string, path: string, };
+
+export type SkillSetEnabledResult = { success: boolean, name: string, enabled: boolean, scope: string, path: string, };
+
 export type ToolListParams = { scope?: GatewayRequestScope | null, };
 
 export type ToolReadParams = { name: string, scope?: GatewayRequestScope | null, };
@@ -399,6 +499,16 @@ export type ToolSetEnabledParams = { name: string, mode: string, enabled: boolea
 export type ToolCreateParams = { name: string, description?: string | null, tools?: Array<string>, includes?: Array<string>, force?: boolean, local?: boolean, scope?: GatewayRequestScope | null, };
 
 export type ToolRemoveParams = { name: string, local?: boolean, scope?: GatewayRequestScope | null, };
+
+export type ToolModeView = { enabled_toolsets?: Array<string> | null, disabled_toolsets: Array<string>, effective_tools: Array<string>, };
+
+export type ToolsetView = { name: string, source: string, description?: string | null, tools: Array<string>, includes: Array<string>, unknown_tools: Array<string>, mode_mutable: boolean, removable: boolean, };
+
+export type ToolListResult = { scope: string, path?: string | null, sources: Array<unknown>, default_enabled_toolsets: Array<string>, modes: { [key in string]?: ToolModeView }, toolsets: Array<ToolsetView>, };
+
+export type ToolReadResult = { toolset: ToolsetView, };
+
+export type ToolMutationResult = { success: boolean, changed: boolean, name: string, path: string, };
 
 export type McpListParams = { scope?: GatewayRequestScope | null, };
 
@@ -416,6 +526,32 @@ export type McpOAuthStartParams = { name: string, scope?: GatewayRequestScope | 
 
 export type McpOAuthStatusParams = { sessionId: string, scope?: GatewayRequestScope | null, };
 
+export type McpTransportView = { "kind": "stdio", command: string, args: Array<string>, envKeys: Array<string>, cwd: string | null, } | { "kind": "streamable_http", url: string, headers: { [key in string]?: string }, auth: McpAuthView, } | { "kind": "unsupported", unsupportedKind: string, };
+
+export type McpAuthView = { bearerTokenEnvVar?: string | null, scopes: Array<string>, oauthResource?: string | null, oauthClientId?: string | null, oauthConfigured: boolean, storedOAuthToken: boolean, };
+
+export type McpPolicyView = { enabledTools?: Array<string> | null, disabledTools: Array<string>, supportsParallelToolCalls: boolean, startupTimeoutSecs?: number | null, toolTimeoutSecs?: number | null, };
+
+export type McpServerView = { name: string, sourceId: string, sourceKind: string, enabled: boolean, required: boolean, transport: McpTransportView, policy: McpPolicyView, };
+
+export type McpListResult = { scope: string, path?: string | null, sources: Array<unknown>, servers: Array<McpServerView>, count: number, };
+
+export type McpReadResult = { server: McpServerView, };
+
+export type McpConfigView = { name: string, config: Record<string, unknown>, };
+
+export type McpMutationResult = { success: boolean, changed: boolean, name: string, path: string, server?: McpConfigView | null, };
+
+export type McpToolSummaryView = { name: string, title?: string | null, description?: string | null, };
+
+export type McpTestResult = { ok: boolean, name: string, transport: string, tools?: Array<McpToolSummaryView>, error?: string | null, };
+
+export type McpOAuthStartResult = { sessionId: string, authorizationUrl: string, status: string, };
+
+export type McpOAuthStatusResult = { sessionId: string, status: string, error?: string | null, };
+
+export type McpOAuthLogoutResult = { success: boolean, name: string, removed: boolean, };
+
 export type BackendConfigView = { id: string, kind: string, enabled: boolean, label: string, description?: string | null, command?: string | null, args?: Array<string>, cwd: string, entrypoints?: Array<string>, clientCapabilities?: Array<string>, mcpServers?: Array<string>, envKeys?: Array<string>, sourceTargets?: Array<BackendConfigTarget>, diagnostics: Array<BackendDiagnosticView>, };
 
 export type BackendListResult = { backends: Array<BackendConfigView>, };
@@ -432,7 +568,7 @@ export type BackendDeleteResult = { deleted: boolean, changed: boolean, id: stri
 
 export type BackendManageResult = { id: string, operation: string, changed: boolean, status: string, path: string, message: string, };
 
-export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured?: boolean, backendRef?: string | null, provenance?: string, profileRevision?: string, capabilityRevision?: string, stability?: RuntimeStabilityView | null, capabilities?: Array<RuntimeCapabilityView>, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, approvalMode?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, optionKeys?: Array<string>, sourceTargets?: Array<BackendConfigTarget>, health: RuntimeHealthView, readinessStages?: Array<RuntimeReadinessStageView>, diagnostics?: Array<BackendDiagnosticView>, };
+export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured?: boolean, backendRef?: string | null, provenance?: string, profileRevision?: string, capabilityRevision?: string, stability?: RuntimeStabilityView | null, capabilities?: Array<RuntimeCapabilityView>, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, optionKeys?: Array<string>, sourceTargets?: Array<BackendConfigTarget>, health: RuntimeHealthView, readinessStages?: Array<RuntimeReadinessStageView>, diagnostics?: Array<BackendDiagnosticView>, };
 
 export type RuntimeHealthView = { status: string, summary: string, commandPath?: string | null, checkedAtMs?: number | null, };
 

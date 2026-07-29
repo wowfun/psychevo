@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "manifest_resources": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plugin": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginPolicyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "psychevo_extensions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "selector": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scope",
+    "success"
+  ],
+  "title": "PluginSetEnabledResult",
+  "type": "object"
+}

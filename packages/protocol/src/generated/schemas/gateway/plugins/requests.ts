@@ -1608,4 +1608,6103 @@ export const gatewayPluginRequestSchemas = {
   "title": "PluginConnectStatusParams",
   "type": "object"
 },
+  PluginAuthorityIdentityView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "psychevo"
+          ],
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "selector"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "codex"
+          ],
+          "type": "string"
+        },
+        "marketplace": {
+          "type": "string"
+        },
+        "plugin": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "marketplace",
+        "plugin"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "PluginAuthorityIdentityView"
+},
+  PluginComponentStatusView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "compatibilityProfile": {
+      "type": "string"
+    },
+    "component": {
+      "type": "string"
+    },
+    "executionOwner": {
+      "type": "string"
+    },
+    "highestLevel": {
+      "type": "string"
+    },
+    "readiness": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "compatibilityProfile",
+    "component",
+    "executionOwner",
+    "highestLevel",
+    "readiness",
+    "reason"
+  ],
+  "title": "PluginComponentStatusView",
+  "type": "object"
+},
+  PluginDiagnosticView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "message"
+  ],
+  "title": "PluginDiagnosticView",
+  "type": "object"
+},
+  PluginPolicyView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "effectiveEnabled": {
+      "type": "boolean"
+    },
+    "profileEnabled": {
+      "type": "boolean"
+    },
+    "projectOverride": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effectiveEnabled",
+    "profileEnabled"
+  ],
+  "title": "PluginPolicyView",
+  "type": "object"
+},
+  PluginTrustView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "fingerprint": {
+      "type": "string"
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string"
+    },
+    "trustedAtMs": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "trustedFingerprint": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "fingerprint",
+    "required",
+    "status"
+  ],
+  "title": "PluginTrustView",
+  "type": "object"
+},
+  PsychevoPluginView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "canonical_id": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "compatibility_profile": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "contributions": {
+      "default": null
+    },
+    "data_root": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diagnostics": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginDiagnosticView"
+      },
+      "type": "array"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "enablement_mutable": {
+      "type": "boolean"
+    },
+    "enablement_scope_name": {
+      "type": "string"
+    },
+    "installed": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "interface": {
+      "default": null
+    },
+    "keywords": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "manifest_kind": {
+      "type": "string"
+    },
+    "manifest_path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manifest_resources": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "npm_registry": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "package_mutable": {
+      "type": "boolean"
+    },
+    "package_root": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginPolicyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "psychevo_extensions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "readiness": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "removable": {
+      "type": "boolean"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "scope_name": {
+      "type": "string"
+    },
+    "selector": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "trust": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginTrustView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "enabled",
+    "enablement_mutable",
+    "enablement_scope_name",
+    "manifest_kind",
+    "name",
+    "package_mutable",
+    "removable",
+    "scope",
+    "scope_name",
+    "selector",
+    "source",
+    "source_id",
+    "source_kind"
+  ],
+  "title": "PsychevoPluginView",
+  "type": "object"
+},
+  CodexPluginView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "$ref": "#/definitions/PluginAuthorityIdentityView"
+    },
+    "canonical_id": {
+      "type": "string"
+    },
+    "compatibility_profile": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "enablement_mutable": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "installed": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "interface": {
+      "default": null
+    },
+    "manifest_kind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginPolicyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "readiness": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope_name": {
+      "type": "string"
+    },
+    "selector": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "trust": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginTrustView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "authority",
+    "canonical_id",
+    "enabled",
+    "manifest_kind",
+    "name",
+    "scope_name",
+    "selector",
+    "source_id"
+  ],
+  "title": "CodexPluginView",
+  "type": "object"
+},
+  PluginView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/PsychevoPluginView"
+    },
+    {
+      "$ref": "#/definitions/CodexPluginView"
+    }
+  ],
+  "definitions": {
+    "CodexPluginView": {
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authority",
+        "canonical_id",
+        "enabled",
+        "manifest_kind",
+        "name",
+        "scope_name",
+        "selector",
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    },
+    "PsychevoPluginView": {
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginAuthorityIdentityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "contributions": {
+          "default": null
+        },
+        "data_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "type": "boolean"
+        },
+        "enablement_scope_name": {
+          "type": "string"
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "keywords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_mutable": {
+          "type": "boolean"
+        },
+        "package_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "psychevo_extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "enablement_mutable",
+        "enablement_scope_name",
+        "manifest_kind",
+        "name",
+        "package_mutable",
+        "removable",
+        "scope",
+        "scope_name",
+        "selector",
+        "source",
+        "source_id",
+        "source_kind"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "PluginView"
+},
+  PluginAuthorityRuntimeView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "auth": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "compatibilityProfile": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "generation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "inventoryReady": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "kind": {
+      "type": "string"
+    },
+    "owner": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "privateHome": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "readiness": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resolvedBinary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runtime": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "securityNotes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "PluginAuthorityRuntimeView",
+  "type": "object"
+},
+  PluginListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CodexPluginView": {
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authority",
+        "canonical_id",
+        "enabled",
+        "manifest_kind",
+        "name",
+        "scope_name",
+        "selector",
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginAuthorityRuntimeView": {
+      "properties": {
+        "auth": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibilityProfile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inventoryReady": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateHome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedBinary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "securityNotes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    },
+    "PluginView": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PsychevoPluginView"
+        },
+        {
+          "$ref": "#/definitions/CodexPluginView"
+        }
+      ]
+    },
+    "PsychevoPluginView": {
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginAuthorityIdentityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "contributions": {
+          "default": null
+        },
+        "data_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "type": "boolean"
+        },
+        "enablement_scope_name": {
+          "type": "string"
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "keywords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_mutable": {
+          "type": "boolean"
+        },
+        "package_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "psychevo_extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "enablement_mutable",
+        "enablement_scope_name",
+        "manifest_kind",
+        "name",
+        "package_mutable",
+        "removable",
+        "scope",
+        "scope_name",
+        "selector",
+        "source",
+        "source_id",
+        "source_kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authorities": {
+      "items": {
+        "$ref": "#/definitions/PluginAuthorityRuntimeView"
+      },
+      "type": "array"
+    },
+    "codex_authority": {
+      "$ref": "#/definitions/PluginAuthorityRuntimeView"
+    },
+    "count": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "plugins": {
+      "items": {
+        "$ref": "#/definitions/PluginView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "authorities",
+    "codex_authority",
+    "count",
+    "plugins"
+  ],
+  "title": "PluginListResult",
+  "type": "object"
+},
+  PluginReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CodexPluginView": {
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authority",
+        "canonical_id",
+        "enabled",
+        "manifest_kind",
+        "name",
+        "scope_name",
+        "selector",
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    },
+    "PluginView": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PsychevoPluginView"
+        },
+        {
+          "$ref": "#/definitions/CodexPluginView"
+        }
+      ]
+    },
+    "PsychevoPluginView": {
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginAuthorityIdentityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "contributions": {
+          "default": null
+        },
+        "data_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "type": "boolean"
+        },
+        "enablement_scope_name": {
+          "type": "string"
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "keywords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_mutable": {
+          "type": "boolean"
+        },
+        "package_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "psychevo_extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "enablement_mutable",
+        "enablement_scope_name",
+        "manifest_kind",
+        "name",
+        "package_mutable",
+        "removable",
+        "scope",
+        "scope_name",
+        "selector",
+        "source",
+        "source_id",
+        "source_kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "inspection": true,
+    "manifest": true,
+    "plugin": {
+      "$ref": "#/definitions/PluginView"
+    }
+  },
+  "required": [
+    "inspection",
+    "manifest",
+    "plugin"
+  ],
+  "title": "PluginReadResult",
+  "type": "object"
+},
+  PluginDoctorEntryView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CodexPluginView": {
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authority",
+        "canonical_id",
+        "enabled",
+        "manifest_kind",
+        "name",
+        "scope_name",
+        "selector",
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    },
+    "PluginView": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PsychevoPluginView"
+        },
+        {
+          "$ref": "#/definitions/CodexPluginView"
+        }
+      ]
+    },
+    "PsychevoPluginView": {
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginAuthorityIdentityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "contributions": {
+          "default": null
+        },
+        "data_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "type": "boolean"
+        },
+        "enablement_scope_name": {
+          "type": "string"
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "keywords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_mutable": {
+          "type": "boolean"
+        },
+        "package_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "psychevo_extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "enablement_mutable",
+        "enablement_scope_name",
+        "manifest_kind",
+        "name",
+        "package_mutable",
+        "removable",
+        "scope",
+        "scope_name",
+        "selector",
+        "source",
+        "source_id",
+        "source_kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "inspection": true,
+    "manifest": true,
+    "plugin": {
+      "$ref": "#/definitions/PluginView"
+    },
+    "sandbox": {
+      "default": null
+    },
+    "worker": {
+      "default": null
+    }
+  },
+  "required": [
+    "inspection",
+    "manifest",
+    "plugin"
+  ],
+  "title": "PluginDoctorEntryView",
+  "type": "object"
+},
+  PluginDoctorResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "CodexPluginView": {
+      "properties": {
+        "authority": {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authority",
+        "canonical_id",
+        "enabled",
+        "manifest_kind",
+        "name",
+        "scope_name",
+        "selector",
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginDoctorEntryView": {
+      "properties": {
+        "inspection": true,
+        "manifest": true,
+        "plugin": {
+          "$ref": "#/definitions/PluginView"
+        },
+        "sandbox": {
+          "default": null
+        },
+        "worker": {
+          "default": null
+        }
+      },
+      "required": [
+        "inspection",
+        "manifest",
+        "plugin"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    },
+    "PluginView": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PsychevoPluginView"
+        },
+        {
+          "$ref": "#/definitions/CodexPluginView"
+        }
+      ]
+    },
+    "PsychevoPluginView": {
+      "properties": {
+        "authority": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginAuthorityIdentityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "contributions": {
+          "default": null
+        },
+        "data_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "enablement_mutable": {
+          "type": "boolean"
+        },
+        "enablement_scope_name": {
+          "type": "string"
+        },
+        "installed": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null
+        },
+        "keywords": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_resources": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_mutable": {
+          "type": "boolean"
+        },
+        "package_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginPolicyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "psychevo_extensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_name": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "status": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "enablement_mutable",
+        "enablement_scope_name",
+        "manifest_kind",
+        "name",
+        "package_mutable",
+        "removable",
+        "scope",
+        "scope_name",
+        "selector",
+        "source",
+        "source_id",
+        "source_kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "apps": {
+      "default": null
+    },
+    "plugins": {
+      "items": {
+        "$ref": "#/definitions/PluginDoctorEntryView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "plugins"
+  ],
+  "title": "PluginDoctorResult",
+  "type": "object"
+},
+  PluginStageDiagnosticView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stage": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message",
+    "stage",
+    "status"
+  ],
+  "title": "PluginStageDiagnosticView",
+  "type": "object"
+},
+  PluginInterfaceView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "brandColor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "composerIcon": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaultPrompt": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "developerName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "displayName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logo": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logoDark": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "longDescription": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "privacyPolicyUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "screenshots": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shortDescription": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "termsOfServiceUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "websiteUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "PluginInterfaceView",
+  "type": "object"
+},
+  PluginInspectionView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginInterfaceView": {
+      "properties": {
+        "brandColor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "composerIcon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultPrompt": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "developerName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logo": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoDark": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "longDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacyPolicyUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "screenshots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "shortDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "termsOfServiceUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "websiteUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PluginStageDiagnosticView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "stage",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "canonical_id": {
+      "type": "string"
+    },
+    "compatibility_profile": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "declared_lanes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/PluginDiagnosticView"
+      },
+      "type": "array"
+    },
+    "framework": {
+      "type": "string"
+    },
+    "interface": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginInterfaceView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest_path": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "package_root": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/definitions/PluginStageDiagnosticView"
+      },
+      "type": "array"
+    },
+    "support": {
+      "type": "string"
+    },
+    "unsupported_lanes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "canonical_id",
+    "declared_lanes",
+    "diagnostics",
+    "framework",
+    "manifest_path",
+    "name",
+    "package_root",
+    "source_id",
+    "source_kind",
+    "stages",
+    "support",
+    "unsupported_lanes"
+  ],
+  "title": "PluginInspectionView",
+  "type": "object"
+},
+  PluginInspectResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginInspectionView": {
+      "properties": {
+        "canonical_id": {
+          "type": "string"
+        },
+        "compatibility_profile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "declared_lanes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "framework": {
+          "type": "string"
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginInterfaceView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "package_root": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/definitions/PluginStageDiagnosticView"
+          },
+          "type": "array"
+        },
+        "support": {
+          "type": "string"
+        },
+        "unsupported_lanes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "canonical_id",
+        "declared_lanes",
+        "diagnostics",
+        "framework",
+        "manifest_path",
+        "name",
+        "package_root",
+        "source_id",
+        "source_kind",
+        "stages",
+        "support",
+        "unsupported_lanes"
+      ],
+      "type": "object"
+    },
+    "PluginInterfaceView": {
+      "properties": {
+        "brandColor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "composerIcon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultPrompt": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "developerName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "displayName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logo": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logoDark": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "longDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privacyPolicyUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "screenshots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "shortDescription": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "termsOfServiceUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "websiteUrl": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PluginStageDiagnosticView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "stage",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "inspection": {
+      "$ref": "#/definitions/PluginInspectionView"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "inspection",
+    "success"
+  ],
+  "title": "PluginInspectResult",
+  "type": "object"
+},
+  PluginInstallRecordView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "compatibility_profile": {
+      "type": "string"
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "data_root": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/PluginDiagnosticView"
+      },
+      "type": "array"
+    },
+    "manifest_kind": {
+      "type": "string"
+    },
+    "manifest_path": {
+      "type": "string"
+    },
+    "manifest_resources": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "npm_registry": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "package_root": {
+      "type": "string"
+    },
+    "psychevo_extensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "source_slug": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "compatibility_profile",
+    "data_root",
+    "description",
+    "diagnostics",
+    "manifest_kind",
+    "manifest_path",
+    "manifest_resources",
+    "name",
+    "package_root",
+    "psychevo_extensions",
+    "scope",
+    "source_id",
+    "source_kind",
+    "source_slug",
+    "version"
+  ],
+  "title": "PluginInstallRecordView",
+  "type": "object"
+},
+  PluginInstallResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PluginInstallRecordView": {
+      "properties": {
+        "compatibility_profile": {
+          "type": "string"
+        },
+        "component_statuses": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PluginComponentStatusView"
+          },
+          "type": "array"
+        },
+        "data_root": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/definitions/PluginDiagnosticView"
+          },
+          "type": "array"
+        },
+        "manifest_kind": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "manifest_resources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_root": {
+          "type": "string"
+        },
+        "psychevo_extensions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        },
+        "source_slug": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibility_profile",
+        "data_root",
+        "description",
+        "diagnostics",
+        "manifest_kind",
+        "manifest_path",
+        "manifest_resources",
+        "name",
+        "package_root",
+        "psychevo_extensions",
+        "scope",
+        "source_id",
+        "source_kind",
+        "source_slug",
+        "version"
+      ],
+      "type": "object"
+    },
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "completedSteps": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "failedStep": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fingerprint": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "materialization": {
+      "default": null
+    },
+    "partial": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "plugin": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginInstallRecordView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginPolicyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "reason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "safeState": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "trust": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginTrustView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "PluginInstallResult",
+  "type": "object"
+},
+  PluginUninstallResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginAuthorityIdentityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "psychevo"
+              ],
+              "type": "string"
+            },
+            "selector": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "selector"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "codex"
+              ],
+              "type": "string"
+            },
+            "marketplace": {
+              "type": "string"
+            },
+            "plugin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "marketplace",
+            "plugin"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "authority": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginAuthorityIdentityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "plugin": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result": {
+      "default": null
+    },
+    "scope": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success"
+  ],
+  "title": "PluginUninstallResult",
+  "type": "object"
+},
+  PluginSetEnabledResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginPolicyView": {
+      "properties": {
+        "effectiveEnabled": {
+          "type": "boolean"
+        },
+        "profileEnabled": {
+          "type": "boolean"
+        },
+        "projectOverride": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "effectiveEnabled",
+        "profileEnabled"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "manifest_resources": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plugin": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "policy": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PluginPolicyView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "psychevo_extensions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "selector": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scope",
+    "success"
+  ],
+  "title": "PluginSetEnabledResult",
+  "type": "object"
+},
+  PluginAuthorityWriteResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "PluginAuthorityRuntimeView": {
+      "properties": {
+        "auth": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibilityProfile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inventoryReady": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateHome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedBinary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "securityNotes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "$ref": "#/definitions/PluginAuthorityRuntimeView"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "write": true
+  },
+  "required": [
+    "authority",
+    "success",
+    "write"
+  ],
+  "title": "PluginAuthorityWriteResult",
+  "type": "object"
+},
+  PluginAuthorityRefreshResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "PluginAuthorityRuntimeView": {
+      "properties": {
+        "auth": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compatibilityProfile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inventoryReady": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "owner": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "privateHome": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readiness": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedBinary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "securityNotes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "authority": {
+      "$ref": "#/definitions/PluginAuthorityRuntimeView"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "authority",
+    "success"
+  ],
+  "title": "PluginAuthorityRefreshResult",
+  "type": "object"
+},
+  PluginAuthoritySetTrustResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "selector": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "trust": {
+      "$ref": "#/definitions/PluginTrustView"
+    },
+    "trusted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selector",
+    "success",
+    "trust",
+    "trusted"
+  ],
+  "title": "PluginAuthoritySetTrustResult",
+  "type": "object"
+},
+  PluginMarketplaceView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "git_ref": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "npm_registry": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "npm_version": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plugins": {
+      "default": [],
+      "items": true,
+      "type": "array"
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "PluginMarketplaceView",
+  "type": "object"
+},
+  PluginCatalogListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginMarketplaceView": {
+      "properties": {
+        "git_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plugins": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "marketplaces": {
+      "items": {
+        "$ref": "#/definitions/PluginMarketplaceView"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "marketplaces"
+  ],
+  "title": "PluginCatalogListResult",
+  "type": "object"
+},
+  PluginCatalogPsychevoAddResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginMarketplaceView": {
+      "properties": {
+        "git_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plugins": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "marketplace": {
+      "$ref": "#/definitions/PluginMarketplaceView"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "marketplace",
+    "scope",
+    "success"
+  ],
+  "title": "PluginCatalogPsychevoAddResult",
+  "type": "object"
+},
+  PluginCatalogPsychevoRemoveResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "removed",
+    "scope",
+    "success"
+  ],
+  "title": "PluginCatalogPsychevoRemoveResult",
+  "type": "object"
+},
+  PluginCatalogCodexAddResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "alreadyAdded": {
+      "type": "boolean"
+    },
+    "installedRoot": {
+      "type": "string"
+    },
+    "marketplaceName": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "alreadyAdded",
+    "installedRoot",
+    "marketplaceName"
+  ],
+  "title": "PluginCatalogCodexAddResult",
+  "type": "object"
+},
+  PluginCatalogCodexRemoveResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "installedRoot": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "marketplaceName": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "installedRoot",
+    "marketplaceName"
+  ],
+  "title": "PluginCatalogCodexRemoveResult",
+  "type": "object"
+},
+  PluginCatalogUpgradeError: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "marketplaceName": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "marketplaceName",
+    "message"
+  ],
+  "title": "PluginCatalogUpgradeError",
+  "type": "object"
+},
+  PluginCatalogUpgradeResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginCatalogUpgradeError": {
+      "properties": {
+        "marketplaceName": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "marketplaceName",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "errors": {
+      "items": {
+        "$ref": "#/definitions/PluginCatalogUpgradeError"
+      },
+      "type": "array"
+    },
+    "selectedMarketplaces": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "upgradedRoots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "errors",
+    "selectedMarketplaces",
+    "upgradedRoots"
+  ],
+  "title": "PluginCatalogUpgradeResult",
+  "type": "object"
+},
+  PluginCatalogAddResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/PluginCatalogPsychevoAddResult"
+    },
+    {
+      "$ref": "#/definitions/PluginCatalogCodexAddResult"
+    }
+  ],
+  "definitions": {
+    "PluginCatalogCodexAddResult": {
+      "properties": {
+        "alreadyAdded": {
+          "type": "boolean"
+        },
+        "installedRoot": {
+          "type": "string"
+        },
+        "marketplaceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "alreadyAdded",
+        "installedRoot",
+        "marketplaceName"
+      ],
+      "type": "object"
+    },
+    "PluginCatalogPsychevoAddResult": {
+      "properties": {
+        "marketplace": {
+          "$ref": "#/definitions/PluginMarketplaceView"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "marketplace",
+        "scope",
+        "success"
+      ],
+      "type": "object"
+    },
+    "PluginMarketplaceView": {
+      "properties": {
+        "git_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm_registry": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "npm_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plugins": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "PluginCatalogAddResult"
+},
+  PluginCatalogRemoveResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/PluginCatalogPsychevoRemoveResult"
+    },
+    {
+      "$ref": "#/definitions/PluginCatalogCodexRemoveResult"
+    }
+  ],
+  "definitions": {
+    "PluginCatalogCodexRemoveResult": {
+      "properties": {
+        "installedRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "marketplaceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installedRoot",
+        "marketplaceName"
+      ],
+      "type": "object"
+    },
+    "PluginCatalogPsychevoRemoveResult": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "removed",
+        "scope",
+        "success"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "PluginCatalogRemoveResult"
+},
+  PluginConnectStartResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "authorizationUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expiresInSeconds": {
+      "$ref": "#/definitions/JsonSafeU64"
+    },
+    "installUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "expiresInSeconds",
+    "sessionId",
+    "status"
+  ],
+  "title": "PluginConnectStartResult",
+  "type": "object"
+},
+  PluginConnectStatusResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "authorizationUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "componentId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selector": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "status"
+  ],
+  "title": "PluginConnectStatusResult",
+  "type": "object"
+},
 } as const;

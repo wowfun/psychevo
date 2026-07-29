@@ -18,6 +18,7 @@ include!("protocol/channels.rs");
 include!("protocol/voice.rs");
 include!("protocol/settings_workspace_context.rs");
 include!("protocol/agents_backend_rpc.rs");
+include!("protocol/capability_results.rs");
 include!("protocol/request_registry.rs");
 include!("protocol/codegen.rs");
 
@@ -633,6 +634,18 @@ mod thread_application_contract_tests {
         assert_eq!(value["profileRevision"], "18446744073709551615");
         assert_eq!(value["capabilityRevision"], above_js_safe);
         assert!(value["capabilityRevision"].is_string());
+    }
+
+    #[test]
+    fn runtime_profile_write_rejects_removed_approval_mode() {
+        let error = serde_json::from_value::<RuntimeProfileWriteParams>(serde_json::json!({
+            "id": "codex",
+            "target": "project",
+            "runtime": "acp",
+            "approvalMode": "manual"
+        }))
+        .expect_err("removed approvalMode must not be accepted");
+        assert!(error.to_string().contains("unknown field `approvalMode`"));
     }
 
     #[test]

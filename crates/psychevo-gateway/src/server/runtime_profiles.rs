@@ -2331,7 +2331,6 @@ fn public_redacted_profile_structure(profile: &RuntimeProfileConfig) -> Value {
         "defaultModel": profile.default_model,
         "defaultMode": profile.default_mode,
         "defaultAgent": profile.default_agent,
-        "approvalMode": profile.approval_mode,
         "sandbox": profile.sandbox,
         "workspaceRootCount": profile.workspace_roots.len(),
         "optionKeys": runtime_profile_option_keys(&profile.options),
@@ -2448,7 +2447,6 @@ pub(super) fn set_runtime_profile_enabled(
         default_model: existing.config.default_model.clone(),
         default_mode: existing.config.default_mode.clone(),
         default_agent: existing.config.default_agent.clone(),
-        approval_mode: existing.config.approval_mode.clone(),
         sandbox: existing.config.sandbox.clone(),
         workspace_roots: existing.config.workspace_roots.clone(),
         options: Some(existing.config.options.clone()),
@@ -2535,7 +2533,6 @@ fn runtime_profile_records(
                     default_model: None,
                     default_mode: None,
                     default_agent: None,
-                    approval_mode: None,
                     sandbox: None,
                     workspace_roots: Vec::new(),
                     options: Value::Null,
@@ -2726,13 +2723,7 @@ fn validate_team_runtime_options(
         }
         if matches!(
             key.as_str(),
-            "approvalMode"
-                | "approval_mode"
-                | "permissionMode"
-                | "permission_mode"
-                | "sandbox"
-                | "workspaceRoots"
-                | "workspace_roots"
+            "permissionMode" | "permission_mode" | "sandbox" | "workspaceRoots" | "workspace_roots"
         ) {
             return Err(Error::Message(format!(
                 "team member `{member_id}` safety override `{key}` must be configured on Runtime Profile `{}`",
@@ -2770,7 +2761,6 @@ pub(super) fn generated_runtime_profiles() -> Vec<RuntimeProfileConfig> {
             default_model: None,
             default_mode: None,
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: Value::Null,
@@ -2784,7 +2774,6 @@ pub(super) fn generated_runtime_profiles() -> Vec<RuntimeProfileConfig> {
             default_model: None,
             default_mode: None,
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: Value::Null,
@@ -2798,7 +2787,6 @@ pub(super) fn generated_runtime_profiles() -> Vec<RuntimeProfileConfig> {
             default_model: None,
             default_mode: Some("build".to_string()),
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: Value::Null,
@@ -2880,7 +2868,6 @@ fn runtime_profile_view_with_backends(
         default_model: config.default_model.clone(),
         default_mode: config.default_mode.clone(),
         default_agent: config.default_agent.clone(),
-        approval_mode: config.approval_mode.clone(),
         sandbox: config.sandbox.clone(),
         workspace_roots: config.workspace_roots.clone(),
         option_keys: runtime_profile_option_keys(&config.options),
@@ -4101,11 +4088,6 @@ fn runtime_profile_config_json(
         "default_agent",
         params.default_agent.as_deref(),
     );
-    insert_optional_string(
-        &mut object,
-        "approval_mode",
-        params.approval_mode.as_deref(),
-    );
     insert_optional_string(&mut object, "sandbox", params.sandbox.as_deref());
     object.insert(
         "workspace_roots".to_string(),
@@ -4440,7 +4422,6 @@ backend_ref = "ephemeral"
             default_model: None,
             default_mode: None,
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: Value::Null,
@@ -4669,7 +4650,6 @@ backend_ref = "reviewer"
             default_model: Some("model-a".to_string()),
             default_mode: None,
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: None,
@@ -4747,7 +4727,6 @@ backend_ref = "reviewer"
             default_model: None,
             default_mode: None,
             default_agent: None,
-            approval_mode: None,
             sandbox: None,
             workspace_roots: Vec::new(),
             options: json!({"privateToken": "alpha"}),

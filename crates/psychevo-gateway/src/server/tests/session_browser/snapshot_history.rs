@@ -765,7 +765,6 @@ async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child
         default_model: None,
         default_mode: None,
         default_agent: None,
-        approval_mode: None,
         sandbox: None,
         workspace_roots: Vec::new(),
         options: Value::Null,

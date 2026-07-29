@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "PluginTrustView": {
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trustedAtMs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "trustedFingerprint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fingerprint",
+        "required",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "selector": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "trust": {
+      "$ref": "#/definitions/PluginTrustView"
+    },
+    "trusted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selector",
+    "success",
+    "trust",
+    "trusted"
+  ],
+  "title": "PluginAuthoritySetTrustResult",
+  "type": "object"
+}

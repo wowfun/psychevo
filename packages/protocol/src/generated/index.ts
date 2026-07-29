@@ -2,3 +2,4 @@
 export * from './types';
 export * from './methods';
 export * from './schemas';
+export * from './validators';

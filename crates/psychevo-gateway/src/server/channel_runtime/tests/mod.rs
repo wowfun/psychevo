@@ -108,6 +108,7 @@ impl crate::GatewayBackend for TestBackend {
                         suggested_rule: None,
                         allow_always: false,
                         filesystem: None,
+                        mcp_startup: None,
                         timeout_secs: 300,
                     })
                     .await;
@@ -1415,6 +1416,7 @@ async fn channel_event_sink_sends_clarify_prompt() {
     let runtime = ChannelRuntimeState::default();
     let identity = wechat_message("ignored", "wx-event").identity;
     let sink = channel_event_sink(
+        None,
         runtime,
         "wechat".to_string(),
         channel_gateway,

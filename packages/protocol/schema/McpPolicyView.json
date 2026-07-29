@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "disabledTools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "enabledTools": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "startupTimeoutSecs": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "supportsParallelToolCalls": {
+      "type": "boolean"
+    },
+    "toolTimeoutSecs": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "disabledTools",
+    "supportsParallelToolCalls"
+  ],
+  "title": "McpPolicyView",
+  "type": "object"
+}

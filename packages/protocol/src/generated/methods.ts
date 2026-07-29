@@ -59,12 +59,19 @@ import type {
   InitializeParams,
   InitializeResult,
   McpListParams,
+  McpListResult,
+  McpMutationResult,
   McpNameParams,
+  McpOAuthLogoutResult,
   McpOAuthStartParams,
+  McpOAuthStartResult,
   McpOAuthStatusParams,
+  McpOAuthStatusResult,
   McpReadParams,
+  McpReadResult,
   McpSetEnabledParams,
   McpSetToolPolicyParams,
+  McpTestResult,
   McpUpsertParams,
   ModelAssignmentSetParams,
   ModelAssignmentSetResult,
@@ -79,21 +86,37 @@ import type {
   ObservabilityReadParams,
   ObservabilityReadResult,
   PluginAuthorityRefreshParams,
+  PluginAuthorityRefreshResult,
   PluginAuthoritySetTrustParams,
+  PluginAuthoritySetTrustResult,
   PluginAuthorityWriteParams,
+  PluginAuthorityWriteResult,
   PluginCatalogAddParams,
+  PluginCatalogAddResult,
   PluginCatalogListParams,
+  PluginCatalogListResult,
   PluginCatalogRemoveParams,
+  PluginCatalogRemoveResult,
   PluginCatalogUpgradeParams,
+  PluginCatalogUpgradeResult,
   PluginConnectStartParams,
+  PluginConnectStartResult,
   PluginConnectStatusParams,
+  PluginConnectStatusResult,
   PluginDoctorParams,
+  PluginDoctorResult,
   PluginInspectParams,
+  PluginInspectResult,
   PluginInstallParams,
+  PluginInstallResult,
   PluginListParams,
+  PluginListResult,
   PluginReadParams,
+  PluginReadResult,
   PluginSetEnabledParams,
+  PluginSetEnabledResult,
   PluginUninstallParams,
+  PluginUninstallResult,
   RuntimeProfileDeleteParams,
   RuntimeProfileDeleteResult,
   RuntimeProfileListParams,
@@ -109,10 +132,15 @@ import type {
   ShellStartParams,
   ShellStartResult,
   SkillInstallParams,
+  SkillInstallResult,
   SkillListParams,
+  SkillListResult,
   SkillReadParams,
+  SkillReadResult,
   SkillSetEnabledParams,
+  SkillSetEnabledResult,
   SkillUninstallParams,
+  SkillUninstallResult,
   SkillWriteParams,
   SkillWriteResult,
   SlashSettingsReadParams,
@@ -180,7 +208,10 @@ import type {
   ThreadTraceResult,
   ToolCreateParams,
   ToolListParams,
+  ToolListResult,
+  ToolMutationResult,
   ToolReadParams,
+  ToolReadResult,
   ToolRemoveParams,
   ToolSetEnabledParams,
   TurnStartParams,
@@ -225,8 +256,6 @@ import type {
   WorkspaceGitBranchesResult,
   WorkspaceGitCheckoutParams,
 } from './types';
-
-export type GatewayJsonResult = Record<string, unknown>;
 
 export interface GatewayRequestParams {
   "initialize": InitializeParams;
@@ -438,43 +467,43 @@ export interface GatewayRequestResults {
   "backend/upgrade": BackendManageResult;
   "backend/write": BackendWriteResult;
   "backend/delete": BackendDeleteResult;
-  "plugin/list": GatewayJsonResult;
-  "plugin/read": GatewayJsonResult;
-  "plugin/doctor": GatewayJsonResult;
-  "plugin/import/inspect": GatewayJsonResult;
-  "plugin/install": GatewayJsonResult;
-  "plugin/uninstall": GatewayJsonResult;
-  "plugin/setEnabled": GatewayJsonResult;
-  "plugin/authority/write": GatewayJsonResult;
-  "plugin/authority/refresh": GatewayJsonResult;
-  "plugin/authority/setTrust": GatewayJsonResult;
-  "plugin/catalog/list": GatewayJsonResult;
-  "plugin/catalog/add": GatewayJsonResult;
-  "plugin/catalog/remove": GatewayJsonResult;
-  "plugin/catalog/upgrade": GatewayJsonResult;
-  "plugin/connect/start": GatewayJsonResult;
-  "plugin/connect/status": GatewayJsonResult;
-  "skill/list": GatewayJsonResult;
-  "skill/read": GatewayJsonResult;
-  "skill/install": GatewayJsonResult;
-  "skill/uninstall": GatewayJsonResult;
-  "skill/setEnabled": GatewayJsonResult;
+  "plugin/list": PluginListResult;
+  "plugin/read": PluginReadResult;
+  "plugin/doctor": PluginDoctorResult;
+  "plugin/import/inspect": PluginInspectResult;
+  "plugin/install": PluginInstallResult;
+  "plugin/uninstall": PluginUninstallResult;
+  "plugin/setEnabled": PluginSetEnabledResult;
+  "plugin/authority/write": PluginAuthorityWriteResult;
+  "plugin/authority/refresh": PluginAuthorityRefreshResult;
+  "plugin/authority/setTrust": PluginAuthoritySetTrustResult;
+  "plugin/catalog/list": PluginCatalogListResult;
+  "plugin/catalog/add": PluginCatalogAddResult;
+  "plugin/catalog/remove": PluginCatalogRemoveResult;
+  "plugin/catalog/upgrade": PluginCatalogUpgradeResult;
+  "plugin/connect/start": PluginConnectStartResult;
+  "plugin/connect/status": PluginConnectStatusResult;
+  "skill/list": SkillListResult;
+  "skill/read": SkillReadResult;
+  "skill/install": SkillInstallResult;
+  "skill/uninstall": SkillUninstallResult;
+  "skill/setEnabled": SkillSetEnabledResult;
   "skill/write": SkillWriteResult;
-  "tool/list": GatewayJsonResult;
-  "tool/read": GatewayJsonResult;
-  "tool/setEnabled": GatewayJsonResult;
-  "tool/create": GatewayJsonResult;
-  "tool/remove": GatewayJsonResult;
-  "mcp/list": GatewayJsonResult;
-  "mcp/read": GatewayJsonResult;
-  "mcp/upsert": GatewayJsonResult;
-  "mcp/remove": GatewayJsonResult;
-  "mcp/setEnabled": GatewayJsonResult;
-  "mcp/setToolPolicy": GatewayJsonResult;
-  "mcp/test": GatewayJsonResult;
-  "mcp/oauth/start": GatewayJsonResult;
-  "mcp/oauth/status": GatewayJsonResult;
-  "mcp/oauth/logout": GatewayJsonResult;
+  "tool/list": ToolListResult;
+  "tool/read": ToolReadResult;
+  "tool/setEnabled": ToolMutationResult;
+  "tool/create": ToolMutationResult;
+  "tool/remove": ToolMutationResult;
+  "mcp/list": McpListResult;
+  "mcp/read": McpReadResult;
+  "mcp/upsert": McpMutationResult;
+  "mcp/remove": McpMutationResult;
+  "mcp/setEnabled": McpMutationResult;
+  "mcp/setToolPolicy": McpMutationResult;
+  "mcp/test": McpTestResult;
+  "mcp/oauth/start": McpOAuthStartResult;
+  "mcp/oauth/status": McpOAuthStatusResult;
+  "mcp/oauth/logout": McpOAuthLogoutResult;
   "channel/list": ChannelListResult;
   "channel/show": ChannelEnableResult;
   "channel/enable": ChannelEnableResult;
@@ -532,7 +561,7 @@ export interface GatewayRequestResults {
 
 export type GatewayMethod = keyof GatewayRequestParams;
 
-export type GatewayResultValidation = "precise" | "opaque";
+export type GatewayResultValidation = "precise";
 
 export const gatewayMethodContracts = {
   "initialize": { paramsSchema: "InitializeParams", resultSchema: "InitializeResult", resultValidation: "precise" },
@@ -593,43 +622,43 @@ export const gatewayMethodContracts = {
   "backend/upgrade": { paramsSchema: "BackendManageParams", resultSchema: "BackendManageResult", resultValidation: "precise" },
   "backend/write": { paramsSchema: "BackendWriteParams", resultSchema: "BackendWriteResult", resultValidation: "precise" },
   "backend/delete": { paramsSchema: "BackendDeleteParams", resultSchema: "BackendDeleteResult", resultValidation: "precise" },
-  "plugin/list": { paramsSchema: "PluginListParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/read": { paramsSchema: "PluginReadParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/doctor": { paramsSchema: "PluginDoctorParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/import/inspect": { paramsSchema: "PluginInspectParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/install": { paramsSchema: "PluginInstallParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/uninstall": { paramsSchema: "PluginUninstallParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/setEnabled": { paramsSchema: "PluginSetEnabledParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/authority/write": { paramsSchema: "PluginAuthorityWriteParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/authority/refresh": { paramsSchema: "PluginAuthorityRefreshParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/authority/setTrust": { paramsSchema: "PluginAuthoritySetTrustParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/catalog/list": { paramsSchema: "PluginCatalogListParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/catalog/add": { paramsSchema: "PluginCatalogAddParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/catalog/remove": { paramsSchema: "PluginCatalogRemoveParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/catalog/upgrade": { paramsSchema: "PluginCatalogUpgradeParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/connect/start": { paramsSchema: "PluginConnectStartParams", resultSchema: null, resultValidation: "opaque" },
-  "plugin/connect/status": { paramsSchema: "PluginConnectStatusParams", resultSchema: null, resultValidation: "opaque" },
-  "skill/list": { paramsSchema: "SkillListParams", resultSchema: null, resultValidation: "opaque" },
-  "skill/read": { paramsSchema: "SkillReadParams", resultSchema: null, resultValidation: "opaque" },
-  "skill/install": { paramsSchema: "SkillInstallParams", resultSchema: null, resultValidation: "opaque" },
-  "skill/uninstall": { paramsSchema: "SkillUninstallParams", resultSchema: null, resultValidation: "opaque" },
-  "skill/setEnabled": { paramsSchema: "SkillSetEnabledParams", resultSchema: null, resultValidation: "opaque" },
+  "plugin/list": { paramsSchema: "PluginListParams", resultSchema: "PluginListResult", resultValidation: "precise" },
+  "plugin/read": { paramsSchema: "PluginReadParams", resultSchema: "PluginReadResult", resultValidation: "precise" },
+  "plugin/doctor": { paramsSchema: "PluginDoctorParams", resultSchema: "PluginDoctorResult", resultValidation: "precise" },
+  "plugin/import/inspect": { paramsSchema: "PluginInspectParams", resultSchema: "PluginInspectResult", resultValidation: "precise" },
+  "plugin/install": { paramsSchema: "PluginInstallParams", resultSchema: "PluginInstallResult", resultValidation: "precise" },
+  "plugin/uninstall": { paramsSchema: "PluginUninstallParams", resultSchema: "PluginUninstallResult", resultValidation: "precise" },
+  "plugin/setEnabled": { paramsSchema: "PluginSetEnabledParams", resultSchema: "PluginSetEnabledResult", resultValidation: "precise" },
+  "plugin/authority/write": { paramsSchema: "PluginAuthorityWriteParams", resultSchema: "PluginAuthorityWriteResult", resultValidation: "precise" },
+  "plugin/authority/refresh": { paramsSchema: "PluginAuthorityRefreshParams", resultSchema: "PluginAuthorityRefreshResult", resultValidation: "precise" },
+  "plugin/authority/setTrust": { paramsSchema: "PluginAuthoritySetTrustParams", resultSchema: "PluginAuthoritySetTrustResult", resultValidation: "precise" },
+  "plugin/catalog/list": { paramsSchema: "PluginCatalogListParams", resultSchema: "PluginCatalogListResult", resultValidation: "precise" },
+  "plugin/catalog/add": { paramsSchema: "PluginCatalogAddParams", resultSchema: "PluginCatalogAddResult", resultValidation: "precise" },
+  "plugin/catalog/remove": { paramsSchema: "PluginCatalogRemoveParams", resultSchema: "PluginCatalogRemoveResult", resultValidation: "precise" },
+  "plugin/catalog/upgrade": { paramsSchema: "PluginCatalogUpgradeParams", resultSchema: "PluginCatalogUpgradeResult", resultValidation: "precise" },
+  "plugin/connect/start": { paramsSchema: "PluginConnectStartParams", resultSchema: "PluginConnectStartResult", resultValidation: "precise" },
+  "plugin/connect/status": { paramsSchema: "PluginConnectStatusParams", resultSchema: "PluginConnectStatusResult", resultValidation: "precise" },
+  "skill/list": { paramsSchema: "SkillListParams", resultSchema: "SkillListResult", resultValidation: "precise" },
+  "skill/read": { paramsSchema: "SkillReadParams", resultSchema: "SkillReadResult", resultValidation: "precise" },
+  "skill/install": { paramsSchema: "SkillInstallParams", resultSchema: "SkillInstallResult", resultValidation: "precise" },
+  "skill/uninstall": { paramsSchema: "SkillUninstallParams", resultSchema: "SkillUninstallResult", resultValidation: "precise" },
+  "skill/setEnabled": { paramsSchema: "SkillSetEnabledParams", resultSchema: "SkillSetEnabledResult", resultValidation: "precise" },
   "skill/write": { paramsSchema: "SkillWriteParams", resultSchema: "SkillWriteResult", resultValidation: "precise" },
-  "tool/list": { paramsSchema: "ToolListParams", resultSchema: null, resultValidation: "opaque" },
-  "tool/read": { paramsSchema: "ToolReadParams", resultSchema: null, resultValidation: "opaque" },
-  "tool/setEnabled": { paramsSchema: "ToolSetEnabledParams", resultSchema: null, resultValidation: "opaque" },
-  "tool/create": { paramsSchema: "ToolCreateParams", resultSchema: null, resultValidation: "opaque" },
-  "tool/remove": { paramsSchema: "ToolRemoveParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/list": { paramsSchema: "McpListParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/read": { paramsSchema: "McpReadParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/upsert": { paramsSchema: "McpUpsertParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/remove": { paramsSchema: "McpNameParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/setEnabled": { paramsSchema: "McpSetEnabledParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/setToolPolicy": { paramsSchema: "McpSetToolPolicyParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/test": { paramsSchema: "McpNameParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/oauth/start": { paramsSchema: "McpOAuthStartParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/oauth/status": { paramsSchema: "McpOAuthStatusParams", resultSchema: null, resultValidation: "opaque" },
-  "mcp/oauth/logout": { paramsSchema: "McpNameParams", resultSchema: null, resultValidation: "opaque" },
+  "tool/list": { paramsSchema: "ToolListParams", resultSchema: "ToolListResult", resultValidation: "precise" },
+  "tool/read": { paramsSchema: "ToolReadParams", resultSchema: "ToolReadResult", resultValidation: "precise" },
+  "tool/setEnabled": { paramsSchema: "ToolSetEnabledParams", resultSchema: "ToolMutationResult", resultValidation: "precise" },
+  "tool/create": { paramsSchema: "ToolCreateParams", resultSchema: "ToolMutationResult", resultValidation: "precise" },
+  "tool/remove": { paramsSchema: "ToolRemoveParams", resultSchema: "ToolMutationResult", resultValidation: "precise" },
+  "mcp/list": { paramsSchema: "McpListParams", resultSchema: "McpListResult", resultValidation: "precise" },
+  "mcp/read": { paramsSchema: "McpReadParams", resultSchema: "McpReadResult", resultValidation: "precise" },
+  "mcp/upsert": { paramsSchema: "McpUpsertParams", resultSchema: "McpMutationResult", resultValidation: "precise" },
+  "mcp/remove": { paramsSchema: "McpNameParams", resultSchema: "McpMutationResult", resultValidation: "precise" },
+  "mcp/setEnabled": { paramsSchema: "McpSetEnabledParams", resultSchema: "McpMutationResult", resultValidation: "precise" },
+  "mcp/setToolPolicy": { paramsSchema: "McpSetToolPolicyParams", resultSchema: "McpMutationResult", resultValidation: "precise" },
+  "mcp/test": { paramsSchema: "McpNameParams", resultSchema: "McpTestResult", resultValidation: "precise" },
+  "mcp/oauth/start": { paramsSchema: "McpOAuthStartParams", resultSchema: "McpOAuthStartResult", resultValidation: "precise" },
+  "mcp/oauth/status": { paramsSchema: "McpOAuthStatusParams", resultSchema: "McpOAuthStatusResult", resultValidation: "precise" },
+  "mcp/oauth/logout": { paramsSchema: "McpNameParams", resultSchema: "McpOAuthLogoutResult", resultValidation: "precise" },
   "channel/list": { paramsSchema: "ChannelListParams", resultSchema: "ChannelListResult", resultValidation: "precise" },
   "channel/show": { paramsSchema: "ChannelIdParams", resultSchema: "ChannelEnableResult", resultValidation: "precise" },
   "channel/enable": { paramsSchema: "ChannelEnableParams", resultSchema: "ChannelEnableResult", resultValidation: "precise" },

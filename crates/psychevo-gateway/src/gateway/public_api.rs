@@ -285,6 +285,25 @@ impl Gateway {
         self.supervisor.spawn_turn(name, future);
     }
 
+    pub(crate) fn acquire_activity_permit(
+        &self,
+    ) -> Result<crate::supervisor::GatewayActivityPermit, crate::supervisor::GatewayAdmissionClosed>
+    {
+        self.supervisor.acquire_activity_admission()
+    }
+
+    pub(crate) fn spawn_permitted_activity<F>(
+        &self,
+        name: impl Into<Arc<str>>,
+        permit: crate::supervisor::GatewayActivityPermit,
+        future: F,
+    ) where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.supervisor
+            .spawn_permitted_activity(name, permit, future);
+    }
+
     pub(crate) async fn inspect_cached_bound_agent_session(
         &self,
         local_session_id: String,

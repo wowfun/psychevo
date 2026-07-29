@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginComponentStatusView": {
+      "properties": {
+        "compatibilityProfile": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "executionOwner": {
+          "type": "string"
+        },
+        "highestLevel": {
+          "type": "string"
+        },
+        "readiness": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "compatibilityProfile",
+        "component",
+        "executionOwner",
+        "highestLevel",
+        "readiness",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "PluginDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "compatibility_profile": {
+      "type": "string"
+    },
+    "component_statuses": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/PluginComponentStatusView"
+      },
+      "type": "array"
+    },
+    "data_root": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/PluginDiagnosticView"
+      },
+      "type": "array"
+    },
+    "manifest_kind": {
+      "type": "string"
+    },
+    "manifest_path": {
+      "type": "string"
+    },
+    "manifest_resources": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "npm_registry": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "package_root": {
+      "type": "string"
+    },
+    "psychevo_extensions": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_kind": {
+      "type": "string"
+    },
+    "source_slug": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "compatibility_profile",
+    "data_root",
+    "description",
+    "diagnostics",
+    "manifest_kind",
+    "manifest_path",
+    "manifest_resources",
+    "name",
+    "package_root",
+    "psychevo_extensions",
+    "scope",
+    "source_id",
+    "source_kind",
+    "source_slug",
+    "version"
+  ],
+  "title": "PluginInstallRecordView",
+  "type": "object"
+}

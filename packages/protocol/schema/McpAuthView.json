@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "bearerTokenEnvVar": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oauthClientId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oauthConfigured": {
+      "type": "boolean"
+    },
+    "oauthResource": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scopes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "storedOAuthToken": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "oauthConfigured",
+    "scopes",
+    "storedOAuthToken"
+  ],
+  "title": "McpAuthView",
+  "type": "object"
+}

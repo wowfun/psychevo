@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 import os
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -14,6 +15,8 @@ from ._callbacks import (
     ApprovalRequest,
     ClarifyHandler,
     ClarifyRequest,
+    FilesystemApprovalRequest,
+    McpStartupApprovalRequest,
     Tool,
     ToolCall,
     ToolResult,
@@ -28,11 +31,16 @@ from ._types import (
     TurnReceipt,
     TurnResult,
 )
-from .errors import ProtocolError, TransportError
+from .errors import ProtocolError, RequestTimeoutError, TransportError
 
 _PROTOCOL_VERSION = 1
 _EVENT_CAPACITY = 256
 _EVENT_END = object()
+_DEFAULT_REQUEST_TIMEOUT = 30.0
+_DEFAULT_CLOSE_TIMEOUT = 10.0
+_DEFAULT_CALLBACK_WORKERS = 8
+_DEFAULT_CALLBACK_BACKLOG = 64
+_USE_DEFAULT_TIMEOUT = object()
 
 
 class _RpcClient:
@@ -43,12 +51,25 @@ class _RpcClient:
         tools: Sequence[Tool],
         approval_handler: ApprovalHandler | None,
         clarify_handler: ClarifyHandler | None,
+        request_timeout: float | None = _DEFAULT_REQUEST_TIMEOUT,
+        callback_workers: int = _DEFAULT_CALLBACK_WORKERS,
+        callback_backlog: int = _DEFAULT_CALLBACK_BACKLOG,
     ) -> None:
+        _validate_timeout("request_timeout", request_timeout, allow_none=True)
+        if callback_workers <= 0:
+            raise ValueError("callback_workers must be greater than zero")
+        if callback_backlog <= 0:
+            raise ValueError("callback_backlog must be greater than zero")
         self._transport = transport
+        self._request_timeout = request_timeout
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[object]] = {}
         self._turns: dict[str, TurnHandle] = {}
         self._reader: asyncio.Task[None] | None = None
+        self._callback_worker_count = callback_workers
+        self._callback_queue: asyncio.Queue[
+            Coroutine[object, object, None] | None
+        ] = asyncio.Queue(maxsize=callback_backlog)
         self._callbacks: set[asyncio.Task[None]] = set()
         self._terminal_error: TransportError | None = None
         self._tools = {tool.name: tool for tool in tools}
@@ -58,6 +79,7 @@ class _RpcClient:
         self._clarify_handler = clarify_handler
 
     async def start(self) -> None:
+        self._ensure_callback_workers()
         self._reader = asyncio.create_task(self._read_loop())
         result = await self.request(
             "initialize",
@@ -85,8 +107,27 @@ class _RpcClient:
                 },
             )
 
-    async def request(self, method: str, params: object = None) -> object:
+    async def request(
+        self,
+        method: str,
+        params: object = None,
+        *,
+        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
+    ) -> object:
         self._raise_if_terminal()
+        effective_timeout = (
+            self._request_timeout
+            if timeout is _USE_DEFAULT_TIMEOUT
+            else timeout
+        )
+        if effective_timeout is not None and not isinstance(
+            effective_timeout, (int, float)
+        ):
+            raise TypeError("timeout must be a number or None")
+        normalized_timeout = (
+            None if effective_timeout is None else float(effective_timeout)
+        )
+        _validate_timeout("timeout", normalized_timeout, allow_none=True)
         self._next_id += 1
         request_id = self._next_id
         loop = asyncio.get_running_loop()
@@ -99,10 +140,28 @@ class _RpcClient:
         }
         if params is not None:
             message["params"] = params
+        delivery_unknown = False
         try:
-            self._raise_if_terminal()
-            await self._send(message)
-            return await future
+            async def send_and_wait() -> object:
+                nonlocal delivery_unknown
+                self._raise_if_terminal()
+                delivery_unknown = True
+                await self._send(message)
+                return await future
+
+            if normalized_timeout is None:
+                return await send_and_wait()
+            try:
+                async with asyncio.timeout(normalized_timeout):
+                    return await send_and_wait()
+            except TimeoutError as error:
+                if not future.done():
+                    future.cancel()
+                raise RequestTimeoutError(
+                    method,
+                    normalized_timeout,
+                    delivery_unknown,
+                ) from error
         except BaseException:
             if future.done() and not future.cancelled():
                 future.exception()
@@ -130,22 +189,25 @@ class _RpcClient:
 
     async def close(self) -> None:
         self._transition_terminal(TransportError("App Server connection closed"))
-        await self._transport.close()
         if self._reader is not None:
-            self._reader.cancel()
             try:
                 await self._reader
             except asyncio.CancelledError:
                 pass
         if self._callbacks:
             await asyncio.gather(*self._callbacks, return_exceptions=True)
+        await self._transport.close()
+
+    def abort(self) -> None:
+        self._transition_terminal(TransportError("App Server close deadline exceeded"))
+        self._transport.abort()
 
     async def _read_loop(self) -> None:
         try:
             while True:
                 message = await self._transport.receive()
                 if "method" in message and "id" in message:
-                    self._spawn_callback(self._handle_callback_request(message))
+                    await self._queue_callback_request(message)
                 elif "id" in message:
                     self._receive_response(message)
                 else:
@@ -192,6 +254,7 @@ class _RpcClient:
         for task in self._callbacks:
             if task is not current_task:
                 task.cancel()
+        self._discard_queued_callbacks()
         self._turns.clear()
 
     def _forget_turn(self, turn_id: str) -> None:
@@ -258,10 +321,82 @@ class _RpcClient:
                     )
                 )
 
-    def _spawn_callback(self, coroutine: object) -> None:
-        task = asyncio.create_task(coroutine)  # type: ignore[arg-type]
-        self._callbacks.add(task)
-        task.add_done_callback(self._callbacks.discard)
+    def _ensure_callback_workers(self) -> None:
+        while len(self._callbacks) < self._callback_worker_count:
+            task = asyncio.create_task(self._callback_worker())
+            self._callbacks.add(task)
+            task.add_done_callback(self._callbacks.discard)
+
+    def _spawn_callback(self, coroutine: object) -> bool:
+        if not inspect.iscoroutine(coroutine):
+            raise TypeError("callback work must be a coroutine")
+        self._ensure_callback_workers()
+        try:
+            self._callback_queue.put_nowait(coroutine)
+            return True
+        except asyncio.QueueFull:
+            coroutine.close()
+            asyncio.get_running_loop().call_exception_handler(
+                {
+                    "message": "Psychevo callback notification dropped: callback queue overloaded",
+                    "exception": ProtocolError(
+                        -32001,
+                        "Python SDK callback queue is overloaded",
+                    ),
+                }
+            )
+            return False
+
+    async def _queue_callback_request(self, message: dict[str, object]) -> None:
+        coroutine = self._handle_callback_request(message)
+        self._ensure_callback_workers()
+        try:
+            self._callback_queue.put_nowait(coroutine)
+        except asyncio.QueueFull:
+            coroutine.close()
+            await self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message.get("id"),
+                    "error": {
+                        "code": -32001,
+                        "message": "Python SDK callback queue is overloaded",
+                    },
+                }
+            )
+
+    async def _callback_worker(self) -> None:
+        while True:
+            work = await self._callback_queue.get()
+            try:
+                if work is None:
+                    return
+                await work
+            except asyncio.CancelledError:
+                if work is not None:
+                    work.close()
+                raise
+            except BaseException as error:
+                asyncio.get_running_loop().call_exception_handler(
+                    {
+                        "message": "Psychevo callback worker failed",
+                        "exception": error,
+                    }
+                )
+            finally:
+                self._callback_queue.task_done()
+            if self._terminal_error is not None:
+                return
+
+    def _discard_queued_callbacks(self) -> None:
+        while True:
+            try:
+                work = self._callback_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if work is not None:
+                work.close()
+            self._callback_queue.task_done()
 
     async def _handle_callback_request(self, message: dict[str, object]) -> None:
         request_id = message.get("id")
@@ -331,7 +466,16 @@ class _RpcClient:
             matched_rule=_optional_string(params, "matchedRule"),
             suggested_rule=_optional_string(params, "suggestedRule"),
             allow_always=params.get("allowAlways") is True,
-            filesystem=params.get("filesystem"),
+            filesystem=(
+                FilesystemApprovalRequest.from_wire(params["filesystem"])
+                if params.get("filesystem") is not None
+                else None
+            ),
+            mcp_startup=(
+                McpStartupApprovalRequest.from_wire(params["mcpStartup"])
+                if params.get("mcpStartup") is not None
+                else None
+            ),
         )
         result = self._approval_handler(request)
         if not inspect.isawaitable(result):
@@ -387,11 +531,15 @@ class Client:
         tools: Sequence[Tool] = (),
         approval_handler: ApprovalHandler | None = None,
         clarify_handler: ClarifyHandler | None = None,
+        request_timeout: float | None = _DEFAULT_REQUEST_TIMEOUT,
+        close_timeout: float = _DEFAULT_CLOSE_TIMEOUT,
     ) -> None:
         if executable is not None and remote_url is not None:
             raise ValueError("executable and remote_url are mutually exclusive")
         if remote_url is not None and not token:
             raise ValueError("remote_url requires an explicit bearer token")
+        _validate_timeout("request_timeout", request_timeout, allow_none=True)
+        _validate_timeout("close_timeout", close_timeout, allow_none=False)
         self._executable = executable
         self._executable_args = tuple(executable_args)
         self._remote_url = remote_url
@@ -399,6 +547,8 @@ class Client:
         self._tools = tuple(tools)
         self._approval_handler = approval_handler
         self._clarify_handler = clarify_handler
+        self._request_timeout = request_timeout
+        self._close_timeout = close_timeout
         self._rpc: _RpcClient | None = None
         self._local = remote_url is None
 
@@ -424,11 +574,12 @@ class Client:
             tools=self._tools,
             approval_handler=self._approval_handler,
             clarify_handler=self._clarify_handler,
+            request_timeout=self._request_timeout,
         )
         try:
             await rpc.start()
         except BaseException:
-            await rpc.close()
+            await self._close_rpc(rpc, shutdown=False)
             raise
         self._rpc = rpc
 
@@ -436,12 +587,22 @@ class Client:
         rpc, self._rpc = self._rpc, None
         if rpc is None:
             return
-        if self._local:
-            try:
-                await rpc.request("shutdown", {})
-            except (ProtocolError, TransportError):
-                pass
-        await rpc.close()
+        await self._close_rpc(rpc, shutdown=self._local)
+
+    async def _close_rpc(self, rpc: _RpcClient, *, shutdown: bool) -> None:
+        async def graceful_close() -> None:
+            if shutdown:
+                try:
+                    await rpc.request("shutdown", {})
+                except (ProtocolError, RequestTimeoutError, TransportError):
+                    pass
+            await rpc.close()
+
+        try:
+            async with asyncio.timeout(self._close_timeout):
+                await graceful_close()
+        except TimeoutError:
+            rpc.abort()
 
     async def start_thread(
         self,
@@ -568,10 +729,16 @@ class Client:
             turn._close_events()
             raise
 
-    async def _request(self, method: str, params: object) -> object:
+    async def _request(
+        self,
+        method: str,
+        params: object,
+        *,
+        timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
+    ) -> object:
         if self._rpc is None:
             raise RuntimeError("Client is not connected; use async with or connect()")
-        return await self._rpc.request(method, params)
+        return await self._rpc.request(method, params, timeout=timeout)
 
 
 class Thread:
@@ -688,9 +855,11 @@ class TurnHandle:
             if isinstance(event, TurnEvent):
                 yield event
 
-    async def wait(self) -> TurnResult:
+    async def wait(self, *, timeout: float | None = None) -> TurnResult:
         result = await self._client._request(
-            "turn/wait", {"turnId": self.receipt.turn_id}
+            "turn/wait",
+            {"turnId": self.receipt.turn_id},
+            timeout=timeout,
         )
         return TurnResult.from_wire(_object(result))
 
@@ -768,6 +937,22 @@ def _object(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TransportError("App Server result must be a JSON object")
     return value
+
+
+def _validate_timeout(
+    name: str,
+    timeout: float | None,
+    *,
+    allow_none: bool,
+) -> None:
+    if timeout is None:
+        if allow_none:
+            return
+        raise ValueError(f"{name} must be greater than zero")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise TypeError(f"{name} must be a number")
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError(f"{name} must be finite and greater than zero")
 
 
 def _terminal_event(value: Mapping[str, object]) -> bool:

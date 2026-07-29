@@ -58,6 +58,65 @@ class Tool:
 
 
 @dataclass(frozen=True, slots=True)
+class FilesystemApprovalTarget:
+    requested_path: str
+    resolved_path: str
+
+    @classmethod
+    def from_wire(cls, value: object) -> "FilesystemApprovalTarget":
+        if not isinstance(value, dict):
+            raise TypeError("filesystem approval target must be an object")
+        requested_path = value.get("requestedPath")
+        resolved_path = value.get("resolvedPath")
+        if not isinstance(requested_path, str) or not isinstance(resolved_path, str):
+            raise TypeError("filesystem approval target paths must be strings")
+        return cls(requested_path=requested_path, resolved_path=resolved_path)
+
+
+@dataclass(frozen=True, slots=True)
+class FilesystemApprovalRequest:
+    targets: tuple[FilesystemApprovalTarget, ...]
+    scope_candidates: tuple[str, ...]
+
+    @classmethod
+    def from_wire(cls, value: object) -> "FilesystemApprovalRequest":
+        if not isinstance(value, dict):
+            raise TypeError("filesystem approval detail must be an object")
+        targets = value.get("targets")
+        scope_candidates = value.get("scopeCandidates")
+        if not isinstance(targets, list) or not isinstance(scope_candidates, list):
+            raise TypeError("filesystem approval detail has invalid lists")
+        if not all(isinstance(item, str) for item in scope_candidates):
+            raise TypeError("filesystem approval scope candidates must be strings")
+        return cls(
+            targets=tuple(FilesystemApprovalTarget.from_wire(item) for item in targets),
+            scope_candidates=tuple(scope_candidates),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class McpStartupApprovalRequest:
+    server: str
+    transport: str
+    descriptor_fingerprint: str
+
+    @classmethod
+    def from_wire(cls, value: object) -> "McpStartupApprovalRequest":
+        if not isinstance(value, dict):
+            raise TypeError("MCP startup approval detail must be an object")
+        server = value.get("server")
+        transport = value.get("transport")
+        fingerprint = value.get("descriptorFingerprint")
+        if not all(isinstance(item, str) for item in (server, transport, fingerprint)):
+            raise TypeError("MCP startup approval detail fields must be strings")
+        return cls(
+            server=server,
+            transport=transport,
+            descriptor_fingerprint=fingerprint,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ApprovalRequest:
     call_id: str
     thread_id: str
@@ -69,7 +128,8 @@ class ApprovalRequest:
     matched_rule: str | None
     suggested_rule: str | None
     allow_always: bool
-    filesystem: JsonValue
+    filesystem: FilesystemApprovalRequest | None
+    mcp_startup: McpStartupApprovalRequest | None
 
 
 @dataclass(frozen=True, slots=True)

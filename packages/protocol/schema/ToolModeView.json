@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "disabled_toolsets": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "effective_tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "enabled_toolsets": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "disabled_toolsets",
+    "effective_tools"
+  ],
+  "title": "ToolModeView",
+  "type": "object"
+}

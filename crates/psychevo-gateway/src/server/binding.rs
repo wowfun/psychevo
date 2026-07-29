@@ -364,7 +364,7 @@ struct WebStateInner {
     managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     source: GatewaySource,
     launches: Mutex<HashMap<String, LaunchEntry>>,
-    browser_sessions: Mutex<HashMap<String, BrowserSession>>,
+    browser_sessions: Mutex<BrowserSessionStore>,
     terminals: TerminalManager,
     review: WorkspaceReviewState,
     workspace_external: WorkspaceExternalState,
@@ -559,7 +559,7 @@ impl WebState {
                 managed_shutdown_tx,
                 source,
                 launches: Mutex::new(HashMap::new()),
-                browser_sessions: Mutex::new(HashMap::new()),
+                browser_sessions: Mutex::new(BrowserSessionStore::default()),
                 terminals: TerminalManager::default(),
                 review: WorkspaceReviewState::default(),
                 workspace_external,
@@ -600,7 +600,7 @@ impl WebState {
             .browser_sessions
             .lock()
             .expect("web browser sessions poisoned")
-            .get(cookie)
+            .authenticate(cookie)
             .map(|_| AuthContext::Browser {
                 session_id: cookie.to_string(),
             })
@@ -698,7 +698,6 @@ impl WebState {
             include_reasoning: false,
             mode: RunMode::Default,
             permission_mode: Some(PermissionMode::Default),
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: true,
             inherited_env: Some(inherited_env),

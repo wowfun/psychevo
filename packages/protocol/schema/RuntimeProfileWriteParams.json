@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
   "definitions": {
     "BackendConfigTarget": {
       "enum": [
@@ -72,13 +73,6 @@
     }
   },
   "properties": {
-    "approvalMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "backendRef": {
       "default": null,
       "type": [

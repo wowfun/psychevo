@@ -80,6 +80,10 @@ async fn start_automation_run(
     trigger: &str,
     out_tx: Option<ConnectionSender>,
 ) -> psychevo::Result<Option<AutomationRunRecord>> {
+    let gateway = state.inner.gateway.clone();
+    let permit = gateway
+        .acquire_activity_permit()
+        .map_err(|error| psychevo::Error::Message(error.to_string()))?;
     let Some(run) = state
         .inner
         .state
@@ -90,7 +94,7 @@ async fn start_automation_run(
         return Ok(None);
     };
     let run_for_task = run.clone();
-    tokio::spawn(async move {
+    gateway.spawn_permitted_activity(format!("automation-run:{}", run.id), permit, async move {
         execute_automation_run(state, task, run_for_task, out_tx).await;
     });
     Ok(Some(run))

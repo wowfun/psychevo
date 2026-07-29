@@ -916,22 +916,24 @@ fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticV
 }
 
 pub(super) async fn agent_status_result(
-    store: Option<&psychevo::__product::persistence::StateRuntime>,
+    control: &AgentControl,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> wire::AgentStatusResult {
     wire::AgentStatusResult {
-        agents: agent_status_records(store, parent_session_id, all)
+        agents: control
+            .status_records(parent_session_id, all)
             .await
             .iter()
             .map(agent_run_view)
             .collect(),
-        control: agent_status_control_view(),
+        control: agent_status_control_view(control, parent_session_id),
     }
 }
 
 pub(super) async fn team_status_result(
     store: &psychevo::__product::persistence::StateRuntime,
+    control: &AgentControl,
     parent_session_id: Option<&str>,
 ) -> psychevo::Result<wire::TeamStatusResult> {
     let team = if let Some(thread) = parent_session_id {
@@ -961,29 +963,31 @@ pub(super) async fn team_status_result(
     Ok(wire::TeamStatusResult {
         team: team.as_ref().map(team_run_view),
         mission: mission.as_ref().map(mission_run_view),
-        agents: agent_status_records(Some(store), parent_session_id, false)
+        agents: control
+            .status_records(parent_session_id, false)
             .await
             .iter()
             .map(agent_run_view)
             .collect(),
-        control: agent_status_control_view(),
+        control: agent_status_control_view(control, parent_session_id),
     })
 }
 
 pub(super) async fn agent_control_result(
-    store: &psychevo::__product::persistence::StateRuntime,
+    control: &AgentControl,
     params: wire::AgentControlParams,
 ) -> psychevo::Result<wire::AgentControlResult> {
     let action = params.action.trim();
     let agent = match action {
         "stop" => {
             let target = required_control_target(&params)?;
-            stop_agent_id_with_grace(target, Some(store), std::time::Duration::from_millis(250))
+            control
+                .stop_with_grace(target, std::time::Duration::from_millis(250))
                 .await?
         }
         "resume" => {
             let target = required_control_target(&params)?;
-            resume_agent_id(target, Some(store)).await?
+            control.resume(target).await?
         }
         "send" => {
             let target = required_control_target(&params)?;
@@ -993,14 +997,16 @@ pub(super) async fn agent_control_result(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| Error::Message("agent/control send requires message".to_string()))?;
-            send_agent_message(target, message, Some(store)).await?
+            control.send(target, message).await?
         }
         "pauseSpawning" => {
-            set_agent_spawn_paused(true);
+            let thread_id = required_control_thread(&params)?;
+            control.set_spawning_paused(thread_id, true);
             None
         }
         "resumeSpawning" => {
-            set_agent_spawn_paused(false);
+            let thread_id = required_control_thread(&params)?;
+            control.set_spawning_paused(thread_id, false);
             None
         }
         other => {
@@ -1012,7 +1018,7 @@ pub(super) async fn agent_control_result(
     Ok(wire::AgentControlResult {
         accepted: matches!(action, "pauseSpawning" | "resumeSpawning") || agent.is_some(),
         agent: agent.as_ref().map(agent_run_view),
-        control: agent_status_control_view(),
+        control: agent_status_control_view(control, params.thread_id.as_deref()),
     })
 }
 
@@ -1025,9 +1031,25 @@ fn required_control_target(params: &wire::AgentControlParams) -> psychevo::Resul
         .ok_or_else(|| Error::Message("agent/control action requires target".to_string()))
 }
 
-fn agent_status_control_view() -> wire::AgentStatusControlView {
+fn required_control_thread(params: &wire::AgentControlParams) -> psychevo::Result<&str> {
+    params
+        .thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            Error::Message(
+                "agent/control pauseSpawning and resumeSpawning require threadId".to_string(),
+            )
+        })
+}
+
+fn agent_status_control_view(
+    control: &AgentControl,
+    parent_session_id: Option<&str>,
+) -> wire::AgentStatusControlView {
     wire::AgentStatusControlView {
-        spawning_paused: agent_spawn_paused(),
+        spawning_paused: parent_session_id.is_some_and(|parent| control.spawning_paused(parent)),
         max_spawn_depth_cap: MAX_AGENT_SPAWN_DEPTH_CAP,
         concurrency_cap: Some(MAX_TEAM_PARALLEL_AGENTS_CAP),
     }

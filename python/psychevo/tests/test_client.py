@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from psychevo import (
     ApprovalDecision,
     Client,
+    RequestTimeoutError,
     Tool,
     ToolResult,
     TransportError,
@@ -112,7 +113,14 @@ for line in sys.stdin:
                     "matchedRule": None,
                     "suggestedRule": "exec:*",
                     "allowAlways": True,
-                    "filesystem": {"write": ["/tmp/work"]},
+                    "filesystem": {
+                        "targets": [{
+                            "requestedPath": "/tmp/work",
+                            "resolvedPath": "/tmp/work",
+                        }],
+                        "scopeCandidates": ["/tmp/work"],
+                    },
+                    "mcpStartup": None,
                 },
             }), flush=True)
             callback = json.loads(sys.stdin.readline())
@@ -378,6 +386,11 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[0].tool_name, "exec")
         self.assertEqual(requests[0].thread_id, "thread-1")
         self.assertEqual(requests[0].turn_id, turn.receipt.turn_id)
+        self.assertEqual(
+            requests[0].filesystem.targets[0].resolved_path,
+            "/tmp/work",
+        )
+        self.assertIsNone(requests[0].mcp_startup)
 
     async def test_pending_permission_response_uses_typed_interaction_payload(self) -> None:
         async with Client(executable=self.server) as client:
@@ -394,6 +407,44 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             '{"filesystemDirectory": "/tmp/work", "kind": "permission", '
             '"outcome": "allow_session"}',
         )
+
+    async def test_mcp_startup_approval_detail_is_typed(self) -> None:
+        requests = []
+
+        async def approve(request):
+            requests.append(request)
+            return ApprovalDecision("allow_once")
+
+        rpc = _RpcClient(
+            _FailingTransport(),
+            tools=(),
+            approval_handler=approve,
+            clarify_handler=None,
+        )
+        await rpc._call_approval(
+            {
+                "callId": "approval-1",
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "toolCallId": "tool-1",
+                "toolName": "mcp",
+                "summary": "Start MCP",
+                "reason": "MCP startup",
+                "allowAlways": False,
+                "mcpStartup": {
+                    "server": "docs",
+                    "transport": "stdio",
+                    "descriptorFingerprint": "sha256:fixture",
+                },
+            }
+        )
+
+        self.assertEqual(requests[0].mcp_startup.server, "docs")
+        self.assertEqual(
+            requests[0].mcp_startup.descriptor_fingerprint,
+            "sha256:fixture",
+        )
+        self.assertIsNone(requests[0].filesystem)
 
     async def test_default_transport_never_searches_path(self) -> None:
         old_path = os.environ.get("PATH")
@@ -429,7 +480,167 @@ class _FailingTransport(Transport):
         self.closed = True
 
 
+class _StubbornTransport(_FailingTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.aborted = False
+
+    async def close(self) -> None:
+        await asyncio.Future()
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
 class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_callback_pool_has_eight_workers_and_sixty_four_backlog(
+        self,
+    ) -> None:
+        rpc = _RpcClient(
+            _FailingTransport(),
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        rpc._ensure_callback_workers()
+
+        self.assertEqual(len(rpc._callbacks), 8)
+        self.assertEqual(rpc._callback_queue.maxsize, 64)
+        await rpc.close()
+
+    async def test_turn_wait_is_unbounded_by_default_and_accepts_a_deadline(
+        self,
+    ) -> None:
+        class WaitClient:
+            def __init__(self) -> None:
+                self.timeouts = []
+
+            async def _request(self, _method, _params, *, timeout):
+                self.timeouts.append(timeout)
+                return {
+                    "threadId": "thread-1",
+                    "outcome": "completed",
+                    "finalAnswer": "done",
+                    "provider": "test",
+                    "model": "test",
+                    "toolFailures": 0,
+                }
+
+        client = WaitClient()
+        turn = TurnHandle(
+            client,  # type: ignore[arg-type]
+            TurnReceipt(
+                accepted=True,
+                thread_id="thread-1",
+                turn_id="turn-1",
+                client_turn_id=None,
+            ),
+        )
+
+        await turn.wait()
+        await turn.wait(timeout=0.25)
+
+        self.assertEqual(client.timeouts, [None, 0.25])
+
+    async def test_request_timeout_forgets_correlation_and_drops_late_response(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+            request_timeout=0.01,
+        )
+
+        with self.assertRaises(RequestTimeoutError) as raised:
+            await rpc.request("thread/read", {"threadId": "thread-1"})
+
+        self.assertEqual(raised.exception.method, "thread/read")
+        self.assertEqual(raised.exception.timeout, 0.01)
+        self.assertTrue(raised.exception.delivery_unknown)
+        self.assertFalse(rpc._pending)
+        rpc._receive_response({"id": 1, "result": {"late": True}})
+        self.assertFalse(rpc._pending)
+
+    async def test_callback_request_overload_is_bounded_and_observable(self) -> None:
+        transport = _FailingTransport()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_tool(_call):
+            started.set()
+            await release.wait()
+            return {"ok": True}
+
+        rpc = _RpcClient(
+            transport,
+            tools=(
+                Tool(
+                    name="blocked",
+                    description="Block until released",
+                    parameters={"type": "object"},
+                    handler=blocked_tool,
+                ),
+            ),
+            approval_handler=None,
+            clarify_handler=None,
+            callback_workers=1,
+            callback_backlog=1,
+        )
+
+        def callback(request_id: str) -> dict[str, object]:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tool/call",
+                "params": {
+                    "callId": request_id,
+                    "toolName": "blocked",
+                    "arguments": {},
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                },
+            }
+
+        await rpc._queue_callback_request(callback("one"))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        await rpc._queue_callback_request(callback("two"))
+        await rpc._queue_callback_request(callback("three"))
+
+        overload = next(
+            message
+            for message in transport.sent
+            if message.get("id") == "three"
+        )
+        self.assertEqual(overload["error"]["code"], -32001)
+        self.assertEqual(rpc._callback_queue.qsize(), 1)
+        release.set()
+        await asyncio.sleep(0)
+        await rpc.close()
+
+    async def test_client_close_deadline_aborts_a_stubborn_transport(self) -> None:
+        transport = _StubbornTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        client = Client(
+            remote_url="ws://127.0.0.1:1/app-server",
+            token="test",
+            close_timeout=0.01,
+        )
+        client._rpc = rpc
+        client._local = False
+
+        await asyncio.wait_for(client.close(), timeout=1)
+
+        self.assertTrue(transport.aborted)
+        self.assertIsNone(client._rpc)
+
     async def test_request_send_failure_is_a_permanent_terminal_transition(
         self,
     ) -> None:

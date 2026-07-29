@@ -14,7 +14,6 @@ import type { GatewayEndpoint } from "@psychevo/host";
 
 export type { GatewayEndpoint } from "@psychevo/host";
 export type {
-  GatewayJsonResult,
   GatewayMethod,
   GatewayRequestParams,
   GatewayRequestResults

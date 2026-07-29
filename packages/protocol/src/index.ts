@@ -1,9 +1,14 @@
-import Ajv, { type ValidateFunction } from "ajv";
 import {
-  gatewaySchemaRefs,
   gatewaySchemas,
   type GatewaySchemaName
 } from "./generated/schemas";
+import {
+  strictlyCompiledGatewaySchemaNames
+} from "./generated/validators";
+import {
+  validateGatewaySchema,
+  type SchemaValidationError
+} from "./schema-validator";
 import {
   gatewayMethodContracts,
   type GatewayMethod,
@@ -50,10 +55,6 @@ import type {
   WorkspaceFileWriteResult,
   WorkspaceFilesResult
 } from "./generated";
-
-const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
-const compiled = new Map<GatewaySchemaName, ValidateFunction>();
-let schemaRefsRegistered = false;
 
 export const SIDE_INHERITED_METADATA_KEY = "side_inherited";
 
@@ -171,41 +172,35 @@ export function gatewayResponseResultSchema<M extends GatewayMethod>(
   method: M
 ): RuntimeSchema<GatewayRequestResults[M]> {
   const contract = gatewayMethodContracts[method];
-  if (contract.resultSchema === null) {
-    return opaqueObjectSchema as RuntimeSchema<GatewayRequestResults[M]>;
-  }
   return schema<GatewayRequestResults[M]>(
     contract.resultSchema as GatewaySchemaName
   );
 }
 
-const opaqueObjectSchema: RuntimeSchema<Record<string, unknown>> = {
-  parse(value) {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      return value as Record<string, unknown>;
-    }
-    throw new Error("opaque Gateway result validation failed: expected an object");
-  },
-  safeParse(value) {
-    try {
-      return { data: this.parse(value), success: true };
-    } catch (error) {
-      return {
-        error: error instanceof Error ? error : new Error(String(error)),
-        success: false
-      };
+/**
+ * Compile the complete generated schema surface with strict AJV settings.
+ *
+ * Consumers normally compile validators lazily. This eager gate is exposed so
+ * generation checks can prove that every emitted schema and reference is
+ * internally coherent before a rarely used RPC reaches production.
+ */
+export function compileAllGatewaySchemas(): void {
+  const generatedNames = new Set(strictlyCompiledGatewaySchemaNames);
+  for (const name of Object.keys(gatewaySchemas) as GatewaySchemaName[]) {
+    if (!generatedNames.has(name)) {
+      throw new Error(`schema was not strictly compiled during generation: ${name}`);
     }
   }
-};
+}
 
 function schema<T>(name: GatewaySchemaName): RuntimeSchema<T> {
   return {
     parse(value) {
-      const validate = validator(name);
-      if (validate(value)) {
+      const validationError = validateGatewaySchema(name, value);
+      if (!validationError) {
         return value as T;
       }
-      throw new Error(`${name} validation failed: ${ajv.errorsText(validate.errors)}`);
+      throw new Error(`${name} validation failed: ${validationErrorsText([validationError])}`);
     },
     safeParse(value) {
       try {
@@ -224,23 +219,28 @@ function recordForValue(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function validator(name: GatewaySchemaName): ValidateFunction {
-  const existing = compiled.get(name);
-  if (existing) {
-    return existing;
-  }
-  registerSchemaRefs();
-  const validate = ajv.compile(gatewaySchemas[name]);
-  compiled.set(name, validate);
-  return validate;
+interface RuntimeValidationError extends SchemaValidationError {
+  message?: string;
 }
 
-function registerSchemaRefs(): void {
-  if (schemaRefsRegistered) {
-    return;
+function validationErrorsText(
+  errors: RuntimeValidationError[] | null | undefined
+): string {
+  if (!errors?.length) {
+    return "unknown validation error";
   }
-  for (const schemaRef of gatewaySchemaRefs) {
-    ajv.addSchema(schemaRef);
-  }
-  schemaRefsRegistered = true;
+  return errors.slice(0, 5).map((error) => {
+    const path = error.instancePath || "data";
+    const property = error.keyword === "required"
+      ? error.params?.missingProperty
+      : error.params?.additionalProperty;
+    if (typeof property === "string" && property) {
+      const fieldPath = path === "data" ? `data.${property}` : `${path}/${property}`;
+      return `${fieldPath} ${error.keyword === "required" ? "is required" : "is invalid"}`;
+    }
+    if (error.message) {
+      return `${path} ${error.message}`;
+    }
+    return `${path} violates ${error.keyword ?? "schema"}`;
+  }).join(", ");
 }

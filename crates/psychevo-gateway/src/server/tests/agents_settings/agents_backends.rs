@@ -483,7 +483,6 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
         default_model: None,
         default_mode: None,
         default_agent: None,
-        approval_mode: None,
         sandbox: None,
         workspace_roots: Vec::new(),
         options: Value::Null,

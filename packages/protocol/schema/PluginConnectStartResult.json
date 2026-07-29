@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "authorizationUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expiresInSeconds": {
+      "$ref": "#/definitions/JsonSafeU64"
+    },
+    "installUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "expiresInSeconds",
+    "sessionId",
+    "status"
+  ],
+  "title": "PluginConnectStartResult",
+  "type": "object"
+}

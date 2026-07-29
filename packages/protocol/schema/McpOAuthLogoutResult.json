@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "removed",
+    "success"
+  ],
+  "title": "McpOAuthLogoutResult",
+  "type": "object"
+}

@@ -79,7 +79,11 @@ pub(super) fn acp_mcp_server_declarations(
                         .iter()
                         .map(|(name, value)| acp_mcp_http_header(&server.name, name, value))
                         .collect::<psychevo::Result<Vec<_>>>()?;
-                    if let Some(token) = resolved.bearer_token.as_deref() {
+                    if let Some(token) = resolved
+                        .bearer_token
+                        .as_ref()
+                        .map(psychevo::__ai::SecretValue::expose_secret)
+                    {
                         if token.contains(['\r', '\n']) {
                             return Err(Error::Message(format!(
                                 "ACP MCP server `{}` bearer token contains a line break",

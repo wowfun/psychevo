@@ -33,6 +33,13 @@ export const clientRequestAgentControlSchema = {
             "string",
             "null"
           ]
+        },
+        "threadId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

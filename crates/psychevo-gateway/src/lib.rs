@@ -17,7 +17,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
-use psychevo::__ai::{AbortSignal, Outcome};
+#[cfg(test)]
+use psychevo::__ai::AbortSignal;
+use psychevo::__ai::Outcome;
 use psychevo::__product::persistence::{
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayLiveSnapshotInput, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,

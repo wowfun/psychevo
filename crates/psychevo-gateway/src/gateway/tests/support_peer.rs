@@ -186,6 +186,7 @@
                             suggested_rule: None,
                             allow_always: true,
                             filesystem: None,
+                            mcp_startup: None,
                             timeout_secs: 300,
                         })
                         .await;
@@ -488,7 +489,6 @@
             include_reasoning: request.options.include_reasoning,
             mode: request.options.mode,
             permission_mode: request.options.permission_mode,
-            approval_mode: request.options.approval_mode,
             approval_handler: request.options.approval_handler,
             clarify_enabled: request.options.clarify_enabled,
             inherited_env: request.options.inherited_env,
@@ -610,7 +610,6 @@
             include_reasoning: false,
             mode: RunMode::Default,
             permission_mode: Some(PermissionMode::Default),
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: false,
             inherited_env: None,

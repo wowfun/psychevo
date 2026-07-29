@@ -859,4 +859,1200 @@ export const gatewayMcpRequestSchemas = {
   "title": "McpOAuthStatusParams",
   "type": "object"
 },
+  McpTransportView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "McpAuthView": {
+      "properties": {
+        "bearerTokenEnvVar": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthClientId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthConfigured": {
+          "type": "boolean"
+        },
+        "oauthResource": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storedOAuthToken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oauthConfigured",
+        "scopes",
+        "storedOAuthToken"
+      ],
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "envKeys": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "stdio"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "args",
+        "command",
+        "envKeys",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "auth": {
+          "$ref": "#/definitions/McpAuthView"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "streamable_http"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth",
+        "headers",
+        "kind",
+        "url"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "unsupported"
+          ],
+          "type": "string"
+        },
+        "unsupportedKind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "unsupportedKind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "McpTransportView"
+},
+  McpAuthView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "bearerTokenEnvVar": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oauthClientId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "oauthConfigured": {
+      "type": "boolean"
+    },
+    "oauthResource": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scopes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "storedOAuthToken": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "oauthConfigured",
+    "scopes",
+    "storedOAuthToken"
+  ],
+  "title": "McpAuthView",
+  "type": "object"
+},
+  McpPolicyView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "disabledTools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "enabledTools": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "startupTimeoutSecs": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "supportsParallelToolCalls": {
+      "type": "boolean"
+    },
+    "toolTimeoutSecs": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "disabledTools",
+    "supportsParallelToolCalls"
+  ],
+  "title": "McpPolicyView",
+  "type": "object"
+},
+  McpServerView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "McpAuthView": {
+      "properties": {
+        "bearerTokenEnvVar": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthClientId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthConfigured": {
+          "type": "boolean"
+        },
+        "oauthResource": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storedOAuthToken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oauthConfigured",
+        "scopes",
+        "storedOAuthToken"
+      ],
+      "type": "object"
+    },
+    "McpPolicyView": {
+      "properties": {
+        "disabledTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabledTools": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "startupTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supportsParallelToolCalls": {
+          "type": "boolean"
+        },
+        "toolTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "disabledTools",
+        "supportsParallelToolCalls"
+      ],
+      "type": "object"
+    },
+    "McpTransportView": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "envKeys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "envKeys",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "auth": {
+              "$ref": "#/definitions/McpAuthView"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "streamable_http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "auth",
+            "headers",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unsupported"
+              ],
+              "type": "string"
+            },
+            "unsupportedKind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "unsupportedKind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "policy": {
+      "$ref": "#/definitions/McpPolicyView"
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "sourceId": {
+      "type": "string"
+    },
+    "sourceKind": {
+      "type": "string"
+    },
+    "transport": {
+      "$ref": "#/definitions/McpTransportView"
+    }
+  },
+  "required": [
+    "enabled",
+    "name",
+    "policy",
+    "required",
+    "sourceId",
+    "sourceKind",
+    "transport"
+  ],
+  "title": "McpServerView",
+  "type": "object"
+},
+  McpListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "McpAuthView": {
+      "properties": {
+        "bearerTokenEnvVar": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthClientId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthConfigured": {
+          "type": "boolean"
+        },
+        "oauthResource": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storedOAuthToken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oauthConfigured",
+        "scopes",
+        "storedOAuthToken"
+      ],
+      "type": "object"
+    },
+    "McpPolicyView": {
+      "properties": {
+        "disabledTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabledTools": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "startupTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supportsParallelToolCalls": {
+          "type": "boolean"
+        },
+        "toolTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "disabledTools",
+        "supportsParallelToolCalls"
+      ],
+      "type": "object"
+    },
+    "McpServerView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/definitions/McpPolicyView"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceKind": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/definitions/McpTransportView"
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "policy",
+        "required",
+        "sourceId",
+        "sourceKind",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "McpTransportView": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "envKeys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "envKeys",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "auth": {
+              "$ref": "#/definitions/McpAuthView"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "streamable_http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "auth",
+            "headers",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unsupported"
+              ],
+              "type": "string"
+            },
+            "unsupportedKind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "unsupportedKind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "count": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "type": "string"
+    },
+    "servers": {
+      "items": {
+        "$ref": "#/definitions/McpServerView"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "items": true,
+      "type": "array"
+    }
+  },
+  "required": [
+    "count",
+    "scope",
+    "servers",
+    "sources"
+  ],
+  "title": "McpListResult",
+  "type": "object"
+},
+  McpReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "McpAuthView": {
+      "properties": {
+        "bearerTokenEnvVar": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthClientId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthConfigured": {
+          "type": "boolean"
+        },
+        "oauthResource": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storedOAuthToken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oauthConfigured",
+        "scopes",
+        "storedOAuthToken"
+      ],
+      "type": "object"
+    },
+    "McpPolicyView": {
+      "properties": {
+        "disabledTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabledTools": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "startupTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supportsParallelToolCalls": {
+          "type": "boolean"
+        },
+        "toolTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "disabledTools",
+        "supportsParallelToolCalls"
+      ],
+      "type": "object"
+    },
+    "McpServerView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/definitions/McpPolicyView"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceKind": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/definitions/McpTransportView"
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "policy",
+        "required",
+        "sourceId",
+        "sourceKind",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "McpTransportView": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "envKeys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "envKeys",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "auth": {
+              "$ref": "#/definitions/McpAuthView"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "streamable_http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "auth",
+            "headers",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unsupported"
+              ],
+              "type": "string"
+            },
+            "unsupportedKind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "unsupportedKind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "server": {
+      "$ref": "#/definitions/McpServerView"
+    }
+  },
+  "required": [
+    "server"
+  ],
+  "title": "McpReadResult",
+  "type": "object"
+},
+  McpConfigView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "config": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "config",
+    "name"
+  ],
+  "title": "McpConfigView",
+  "type": "object"
+},
+  McpMutationResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "McpConfigView": {
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "server": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/McpConfigView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changed",
+    "name",
+    "path",
+    "success"
+  ],
+  "title": "McpMutationResult",
+  "type": "object"
+},
+  McpToolSummaryView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "title": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "McpToolSummaryView",
+  "type": "object"
+},
+  McpTestResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "McpToolSummaryView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "tools": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/McpToolSummaryView"
+      },
+      "type": "array"
+    },
+    "transport": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "ok",
+    "transport"
+  ],
+  "title": "McpTestResult",
+  "type": "object"
+},
+  McpOAuthStartResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "authorizationUrl": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "authorizationUrl",
+    "sessionId",
+    "status"
+  ],
+  "title": "McpOAuthStartResult",
+  "type": "object"
+},
+  McpOAuthStatusResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "status"
+  ],
+  "title": "McpOAuthStatusResult",
+  "type": "object"
+},
+  McpOAuthLogoutResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "removed",
+    "success"
+  ],
+  "title": "McpOAuthLogoutResult",
+  "type": "object"
+},
 } as const;

@@ -242,7 +242,8 @@ pub(super) async fn start_realtime(
     let state_for_close = state.clone();
     let event_session_id = session_id.clone();
     let cleanup_session_id = session_id.clone();
-    tokio::spawn(async move {
+    let supervisor = state.inner.gateway.clone();
+    supervisor.spawn_background(format!("realtime-voice:{session_id}"), async move {
         while let Some(event) = stream.next_event().await {
             let Ok(event) = event else {
                 continue;
@@ -337,9 +338,12 @@ pub(super) fn stop_realtime(
         .remove(&params.session_id);
     let accepted = removed.is_some();
     if let Some(session) = removed {
-        tokio::spawn(async move {
-            let _ = session.sender.close().await;
-        });
+        state
+            .inner
+            .gateway
+            .spawn_background("realtime-voice-close", async move {
+                let _ = session.sender.close().await;
+            });
         let _ = out_tx.send(rpc_notification(
             "thread/realtime/closed",
             json!(wire::ThreadRealtimeClosedNotification {

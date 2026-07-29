@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "includes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "mode_mutable": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "removable": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "unknown_tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "includes",
+    "mode_mutable",
+    "name",
+    "removable",
+    "source",
+    "tools",
+    "unknown_tools"
+  ],
+  "title": "ToolsetView",
+  "type": "object"
+}

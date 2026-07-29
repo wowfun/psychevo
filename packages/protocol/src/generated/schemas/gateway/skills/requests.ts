@@ -620,4 +620,1131 @@ export const gatewaySkillRequestSchemas = {
   "title": "SkillWriteResult",
   "type": "object"
 },
+  SkillDiagnosticView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "message"
+  ],
+  "title": "SkillDiagnosticView",
+  "type": "object"
+},
+  SkillRequiredEnvironmentVariableView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "help": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "optional": {
+      "default": false,
+      "type": "boolean"
+    },
+    "prompt": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "required_for": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "SkillRequiredEnvironmentVariableView",
+  "type": "object"
+},
+  SkillSummaryView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillRequiredEnvironmentVariableView": {
+      "properties": {
+        "help": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required_for": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "allowed_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collision_group": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "compatibility": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "disable_model_invocation": {
+      "type": "boolean"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "fallback_for_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "fallback_for_toolsets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "issues": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "license": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "location": {
+      "type": "string"
+    },
+    "missing_credential_files": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "missing_required_environment_variables": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "platforms": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prompt_visible": {
+      "type": "boolean"
+    },
+    "readiness_status": {
+      "type": "string"
+    },
+    "related_skills": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_environment_variables": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/SkillRequiredEnvironmentVariableView"
+      },
+      "type": "array"
+    },
+    "required_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_toolsets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "skill_dir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "string"
+    },
+    "source_label": {
+      "type": "string"
+    },
+    "supported_on_current_platform": {
+      "type": "boolean"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "description",
+    "disable_model_invocation",
+    "enabled",
+    "id",
+    "issues",
+    "location",
+    "name",
+    "prompt_visible",
+    "readiness_status",
+    "source",
+    "source_label",
+    "supported_on_current_platform"
+  ],
+  "title": "SkillSummaryView",
+  "type": "object"
+},
+  SkillListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "SkillRequiredEnvironmentVariableView": {
+      "properties": {
+        "help": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required_for": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "SkillSummaryView": {
+      "properties": {
+        "allowed_tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "collision_group": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "compatibility": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "disable_model_invocation": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "fallback_for_tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fallback_for_toolsets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "license": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "location": {
+          "type": "string"
+        },
+        "missing_credential_files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "missing_required_environment_variables": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "platforms": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "prompt_visible": {
+          "type": "boolean"
+        },
+        "readiness_status": {
+          "type": "string"
+        },
+        "related_skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_environment_variables": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/SkillRequiredEnvironmentVariableView"
+          },
+          "type": "array"
+        },
+        "required_tools": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_toolsets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "skill_dir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_label": {
+          "type": "string"
+        },
+        "supported_on_current_platform": {
+          "type": "boolean"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "description",
+        "disable_model_invocation",
+        "enabled",
+        "id",
+        "issues",
+        "location",
+        "name",
+        "prompt_visible",
+        "readiness_status",
+        "source",
+        "source_label",
+        "supported_on_current_platform"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "collisions": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "object"
+    },
+    "count": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/definitions/SkillDiagnosticView"
+      },
+      "type": "array"
+    },
+    "skills": {
+      "items": {
+        "$ref": "#/definitions/SkillSummaryView"
+      },
+      "type": "array"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "collisions",
+    "count",
+    "diagnostics",
+    "skills",
+    "success"
+  ],
+  "title": "SkillListResult",
+  "type": "object"
+},
+  SkillReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillRequiredEnvironmentVariableView": {
+      "properties": {
+        "help": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "type": "boolean"
+        },
+        "prompt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required_for": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "allowed_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "available_files": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collision_group": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "compatibility": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "error": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fallback_for_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "fallback_for_toolsets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "file": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_binary": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "issues": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "license": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "linked_files": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "missing_credential_files": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "missing_required_environment_variables": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform_status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platforms": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "preview_content": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prompt_visible": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "readiness_status": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "related_skills": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_environment_variables": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/SkillRequiredEnvironmentVariableView"
+      },
+      "type": "array"
+    },
+    "required_tools": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "required_toolsets": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "setup_help": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "setup_needed": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "size": {
+      "default": null,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "skill_dir": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_label": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "success"
+  ],
+  "title": "SkillReadResult",
+  "type": "object"
+},
+  SkillScanFindingView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "category": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "pattern": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "category",
+    "file",
+    "pattern",
+    "severity"
+  ],
+  "title": "SkillScanFindingView",
+  "type": "object"
+},
+  SkillScanResultView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillScanFindingView": {
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "file",
+        "pattern",
+        "severity"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "findings": {
+      "items": {
+        "$ref": "#/definitions/SkillScanFindingView"
+      },
+      "type": "array"
+    },
+    "verdict": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "findings",
+    "verdict"
+  ],
+  "title": "SkillScanResultView",
+  "type": "object"
+},
+  SkillInstalledView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillScanFindingView": {
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "file",
+        "pattern",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "SkillScanResultView": {
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/SkillScanFindingView"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "findings",
+        "verdict"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scan": {
+      "$ref": "#/definitions/SkillScanResultView"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "scan"
+  ],
+  "title": "SkillInstalledView",
+  "type": "object"
+},
+  SkillInstallResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillInstalledView": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scan": {
+          "$ref": "#/definitions/SkillScanResultView"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "scan"
+      ],
+      "type": "object"
+    },
+    "SkillScanFindingView": {
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "file",
+        "pattern",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "SkillScanResultView": {
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/SkillScanFindingView"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "findings",
+        "verdict"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "installed": {
+      "items": {
+        "$ref": "#/definitions/SkillInstalledView"
+      },
+      "type": "array"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "installed",
+    "success"
+  ],
+  "title": "SkillInstallResult",
+  "type": "object"
+},
+  SkillUninstallResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "path",
+    "scope",
+    "success"
+  ],
+  "title": "SkillUninstallResult",
+  "type": "object"
+},
+  SkillSetEnabledResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "name",
+    "path",
+    "scope",
+    "success"
+  ],
+  "title": "SkillSetEnabledResult",
+  "type": "object"
+},
 } as const;

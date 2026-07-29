@@ -74,14 +74,8 @@ export const clientRequestRuntimeProfileWriteSchema = {
       "type": "string"
     },
     "RuntimeProfileWriteParams": {
+      "additionalProperties": false,
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [

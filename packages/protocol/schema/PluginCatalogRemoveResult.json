@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/PluginCatalogPsychevoRemoveResult"
+    },
+    {
+      "$ref": "#/definitions/PluginCatalogCodexRemoveResult"
+    }
+  ],
+  "definitions": {
+    "PluginCatalogCodexRemoveResult": {
+      "properties": {
+        "installedRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "marketplaceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installedRoot",
+        "marketplaceName"
+      ],
+      "type": "object"
+    },
+    "PluginCatalogPsychevoRemoveResult": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "removed",
+        "scope",
+        "success"
+      ],
+      "type": "object"
+    }
+  },
+  "title": "PluginCatalogRemoveResult"
+}

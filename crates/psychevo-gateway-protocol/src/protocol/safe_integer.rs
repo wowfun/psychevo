@@ -280,6 +280,30 @@ mod tests {
         let usage = SessionUsageSummaryView::decl();
         assert!(usage.contains("estimatedCostNanodollars: number"));
         assert!(!usage.contains("bigint"));
+
+        for declaration in [
+            PluginTrustView::decl(),
+            PluginAuthorityRuntimeView::decl(),
+            PluginInstallResult::decl(),
+            PluginConnectStartResult::decl(),
+            McpPolicyView::decl(),
+        ] {
+            assert!(!declaration.contains("bigint"), "{declaration}");
+        }
+        assert!(PluginTrustView::decl().contains("trustedAtMs: number | null"));
+        assert!(PluginConnectStartResult::decl().contains("expiresInSeconds: number"));
+    }
+
+    #[test]
+    fn capability_result_integers_reject_json_unsafe_output() {
+        let result = PluginConnectStartResult {
+            session_id: "session".to_string(),
+            status: "pending".to_string(),
+            install_url: None,
+            authorization_url: None,
+            expires_in_seconds: JSON_SAFE_INTEGER_MAX + 1,
+        };
+        assert!(serde_json::to_value(result).is_err());
     }
 
     #[test]

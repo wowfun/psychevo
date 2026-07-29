@@ -154,10 +154,14 @@ impl GatewayExternalAgentDelegate {
                 .resume_thread(&child_session_id)
                 .await?;
             let handle = thread.start_turn(turn_request).await?;
-            let abort_bridge =
-                spawn_framework_delegate_abort_bridge(request.abort.clone(), handle.clone());
-            let completed = handle.wait().await;
-            abort_bridge.abort();
+            let mut abort = request.abort.clone();
+            let completed = tokio::select! {
+                completed = handle.wait() => completed,
+                _ = abort.wait_for_abort() => {
+                    handle.interrupt();
+                    handle.wait().await
+                }
+            };
             completed.map(|turn| ExternalAgentDelegateResult {
                 child_session_id: child_session_id.clone(),
                 final_answer: turn.final_answer,
@@ -176,16 +180,6 @@ impl GatewayExternalAgentDelegate {
             .await?;
         result
     }
-}
-
-fn spawn_framework_delegate_abort_bridge(
-    mut abort: AbortSignal,
-    turn: psychevo::TurnHandle,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        abort.wait_for_abort().await;
-        turn.interrupt();
-    })
 }
 
 #[cfg(test)]

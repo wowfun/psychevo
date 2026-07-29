@@ -413,6 +413,7 @@ async fn approve_acp_terminal_create(
             suggested_rule: None,
             allow_always: false,
             filesystem: None,
+            mcp_startup: None,
             timeout_secs: handler.timeout_secs(),
         })
         .await;

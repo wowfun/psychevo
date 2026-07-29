@@ -13,6 +13,7 @@ pub(super) async fn channel_reply_thread_id(state: &WebState, source: &GatewaySo
 }
 
 pub(super) fn channel_event_sink(
+    supervisor: Option<Gateway>,
     runtime: ChannelRuntimeState,
     connection_id: String,
     channel_gateway: ChannelGateway,
@@ -69,7 +70,7 @@ pub(super) fn channel_event_sink(
         let runtime = runtime.clone();
         let connection_id = connection_id.clone();
         let identity = identity.clone();
-        tokio::spawn(async move {
+        let delivery = async move {
             let result = gateway
                 .send(ImOutboundMessage {
                     identity,
@@ -88,7 +89,15 @@ pub(super) fn channel_event_sink(
                     );
                 }
             }
-        });
+        };
+        if let Some(supervisor) = &supervisor {
+            supervisor.spawn_background("channel-event-delivery", delivery);
+        } else {
+            #[cfg(test)]
+            {
+                tokio::spawn(delivery);
+            }
+        }
     })
 }
 

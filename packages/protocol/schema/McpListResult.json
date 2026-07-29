@@ -1,0 +1,263 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "McpAuthView": {
+      "properties": {
+        "bearerTokenEnvVar": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthClientId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oauthConfigured": {
+          "type": "boolean"
+        },
+        "oauthResource": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "storedOAuthToken": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "oauthConfigured",
+        "scopes",
+        "storedOAuthToken"
+      ],
+      "type": "object"
+    },
+    "McpPolicyView": {
+      "properties": {
+        "disabledTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabledTools": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "startupTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "supportsParallelToolCalls": {
+          "type": "boolean"
+        },
+        "toolTimeoutSecs": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "disabledTools",
+        "supportsParallelToolCalls"
+      ],
+      "type": "object"
+    },
+    "McpServerView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/definitions/McpPolicyView"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceKind": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/definitions/McpTransportView"
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "policy",
+        "required",
+        "sourceId",
+        "sourceKind",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "McpTransportView": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "envKeys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "envKeys",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "auth": {
+              "$ref": "#/definitions/McpAuthView"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "streamable_http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "auth",
+            "headers",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unsupported"
+              ],
+              "type": "string"
+            },
+            "unsupportedKind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "unsupportedKind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "count": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "type": "string"
+    },
+    "servers": {
+      "items": {
+        "$ref": "#/definitions/McpServerView"
+      },
+      "type": "array"
+    },
+    "sources": {
+      "items": true,
+      "type": "array"
+    }
+  },
+  "required": [
+    "count",
+    "scope",
+    "servers",
+    "sources"
+  ],
+  "title": "McpListResult",
+  "type": "object"
+}

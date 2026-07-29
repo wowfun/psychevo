@@ -12,8 +12,7 @@ fn current_browser_session(
         .browser_sessions
         .lock()
         .expect("web browser sessions poisoned")
-        .get(session_id)
-        .cloned()
+        .authenticate(session_id)
         .ok_or_else(|| Error::Message("browser session is no longer active".to_string()))
 }
 

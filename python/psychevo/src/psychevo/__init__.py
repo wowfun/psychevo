@@ -3,6 +3,9 @@ from ._callbacks import (
     ApprovalDecision,
     ApprovalRequest,
     ClarifyRequest,
+    FilesystemApprovalRequest,
+    FilesystemApprovalTarget,
+    McpStartupApprovalRequest,
     Tool,
     ToolCall,
     ToolResult,
@@ -18,7 +21,7 @@ from ._types import (
     TurnReceipt,
     TurnResult,
 )
-from .errors import PsychevoError, ProtocolError, TransportError
+from .errors import PsychevoError, ProtocolError, RequestTimeoutError, TransportError
 
 __all__ = [
     "Client",
@@ -26,8 +29,12 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalRequest",
     "ClarifyRequest",
+    "FilesystemApprovalRequest",
+    "FilesystemApprovalTarget",
+    "McpStartupApprovalRequest",
     "ProtocolError",
     "PsychevoError",
+    "RequestTimeoutError",
     "PendingInteraction",
     "Thread",
     "ThreadSnapshot",

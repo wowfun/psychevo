@@ -167,11 +167,7 @@ async fn consume_launch(
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|proto| proto == "https");
-    let cookie = if secure {
-        format!("psychevo_gateway_session={session_id}; Path=/; HttpOnly; SameSite=Lax; Secure")
-    } else {
-        format!("psychevo_gateway_session={session_id}; Path=/; HttpOnly; SameSite=Lax")
-    };
+    let cookie = browser_session_cookie(&session_id, secure);
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().insert(SET_COOKIE, value);
     }

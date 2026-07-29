@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PluginCatalogUpgradeError": {
+      "properties": {
+        "marketplaceName": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "marketplaceName",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "errors": {
+      "items": {
+        "$ref": "#/definitions/PluginCatalogUpgradeError"
+      },
+      "type": "array"
+    },
+    "selectedMarketplaces": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "upgradedRoots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "errors",
+    "selectedMarketplaces",
+    "upgradedRoots"
+  ],
+  "title": "PluginCatalogUpgradeResult",
+  "type": "object"
+}

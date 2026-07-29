@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "McpConfigView": {
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config",
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "server": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/McpConfigView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changed",
+    "name",
+    "path",
+    "success"
+  ],
+  "title": "McpMutationResult",
+  "type": "object"
+}

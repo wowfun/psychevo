@@ -6474,13 +6474,6 @@ export const threadControlSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [
@@ -7667,13 +7660,6 @@ export const threadControlSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [
@@ -9114,13 +9100,6 @@ export const threadControlSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [
@@ -10040,13 +10019,6 @@ export const threadControlSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [

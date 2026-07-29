@@ -480,4 +480,311 @@ export const gatewayToolRequestSchemas = {
   "title": "ToolRemoveParams",
   "type": "object"
 },
+  ToolModeView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "disabled_toolsets": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "effective_tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "enabled_toolsets": {
+      "default": null,
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "disabled_toolsets",
+    "effective_tools"
+  ],
+  "title": "ToolModeView",
+  "type": "object"
+},
+  ToolsetView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "includes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "mode_mutable": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "removable": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "unknown_tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "includes",
+    "mode_mutable",
+    "name",
+    "removable",
+    "source",
+    "tools",
+    "unknown_tools"
+  ],
+  "title": "ToolsetView",
+  "type": "object"
+},
+  ToolListResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ToolModeView": {
+      "properties": {
+        "disabled_toolsets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "effective_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled_toolsets": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "disabled_toolsets",
+        "effective_tools"
+      ],
+      "type": "object"
+    },
+    "ToolsetView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "includes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode_mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unknown_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "includes",
+        "mode_mutable",
+        "name",
+        "removable",
+        "source",
+        "tools",
+        "unknown_tools"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "default_enabled_toolsets": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "modes": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ToolModeView"
+      },
+      "type": "object"
+    },
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "type": "string"
+    },
+    "sources": {
+      "items": true,
+      "type": "array"
+    },
+    "toolsets": {
+      "items": {
+        "$ref": "#/definitions/ToolsetView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "default_enabled_toolsets",
+    "modes",
+    "scope",
+    "sources",
+    "toolsets"
+  ],
+  "title": "ToolListResult",
+  "type": "object"
+},
+  ToolReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ToolsetView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "includes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode_mutable": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "removable": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unknown_tools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "includes",
+        "mode_mutable",
+        "name",
+        "removable",
+        "source",
+        "tools",
+        "unknown_tools"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "toolset": {
+      "$ref": "#/definitions/ToolsetView"
+    }
+  },
+  "required": [
+    "toolset"
+  ],
+  "title": "ToolReadResult",
+  "type": "object"
+},
+  ToolMutationResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "changed": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changed",
+    "name",
+    "path",
+    "success"
+  ],
+  "title": "ToolMutationResult",
+  "type": "object"
+},
 } as const;

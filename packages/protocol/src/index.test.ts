@@ -3,7 +3,9 @@ import {
   ClientRequestSchema,
   GatewayEventSchema,
   ThreadSnapshotSchema,
+  compileAllGatewaySchemas,
   gatewayMethodValidation,
+  gatewayMethodContracts,
   gatewayRequestParamsSchema,
   gatewayResponseResultSchema,
   gatewaySchemas
@@ -48,20 +50,67 @@ describe("ClientRequestSchema", () => {
 });
 
 describe("generated method validator registry", () => {
-  it("distinguishes precise and explicit opaque results", () => {
+  it("strictly compiles every generated schema and reference", () => {
+    expect(() => compileAllGatewaySchemas()).not.toThrow();
+  });
+
+  it("validates through the public runtime schema without dynamic code generation", () => {
+    const originalFunction = globalThis.Function;
+    const originalEval = globalThis.eval;
+    Object.defineProperty(globalThis, "Function", {
+      configurable: true,
+      value: () => {
+        throw new Error("dynamic Function is blocked by production CSP");
+      }
+    });
+    Object.defineProperty(globalThis, "eval", {
+      configurable: true,
+      value: () => {
+        throw new Error("eval is blocked by production CSP");
+      }
+    });
+    try {
+      expect(gatewayResponseResultSchema("plugin/list").safeParse({
+        plugins: [],
+        count: 0,
+        codex_authority: { kind: "codex", readiness: "unavailable" },
+        authorities: []
+      }).success).toBe(true);
+      expect(gatewayResponseResultSchema("plugin/list").safeParse([]).success).toBe(false);
+    } finally {
+      Object.defineProperty(globalThis, "Function", {
+        configurable: true,
+        value: originalFunction
+      });
+      Object.defineProperty(globalThis, "eval", {
+        configurable: true,
+        value: originalEval
+      });
+    }
+  });
+
+  it("has a precise result schema for every method", () => {
     expect(gatewayMethodValidation("thread/read")).toEqual({
       params: "precise",
       result: "precise"
     });
     expect(gatewayMethodValidation("plugin/list")).toEqual({
       params: "precise",
-      result: "opaque"
+      result: "precise"
     });
+    expect(Object.values(gatewayMethodContracts).every(
+      (contract) => contract.resultValidation === "precise"
+        && typeof contract.resultSchema === "string"
+    )).toBe(true);
   });
 
   it("follows Rust optionality for params and validates result semantics", () => {
     expect(gatewayRequestParamsSchema("thread/list").safeParse({}).success).toBe(true);
     expect(gatewayRequestParamsSchema("thread/read").safeParse({}).success).toBe(false);
+    expect(gatewayRequestParamsSchema("thread/read").safeParse({
+      scope: undefined,
+      threadId: "thread-1"
+    }).success).toBe(true);
     expect(gatewayRequestParamsSchema("turn/start").safeParse({
       scope: {
         cwd: "/tmp/project",
@@ -70,9 +119,41 @@ describe("generated method validator registry", () => {
       clientTurnId: "client-turn-1"
     }).success).toBe(true);
     expect(gatewayResponseResultSchema("thread/read").safeParse({}).success).toBe(false);
+    expect(gatewayResponseResultSchema("plugin/list").safeParse({
+      plugins: [],
+      count: 0,
+      codex_authority: { kind: "codex", readiness: "unavailable" },
+      authorities: []
+    }).success).toBe(true);
     expect(gatewayResponseResultSchema("plugin/list").safeParse({ plugins: [] }).success)
-      .toBe(true);
+      .toBe(false);
     expect(gatewayResponseResultSchema("plugin/list").safeParse([]).success).toBe(false);
+  });
+
+  it("validates method-specific Codex marketplace mutation results", () => {
+    expect(gatewayResponseResultSchema("plugin/catalog/add").safeParse({
+      marketplaceName: "tools",
+      installedRoot: "/tmp/codex/plugins/tools",
+      alreadyAdded: false
+    }).success).toBe(true);
+    expect(gatewayResponseResultSchema("plugin/catalog/remove").safeParse({
+      marketplaceName: "tools",
+      installedRoot: null
+    }).success).toBe(true);
+    expect(gatewayResponseResultSchema("plugin/catalog/upgrade").safeParse({
+      selectedMarketplaces: ["tools"],
+      upgradedRoots: ["/tmp/codex/plugins/tools"],
+      errors: [{ marketplaceName: "other", message: "not available" }]
+    }).success).toBe(true);
+
+    expect(gatewayResponseResultSchema("plugin/catalog/add").safeParse({
+      marketplaceName: "tools"
+    }).success).toBe(false);
+    expect(gatewayResponseResultSchema("plugin/catalog/remove").safeParse({}).success).toBe(false);
+    expect(gatewayResponseResultSchema("plugin/catalog/upgrade").safeParse({
+      selectedMarketplaces: ["tools"],
+      upgradedRoots: []
+    }).success).toBe(false);
   });
 });
 

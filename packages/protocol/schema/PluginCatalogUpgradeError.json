@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "marketplaceName": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "marketplaceName",
+    "message"
+  ],
+  "title": "PluginCatalogUpgradeError",
+  "type": "object"
+}

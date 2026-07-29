@@ -276,6 +276,7 @@ export const turnRuntimeSchemas = {
 },
   RuntimeProfileWriteParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
   "definitions": {
     "BackendConfigTarget": {
       "enum": [
@@ -348,13 +349,6 @@ export const turnRuntimeSchemas = {
     }
   },
   "properties": {
-    "approvalMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "backendRef": {
       "default": null,
       "type": [
@@ -682,13 +676,6 @@ export const turnRuntimeSchemas = {
     }
   },
   "properties": {
-    "approvalMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "backendRef": {
       "default": null,
       "type": [
@@ -1067,13 +1054,6 @@ export const turnRuntimeSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [
@@ -1362,13 +1342,6 @@ export const turnRuntimeSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [
@@ -1657,13 +1630,6 @@ export const turnRuntimeSchemas = {
     },
     "RuntimeProfileView": {
       "properties": {
-        "approvalMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "backendRef": {
           "default": null,
           "type": [

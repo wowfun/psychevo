@@ -1,3 +1,15 @@
+fn assert_wire_result<T>(value: &Value)
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value::<T>(value.clone()).unwrap_or_else(|error| {
+        panic!(
+            "result did not match {}: {error}\n{value}",
+            std::any::type_name::<T>()
+        )
+    });
+}
+
 #[tokio::test]
 async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     let (temp, state) = web_state().await;
@@ -56,6 +68,7 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     )
     .await
     .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     assert_eq!(list["count"], 2);
     assert!(
         list["plugins"]
@@ -90,6 +103,7 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     )
     .await
     .expect("plugin/read");
+    assert_wire_result::<wire::PluginReadResult>(&read);
     assert_eq!(
         read["manifest"]["interface"]["displayName"],
         "Display Plugin"
@@ -121,6 +135,7 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     )
     .await
     .expect("plugin/doctor");
+    assert_wire_result::<wire::PluginDoctorResult>(&doctor);
     assert_eq!(
         doctor["plugins"][0]["manifest"]["interface"]["displayName"],
         "Display Plugin"
@@ -169,23 +184,26 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
             "PATH".to_string(),
             std::env::var("PATH").unwrap_or_default(),
         ),
-    ])).await;
+    ]))
+    .await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    capability_rpc(
+    let authority = capability_rpc(
         &state,
         "plugin/authority/write",
         json!({"scope":scope.clone(),"enabled":true,"binary":script}),
     )
     .await
     .expect("enable Codex authority");
+    assert_wire_result::<wire::PluginAuthorityWriteResult>(&authority);
 
     let list = capability_rpc(&state, "plugin/list", json!({"scope":scope.clone()}))
         .await
         .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     let codex = list["plugins"]
         .as_array()
         .expect("plugins")
@@ -202,6 +220,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("plugin/read");
+    assert_wire_result::<wire::PluginReadResult>(&read);
     assert_eq!(read["plugin"]["authority"]["marketplace"], "openai");
     assert_eq!(
         read["plugin"]["component_statuses"][0]["executionOwner"],
@@ -215,6 +234,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("plugin/install");
+    assert_wire_result::<wire::PluginInstallResult>(&installed);
     assert_eq!(installed["success"], true);
     assert_eq!(installed["authority"]["kind"], "codex");
     assert!(installed.get("result").is_none());
@@ -229,6 +249,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("remove Codex fingerprint trust");
+    assert_wire_result::<wire::PluginAuthoritySetTrustResult>(&untrusted);
     assert_eq!(untrusted["trust"]["status"], "untrusted");
     let trusted = capability_rpc(
         &state,
@@ -241,6 +262,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("trust Codex fingerprint");
+    assert_wire_result::<wire::PluginAuthoritySetTrustResult>(&trusted);
     assert_eq!(trusted["trust"]["status"], "trusted");
     let rejected = capability_rpc(
         &state,
@@ -265,6 +287,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("plugin/doctor");
+    assert_wire_result::<wire::PluginDoctorResult>(&doctor);
     assert_eq!(doctor["apps"]["data"], json!([]));
     let removed = capability_rpc(
         &state,
@@ -273,6 +296,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     )
     .await
     .expect("plugin/uninstall");
+    assert_wire_result::<wire::PluginUninstallResult>(&removed);
     assert_eq!(removed["authority"]["kind"], "codex");
     assert_eq!(
         std::fs::read_to_string(&log).expect("calls"),
@@ -325,6 +349,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     )
     .await
     .expect("skill/install");
+    assert_wire_result::<wire::SkillInstallResult>(&installed);
     assert_eq!(installed["installed"][0]["name"], "review-flow");
 
     let read = capability_rpc(
@@ -337,6 +362,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     )
     .await
     .expect("skill/read");
+    assert_wire_result::<wire::SkillReadResult>(&read);
     assert_eq!(read["description"], "Review workflow");
     assert_eq!(read["content"], "fresh body");
     let preview_content = read["preview_content"].as_str().expect("preview content");
@@ -356,6 +382,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     )
     .await
     .expect("skill/setEnabled");
+    assert_wire_result::<wire::SkillSetEnabledResult>(&disabled);
     assert_eq!(disabled["enabled"], false);
     let project_config =
         std::fs::read_to_string(state.inner.cwd.join(".psychevo/config.toml")).expect("config");
@@ -369,6 +396,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     )
     .await
     .expect("skill/list");
+    assert_wire_result::<wire::SkillListResult>(&listed);
     let row = listed["skills"]
         .as_array()
         .expect("skills")
@@ -395,6 +423,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     )
     .await
     .expect("skill/uninstall");
+    assert_wire_result::<wire::SkillUninstallResult>(&removed);
     assert_eq!(removed["success"], true);
     assert!(
         !state
@@ -654,6 +683,7 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
         .await
         .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     let browser = list["plugins"]
         .as_array()
         .expect("plugins")
@@ -684,6 +714,7 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     )
     .await
     .expect("plugin/read");
+    assert_wire_result::<wire::PluginReadResult>(&read);
     assert_eq!(read["manifest"]["interface"]["displayName"], "Browser");
     assert_eq!(read["plugin"]["status"], "Installed");
     assert_eq!(read["inspection"]["framework"], "psychevo");
@@ -702,11 +733,13 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     )
     .await
     .expect("plugin/setEnabled");
+    assert_wire_result::<wire::PluginSetEnabledResult>(&disabled);
     assert_eq!(disabled["enabled"], false);
 
     let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
         .await
         .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     let browser = list["plugins"]
         .as_array()
         .expect("plugins")
@@ -726,6 +759,7 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     )
     .await
     .expect("plugin/read disabled browser");
+    assert_wire_result::<wire::PluginReadResult>(&read);
     assert_eq!(read["plugin"]["status"], "Disabled");
     assert_eq!(read["inspection"]["support"], "built_in");
     assert!(read["inspection"].get("status").is_none());
@@ -740,14 +774,11 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     )
     .await
     .expect("plugin/doctor");
+    assert_wire_result::<wire::PluginDoctorResult>(&doctor);
     assert_eq!(doctor["plugins"][0]["plugin"]["name"], "Browser");
     assert_eq!(doctor["plugins"][0]["plugin"]["status"], "Disabled");
     assert_eq!(doctor["plugins"][0]["inspection"]["support"], "built_in");
-    assert!(
-        doctor["plugins"][0]["inspection"]
-            .get("status")
-            .is_none()
-    );
+    assert!(doctor["plugins"][0]["inspection"].get("status").is_none());
     assert_eq!(doctor["plugins"][0]["worker"]["status"], "not_applicable");
 
     let rejected = capability_rpc(
@@ -1010,11 +1041,13 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     )
     .await
     .expect("plugin/install");
+    assert_wire_result::<wire::PluginInstallResult>(&installed);
     assert_eq!(installed["plugin"]["name"], "managed-plugin");
 
     let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
         .await
         .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     let managed = list["plugins"]
         .as_array()
         .expect("plugins")
@@ -1045,6 +1078,7 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     )
     .await
     .expect("plugin/read");
+    assert_wire_result::<wire::PluginReadResult>(&read);
     assert_eq!(read["plugin"]["selector"], selector);
     assert_eq!(read["plugin"]["scope_name"], "project");
 
@@ -1058,6 +1092,7 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     )
     .await
     .expect("plugin/doctor");
+    assert_wire_result::<wire::PluginDoctorResult>(&doctor);
     assert_eq!(doctor["plugins"][0]["plugin"]["selector"], selector);
     assert_eq!(doctor["plugins"][0]["plugin"]["scope_name"], "project");
 
@@ -1073,11 +1108,13 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     )
     .await
     .expect("plugin/setEnabled");
+    assert_wire_result::<wire::PluginSetEnabledResult>(&enabled);
     assert_eq!(enabled["enabled"], true);
 
     let list = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
         .await
         .expect("plugin/list");
+    assert_wire_result::<wire::PluginListResult>(&list);
     let managed = list["plugins"]
         .as_array()
         .expect("plugins")
@@ -1097,6 +1134,7 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     )
     .await
     .expect("plugin/uninstall");
+    assert_wire_result::<wire::PluginUninstallResult>(&removed);
     assert_eq!(removed["success"], true);
 }
 
@@ -1325,17 +1363,14 @@ async fn foreign_plugin_rpc_is_inspection_only_and_install_does_not_persist() {
     )
     .await
     .expect("plugin/import/inspect");
+    assert_wire_result::<wire::PluginInspectResult>(&inspected);
     assert_eq!(inspected["inspection"]["framework"], "hermes");
     assert_eq!(inspected["inspection"]["support"], "inspection_only");
     assert_eq!(inspected["inspection"]["declared_lanes"][0], "tools");
 
-    let before = capability_rpc(
-        &state,
-        "plugin/list",
-        json!({ "scope": scope.clone() }),
-    )
-    .await
-    .expect("plugin/list before");
+    let before = capability_rpc(&state, "plugin/list", json!({ "scope": scope.clone() }))
+        .await
+        .expect("plugin/list before");
     let error = capability_rpc(
         &state,
         "plugin/install",
@@ -1349,13 +1384,9 @@ async fn foreign_plugin_rpc_is_inspection_only_and_install_does_not_persist() {
     .await
     .expect_err("foreign install must be rejected");
     assert!(error.to_string().contains("inspection-only"));
-    let after = capability_rpc(
-        &state,
-        "plugin/list",
-        json!({ "scope": scope }),
-    )
-    .await
-    .expect("plugin/list after");
+    let after = capability_rpc(&state, "plugin/list", json!({ "scope": scope }))
+        .await
+        .expect("plugin/list after");
     assert_eq!(before, after);
 }
 
@@ -1380,6 +1411,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("tool/create");
+    assert_wire_result::<wire::ToolMutationResult>(&created);
     assert_eq!(created["name"], "review-tools");
     let expected_profile_config = state.inner.home.join("config.toml");
     assert_eq!(
@@ -1410,6 +1442,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("tool/read");
+    assert_wire_result::<wire::ToolReadResult>(&tool);
     assert_eq!(tool["toolset"]["source"], "custom");
     assert_eq!(tool["toolset"]["unknown_tools"][0], "unknown_tool");
 
@@ -1432,6 +1465,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("mcp/upsert");
+    assert_wire_result::<wire::McpMutationResult>(&upserted);
     assert_eq!(
         upserted["server"]["config"]["bearer_token_env_var"],
         "DOCS_MCP_TOKEN"
@@ -1449,6 +1483,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("mcp/read");
+    assert_wire_result::<wire::McpReadResult>(&server);
     assert_eq!(
         server["server"]["transport"]["auth"]["bearerTokenEnvVar"],
         "DOCS_MCP_TOKEN"
@@ -1478,6 +1513,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("mcp/setEnabled");
+    assert_wire_result::<wire::McpMutationResult>(&disabled);
     assert_eq!(disabled["server"]["config"]["enabled"], false);
 
     let inline_token = capability_rpc(
@@ -1505,6 +1541,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("mcp/remove");
+    assert_wire_result::<wire::McpMutationResult>(&removed_mcp);
     assert_eq!(removed_mcp["success"], true);
     let removed_tool = capability_rpc(
         &state,
@@ -1516,6 +1553,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("tool/remove");
+    assert_wire_result::<wire::ToolMutationResult>(&removed_tool);
     assert_eq!(removed_tool["success"], true);
 }
 
@@ -1718,11 +1756,7 @@ async fn codex_authority_write_is_profile_scoped_and_preserves_private_home() {
     assert!(!state.inner.cwd.join(".psychevo/config.toml").exists());
 }
 
-async fn capability_rpc(
-    state: &WebState,
-    method: &str,
-    params: Value,
-) -> psychevo::Result<Value> {
+async fn capability_rpc(state: &WebState, method: &str, params: Value) -> psychevo::Result<Value> {
     let (tx, _rx) = mpsc::unbounded_channel();
     handle_rpc(
         state.clone(),

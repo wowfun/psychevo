@@ -1969,7 +1969,6 @@ default_mode = "default"
         default_model: Some("profile-default-model".to_string()),
         default_mode: Some("default".to_string()),
         default_agent: None,
-        approval_mode: None,
         sandbox: None,
         workspace_roots: Vec::new(),
         options: Value::Null,

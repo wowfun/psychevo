@@ -248,6 +248,7 @@ async fn write_text_file_content(
                 suggested_rule: None,
                 allow_always: false,
                 filesystem: None,
+                mcp_startup: None,
                 timeout_secs: handler.timeout_secs(),
             })
             .await
@@ -292,6 +293,7 @@ async fn request_permission(
                     .iter()
                     .any(|option| option.kind == PermissionOptionKind::AllowAlways),
                 filesystem: None,
+                mcp_startup: None,
                 timeout_secs: handler.timeout_secs(),
             })
             .await

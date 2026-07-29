@@ -26,6 +26,9 @@ class Transport(ABC):
     @abstractmethod
     async def close(self) -> None: ...
 
+    def abort(self) -> None:
+        """Best-effort synchronous fallback when the shared close deadline expires."""
+
 
 class StdioTransport(Transport):
     def __init__(self, process: asyncio.subprocess.Process) -> None:
@@ -102,6 +105,12 @@ class StdioTransport(Transport):
                 self._process.kill()
                 await self._process.wait()
 
+    def abort(self) -> None:
+        if not self._stdin.is_closing():
+            self._stdin.close()
+        if self._process.returncode is None:
+            self._process.kill()
+
 
 class WebSocketTransport(Transport):
     def __init__(self, connection: ClientConnection) -> None:
@@ -149,3 +158,9 @@ class WebSocketTransport(Transport):
             await self._connection.close()
         except (OSError, WebSocketException):
             pass
+
+    def abort(self) -> None:
+        transport = getattr(self._connection, "transport", None)
+        abort = getattr(transport, "abort", None)
+        if callable(abort):
+            abort()

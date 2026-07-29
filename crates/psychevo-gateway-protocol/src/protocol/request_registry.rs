@@ -5,21 +5,12 @@ pub(crate) struct RequestContract {
     pub(crate) result_ts: String,
 }
 
-macro_rules! request_result_ts {
-    (json_object) => {
-        "GatewayJsonResult".to_string()
-    };
-    ($result:ty) => {
-        <$result as TS>::name()
-    };
-}
-
 macro_rules! request_registry {
     (
         $(
             $variant:ident => $method:literal {
                 params: $params:ty,
-                result: $result:tt
+                result: $result:ty
             }
         ),* $(,)?
     ) => {
@@ -38,7 +29,7 @@ macro_rules! request_registry {
                     RequestContract {
                         method: $method,
                         params_ts: <$params as TS>::name(),
-                        result_ts: request_result_ts!($result),
+                        result_ts: <$result as TS>::name(),
                     },
                 )*
             ]
@@ -105,43 +96,43 @@ request_registry! {
     BackendUpgrade => "backend/upgrade" { params: BackendManageParams, result: BackendManageResult },
     BackendWrite => "backend/write" { params: BackendWriteParams, result: BackendWriteResult },
     BackendDelete => "backend/delete" { params: BackendDeleteParams, result: BackendDeleteResult },
-    PluginList => "plugin/list" { params: PluginListParams, result: json_object },
-    PluginRead => "plugin/read" { params: PluginReadParams, result: json_object },
-    PluginDoctor => "plugin/doctor" { params: PluginDoctorParams, result: json_object },
-    PluginInspect => "plugin/import/inspect" { params: PluginInspectParams, result: json_object },
-    PluginInstall => "plugin/install" { params: PluginInstallParams, result: json_object },
-    PluginUninstall => "plugin/uninstall" { params: PluginUninstallParams, result: json_object },
-    PluginSetEnabled => "plugin/setEnabled" { params: PluginSetEnabledParams, result: json_object },
-    PluginAuthorityWrite => "plugin/authority/write" { params: PluginAuthorityWriteParams, result: json_object },
-    PluginAuthorityRefresh => "plugin/authority/refresh" { params: PluginAuthorityRefreshParams, result: json_object },
-    PluginAuthoritySetTrust => "plugin/authority/setTrust" { params: PluginAuthoritySetTrustParams, result: json_object },
-    PluginCatalogList => "plugin/catalog/list" { params: PluginCatalogListParams, result: json_object },
-    PluginCatalogAdd => "plugin/catalog/add" { params: PluginCatalogAddParams, result: json_object },
-    PluginCatalogRemove => "plugin/catalog/remove" { params: PluginCatalogRemoveParams, result: json_object },
-    PluginCatalogUpgrade => "plugin/catalog/upgrade" { params: PluginCatalogUpgradeParams, result: json_object },
-    PluginConnectStart => "plugin/connect/start" { params: PluginConnectStartParams, result: json_object },
-    PluginConnectStatus => "plugin/connect/status" { params: PluginConnectStatusParams, result: json_object },
-    SkillList => "skill/list" { params: SkillListParams, result: json_object },
-    SkillRead => "skill/read" { params: SkillReadParams, result: json_object },
-    SkillInstall => "skill/install" { params: SkillInstallParams, result: json_object },
-    SkillUninstall => "skill/uninstall" { params: SkillUninstallParams, result: json_object },
-    SkillSetEnabled => "skill/setEnabled" { params: SkillSetEnabledParams, result: json_object },
+    PluginList => "plugin/list" { params: PluginListParams, result: PluginListResult },
+    PluginRead => "plugin/read" { params: PluginReadParams, result: PluginReadResult },
+    PluginDoctor => "plugin/doctor" { params: PluginDoctorParams, result: PluginDoctorResult },
+    PluginInspect => "plugin/import/inspect" { params: PluginInspectParams, result: PluginInspectResult },
+    PluginInstall => "plugin/install" { params: PluginInstallParams, result: PluginInstallResult },
+    PluginUninstall => "plugin/uninstall" { params: PluginUninstallParams, result: PluginUninstallResult },
+    PluginSetEnabled => "plugin/setEnabled" { params: PluginSetEnabledParams, result: PluginSetEnabledResult },
+    PluginAuthorityWrite => "plugin/authority/write" { params: PluginAuthorityWriteParams, result: PluginAuthorityWriteResult },
+    PluginAuthorityRefresh => "plugin/authority/refresh" { params: PluginAuthorityRefreshParams, result: PluginAuthorityRefreshResult },
+    PluginAuthoritySetTrust => "plugin/authority/setTrust" { params: PluginAuthoritySetTrustParams, result: PluginAuthoritySetTrustResult },
+    PluginCatalogList => "plugin/catalog/list" { params: PluginCatalogListParams, result: PluginCatalogListResult },
+    PluginCatalogAdd => "plugin/catalog/add" { params: PluginCatalogAddParams, result: PluginCatalogAddResult },
+    PluginCatalogRemove => "plugin/catalog/remove" { params: PluginCatalogRemoveParams, result: PluginCatalogRemoveResult },
+    PluginCatalogUpgrade => "plugin/catalog/upgrade" { params: PluginCatalogUpgradeParams, result: PluginCatalogUpgradeResult },
+    PluginConnectStart => "plugin/connect/start" { params: PluginConnectStartParams, result: PluginConnectStartResult },
+    PluginConnectStatus => "plugin/connect/status" { params: PluginConnectStatusParams, result: PluginConnectStatusResult },
+    SkillList => "skill/list" { params: SkillListParams, result: SkillListResult },
+    SkillRead => "skill/read" { params: SkillReadParams, result: SkillReadResult },
+    SkillInstall => "skill/install" { params: SkillInstallParams, result: SkillInstallResult },
+    SkillUninstall => "skill/uninstall" { params: SkillUninstallParams, result: SkillUninstallResult },
+    SkillSetEnabled => "skill/setEnabled" { params: SkillSetEnabledParams, result: SkillSetEnabledResult },
     SkillWrite => "skill/write" { params: SkillWriteParams, result: SkillWriteResult },
-    ToolList => "tool/list" { params: ToolListParams, result: json_object },
-    ToolRead => "tool/read" { params: ToolReadParams, result: json_object },
-    ToolSetEnabled => "tool/setEnabled" { params: ToolSetEnabledParams, result: json_object },
-    ToolCreate => "tool/create" { params: ToolCreateParams, result: json_object },
-    ToolRemove => "tool/remove" { params: ToolRemoveParams, result: json_object },
-    McpList => "mcp/list" { params: McpListParams, result: json_object },
-    McpRead => "mcp/read" { params: McpReadParams, result: json_object },
-    McpUpsert => "mcp/upsert" { params: McpUpsertParams, result: json_object },
-    McpRemove => "mcp/remove" { params: McpNameParams, result: json_object },
-    McpSetEnabled => "mcp/setEnabled" { params: McpSetEnabledParams, result: json_object },
-    McpSetToolPolicy => "mcp/setToolPolicy" { params: McpSetToolPolicyParams, result: json_object },
-    McpTest => "mcp/test" { params: McpNameParams, result: json_object },
-    McpOAuthStart => "mcp/oauth/start" { params: McpOAuthStartParams, result: json_object },
-    McpOAuthStatus => "mcp/oauth/status" { params: McpOAuthStatusParams, result: json_object },
-    McpOAuthLogout => "mcp/oauth/logout" { params: McpNameParams, result: json_object },
+    ToolList => "tool/list" { params: ToolListParams, result: ToolListResult },
+    ToolRead => "tool/read" { params: ToolReadParams, result: ToolReadResult },
+    ToolSetEnabled => "tool/setEnabled" { params: ToolSetEnabledParams, result: ToolMutationResult },
+    ToolCreate => "tool/create" { params: ToolCreateParams, result: ToolMutationResult },
+    ToolRemove => "tool/remove" { params: ToolRemoveParams, result: ToolMutationResult },
+    McpList => "mcp/list" { params: McpListParams, result: McpListResult },
+    McpRead => "mcp/read" { params: McpReadParams, result: McpReadResult },
+    McpUpsert => "mcp/upsert" { params: McpUpsertParams, result: McpMutationResult },
+    McpRemove => "mcp/remove" { params: McpNameParams, result: McpMutationResult },
+    McpSetEnabled => "mcp/setEnabled" { params: McpSetEnabledParams, result: McpMutationResult },
+    McpSetToolPolicy => "mcp/setToolPolicy" { params: McpSetToolPolicyParams, result: McpMutationResult },
+    McpTest => "mcp/test" { params: McpNameParams, result: McpTestResult },
+    McpOAuthStart => "mcp/oauth/start" { params: McpOAuthStartParams, result: McpOAuthStartResult },
+    McpOAuthStatus => "mcp/oauth/status" { params: McpOAuthStatusParams, result: McpOAuthStatusResult },
+    McpOAuthLogout => "mcp/oauth/logout" { params: McpNameParams, result: McpOAuthLogoutResult },
     ChannelList => "channel/list" { params: ChannelListParams, result: ChannelListResult },
     ChannelShow => "channel/show" { params: ChannelIdParams, result: ChannelEnableResult },
     ChannelEnable => "channel/enable" { params: ChannelEnableParams, result: ChannelEnableResult },

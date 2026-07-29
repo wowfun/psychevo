@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "brandColor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capabilities": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "category": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "composerIcon": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "defaultPrompt": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "developerName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "displayName": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logo": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logoDark": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "longDescription": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "privacyPolicyUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "screenshots": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shortDescription": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "termsOfServiceUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "websiteUrl": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "PluginInterfaceView",
+  "type": "object"
+}

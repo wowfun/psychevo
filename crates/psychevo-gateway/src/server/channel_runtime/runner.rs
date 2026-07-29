@@ -269,7 +269,8 @@ pub(super) async fn handle_channel_message(
                 let reply_gateway = channel_gateway.clone();
                 let reply_identity = message.identity;
                 let fallback_thread_id = channel_reply_thread_id(state, &source).await;
-                let _handle = tokio::spawn(async move {
+                let supervisor = state.inner.gateway.clone();
+                supervisor.spawn_background("channel-compaction-reply", async move {
                     let (thread_id, text) = match pending.await {
                         Ok(wire::ThreadActionRunResult::Compact { thread_id, result }) => {
                             (thread_id, channel_compaction_reply(&result))
@@ -304,7 +305,8 @@ pub(super) async fn handle_channel_message(
     let turn_runtime = runtime.clone();
     let turn_connection = connection.clone();
     let turn_gateway = channel_gateway.clone();
-    let _handle = tokio::spawn(async move {
+    let supervisor = state.inner.gateway.clone();
+    supervisor.spawn_background("channel-inbound-turn", async move {
         if let Err(err) = run_channel_inbound_turn(
             turn_state,
             turn_runtime.clone(),
@@ -413,6 +415,7 @@ async fn run_channel_inbound_turn(
         );
     }
     let event_sink = channel_event_sink(
+        Some(state.inner.gateway.clone()),
         runtime.clone(),
         connection.id.clone(),
         channel_gateway.clone(),

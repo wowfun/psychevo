@@ -488,9 +488,10 @@ where
                     .await?
             };
             let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
+            let agent_control = state.inner.application.agent_control();
             Ok(serde_json::to_value(
                 agent_status_result(
-                Some(&state.inner.state),
+                &agent_control,
                 thread_id,
                 params.all.unwrap_or(false),
             )
@@ -501,8 +502,12 @@ where
             let params = request.required_params::<wire::AgentControlParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let _ = scope;
+            if let Some(thread_id) = params.thread_id.as_deref() {
+                authorize_thread(&state, &auth, thread_id).await?;
+            }
+            let agent_control = state.inner.application.agent_control();
             Ok(serde_json::to_value(agent_control_result(
-                &state.inner.state,
+                &agent_control,
                 params,
             )
             .await?)?)
@@ -556,8 +561,10 @@ where
                     .await?
             };
             let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
+            let agent_control = state.inner.application.agent_control();
             Ok(serde_json::to_value(team_status_result(
                 &state.inner.state,
+                &agent_control,
                 thread_id,
             )
             .await?)?)
@@ -1344,7 +1351,8 @@ where
             let bind_source = cwd_source(&scope.cwd);
             let cwd = scope.cwd.clone();
             let result_thread_id = thread_id.clone();
-            tokio::spawn(async move {
+            let supervisor = state.inner.gateway.clone();
+            supervisor.spawn_background("shell-result", async move {
                 let result = gateway
                     .send_shell(SendShellRequest {
                         thread_id: result_thread_id.clone(),
@@ -1621,13 +1629,10 @@ async fn mcp_oauth_start_value(
                 status: Arc::clone(&status),
             },
         );
-    tokio::spawn(run_mcp_oauth_callback(
-        listener,
-        metadata,
-        redirect_uri,
-        state_token,
-        status,
-    ));
+    state.inner.gateway.spawn_background(
+        format!("mcp-oauth-callback:{session_id}"),
+        run_mcp_oauth_callback(listener, metadata, redirect_uri, state_token, status),
+    );
     Ok(json!({
         "sessionId": session_id,
         "authorizationUrl": authorization_url,
@@ -1962,7 +1967,8 @@ async fn enqueue_thread_compact_result_for_thread(
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
             force: true,
-        inherited_env: options.inherited_env,
+            inherited_env: options.inherited_env,
+            ..psychevo::CompactThreadRequest::default()
     };
     let source = scope.source.clone();
     let event_selector = GatewayThreadSelector::thread_id(&thread_id);

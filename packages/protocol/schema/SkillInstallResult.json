@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "SkillInstalledView": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "scan": {
+          "$ref": "#/definitions/SkillScanResultView"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "scan"
+      ],
+      "type": "object"
+    },
+    "SkillScanFindingView": {
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "category",
+        "file",
+        "pattern",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "SkillScanResultView": {
+      "properties": {
+        "findings": {
+          "items": {
+            "$ref": "#/definitions/SkillScanFindingView"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "findings",
+        "verdict"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "installed": {
+      "items": {
+        "$ref": "#/definitions/SkillInstalledView"
+      },
+      "type": "array"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "installed",
+    "success"
+  ],
+  "title": "SkillInstallResult",
+  "type": "object"
+}

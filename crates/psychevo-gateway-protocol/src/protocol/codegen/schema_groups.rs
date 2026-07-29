@@ -107,7 +107,7 @@ fn schema_group_module(name: &str) -> &'static str {
     if matches!(name, "BackendKind" | "GatewayBackendInfo") {
         return "gateway/backend/core";
     }
-    if name.starts_with("Plugin") {
+    if name.starts_with("Plugin") || matches!(name, "PsychevoPluginView" | "CodexPluginView") {
         return "gateway/plugins/requests";
     }
     if name.starts_with("Skill") {

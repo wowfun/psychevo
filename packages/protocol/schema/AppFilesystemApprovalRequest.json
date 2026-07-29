@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppFilesystemApprovalTarget": {
+      "properties": {
+        "requestedPath": {
+          "type": "string"
+        },
+        "resolvedPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestedPath",
+        "resolvedPath"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "scopeCandidates": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "targets": {
+      "items": {
+        "$ref": "#/definitions/AppFilesystemApprovalTarget"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scopeCandidates",
+    "targets"
+  ],
+  "title": "AppFilesystemApprovalRequest",
+  "type": "object"
+}

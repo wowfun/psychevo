@@ -257,8 +257,34 @@ pub struct AppApprovalRequestParams {
     pub matched_rule: Option<String>,
     pub suggested_rule: Option<String>,
     pub allow_always: bool,
-    #[ts(type = "unknown")]
-    pub filesystem: Option<Value>,
+    pub filesystem: Option<AppFilesystemApprovalRequest>,
+    #[serde(default, rename = "mcpStartup")]
+    pub mcp_startup: Option<AppMcpStartupApprovalRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct AppFilesystemApprovalTarget {
+    pub requested_path: String,
+    pub resolved_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct AppFilesystemApprovalRequest {
+    pub targets: Vec<AppFilesystemApprovalTarget>,
+    pub scope_candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct AppMcpStartupApprovalRequest {
+    pub server: String,
+    pub transport: String,
+    pub descriptor_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS)]

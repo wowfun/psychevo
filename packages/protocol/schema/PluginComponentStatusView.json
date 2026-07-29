@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "compatibilityProfile": {
+      "type": "string"
+    },
+    "component": {
+      "type": "string"
+    },
+    "executionOwner": {
+      "type": "string"
+    },
+    "highestLevel": {
+      "type": "string"
+    },
+    "readiness": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "compatibilityProfile",
+    "component",
+    "executionOwner",
+    "highestLevel",
+    "readiness",
+    "reason"
+  ],
+  "title": "PluginComponentStatusView",
+  "type": "object"
+}
