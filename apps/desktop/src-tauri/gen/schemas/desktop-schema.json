@@ -177,6 +177,150 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the desktop_fallback_cwd command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-desktop-fallback-cwd",
+          "markdownDescription": "Enables the desktop_fallback_cwd command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the desktop_platform_capabilities command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-desktop-platform-capabilities",
+          "markdownDescription": "Enables the desktop_platform_capabilities command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_session_artifact command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-session-artifact",
+          "markdownDescription": "Enables the download_session_artifact command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the floating_begin_region_picker command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-floating-begin-region-picker",
+          "markdownDescription": "Enables the floating_begin_region_picker command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the floating_capture_region command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-floating-capture-region",
+          "markdownDescription": "Enables the floating_capture_region command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the floating_capture_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-floating-capture-selection",
+          "markdownDescription": "Enables the floating_capture_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the floating_initial_activation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-floating-initial-activation",
+          "markdownDescription": "Enables the floating_initial_activation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the gateway_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-gateway-connect",
+          "markdownDescription": "Enables the gateway_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the gateway_disconnect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-gateway-disconnect",
+          "markdownDescription": "Enables the gateway_disconnect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the gateway_endpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-gateway-endpoint",
+          "markdownDescription": "Enables the gateway_endpoint command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the gateway_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-gateway-send",
+          "markdownDescription": "Enables the gateway_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_thread_in_workbench command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-thread-in-workbench",
+          "markdownDescription": "Enables the open_thread_in_workbench command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the desktop_fallback_cwd command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-desktop-fallback-cwd",
+          "markdownDescription": "Denies the desktop_fallback_cwd command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the desktop_platform_capabilities command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-desktop-platform-capabilities",
+          "markdownDescription": "Denies the desktop_platform_capabilities command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_session_artifact command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-session-artifact",
+          "markdownDescription": "Denies the download_session_artifact command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the floating_begin_region_picker command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-floating-begin-region-picker",
+          "markdownDescription": "Denies the floating_begin_region_picker command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the floating_capture_region command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-floating-capture-region",
+          "markdownDescription": "Denies the floating_capture_region command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the floating_capture_selection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-floating-capture-selection",
+          "markdownDescription": "Denies the floating_capture_selection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the floating_initial_activation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-floating-initial-activation",
+          "markdownDescription": "Denies the floating_initial_activation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the gateway_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-gateway-connect",
+          "markdownDescription": "Denies the gateway_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the gateway_disconnect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-gateway-disconnect",
+          "markdownDescription": "Denies the gateway_disconnect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the gateway_endpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-gateway-endpoint",
+          "markdownDescription": "Denies the gateway_endpoint command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the gateway_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-gateway-send",
+          "markdownDescription": "Denies the gateway_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_thread_in_workbench command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-thread-in-workbench",
+          "markdownDescription": "Denies the open_thread_in_workbench command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

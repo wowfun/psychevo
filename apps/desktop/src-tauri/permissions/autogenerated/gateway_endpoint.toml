@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-gateway-endpoint"
+description = "Enables the gateway_endpoint command without any pre-configured scope."
+commands.allow = ["gateway_endpoint"]
+
+[[permission]]
+identifier = "deny-gateway-endpoint"
+description = "Denies the gateway_endpoint command without any pre-configured scope."
+commands.deny = ["gateway_endpoint"]

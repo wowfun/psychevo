@@ -78,7 +78,11 @@ impl TuiApp {
     }
 
     pub(crate) async fn agent_running_panel(&self) -> BottomSelectionPanel {
-        let paused = agent_spawn_paused();
+        let control = self.application.agent_control();
+        let paused = self
+            .current_session
+            .as_deref()
+            .is_some_and(|parent| control.spawning_paused(parent));
         let mut rows = vec![BottomSelectionRow {
             label: if paused {
                 "Resume spawning".to_string()
@@ -104,8 +108,7 @@ impl TuiApp {
         }];
         let mut live_count = 0usize;
         if let Some(parent) = self.current_session.as_deref() {
-            let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(parent), false).await;
+            let value = control.status_value_for(Some(parent), false).await;
             if let Some(agents) = value.get("agents").and_then(Value::as_array) {
                 for agent in agents {
                     let status = agent

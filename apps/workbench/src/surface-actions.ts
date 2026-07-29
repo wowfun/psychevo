@@ -3,30 +3,17 @@ import {
   parseThreadSnapshot,
   reconcileThreadSnapshot,
   scopeForCwd,
-  type GatewayClient,
-  type GatewayMethod,
-  type GatewayRequestInit,
-  type GatewayRequestResults
+  type GatewayClient
 } from "@psychevo/client";
 import {
   ObservabilityReadResultSchema,
   SettingsReadResultSchema,
-  ThreadBrowserResultSchema,
-  ThreadListResultSchema,
   ThreadTraceResultSchema,
-  WorkspaceChangesResultSchema,
-  WorkspaceDiffResultSchema,
-  WorkspaceFilesResultSchema,
   type ContextReadResult,
   type GatewayRequestScope,
   type ObservabilityReadResult,
-  type SessionSummary,
   type SettingsReadResult,
-  type ThreadBrowserResult,
-  type ThreadSnapshot,
-  type WorkspaceChangesResult,
-  type WorkspaceDiffResult,
-  type WorkspaceFilesResult
+  type ThreadSnapshot
 } from "@psychevo/protocol";
 import {
   optionalStringField,
@@ -34,47 +21,17 @@ import {
   parseBackendList,
   parseCommandList
 } from "./data";
-import {
-  normalizeSessionSummary,
-  normalizeSnapshot
-} from "./session-utils";
+import { normalizeSnapshot } from "./session-utils";
+import type { SessionBrowserApplication } from "./session-browser-application";
 import type {
   DebugEvent,
   TraceState,
-  SessionBrowserWorkspaceState,
   WorkbenchAgent,
   WorkbenchBackend,
   WorkbenchCommand
 } from "./types";
 import { shouldApplyReadOnlySnapshot } from "./viewGuard";
-
-const inFlightReads = new WeakMap<GatewayClient, Map<string, Promise<unknown>>>();
-
-function requestOnce<M extends GatewayMethod>(
-  client: GatewayClient,
-  method: M,
-  params: GatewayRequestInit<M>
-): Promise<GatewayRequestResults[M]> {
-  let requests = inFlightReads.get(client);
-  if (!requests) {
-    requests = new Map();
-    inFlightReads.set(client, requests);
-  }
-  const key = `${method}:${JSON.stringify(params ?? null)}`;
-  const existing = requests.get(key);
-  if (existing) {
-    return existing as Promise<GatewayRequestResults[M]>;
-  }
-  const request = client.request(method, params);
-  requests.set(key, request);
-  const clear = () => {
-    if (requests?.get(key) === request) {
-      requests.delete(key);
-    }
-  };
-  request.then(clear, clear);
-  return request;
-}
+import type { WorkspaceApplication } from "./workspace-application";
 
 type SurfaceActionsParams = {
   activeScope: GatewayRequestScope | null;
@@ -84,13 +41,13 @@ type SurfaceActionsParams = {
   initScope: GatewayRequestScope | null;
   scopeRef: MutableRefObject<GatewayRequestScope | null>;
   selectedThreadIdRef: MutableRefObject<string | null>;
-  pinnedSessionIds: string[];
+  sessionBrowserApplication: SessionBrowserApplication;
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
+  workspaceApplication: WorkspaceApplication;
   setActiveScope: Dispatch<SetStateAction<GatewayRequestScope | null>>;
   setAgents: Dispatch<SetStateAction<WorkbenchAgent[]>>;
-  setArchivedSessions: Dispatch<SetStateAction<SessionSummary[]>>;
   setBackends: Dispatch<SetStateAction<WorkbenchBackend[]>>;
   setCommands: Dispatch<SetStateAction<WorkbenchCommand[]>>;
   setContextUsage: Dispatch<SetStateAction<ContextReadResult | null>>;
@@ -98,14 +55,9 @@ type SurfaceActionsParams = {
   setError: Dispatch<SetStateAction<string | null>>;
   setObservability: Dispatch<SetStateAction<ObservabilityReadResult | null>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
-  setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
-  setSessionBrowserWorkspaces: Dispatch<SetStateAction<SessionBrowserWorkspaceState[]>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setTraceState: Dispatch<SetStateAction<TraceState>>;
-  setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
-  setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
-  setWorkspaceFiles: Dispatch<SetStateAction<WorkspaceFilesResult | null>>;
   onSnapshotAdopted(): void;
 };
 
@@ -222,49 +174,23 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !cwd) {
       return;
     }
-    const settingsValue = await requestOnce(nextClient, "settings/read", { threadId, cwd });
+    const settingsValue = await nextClient.request("settings/read", { threadId, cwd });
     const nextSettings = SettingsReadResultSchema.parse(settingsValue);
     params.setSettings(nextSettings);
     applyInitialControls(nextSettings);
   }
 
-  async function refreshHistory(nextClient = params.client, includeArchived = false, cwd: string | null = null): Promise<SessionSummary[]> {
-    if (!nextClient) {
-      return [];
-    }
-    if (!includeArchived) {
-      const result = ThreadBrowserResultSchema.parse(
-        await requestOnce(nextClient, "thread/browser", {
-          archived: false,
-          cursor: null,
-          includeSessionIds: browserIncludeSessionIds(),
-          limit: 20,
-          recentDays: 7,
-          cwd: cwd || null
-        })
-      );
-      const nextSessions = sessionsFromThreadBrowser(result);
-      params.setSessions(nextSessions);
-      params.setSessionBrowserWorkspaces(workspacesFromThreadBrowser(result));
-      return nextSessions;
-    }
-    const result = ThreadListResultSchema.parse(
-      await requestOnce(nextClient, "thread/list", { archived: includeArchived, limit: 100, cwd: cwd || null })
-    );
-    const nextSessions = result.sessions.map(normalizeSessionSummary);
-    if (includeArchived) {
-      params.setArchivedSessions(nextSessions);
-    } else {
-      params.setSessions(nextSessions);
-    }
-    return nextSessions;
-  }
-
-  function browserIncludeSessionIds(): string[] {
-    return Array.from(new Set([
-      params.currentThreadId,
-      ...params.pinnedSessionIds
-    ].filter((id): id is string => Boolean(id))));
+  async function refreshHistory(
+    nextClient = params.client,
+    includeArchived = false,
+    cwd: string | null = null
+  ) {
+    return params.sessionBrowserApplication.refreshHistory(nextClient, {
+      activeScope: params.activeScope ?? params.initScope,
+      currentThreadId: params.currentThreadId,
+      cwd,
+      includeArchived
+    });
   }
 
   async function refreshAgentCatalog(nextClient = params.client, scope = params.activeScope ?? params.initScope ?? undefined) {
@@ -272,8 +198,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     const [agentList, backendList] = await Promise.all([
-      requestOnce(nextClient, "agent/list", { scope }),
-      requestOnce(nextClient, "backend/list", { scope })
+      nextClient.request("agent/list", { scope }),
+      nextClient.request("backend/list", { scope })
     ]);
     params.setAgents(parseAgentList(agentList));
     params.setBackends(parseBackendList(backendList));
@@ -287,7 +213,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !scope) {
       return;
     }
-    const commandList = await requestOnce(nextClient, "command/list", { scope, threadId });
+    const commandList = await nextClient.request("command/list", { scope, threadId });
     params.setCommands(parseCommandList(commandList));
   }
 
@@ -305,7 +231,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     expectedEpoch: number | null = params.viewEpochRef.current
   ) {
     if (!nextClient || !scope) {
-      params.setWorkspaceChanges(null);
+      params.workspaceApplication.bind(nextClient, scope ?? null);
       params.setObservability(null);
       params.setContextUsage(null);
       return;
@@ -314,18 +240,10 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setObservability(null);
       params.setContextUsage(null);
     }
-    const [files, diff, changes, nextObservability] = await Promise.all([
-      requestOnce(nextClient, "workspace/files", { scope }),
-      requestOnce(nextClient, "workspace/diff", { scope, path: null }),
-      requestOnce(nextClient, "workspace/changes", { scope }),
-      threadId ? requestOnce(nextClient, "observability/read", { scope, threadId }) : Promise.resolve(null)
+    const [, nextObservability] = await Promise.all([
+      params.workspaceApplication.refreshSurface(nextClient, scope),
+      threadId ? nextClient.request("observability/read", { scope, threadId }) : Promise.resolve(null)
     ]);
-    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
-      return;
-    }
-    params.setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
-    params.setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
-    params.setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
     if (nextObservability && shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       applyObservability(nextObservability);
     }
@@ -339,11 +257,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !scope) {
       return;
     }
-    const files = await requestOnce(nextClient, "workspace/files", { scope });
-    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
-      return;
-    }
-    params.setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
+    void expectedEpoch;
+    await params.workspaceApplication.refresh("files", nextClient, scope);
   }
 
   async function refreshWorkspaceDiff(
@@ -354,11 +269,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !scope) {
       return;
     }
-    const diff = await requestOnce(nextClient, "workspace/diff", { scope, path: null });
-    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
-      return;
-    }
-    params.setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
+    void expectedEpoch;
+    await params.workspaceApplication.refresh("diff", nextClient, scope);
   }
 
   async function refreshWorkspaceChanges(
@@ -369,11 +281,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !scope) {
       return;
     }
-    const changes = await requestOnce(nextClient, "workspace/changes", { scope });
-    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
-      return;
-    }
-    params.setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
+    void expectedEpoch;
+    await params.workspaceApplication.refresh("changes", nextClient, scope);
   }
 
   async function refreshObservability(
@@ -387,7 +296,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setContextUsage(null);
       return;
     }
-    const nextObservability = await requestOnce(nextClient, "observability/read", { scope, threadId });
+    const nextObservability = await nextClient.request("observability/read", { scope, threadId });
     if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       return;
     }
@@ -506,27 +415,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
 }
 
 export type ReturnTypeOfSurfaceActions = ReturnType<typeof createSurfaceActions>;
-
-export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionSummary[] {
-  const seen = new Set<string>();
-  const sessions: SessionSummary[] = [];
-  for (const workspace of result.workspaces) {
-    for (const session of workspace.sessions) {
-      if (seen.has(session.id)) {
-        continue;
-      }
-      seen.add(session.id);
-      sessions.push(normalizeSessionSummary(session));
-    }
-  }
-  return sessions;
-}
-
-export function workspacesFromThreadBrowser(result: ThreadBrowserResult): SessionBrowserWorkspaceState[] {
-  return result.workspaces.map((workspace) => ({
-    cwd: workspace.cwd,
-    displayPath: workspace.project.displayPath,
-    hiddenCount: workspace.hiddenCount ?? 0,
-    nextCursor: workspace.nextCursor ?? null
-  }));
-}
+export {
+  sessionsFromThreadBrowser,
+  workspacesFromThreadBrowser
+} from "./session-browser-application";

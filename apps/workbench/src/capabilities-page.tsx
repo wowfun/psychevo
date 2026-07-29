@@ -111,7 +111,6 @@ type RuntimeProfileRow = {
   defaultModel: string;
   defaultMode: string;
   defaultAgent: string;
-  approvalMode: string;
   sandbox: string;
   workspaceRoots: string[];
   healthStatus: string;
@@ -135,7 +134,6 @@ type RuntimeProfileDraft = {
   defaultModel: string;
   defaultMode: string;
   defaultAgent: string;
-  approvalMode: string;
   sandbox: string;
   workspaceRootsText: string;
   optionsText: string;
@@ -1458,7 +1456,6 @@ function RuntimeProfilesPanel({
       defaultModel: nullableText(draft.defaultModel),
       defaultMode: nullableText(draft.defaultMode),
       defaultAgent: nullableText(draft.defaultAgent),
-      approvalMode: nullableText(draft.approvalMode),
       sandbox: nullableText(draft.sandbox),
       workspaceRoots: splitLines(draft.workspaceRootsText),
       options,
@@ -1635,7 +1632,7 @@ function RuntimeProfilesPanel({
                 <div><dt>Default model</dt><dd>{selected.defaultModel || "Runtime default"}</dd></div>
                 <div><dt>Default mode</dt><dd>{selected.defaultMode || "Runtime default"}</dd></div>
                 <div><dt>Default agent</dt><dd>{selected.defaultAgent || "Runtime default"}</dd></div>
-                <div><dt>Safety</dt><dd>{[selected.approvalMode || "Runtime approval", selected.sandbox || "Runtime sandbox"].join(" · ")}</dd></div>
+                <div><dt>Sandbox</dt><dd>{selected.sandbox || "Runtime default"}</dd></div>
                 <div><dt>Workspace roots</dt><dd>{selected.workspaceRoots.length > 0 ? selected.workspaceRoots.join(", ") : "Current workspace"}</dd></div>
                 <div><dt>Source</dt><dd>{runtimeProfileSource(selected)}</dd></div>
               </dl>
@@ -1760,10 +1757,6 @@ function RuntimeProfileEditorForm({
       <label>
         <span>Default agent</span>
         <input aria-label="Runtime Profile default agent" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, defaultAgent: event.target.value })} placeholder="Runtime default" value={draft.defaultAgent} />
-      </label>
-      <label>
-        <span>Approval mode</span>
-        <input aria-label="Runtime Profile approval mode" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, approvalMode: event.target.value })} placeholder="Runtime default" value={draft.approvalMode} />
       </label>
       <label>
         <span>Sandbox</span>
@@ -2826,7 +2819,6 @@ function runtimeProfileRowsFromData(data: JsonObject | null): RuntimeProfileRow[
       defaultModel: stringField(profile, "defaultModel"),
       defaultMode: stringField(profile, "defaultMode"),
       defaultAgent: stringField(profile, "defaultAgent"),
-      approvalMode: stringField(profile, "approvalMode"),
       sandbox: stringField(profile, "sandbox"),
       workspaceRoots: arrayStrings(profile.workspaceRoots),
       healthStatus: stringField(health, "status") || "unchecked",
@@ -2856,7 +2848,6 @@ function emptyRuntimeProfileDraft(): RuntimeProfileDraft {
     defaultModel: "",
     defaultMode: "",
     defaultAgent: "",
-    approvalMode: "",
     sandbox: "",
     workspaceRootsText: "",
     optionsText: ""
@@ -2874,7 +2865,6 @@ function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unkno
     defaultModel: profile.defaultModel ?? "",
     defaultMode: profile.defaultMode ?? "",
     defaultAgent: profile.defaultAgent ?? "",
-    approvalMode: profile.approvalMode ?? "",
     sandbox: profile.sandbox ?? "",
     workspaceRootsText: (profile.workspaceRoots ?? []).join("\n"),
     optionsText: options == null ? "" : JSON.stringify(options, null, 2)

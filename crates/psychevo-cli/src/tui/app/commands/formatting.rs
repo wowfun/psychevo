@@ -170,7 +170,6 @@ impl TuiApp {
         request = request
             .with_prompt_display(prompt_display_metadata(display_prompt, &images, &self.cwd))
             .with_approval(
-                None,
                 Some(Arc::new(TuiApprovalHandler {
                     session_id: self.current_session.clone(),
                     sender: approval_tx,
@@ -375,10 +374,7 @@ impl TuiApp {
         let Some(session_id) = self.current_session.clone() else {
             return Ok(());
         };
-        let options = CompactSessionOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            session: session_id.clone(),
+        let request = CompactThreadRequest {
             config_path: self.config_path.clone(),
             model: self.current_model.clone(),
             reasoning_effort: self.current_variant.clone(),
@@ -387,8 +383,15 @@ impl TuiApp {
             instructions,
             force,
         };
+        let framework = self.framework.clone();
+        let task_session_id = session_id.clone();
         let task = tokio::spawn(async move {
-            compact_session(options)
+            let thread = framework
+                .resume_thread(task_session_id)
+                .await
+                .map_err(|err| format!("{err:#}"))?;
+            thread
+                .compact(request)
                 .await
                 .map_err(|err| format!("{err:#}"))
         });
@@ -411,19 +414,18 @@ impl TuiApp {
             .current_session
             .clone()
             .ok_or_else(|| anyhow!("no session context yet"))?;
-        let result = compact_session(CompactSessionOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            session,
-            config_path: self.config_path.clone(),
-            model: self.current_model.clone(),
-            reasoning_effort: self.current_variant.clone(),
-            inherited_env: Some(self.env_map.clone()),
-            reason: CompactionReason::Manual,
-            instructions,
-            force: true,
-        })
-        .await?;
+        let thread = self.framework.resume_thread(session).await?;
+        let result = thread
+            .compact(CompactThreadRequest {
+                config_path: self.config_path.clone(),
+                model: self.current_model.clone(),
+                reasoning_effort: self.current_variant.clone(),
+                inherited_env: Some(self.env_map.clone()),
+                reason: CompactionReason::Manual,
+                instructions,
+                force: true,
+            })
+            .await?;
         println!("{}", format_compaction_result(&result, true));
         self.last_context_snapshot = None;
         Ok(())

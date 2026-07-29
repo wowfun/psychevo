@@ -421,8 +421,10 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         id: &str,
     ) -> Result<()> {
-        let store = &self.state_runtime;
-        let _ = stop_agent_id_with_grace(id, Some(store), Duration::from_millis(1200)).await?;
+        let control = self.application.agent_control();
+        let _ = control
+            .stop_with_grace(id, Duration::from_millis(1200))
+            .await?;
         let mut panel = self.agent_panel().await;
         panel.tab = AgentTab::Running;
         panel.running.notice = Some("agent subtree stopped".to_string());
@@ -431,8 +433,12 @@ impl TuiApp {
     }
 
     pub(crate) async fn toggle_agent_spawning(&mut self, ui: &mut FullscreenUi<'_>) {
-        let paused = !agent_spawn_paused();
-        set_agent_spawn_paused(paused);
+        let Some(parent) = self.current_session.as_deref() else {
+            return;
+        };
+        let control = self.application.agent_control();
+        let paused = !control.spawning_paused(parent);
+        control.set_spawning_paused(parent, paused);
         let mut panel = self.agent_panel().await;
         panel.tab = AgentTab::Running;
         panel.running.notice = Some(if paused {

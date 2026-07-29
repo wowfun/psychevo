@@ -488,7 +488,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const selectedRuntimeProfile = runtimeProfiles.find((profile) => (
     profile.id === selectedRuntimeRef
   )) ?? null;
-  const runtimeSafetyParts = [selectedRuntimeProfile?.approvalMode, selectedRuntimeProfile?.sandbox]
+  const runtimeSafetyParts = [selectedRuntimeProfile?.sandbox]
     .filter((value): value is string => typeof value === "string" && Boolean(value.trim()));
   const runtimeSafetyLabel = runtimeSafetyParts.length > 0
     ? ["Profile safety", ...runtimeSafetyParts].join(" · ")

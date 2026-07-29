@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { startPevoWeb } from "./harness";
 import { openPanel } from "./workbench.support";
 
@@ -13,13 +15,27 @@ test("keeps off-screen features outside the production startup graph", async ({ 
     await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
 
     const initial = await javascriptResources(page);
+    const initialEncodedBodySize = initial.reduce(
+      (total, entry) => total + entry.encodedBodySize,
+      0
+    );
+    writeStartupProof(testInfo.project.name, {
+      budgetBytes: INITIAL_JAVASCRIPT_BUDGET_BYTES,
+      initial,
+      initialEncodedBodySize
+    });
     expect(initial.map((entry) => entry.name).filter((name) => DEFERRED_CHUNK_PATTERN.test(name))).toEqual([]);
-    expect(initial.reduce((total, entry) => total + entry.encodedBodySize, 0))
-      .toBeLessThanOrEqual(INITIAL_JAVASCRIPT_BUDGET_BYTES);
+    expect(initialEncodedBodySize).toBeLessThanOrEqual(INITIAL_JAVASCRIPT_BUDGET_BYTES);
 
     await page.reload();
     await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
     const reload = await javascriptResources(page);
+    writeStartupProof(testInfo.project.name, {
+      budgetBytes: INITIAL_JAVASCRIPT_BUDGET_BYTES,
+      initial,
+      initialEncodedBodySize,
+      reload
+    });
     expect(reload.length).toBeGreaterThan(0);
     expect(reload.every((entry) => entry.transferSize === 0)).toBe(true);
 
@@ -33,6 +49,18 @@ test("keeps off-screen features outside the production startup graph", async ({ 
     await server.stop();
   }
 });
+
+function writeStartupProof(projectName: string, proof: Record<string, unknown>): void {
+  const artifactRoot = process.env.PSYCHEVO_PLAYWRIGHT_SCREENSHOT_ROOT;
+  if (!artifactRoot) {
+    return;
+  }
+  mkdirSync(artifactRoot, { recursive: true });
+  writeFileSync(
+    path.join(artifactRoot, `startup-resources-${projectName}.json`),
+    `${JSON.stringify(proof, null, 2)}\n`
+  );
+}
 
 async function javascriptResources(page: import("@playwright/test").Page) {
   await page.waitForLoadState("load");

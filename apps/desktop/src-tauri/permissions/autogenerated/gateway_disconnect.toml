@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-gateway-disconnect"
+description = "Enables the gateway_disconnect command without any pre-configured scope."
+commands.allow = ["gateway_disconnect"]
+
+[[permission]]
+identifier = "deny-gateway-disconnect"
+description = "Denies the gateway_disconnect command without any pre-configured scope."
+commands.deny = ["gateway_disconnect"]

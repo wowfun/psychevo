@@ -262,8 +262,8 @@ impl TuiApp {
         }
         interrupted |= ui.request_interrupt(current_session.as_deref());
         if let Some(session_id) = current_session.as_deref() {
-            let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(session_id), false).await;
+            let control = self.application.agent_control();
+            let value = control.status_value_for(Some(session_id), false).await;
             let targets = value
                 .get("agents")
                 .and_then(Value::as_array)
@@ -284,7 +284,8 @@ impl TuiApp {
                 })
                 .collect::<Vec<_>>();
             for target in targets {
-                if stop_agent_id_with_grace(&target, Some(store), Duration::ZERO)
+                if control
+                    .stop_with_grace(&target, Duration::ZERO)
                     .await
                     .ok()
                     .flatten()

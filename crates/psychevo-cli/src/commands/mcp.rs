@@ -273,7 +273,7 @@ async fn run_cli_mcp_turn(
             args.variant.map(|variant| variant.as_str().to_string()),
         )
         .with_execution_policy(run_mode, permission_mode, config_path)
-        .with_approval(None, interactive_approval_handler(), false)
+        .with_approval(interactive_approval_handler(), false)
         .with_environment(Some(env_map), project_context_override, None)
         .with_agent(args.agent, args.no_agents, args.no_skills)
         .with_skills(args.skill);

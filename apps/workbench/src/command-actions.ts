@@ -41,6 +41,7 @@ import type {
   RightWorkspaceTabKind
 } from "./types";
 import type { PendingDetachedShell } from "./viewGuard";
+import type { WorkspaceApplication } from "./workspace-application";
 import {
   enabledThreadAction,
   runThreadInterrupt,
@@ -78,6 +79,7 @@ type CommandActionsParams = {
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
+  workspaceApplication: WorkspaceApplication;
   workspaceDiff: WorkspaceDiffResult | null;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
@@ -101,7 +103,6 @@ type CommandActionsParams = {
   setError: Dispatch<SetStateAction<string | null>>;
   setMobilePanel: Dispatch<SetStateAction<"history" | "transcript" | "status">>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
-  setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   startNewThread(cwd?: string): Promise<void>;
   submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
   submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<unknown>;
@@ -474,7 +475,7 @@ export function createCommandActions(params: CommandActionsParams) {
       case "workspaceDiff": {
         const diff = WorkspaceDiffResultSchema.parse(record.diff);
         params.setActiveCommandOverlay(null);
-        params.setWorkspaceDiff(diff);
+        params.workspaceApplication.setDiff(diff);
         params.openReviewTab(diff, diff.selectedPath);
         break;
       }

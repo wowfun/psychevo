@@ -11,12 +11,27 @@ fn main() {
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 fn build_native() {
-    println!("cargo:rerun-if-changed=capabilities/default.json");
+    println!("cargo:rerun-if-changed=capabilities/production");
     #[cfg(feature = "wdio-test")]
     println!("cargo:rerun-if-changed=capabilities/wdio.json");
 
-    let attributes =
-        tauri_build::Attributes::new().capabilities_path_pattern(capabilities_path_pattern());
+    let app_manifest = tauri_build::AppManifest::new().commands(&[
+        "desktop_fallback_cwd",
+        "desktop_platform_capabilities",
+        "download_session_artifact",
+        "floating_begin_region_picker",
+        "floating_capture_region",
+        "floating_capture_selection",
+        "floating_initial_activation",
+        "gateway_connect",
+        "gateway_disconnect",
+        "gateway_endpoint",
+        "gateway_send",
+        "open_thread_in_workbench",
+    ]);
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(app_manifest)
+        .capabilities_path_pattern(capabilities_path_pattern());
     if let Err(error) = tauri_build::try_build(attributes) {
         let error = format!("{error:#}");
         println!("{error}");
@@ -37,7 +52,7 @@ fn build_native() {
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 fn capabilities_path_pattern() -> &'static str {
-    "./capabilities/*.json"
+    "./capabilities/**/*.json"
 }
 
 #[cfg(all(
@@ -46,5 +61,5 @@ fn capabilities_path_pattern() -> &'static str {
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 fn capabilities_path_pattern() -> &'static str {
-    "./capabilities/default.json"
+    "./capabilities/production/*.json"
 }

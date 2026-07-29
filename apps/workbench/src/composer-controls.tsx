@@ -53,6 +53,10 @@ function PermissionComposerRequest({
     () => permissionFilesystem(permission),
     [permission.actionId, permission.payload]
   );
+  const mcpStartup = useMemo(
+    () => permissionMcpStartup(permission),
+    [permission.actionId, permission.payload]
+  );
   const defaultScopeDirectory = filesystem?.scopeCandidates[0] ?? "";
   const [scopeExpanded, setScopeExpanded] = useState(false);
   const [scopeDirectory, setScopeDirectory] = useState(defaultScopeDirectory);
@@ -87,6 +91,20 @@ function PermissionComposerRequest({
                 ) : null}
               </div>
             ))}
+          </div>
+        </>
+      ) : mcpStartup ? (
+        <>
+          {permissionReason(permission) ? <p>{permissionReason(permission)}</p> : null}
+          <div className="composerPermissionPaths">
+            <div className="composerPermissionPath">
+              <span>Server</span>
+              <code>{mcpStartup.server}</code>
+              <span>Transport</span>
+              <code>{mcpStartup.transport}</code>
+              <span>Fingerprint</span>
+              <code>{mcpStartup.descriptorFingerprint}</code>
+            </div>
           </div>
         </>
       ) : (
@@ -467,6 +485,12 @@ type PermissionFilesystem = {
   scopeCandidates: string[];
 };
 
+type PermissionMcpStartup = {
+  server: string;
+  transport: string;
+  descriptorFingerprint: string;
+};
+
 function permissionFilesystem(action: PendingActionView): PermissionFilesystem | null {
   const filesystem = asRecord(actionPayload(action).filesystem);
   const targets = Array.isArray(filesystem.targets)
@@ -481,6 +505,19 @@ function permissionFilesystem(action: PendingActionView): PermissionFilesystem |
     ? filesystem.scopeCandidates.filter((value): value is string => typeof value === "string")
     : [];
   return targets.length > 0 ? { targets, scopeCandidates } : null;
+}
+
+function permissionMcpStartup(action: PendingActionView): PermissionMcpStartup | null {
+  const detail = asRecord(actionPayload(action).mcpStartup);
+  return typeof detail.server === "string"
+    && typeof detail.transport === "string"
+    && typeof detail.descriptorFingerprint === "string"
+    ? {
+      server: detail.server,
+      transport: detail.transport,
+      descriptorFingerprint: detail.descriptorFingerprint
+    }
+    : null;
 }
 
 function actionPayloadRecord(action: PendingActionView, key: string): Record<string, unknown> {
@@ -571,12 +608,14 @@ function permissionSuggestedRule(permission: PendingActionView): string {
 }
 
 function permissionAllowAlways(permission: PendingActionView): boolean {
-  return actionPayloadBool(permission, "allowAlways")
+  return permissionMcpStartup(permission) === null
+    && actionPayloadBool(permission, "allowAlways")
     && actionPayloadString(permission, "alwaysAuthorizationLifetime") === "permanent";
 }
 
 function permissionAllowSession(permission: PendingActionView): boolean {
-  return actionPayloadBool(permission, "allowSession")
+  return permissionMcpStartup(permission) === null
+    && actionPayloadBool(permission, "allowSession")
     && Boolean(actionPayloadString(permission, "authorizationLifetime"));
 }
 

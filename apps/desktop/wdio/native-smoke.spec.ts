@@ -9,6 +9,7 @@ const artifactRoot = path.resolve(
 const screenshotRoot = path.join(artifactRoot, "screenshots");
 const startupRustTracePath = path.join(artifactRoot, "desktop-startup-rust.jsonl");
 const startupManifestPath = path.join(artifactRoot, "desktop-startup-journey.json");
+const startupFailureStatePath = path.join(artifactRoot, "desktop-startup-failure-state.json");
 const providerLive = process.env.PSYCHEVO_DESKTOP_PROVIDER_LIVE === "1";
 const providerToken = process.env.PSYCHEVO_FLOATING_PROVIDER_TOKEN ?? "PEVO_DESKTOP_FLOATING_PROVIDER_LIVE_OK";
 const compactFloatingHeightLimit = 220;
@@ -202,6 +203,7 @@ async function captureDesktopStartupJourney(): Promise<void> {
     writeDesktopStartupManifest(manifest);
   } catch (error) {
     const failure = boundedFailure(error);
+    await captureStartupFailureState();
     const retainedBrowserMarks = await readAvailableBrowserStartupMarks();
     const rustMarks = readAvailableRustStartupMarks();
     const manifest = createDesktopStartupManifest(
@@ -212,6 +214,44 @@ async function captureDesktopStartupJourney(): Promise<void> {
     );
     writeDesktopStartupManifest(manifest);
     throw error;
+  }
+}
+
+async function captureStartupFailureState(): Promise<void> {
+  try {
+    await browser.saveScreenshot(path.join(screenshotRoot, "00-workbench-startup-failure.png"));
+    const state = await browser.execute(() => {
+      const shell = document.querySelector<HTMLElement>(".appShell");
+      return {
+        schemaVersion: 1,
+        location: {
+          pathname: window.location.pathname,
+          search: window.location.search
+        },
+        shell: shell
+          ? {
+              composerState: shell.dataset.composerState ?? null,
+              gatewayStatus: shell.dataset.gatewayStatus ?? null,
+              mainView: shell.dataset.mainView ?? null,
+              turnState: shell.dataset.turnState ?? null
+            }
+          : null,
+        textareas: [...document.querySelectorAll<HTMLTextAreaElement>("textarea")].map((textarea) => ({
+          disabled: textarea.disabled,
+          placeholder: textarea.placeholder
+        })),
+        titledButtons: [...document.querySelectorAll<HTMLButtonElement>("button[title]")]
+          .slice(0, 64)
+          .map((button) => ({
+            disabled: button.disabled,
+            title: button.title
+          }))
+      };
+    });
+    writeFileSync(startupFailureStatePath, `${JSON.stringify(state, null, 2)}\n`);
+  } catch {
+    // Preserve the original readiness failure when the webview is no longer
+    // reachable. Rust milestones still identify how far startup progressed.
   }
 }
 

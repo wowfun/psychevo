@@ -89,8 +89,8 @@ impl TuiApp {
             ));
         }
         if let Some(parent) = self.current_session.as_deref() {
-            let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(parent), false).await;
+            let control = self.application.agent_control();
+            let value = control.status_value_for(Some(parent), false).await;
             let running = value
                 .get("agents")
                 .and_then(Value::as_array)

@@ -42,8 +42,8 @@ export class DesktopGatewayTransport implements GatewayTransport {
   private readonly messageHandlers = new Set<GatewayRawMessageHandler>();
   readonly connectionId: string;
 
-  constructor(private readonly ownerWindow: string) {
-    this.connectionId = desktopGatewayConnectionId(ownerWindow);
+  constructor(surfaceLabel: string) {
+    this.connectionId = desktopGatewayConnectionId(surfaceLabel);
   }
 
   async connect(): Promise<void> {
@@ -59,8 +59,7 @@ export class DesktopGatewayTransport implements GatewayTransport {
     const epoch = ++this.connectEpoch;
     const connecting = this.ensureListeners()
       .then(() => invoke<number>("gateway_connect", {
-        connectionId: this.connectionId,
-        ownerWindow: this.ownerWindow
+        connectionId: this.connectionId
       }))
       .then(async (generation) => {
         if (this.disposed || epoch !== this.connectEpoch) {

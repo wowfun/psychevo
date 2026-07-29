@@ -9,7 +9,6 @@ import {
   SettingsReadResultSchema,
   WorkspaceChangeMutationResultSchema,
   WorkspaceCreateResultSchema,
-  WorkspaceDiffResultSchema,
   WorkspaceFileWriteResultSchema,
   type ChannelUpdateParams,
   type ChannelSourceListResult,
@@ -24,7 +23,6 @@ import {
   type ThreadContextReadResult,
   type SettingsReadResult,
   type ThreadSnapshot,
-  type WorkspaceChangesResult,
   type WorkspaceDiffResult,
   type WorkspaceFolderListResult,
   type WorkspaceFileWriteResult,
@@ -68,6 +66,7 @@ import {
 } from "./right-workspace-model";
 import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
 import type { ComposerSessionCoordinator } from "./composer-session-coordinator";
+import type { WorkspaceApplication } from "./workspace-application";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
@@ -115,6 +114,7 @@ type AppActionsParams = {
   snapshot: ThreadSnapshot;
   threadSession: ThreadSession;
   viewEpochRef: MutableRefObject<number>;
+  workspaceApplication: WorkspaceApplication;
   adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
@@ -138,15 +138,12 @@ type AppActionsParams = {
   setRightTabs: Dispatch<SetStateAction<RightWorkspaceTab[]>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
   setRuntimeOptionsLoading: Dispatch<SetStateAction<boolean>>;
-  setWorkspaceBranch: Dispatch<SetStateAction<string | null | undefined>>;
   setRuntimeContext(value: ThreadContextReadResult | null): void;
   setRuntimeContextTargetId: Dispatch<SetStateAction<string>>;
   setSelectedTargetId: Dispatch<SetStateAction<string>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
   setTraceState: Dispatch<SetStateAction<TraceState>>;
-  setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
-  setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   patchComposerDraft(text: string): void;
   updateMainView(value: MainView): void;
 };
@@ -208,9 +205,10 @@ export function createAppActions(params: AppActionsParams) {
         ? { kind: "exact", targetId: inheritedTargetId }
         : { kind: "default" }
     });
-    const branchRequest = params.client.request("workspace/git/branches", {
-      scope: nextScope
-    }).then((result) => result.current?.trim() || null).catch(() => null);
+    const branchRequest = params.workspaceApplication
+      .refresh("branch", params.client, nextScope)
+      .then(() => params.workspaceApplication.getSnapshot().branch ?? null)
+      .catch(() => null);
     let opened;
     let workspaceBranch: string | null;
     try {
@@ -233,7 +231,7 @@ export function createAppActions(params: AppActionsParams) {
       params.setSnapshot(normalized);
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
       params.setRuntimeContext(nextContext);
-      params.setWorkspaceBranch(workspaceBranch);
+      params.workspaceApplication.setBranch(workspaceBranch);
       params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
       params.setSelectedTargetId(
         nextContext.selectedTargetId
@@ -283,12 +281,7 @@ export function createAppActions(params: AppActionsParams) {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
     }
-    const epoch = params.viewEpochRef.current;
-    const result = await params.client.request("workspace/git/branches", { scope: scope() });
-    if (params.viewEpochRef.current === epoch) {
-      params.setWorkspaceBranch(result.current?.trim() || null);
-    }
-    return result;
+    return params.workspaceApplication.readBranches(params.client, scope());
   }
 
   async function checkoutWorkspaceGitBranch(
@@ -308,7 +301,7 @@ export function createAppActions(params: AppActionsParams) {
     if (params.viewEpochRef.current !== epoch) {
       return result;
     }
-    params.setWorkspaceBranch(result.current?.trim() || null);
+    params.workspaceApplication.setBranch(result.current?.trim() || null);
     params.setSettings((current) => current
       ? {
           ...current,
@@ -547,7 +540,7 @@ export function createAppActions(params: AppActionsParams) {
       turnId,
       path
     }));
-    params.setWorkspaceChanges(result.changes);
+    params.workspaceApplication.setChanges(result.changes);
   }
 
   async function rejectWorkspaceChange(turnId: string, path: string) {
@@ -557,13 +550,16 @@ export function createAppActions(params: AppActionsParams) {
       turnId,
       path
     }));
-    params.setWorkspaceChanges(result.changes);
+    params.workspaceApplication.setChanges(result.changes);
     await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);
   }
 
   async function openDiffPreview(path?: string | null) {
-    const result = WorkspaceDiffResultSchema.parse(await params.client?.request("workspace/diff", { scope: scope(), path: path ?? null }));
-    params.setWorkspaceDiff((current) => path ? current : result);
+    const result = await params.workspaceApplication.readDiff(
+      path ?? null,
+      params.client,
+      scope()
+    );
     params.openReviewTab(result, path ?? null);
   }
 

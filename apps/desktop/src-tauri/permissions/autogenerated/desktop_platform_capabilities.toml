@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-platform-capabilities"
+description = "Enables the desktop_platform_capabilities command without any pre-configured scope."
+commands.allow = ["desktop_platform_capabilities"]
+
+[[permission]]
+identifier = "deny-desktop-platform-capabilities"
+description = "Denies the desktop_platform_capabilities command without any pre-configured scope."
+commands.deny = ["desktop_platform_capabilities"]

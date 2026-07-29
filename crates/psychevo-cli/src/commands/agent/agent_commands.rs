@@ -8,10 +8,11 @@ use anyhow::{Result, anyhow};
 use psychevo::__product::persistence::{AgentEdgeRecord, StateRuntime};
 use psychevo::{
     Application, StartThreadRequest, TurnOutcome, TurnRequest, __product::usage::effective_usage_total,
-    __product::capabilities::AgentBackendConfig, __product::capabilities::AgentCatalog, __product::capabilities::AgentDiscoveryOptions,
-    __product::capabilities::agent_status_value, __product::capabilities::close_agent_id, __product::capabilities::discover_agents,
-    __product::capabilities::list_agents_value, __product::capabilities::resolve_agent_definition, __product::capabilities::resume_agent_id,
-    __product::capabilities::send_agent_message, __product::capabilities::valid_agent_name, __product::capabilities::view_agent_value_with_catalog,
+    __product::capabilities::AgentBackendConfig, __product::capabilities::AgentCatalog,
+    __product::capabilities::AgentControl, __product::capabilities::AgentDiscoveryOptions,
+    __product::capabilities::discover_agents, __product::capabilities::list_agents_value,
+    __product::capabilities::resolve_agent_definition,
+    __product::capabilities::valid_agent_name, __product::capabilities::view_agent_value_with_catalog,
     __product::capabilities::wait_agent_mailbox, __product::configuration::load_agent_backend_configs, __product::configuration::set_config_value,
     __product::runtime::SessionSummary, __product::runtime::TuiMessageSummary,
 };
@@ -367,7 +368,8 @@ pub(crate) async fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
             .latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])
             .await?
     };
-    let value = agent_status_value(Some(&store), parent.as_deref(), args.all).await;
+    let control = AgentControl::__standalone(Some(store.clone()));
+    let value = control.status_value_for(parent.as_deref(), args.all).await;
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
     } else {
@@ -451,7 +453,8 @@ pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
 
 pub(crate) async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let store = command_store().await?;
-    let record = close_agent_id(&args.id, Some(&store)).await?;
+    let control = AgentControl::__standalone(Some(store));
+    let record = control.close(&args.id).await?;
     if args.json {
         println!(
             "{}",
@@ -467,7 +470,8 @@ pub(crate) async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
 
 pub(crate) async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
     let store = command_store().await?;
-    let record = send_agent_message(&args.id, &args.message.join(" "), Some(&store)).await?;
+    let control = AgentControl::__standalone(Some(store));
+    let record = control.send(&args.id, &args.message.join(" ")).await?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -480,7 +484,8 @@ pub(crate) async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
 
 pub(crate) async fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let store = command_store().await?;
-    let record = resume_agent_id(&args.id, Some(&store)).await?;
+    let control = AgentControl::__standalone(Some(store));
+    let record = control.resume(&args.id).await?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -556,7 +561,8 @@ pub(crate) async fn agent_status_record_value(
     target: &str,
     edge: &AgentEdgeRecord,
 ) -> Result<Value> {
-    let value = agent_status_value(Some(store), None, true).await;
+    let control = AgentControl::__standalone(Some(store.clone()));
+    let value = control.status_value_for(None, true).await;
     let agents = value
         .get("agents")
         .and_then(Value::as_array)

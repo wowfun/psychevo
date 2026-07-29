@@ -15,7 +15,6 @@ import {
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
   SettingsReadResultSchema,
-  ThreadBrowserResultSchema,
   UsageReadResultSchema,
   type ContextReadResult,
   type GatewayEvent,
@@ -45,16 +44,12 @@ import { useGatewayLiveEvents } from "./app-live-events";
 import {
   mergeModelCatalogOptionsIntoSettings
 } from "./app-model-state";
-import {
-  createSurfaceActions,
-  sessionsFromThreadBrowser,
-  workspacesFromThreadBrowser
-} from "./surface-actions";
+import { createSurfaceActions } from "./surface-actions";
 import {
   normalizeActivity,
-  normalizeSnapshot,
-  patchSessionSummariesFromGatewayEvent
+  normalizeSnapshot
 } from "./session-utils";
+import { SessionBrowserApplication } from "./session-browser-application";
 import { transcriptMayContainWorkspaceFile } from "./search-model";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
@@ -85,6 +80,7 @@ import {
   type WorkbenchRuntimeFactory
 } from "./runtime";
 import { startWavRecorder, type VoiceRecorder } from "./voice-capture";
+import { WorkspaceApplication } from "./workspace-application";
 import type {
   Appearance,
   BackendDraft,
@@ -95,7 +91,6 @@ import type {
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
-  SessionBrowserWorkspaceState,
   SettingsSection,
   TerminalNotificationEvent,
   TraceState,
@@ -120,29 +115,6 @@ declare global {
   }
 }
 
-function mergeSessionSummaries(current: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
-  const byId = new Map(current.map((session) => [session.id, session]));
-  for (const session of incoming) {
-    byId.set(session.id, session);
-  }
-  return Array.from(byId.values()).sort((left, right) => {
-    const rightTime = right.updatedAtMs ?? right.startedAtMs ?? 0;
-    const leftTime = left.updatedAtMs ?? left.startedAtMs ?? 0;
-    return rightTime - leftTime || left.id.localeCompare(right.id);
-  });
-}
-
-function mergeBrowserWorkspaces(
-  current: SessionBrowserWorkspaceState[],
-  incoming: SessionBrowserWorkspaceState[]
-): SessionBrowserWorkspaceState[] {
-  const byCwd = new Map(current.map((workspace) => [workspace.cwd, workspace]));
-  for (const workspace of incoming) {
-    byCwd.set(workspace.cwd, workspace);
-  }
-  return Array.from(byCwd.values());
-}
-
 export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtimeFactory?: WorkbenchRuntimeFactory } = {}) {
   return (
     <ConfirmActionProvider>
@@ -157,6 +129,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const confirmAction = useConfirmAction();
   const threadSession = useMemo(() => new ThreadSession({ snapshot: EMPTY_SNAPSHOT }), []);
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
+  const sessionBrowserApplication = useMemo(
+    () => new SessionBrowserApplication(readPinnedSessionIds()),
+    []
+  );
+  const workspaceApplication = useMemo(() => new WorkspaceApplication(), []);
   const threadSessionViewStore = useMemo(() => ({
     getSnapshot: () => threadSession.getView(),
     subscribe: (listener: () => void) => threadSession.subscribe(listener)
@@ -174,19 +151,37 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       : null,
     [threadSessionView.context]
   );
+  const sessionBrowserView = useSyncExternalStore(
+    sessionBrowserApplication.subscribe,
+    sessionBrowserApplication.getSnapshot,
+    sessionBrowserApplication.getSnapshot
+  );
+  const workspaceView = useSyncExternalStore(
+    workspaceApplication.subscribe,
+    workspaceApplication.getSnapshot,
+    workspaceApplication.getSnapshot
+  );
+  const {
+    archivedSessions,
+    loadingOlderCwd,
+    pinnedSessionIds,
+    sessions,
+    workspaces: sessionBrowserWorkspaces
+  } = sessionBrowserView;
+  const {
+    branch: workspaceBranch,
+    changes: workspaceChanges,
+    diff: workspaceDiff,
+    files: workspaceFiles
+  } = workspaceView;
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [startupStable, setStartupStable] = useState(false);
   const [host, setHost] = useState<PsychevoHost | null>(null);
   const [endpoint, setEndpoint] = useState<GatewayEndpoint | null>(null);
   const [init, setInit] = useState<InitializeResult | null>(null);
   const [activeScope, setActiveScope] = useState<GatewayRequestScope | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [olderHistoryLoading, setOlderHistoryLoading] = useState(false);
-  const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
-  const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
-  const [loadingOlderCwd, setLoadingOlderCwd] = useState<string | null>(null);
-  const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(readPinnedSessionIds);
   const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(() =>
     createHistoryDraftSession(0, browserFallbackCwd())
   );
@@ -212,11 +207,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [runtimeControlDrafts, setRuntimeControlDrafts] = useState<Record<string, unknown>>({});
   const [runtimeOptionsLoading, setRuntimeOptionsLoading] = useState(false);
   const [runtimeOptionsError, setRuntimeOptionsError] = useState<string | null>(null);
-  const [workspaceBranch, setWorkspaceBranch] = useState<string | null | undefined>(undefined);
-  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFilesResult | null>(null);
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
-  const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
-  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChangesResult | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
   const [observability, setObservability] = useState<ObservabilityReadResult | null>(null);
   const [usageStats, setUsageStats] = useState<UsageReadResult | null>(null);
@@ -270,6 +261,18 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     threadSession.attachClient(client);
     return () => threadSession.attachClient(null);
   }, [client, threadSession]);
+
+  useEffect(() => {
+    const scope = activeScope ?? init?.scope ?? null;
+    sessionBrowserApplication.bind(client, scope);
+    workspaceApplication.bind(client, scope);
+  }, [
+    activeScope,
+    client,
+    init?.scope,
+    sessionBrowserApplication,
+    workspaceApplication
+  ]);
 
   useEffect(() => () => threadSession.dispose(), [threadSession]);
 
@@ -483,15 +486,15 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     currentThreadId: currentThreadId ?? null,
     fallbackCwd,
     initScope: init?.scope ?? null,
-    pinnedSessionIds,
+    sessionBrowserApplication,
     scopeRef,
     selectedThreadIdRef,
     settings,
     snapshot,
     viewEpochRef,
+    workspaceApplication,
     setActiveScope,
     setAgents,
-    setArchivedSessions,
     setBackends,
     setCommands,
     setContextUsage,
@@ -499,14 +502,9 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setError,
     setObservability,
     setRuntimeOptionsError,
-    setSessions,
-    setSessionBrowserWorkspaces,
     setSettings,
     setSnapshot,
     setTraceState,
-    setWorkspaceChanges,
-    setWorkspaceDiff,
-    setWorkspaceFiles,
     onSnapshotAdopted: () => setStartupStable(true)
   });
   const {
@@ -537,12 +535,13 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     ) {
       return;
     }
-    void refreshWorkspaceFiles(client, activeScope, viewEpochRef.current);
+    void workspaceApplication.ensure("files", client, activeScope);
   }, [
     startupStable,
     client,
     activeScope,
     workspaceFileLinkDemand,
+    workspaceApplication,
     workspaceFiles?.root
   ]);
 
@@ -593,30 +592,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   } = automationModel;
 
   async function loadOlderSessions(cwd: string) {
-    if (!client) {
-      return;
-    }
-    const cursor = sessionBrowserWorkspaces.find((workspace) => workspace.cwd === cwd)?.nextCursor;
-    if (!cursor || loadingOlderCwd) {
-      return;
-    }
-    setLoadingOlderCwd(cwd);
-    try {
-      const result = ThreadBrowserResultSchema.parse(
-        await client.request("thread/browser", {
-          archived: false,
-          cursor,
-          includeSessionIds: [currentThreadId ?? null, ...pinnedSessionIds].filter((id): id is string => Boolean(id)),
-          limit: 20,
-          recentDays: 7,
-          cwd
-        })
-      );
-      setSessions((current) => mergeSessionSummaries(current, sessionsFromThreadBrowser(result)));
-      setSessionBrowserWorkspaces((current) => mergeBrowserWorkspaces(current, workspacesFromThreadBrowser(result)));
-    } finally {
-      setLoadingOlderCwd(null);
-    }
+    await sessionBrowserApplication.loadOlder(client, {
+      activeScope: activeScope ?? init?.scope ?? null,
+      currentThreadId: currentThreadId ?? null,
+      cwd
+    });
   }
 
   async function loadOlderHistory() {
@@ -704,10 +684,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     startupStable,
     threadSession,
     viewEpochRef,
+    workspaceApplication,
     adoptSnapshotScope,
     applyGatewayEvent,
     patchSessionEvent: (event: GatewayEvent) => {
-      setSessions((current) => patchSessionSummariesFromGatewayEvent(current, event));
+      sessionBrowserApplication.patchGatewayEvent(event);
     },
     beginExplicitViewSwitch,
     clearCommandTransientUi,
@@ -736,14 +717,13 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setHistoryLoading,
     setInit,
     setMobilePanel,
-    setPinnedSessionIds,
+    setPinnedSessionIds: sessionBrowserApplication.setPinnedSessionIds,
     setRightCollapsed,
     setRightTabs,
     setRuntimeContext,
     setRuntimeContextTargetId,
     setRuntimeOptionsError,
     setRuntimeOptionsLoading,
-    setWorkspaceBranch,
     setSelectedTargetId,
     setSnapshot,
     setStatus,
@@ -771,11 +751,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   }
 
   function togglePinnedSession(threadId: string) {
-    setPinnedSessionIds((current) => (
-      current.includes(threadId)
-        ? current.filter((id) => id !== threadId)
-        : [threadId, ...current]
-    ));
+    sessionBrowserApplication.togglePinnedSession(threadId);
   }
 
   function patchComposerDraft(text: string, inputParts?: ThreadEditableInputPart[]) {
@@ -876,6 +852,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     settings,
     snapshot,
     viewEpochRef,
+    workspaceApplication,
     turnBlockReason,
     adoptSnapshotScope,
     beginExplicitViewSwitch,
@@ -900,15 +877,12 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setRightTabs,
     setRuntimeOptionsError,
     setRuntimeOptionsLoading,
-    setWorkspaceBranch,
     setRuntimeContext,
     setRuntimeContextTargetId,
     setSelectedTargetId,
     setSnapshot,
     setSettings,
     setTraceState,
-    setWorkspaceChanges,
-    setWorkspaceDiff,
     patchComposerDraft,
     threadSession,
     updateMainView
@@ -1326,6 +1300,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     settings,
     snapshot,
     viewEpochRef,
+    workspaceApplication,
     workspaceDiff,
     beginExplicitViewSwitch,
     changeRuntimeMode: async (value) => {
@@ -1353,7 +1328,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setError,
     setMobilePanel,
     setSnapshot,
-    setWorkspaceDiff,
     startNewThread: async (cwd) => {
       await startNewThread(cwd);
     },

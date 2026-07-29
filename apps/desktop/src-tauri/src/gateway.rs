@@ -19,7 +19,7 @@ use std::sync::{
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "native-runtime")]
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 #[cfg(feature = "native-runtime")]
 use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
 #[cfg(feature = "native-runtime")]
@@ -119,11 +119,12 @@ struct GatewayBridgeEvent {
 #[tauri::command]
 pub(crate) async fn gateway_connect(
     app: AppHandle,
+    window: WebviewWindow,
     resolver: State<'_, ManagedGatewayResolver>,
     state: State<'_, GatewayBridge>,
     connection_id: String,
-    owner_window: String,
 ) -> Result<u64, String> {
+    let owner_window = window.label().to_string();
     let managed = resolve_managed_gateway(resolver.inner())
         .await
         .map_err(|err| err.to_string())?;
@@ -136,19 +137,27 @@ pub(crate) async fn gateway_connect(
     let (cancel, mut writer_cancel) = watch::channel(false);
     let mut reader_cancel = cancel.subscribe();
     let generation = state.next_generation.fetch_add(1, Ordering::Relaxed);
-    let replaced = state
-        .entries
-        .lock()
-        .map_err(|_| "Gateway bridge lock poisoned".to_string())?
-        .insert(
+    let replaced = {
+        let mut entries = state
+            .entries
+            .lock()
+            .map_err(|_| "Gateway bridge lock poisoned".to_string())?;
+        if entries
+            .get(&connection_id)
+            .is_some_and(|entry| entry.owner_window != owner_window)
+        {
+            return Err("Gateway bridge connection belongs to another window".to_string());
+        }
+        entries.insert(
             connection_id.clone(),
             GatewayBridgeEntry {
                 sender,
                 cancel,
-                owner_window,
+                owner_window: owner_window.clone(),
                 generation,
             },
-        );
+        )
+    };
     if let Some(replaced) = replaced {
         let _ = replaced.cancel.send(true);
     }
@@ -157,6 +166,7 @@ pub(crate) async fn gateway_connect(
 
     let writer_app = app.clone();
     let writer_connection_id = connection_id.clone();
+    let writer_owner_window = owner_window.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::select! {
@@ -174,8 +184,10 @@ pub(crate) async fn gateway_connect(
                             &writer_app,
                             &writer_connection_id,
                             generation,
+                            &writer_owner_window,
                         ) {
-                            let _ = writer_app.emit(
+                            let _ = writer_app.emit_to(
+                                &writer_owner_window,
                                 "gateway-disconnect",
                                 GatewayBridgeEvent {
                                     connection_id: writer_connection_id,
@@ -192,6 +204,7 @@ pub(crate) async fn gateway_connect(
     });
 
     let read_connection_id = connection_id.clone();
+    let read_owner_window = owner_window;
     tauri::async_runtime::spawn(async move {
         let disconnect_message = loop {
             let message = tokio::select! {
@@ -208,7 +221,8 @@ pub(crate) async fn gateway_connect(
             };
             match message {
                 Ok(Message::Text(text)) => {
-                    let _ = app.emit(
+                    let _ = app.emit_to(
+                        &read_owner_window,
                         "gateway-message",
                         GatewayBridgeEvent {
                             connection_id: read_connection_id.clone(),
@@ -222,8 +236,9 @@ pub(crate) async fn gateway_connect(
                 Err(err) => break err.to_string(),
             }
         };
-        if remove_bridge_generation(&app, &read_connection_id, generation) {
-            let _ = app.emit(
+        if remove_bridge_generation(&app, &read_connection_id, generation, &read_owner_window) {
+            let _ = app.emit_to(
+                &read_owner_window,
                 "gateway-disconnect",
                 GatewayBridgeEvent {
                     connection_id: read_connection_id,
@@ -240,6 +255,7 @@ pub(crate) async fn gateway_connect(
 #[cfg(feature = "native-runtime")]
 #[tauri::command]
 pub(crate) async fn gateway_send(
+    window: WebviewWindow,
     state: State<'_, GatewayBridge>,
     connection_id: String,
     generation: u64,
@@ -255,16 +271,29 @@ pub(crate) async fn gateway_send(
     if entry.generation != generation {
         return Err("Gateway bridge generation is stale".to_string());
     }
+    if entry.owner_window != window.label() {
+        return Err("Gateway bridge connection belongs to another window".to_string());
+    }
     let sender = entry.sender.clone();
     drop(guard);
     match sender.try_send(message) {
         Ok(()) => Ok(()),
         Err(mpsc::error::TrySendError::Full(_)) => {
-            let _ = remove_bridge_entry(state.inner(), &connection_id, Some(generation));
+            let _ = remove_bridge_entry(
+                state.inner(),
+                &connection_id,
+                Some(generation),
+                Some(window.label()),
+            );
             Err("Gateway bridge sender is overloaded".to_string())
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
-            let _ = remove_bridge_entry(state.inner(), &connection_id, Some(generation));
+            let _ = remove_bridge_entry(
+                state.inner(),
+                &connection_id,
+                Some(generation),
+                Some(window.label()),
+            );
             Err("Gateway bridge is closed".to_string())
         }
     }
@@ -273,12 +302,18 @@ pub(crate) async fn gateway_send(
 #[cfg(feature = "native-runtime")]
 #[tauri::command]
 pub(crate) async fn gateway_disconnect(
+    window: WebviewWindow,
     state: State<'_, GatewayBridge>,
     connection_id: String,
     generation: u64,
 ) -> Result<(), String> {
-    remove_bridge_entry(state.inner(), &connection_id, Some(generation))
-        .map_err(|_| "Gateway bridge lock poisoned".to_string())?;
+    remove_bridge_entry(
+        state.inner(),
+        &connection_id,
+        Some(generation),
+        Some(window.label()),
+    )
+    .map_err(|_| "Gateway bridge lock poisoned".to_string())?;
     Ok(())
 }
 
@@ -287,12 +322,20 @@ fn remove_bridge_entry(
     state: &GatewayBridge,
     connection_id: &str,
     generation: Option<u64>,
+    owner_window: Option<&str>,
 ) -> Result<bool, ()> {
     let mut entries = state.entries.lock().map_err(|_| ())?;
     if let Some(expected) = generation
         && entries
             .get(connection_id)
             .is_some_and(|entry| entry.generation != expected)
+    {
+        return Ok(false);
+    }
+    if let Some(owner_window) = owner_window
+        && entries
+            .get(connection_id)
+            .is_some_and(|entry| entry.owner_window != owner_window)
     {
         return Ok(false);
     }
@@ -304,9 +347,20 @@ fn remove_bridge_entry(
 }
 
 #[cfg(feature = "native-runtime")]
-fn remove_bridge_generation(app: &AppHandle, connection_id: &str, generation: u64) -> bool {
+fn remove_bridge_generation(
+    app: &AppHandle,
+    connection_id: &str,
+    generation: u64,
+    owner_window: &str,
+) -> bool {
     let state = app.state::<GatewayBridge>();
-    remove_bridge_entry(state.inner(), connection_id, Some(generation)).unwrap_or(false)
+    remove_bridge_entry(
+        state.inner(),
+        connection_id,
+        Some(generation),
+        Some(owner_window),
+    )
+    .unwrap_or(false)
 }
 
 #[cfg(feature = "native-runtime")]
@@ -748,9 +802,13 @@ mod tests {
             },
         );
 
-        assert!(!remove_bridge_entry(&bridge, "workbench:one", Some(1)).unwrap());
+        assert!(
+            !remove_bridge_entry(&bridge, "workbench:one", Some(1), Some("workbench")).unwrap()
+        );
         assert!(bridge.entries.lock().unwrap().contains_key("workbench:one"));
-        assert!(remove_bridge_entry(&bridge, "workbench:one", Some(2)).unwrap());
+        assert!(!remove_bridge_entry(&bridge, "workbench:one", Some(2), Some("floating")).unwrap());
+        assert!(bridge.entries.lock().unwrap().contains_key("workbench:one"));
+        assert!(remove_bridge_entry(&bridge, "workbench:one", Some(2), Some("workbench")).unwrap());
         assert!(!bridge.entries.lock().unwrap().contains_key("workbench:one"));
     }
 

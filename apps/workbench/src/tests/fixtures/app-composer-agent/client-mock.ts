@@ -1583,7 +1583,6 @@ vi.mock("@psychevo/client", async () => {
           defaultModel?: string | null;
           defaultMode?: string | null;
           defaultAgent?: string | null;
-          approvalMode?: string | null;
           sandbox?: string | null;
           workspaceRoots?: string[];
         };
@@ -1603,7 +1602,6 @@ vi.mock("@psychevo/client", async () => {
           defaultModel: normalizeNullableString(record.defaultModel) ?? existing?.defaultModel ?? null,
           defaultMode: normalizeNullableString(record.defaultMode) ?? existing?.defaultMode ?? null,
           defaultAgent: normalizeNullableString(record.defaultAgent) ?? existing?.defaultAgent ?? null,
-          approvalMode: normalizeNullableString(record.approvalMode) ?? existing?.approvalMode ?? null,
           sandbox: normalizeNullableString(record.sandbox) ?? existing?.sandbox ?? null,
           workspaceRoots: record.workspaceRoots ?? existing?.workspaceRoots ?? [],
           optionKeys: existing?.optionKeys ?? [],
@@ -1636,7 +1634,6 @@ vi.mock("@psychevo/client", async () => {
           defaultModel: null,
           defaultMode: null,
           defaultAgent: null,
-          approvalMode: null,
           sandbox: null,
           workspaceRoots: [],
           optionKeys: [],

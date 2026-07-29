@@ -19,7 +19,6 @@ impl TuiApp {
             reasoning_effort: self.current_variant.clone(),
             mode: self.current_mode,
             permission_mode: None,
-            approval_mode: None,
             approval_handler: None,
             inherited_env: Some(self.env_map.clone()),
             selected_parent_agent: self.current_agent.clone(),
@@ -27,6 +26,7 @@ impl TuiApp {
             selected_capability_roots: Vec::new(),
             skill_inputs: self.skill_inputs.clone(),
             mcp_servers: Vec::new(),
+            agent_control: Some(self.application.agent_control()),
         })
         .await?;
         self.current_session = Some(result.parent_session_id);

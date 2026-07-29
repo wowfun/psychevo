@@ -53,6 +53,7 @@ import {
   type ComposerSessionCoordinator,
   type DraftOpenToken
 } from "./composer-session-coordinator";
+import type { WorkspaceApplication } from "./workspace-application";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
 const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
@@ -133,6 +134,7 @@ type AppEffectsParams = {
   selectedThreadIdRef: MutableRefObject<string | null>;
   mainViewRef: MutableRefObject<MainView>;
   viewEpochRef: MutableRefObject<number>;
+  workspaceApplication: WorkspaceApplication;
   adoptSnapshotScope(runtimeClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   applyGatewayEvent(event: GatewayEvent): void;
   patchSessionEvent(event: GatewayEvent): void;
@@ -170,7 +172,6 @@ type AppEffectsParams = {
   setRuntimeContextTargetId(value: string): void;
   setRuntimeOptionsError(value: string | null): void;
   setRuntimeOptionsLoading(value: boolean): void;
-  setWorkspaceBranch(value: string | null): void;
   setSelectedTargetId(value: string): void;
   setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)): void;
   setStatus(value: string): void;
@@ -669,14 +670,13 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           origin: startupScope,
           targetIntent: { kind: "default" }
         });
-        const branchRequest = runtime.client.request("workspace/git/branches", {
-          scope: startupScope
-        }).then((result) => result.current?.trim() || null).catch((error) => {
-          params.pushDebugEvent("workspace/git/branches/startup-error", {
-            message: error instanceof Error ? error.message : String(error)
+        const branchRequest = params.workspaceApplication
+          .refresh("branch", runtime.client, startupScope)
+          .catch((error) => {
+            params.pushDebugEvent("workspace/git/branches/startup-error", {
+              message: error instanceof Error ? error.message : String(error)
+            });
           });
-          return null;
-        });
         params.selectedThreadIdRef.current = null;
         params.setSnapshot(normalizeSnapshot({
           source: initialize.source,
@@ -691,7 +691,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
         params.setRuntimeOptionsLoading(true);
         params.setRuntimeOptionsError(null);
-        const [opened, workspaceBranch] = await Promise.all([draftOpenRequest, branchRequest]);
+        const [opened] = await Promise.all([draftOpenRequest, branchRequest]);
         const nextSnapshot = parseThreadSnapshot(opened.snapshot);
         const nextContext = parseThreadContext(opened.context);
         if (!alive) {
@@ -707,7 +707,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           params.setSnapshot(normalized);
           params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
           params.setRuntimeContext(nextContext);
-          params.setWorkspaceBranch(workspaceBranch);
           params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
           params.setSelectedTargetId(
             nextContext.selectedTargetId

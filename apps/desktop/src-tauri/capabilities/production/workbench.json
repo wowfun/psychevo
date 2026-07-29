@@ -1,0 +1,12 @@
+{
+  "$schema": "../../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-workbench",
+  "description": "Commands owned by the Desktop Workbench window.",
+  "windows": ["workbench"],
+  "permissions": [
+    "allow-desktop-fallback-cwd",
+    "allow-desktop-platform-capabilities",
+    "allow-download-session-artifact",
+    "allow-gateway-endpoint"
+  ]
+}

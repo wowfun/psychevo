@@ -1,0 +1,14 @@
+{
+  "$schema": "../../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-floating",
+  "description": "Commands and window controls owned by the Floating Desktop window.",
+  "windows": ["floating"],
+  "permissions": [
+    "core:window:allow-hide",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
+    "allow-floating-initial-activation",
+    "allow-open-thread-in-workbench"
+  ]
+}

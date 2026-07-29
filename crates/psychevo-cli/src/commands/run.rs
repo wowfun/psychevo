@@ -148,7 +148,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             .with_runtime(runtime_ref, runtime_options)
             .with_reasoning_output(args.include_reasoning)
             .with_execution_policy(run_mode, permission_mode, config_path)
-            .with_approval(None, approval_handler, false)
+            .with_approval(approval_handler, false)
             .with_environment(Some(env_map), project_context_override, None)
             .with_agent(args.agent.clone(), args.no_agents, args.no_skills)
             .with_skills(args.skill.clone());

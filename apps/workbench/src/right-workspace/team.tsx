@@ -92,7 +92,15 @@ export function TeamPanel({
     setControlBusy(`${action}:${target ?? "global"}`);
     setError(null);
     try {
-      await client.request("agent/control", { action, target, message, scope });
+      await client.request("agent/control", {
+        action,
+        target,
+        message,
+        scope,
+        threadId: action === "pauseSpawning" || action === "resumeSpawning"
+          ? threadId
+          : null
+      });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

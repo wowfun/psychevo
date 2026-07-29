@@ -160,6 +160,10 @@ impl TuiApp {
                         .get("filesystem")
                         .cloned()
                         .and_then(|value| serde_json::from_value(value).ok()),
+                    mcp_startup: payload
+                        .get("mcpStartup")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok()),
                     timeout_secs: payload
                         .get("timeoutSecs")
                         .and_then(Value::as_u64)

@@ -15,7 +15,7 @@ impl TuiApp {
                 Some(self.current_permission_mode),
                 self.config_path.clone(),
             )
-            .with_approval(None, None, true)
+            .with_approval(None, true)
             .with_environment(Some(self.env_map.clone()), None, None)
             .with_agent(self.current_agent.clone(), self.no_agents, self.no_skills)
             .with_skills(self.skill_inputs.clone())
@@ -88,7 +88,6 @@ impl TuiApp {
             include_reasoning: false,
             mode: self.current_mode,
             permission_mode: Some(self.current_permission_mode),
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: true,
             inherited_env: Some(self.env_map.clone()),

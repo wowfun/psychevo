@@ -191,7 +191,6 @@ export function parseRuntimeProfile(value: unknown): WorkbenchRuntimeProfile {
     defaultModel: nullableString(record.defaultModel),
     defaultMode: nullableString(record.defaultMode),
     defaultAgent: nullableString(record.defaultAgent),
-    approvalMode: nullableString(record.approvalMode),
     sandbox: nullableString(record.sandbox),
     workspaceRoots: stringArray(record.workspaceRoots),
     optionKeys: stringArray(record.optionKeys),

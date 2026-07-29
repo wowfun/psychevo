@@ -135,7 +135,6 @@ export function channelRuntimeSafetyLabel(
   }
   return [
     selected.label || selected.id,
-    selected.approvalMode || "runtime approval",
     selected.sandbox || "runtime sandbox"
   ].join(" · ");
 }

@@ -548,6 +548,44 @@ describe("Workbench public Thread Application interactions", () => {
     expect(await screen.findByText("Permission response accepted.")).toBeTruthy();
   });
 
+  it("shows MCP startup identity and offers only once or deny", async () => {
+    gatewayMock.snapshot.pendingActions = [{
+      actionId: "permission-mcp-startup-1",
+      kind: "permission",
+      title: "Start MCP server",
+      summary: "Start docs",
+      payload: {
+        toolName: "mcp_startup",
+        summary: "Start docs",
+        reason: "MCP startup requires approval",
+        allowSession: true,
+        authorizationLifetime: "native_session",
+        allowAlways: true,
+        alwaysAuthorizationLifetime: "permanent",
+        mcpStartup: {
+          server: "docs",
+          transport: "stdio",
+          descriptorFingerprint: "sha256:abc123"
+        }
+      },
+      threadId: "thread-1",
+      turnId: "turn-1"
+    }];
+
+    render(<App />);
+    await resumeSession();
+    const requestHeading = await screen.findByText("Start MCP server");
+    const requestCard = requestHeading.closest(".composerRequest");
+    expect(requestCard).not.toBeNull();
+    expect(within(requestCard as HTMLElement).getByText("docs")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("stdio")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("sha256:abc123")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).queryByRole("button", { name: "Session" })).toBeNull();
+    expect(within(requestCard as HTMLElement).queryByRole("button", { name: "Always" })).toBeNull();
+    expect(within(requestCard as HTMLElement).getByRole("button", { name: "Once" })).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByRole("button", { name: "Deny" })).toBeTruthy();
+  });
+
   it("keeps filesystem scope collapsed and submits an offered canonical directory", async () => {
     gatewayMock.snapshot.pendingActions = [{
       actionId: "permission-fs-1",

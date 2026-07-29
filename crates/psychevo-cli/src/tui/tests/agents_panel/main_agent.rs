@@ -5,7 +5,6 @@ pub(crate) use super::*;
 
 #[tokio::test]
 pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowed_definitions() {
-    psychevo::__product::capabilities::set_agent_spawn_paused(false);
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(
@@ -61,7 +60,8 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
     )
     .await
     .expect("resume spawning");
-    assert!(!psychevo::__product::capabilities::agent_spawn_paused());
+    let parent = app.current_session.as_deref().expect("session");
+    assert!(!app.application.agent_control().spawning_paused(parent));
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await

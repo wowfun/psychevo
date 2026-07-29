@@ -104,7 +104,6 @@ impl GatewayContext {
             include_reasoning: false,
             mode: psychevo::__product::runtime::RunMode::Default,
             permission_mode: None,
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: false,
             inherited_env: Some(self.env_map.clone()),
