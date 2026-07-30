@@ -95,24 +95,85 @@ class FilesystemApprovalRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class McpStdioStartupTarget:
+    command: str
+    args: tuple[str, ...]
+    cwd: str
+    env_names: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class McpHttpStartupTarget:
+    url: str
+    header_names: tuple[str, ...]
+    credential_names: tuple[str, ...]
+
+
+McpStartupTarget = McpStdioStartupTarget | McpHttpStartupTarget
+
+
+def _mcp_startup_target_from_wire(value: object) -> McpStartupTarget:
+    if not isinstance(value, dict):
+        raise TypeError("MCP startup target must be an object")
+    kind = value.get("kind")
+    if kind == "stdio":
+        command = value.get("command")
+        args = value.get("args")
+        cwd = value.get("cwd")
+        env_names = value.get("envNames")
+        if (
+            not isinstance(command, str)
+            or not isinstance(cwd, str)
+            or not isinstance(args, list)
+            or not all(isinstance(item, str) for item in args)
+            or not isinstance(env_names, list)
+            or not all(isinstance(item, str) for item in env_names)
+        ):
+            raise TypeError("MCP stdio startup target is malformed")
+        return McpStdioStartupTarget(
+            command=command,
+            args=tuple(args),
+            cwd=cwd,
+            env_names=tuple(env_names),
+        )
+    if kind == "http":
+        url = value.get("url")
+        header_names = value.get("headerNames")
+        credential_names = value.get("credentialNames")
+        if (
+            not isinstance(url, str)
+            or not isinstance(header_names, list)
+            or not all(isinstance(item, str) for item in header_names)
+            or not isinstance(credential_names, list)
+            or not all(isinstance(item, str) for item in credential_names)
+        ):
+            raise TypeError("MCP HTTP startup target is malformed")
+        return McpHttpStartupTarget(
+            url=url,
+            header_names=tuple(header_names),
+            credential_names=tuple(credential_names),
+        )
+    raise TypeError("MCP startup target kind is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class McpStartupApprovalRequest:
     server: str
-    transport: str
-    descriptor_fingerprint: str
+    source: str
+    target: McpStartupTarget
 
     @classmethod
     def from_wire(cls, value: object) -> "McpStartupApprovalRequest":
         if not isinstance(value, dict):
             raise TypeError("MCP startup approval detail must be an object")
         server = value.get("server")
-        transport = value.get("transport")
-        fingerprint = value.get("descriptorFingerprint")
-        if not all(isinstance(item, str) for item in (server, transport, fingerprint)):
+        source = value.get("source")
+        if not isinstance(server, str) or not isinstance(source, str):
             raise TypeError("MCP startup approval detail fields must be strings")
         return cls(
             server=server,
-            transport=transport,
-            descriptor_fingerprint=fingerprint,
+            source=source,
+            target=_mcp_startup_target_from_wire(value.get("target")),
         )
 
 

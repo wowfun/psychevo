@@ -5,8 +5,9 @@ import inspect
 import math
 import os
 from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 from uuid import uuid4
 
 from ._callbacks import (
@@ -43,6 +44,13 @@ _DEFAULT_CALLBACK_BACKLOG = 64
 _USE_DEFAULT_TIMEOUT = object()
 
 
+@dataclass(slots=True)
+class _PendingRequest:
+    method: str
+    future: asyncio.Future[object]
+    decoder: Callable[[object], object]
+
+
 class _RpcClient:
     def __init__(
         self,
@@ -63,7 +71,7 @@ class _RpcClient:
         self._transport = transport
         self._request_timeout = request_timeout
         self._next_id = 0
-        self._pending: dict[int, asyncio.Future[object]] = {}
+        self._pending: dict[int, _PendingRequest] = {}
         self._turns: dict[str, TurnHandle] = {}
         self._reader: asyncio.Task[None] | None = None
         self._callback_worker_count = callback_workers
@@ -79,7 +87,6 @@ class _RpcClient:
         self._clarify_handler = clarify_handler
 
     async def start(self) -> None:
-        self._ensure_callback_workers()
         self._reader = asyncio.create_task(self._read_loop())
         result = await self.request(
             "initialize",
@@ -132,7 +139,11 @@ class _RpcClient:
         request_id = self._next_id
         loop = asyncio.get_running_loop()
         future: asyncio.Future[object] = loop.create_future()
-        self._pending[request_id] = future
+        self._pending[request_id] = _PendingRequest(
+            method=method,
+            future=future,
+            decoder=_result_decoder(method),
+        )
         message: dict[str, object] = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -206,12 +217,7 @@ class _RpcClient:
         try:
             while True:
                 message = await self._transport.receive()
-                if "method" in message and "id" in message:
-                    await self._queue_callback_request(message)
-                elif "id" in message:
-                    self._receive_response(message)
-                else:
-                    self._receive_notification(message)
+                await self._receive_message(message)
         except asyncio.CancelledError:
             raise
         except BaseException as error:
@@ -243,9 +249,9 @@ class _RpcClient:
         if self._terminal_error is not None:
             return
         self._terminal_error = error
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(error)
+        for pending in self._pending.values():
+            if not pending.future.done():
+                pending.future.set_exception(error)
         for turn in self._turns.values():
             turn._close_events()
         current_task = asyncio.current_task()
@@ -260,31 +266,77 @@ class _RpcClient:
     def _forget_turn(self, turn_id: str) -> None:
         self._turns.pop(turn_id, None)
 
+    async def _receive_message(self, message: dict[str, object]) -> None:
+        if message.get("jsonrpc") != "2.0":
+            raise TransportError('App Server message requires jsonrpc exactly "2.0"')
+        has_method = "method" in message
+        has_id = "id" in message
+        if has_method:
+            if "result" in message or "error" in message:
+                raise TransportError(
+                    "App Server request or notification cannot contain result or error"
+                )
+            method = message.get("method")
+            if not isinstance(method, str):
+                raise TransportError("App Server method must be a string")
+            if "params" in message and not isinstance(
+                message.get("params"), (dict, list)
+            ):
+                raise TransportError(
+                    "App Server request or notification params must be an object or array"
+                )
+            if has_id:
+                if not isinstance(message.get("id"), str):
+                    raise TransportError("App Server callback id must be a string")
+                await self._queue_callback_request(message)
+            else:
+                self._receive_notification(message)
+            return
+        if not has_id:
+            raise TransportError("App Server message is not a JSON-RPC envelope")
+        self._receive_response(message)
+
     def _receive_response(self, message: dict[str, object]) -> None:
         request_id = message.get("id")
-        if not isinstance(request_id, int):
-            return
-        future = self._pending.get(request_id)
-        if future is None or future.done():
-            return
-        error = message.get("error")
-        if isinstance(error, dict):
-            future.set_exception(
-                ProtocolError(
-                    int(error.get("code", -32000)),
-                    str(error.get("message", "App Server request failed")),
-                    error.get("data"),
-                )
+        if type(request_id) is not int:
+            raise TransportError("App Server response id must be an integer")
+        has_result = "result" in message
+        has_error = "error" in message
+        if has_result == has_error:
+            raise TransportError(
+                "App Server response must contain exactly one of result or error"
             )
-        else:
-            future.set_result(message.get("result"))
+        protocol_error = (
+            _decode_rpc_error(message["error"]) if has_error else None
+        )
+        pending = self._pending.get(request_id)
+        if pending is None or pending.future.done():
+            return
+        if protocol_error is not None:
+            pending.future.set_exception(protocol_error)
+            return
+        try:
+            result = pending.decoder(message["result"])
+        except Exception as error:
+            if isinstance(error, TransportError):
+                raise
+            raise TransportError(
+                f"{pending.method} returned an invalid result: {error}"
+            ) from error
+        pending.future.set_result(result)
 
     def _receive_notification(self, message: dict[str, object]) -> None:
-        if message.get("method") != "turn/event":
+        method = message["method"]
+        if method == "server/error":
+            error = _decode_rpc_error(message.get("params"))
+            raise TransportError(
+                f"App Server reported error {error.code}: {error}"
+            )
+        if method != "turn/event":
             return
         params = message.get("params")
         if not isinstance(params, dict):
-            return
+            raise TransportError("turn/event params must be an object")
         thread_id = params.get("threadId")
         turn_id = params.get("turnId")
         event = params.get("event")
@@ -293,7 +345,10 @@ class _RpcClient:
             or not isinstance(turn_id, str)
             or not isinstance(event, dict)
         ):
-            return
+            raise TransportError(
+                "turn/event requires string threadId, string turnId, and object event"
+            )
+        _validate_turn_event(event, thread_id, turn_id)
         turn = self._turns.get(turn_id)
         if turn is None:
             return
@@ -377,10 +432,16 @@ class _RpcClient:
                     work.close()
                 raise
             except BaseException as error:
+                transport_error = (
+                    error
+                    if isinstance(error, TransportError)
+                    else TransportError(f"App Server callback worker failed: {error}")
+                )
+                self._transition_terminal(transport_error)
                 asyncio.get_running_loop().call_exception_handler(
                     {
                         "message": "Psychevo callback worker failed",
-                        "exception": error,
+                        "exception": transport_error,
                     }
                 )
             finally:
@@ -402,13 +463,13 @@ class _RpcClient:
         request_id = message.get("id")
         method = message.get("method")
         params = message.get("params")
-        if not isinstance(request_id, str) or not isinstance(method, str):
-            return
+        assert isinstance(request_id, str)
+        assert isinstance(method, str)
         try:
             if method == "tool/call":
-                result = await self._call_tool(_object(params))
+                result = await self._call_tool(_callback_params(params))
             elif method == "approval/request":
-                result = await self._call_approval(_object(params))
+                result = await self._call_approval(_callback_params(params))
             else:
                 raise ProtocolError(-32601, f"callback method not found: {method}")
             response: dict[str, object] = {
@@ -619,11 +680,11 @@ class Client:
                 "metadata": dict(metadata) if metadata is not None else None,
             },
         )
-        return Thread(self, ThreadSnapshot.from_wire(_object(result)))
+        return Thread(self, cast(ThreadSnapshot, result))
 
     async def resume_thread(self, thread_id: str) -> Thread:
         result = await self._request("thread/resume", {"threadId": thread_id})
-        return Thread(self, ThreadSnapshot.from_wire(_object(result)))
+        return Thread(self, cast(ThreadSnapshot, result))
 
     async def list_threads(
         self,
@@ -634,7 +695,8 @@ class Client:
         cursor: str | None = None,
         limit: int = 50,
     ) -> ThreadPage:
-        result = _object(
+        return cast(
+            ThreadPage,
             await self._request(
                 "thread/list",
                 {
@@ -644,17 +706,7 @@ class Client:
                     "cursor": cursor,
                     "limit": limit,
                 },
-            )
-        )
-        threads = result.get("threads")
-        if not isinstance(threads, list):
-            raise TransportError("thread/list returned invalid threads")
-        next_cursor = result.get("nextCursor")
-        if next_cursor is not None and not isinstance(next_cursor, str):
-            raise TransportError("thread/list returned an invalid next cursor")
-        return ThreadPage(
-            threads=tuple(ThreadSummary.from_wire(_object(item)) for item in threads),
-            next_cursor=next_cursor,
+            ),
         )
 
     async def iter_threads(
@@ -712,7 +764,7 @@ class Client:
         )
         rpc.register_turn(turn)
         try:
-            receipt = TurnReceipt.from_wire(_object(await rpc.request(method, params)))
+            receipt = cast(TurnReceipt, await rpc.request(method, params))
             if (
                 not receipt.accepted
                 or receipt.turn_id != turn_id
@@ -752,7 +804,7 @@ class Thread:
 
     async def snapshot(self) -> ThreadSnapshot:
         result = await self._client._request("thread/read", {"threadId": self.id})
-        self._snapshot = ThreadSnapshot.from_wire(_object(result))
+        self._snapshot = cast(ThreadSnapshot, result)
         return self._snapshot
 
     async def start_turn(
@@ -814,7 +866,7 @@ class Thread:
                 "force": force,
             },
         )
-        return CompactionResult.from_wire(_object(result))
+        return cast(CompactionResult, result)
 
     async def fork(self, *, before_session_seq: int | None = None) -> Thread:
         result = await self._client._request(
@@ -824,7 +876,7 @@ class Thread:
                 "beforeSessionSeq": before_session_seq,
             },
         )
-        return Thread(self._client, ThreadSnapshot.from_wire(_object(result)))
+        return Thread(self._client, cast(ThreadSnapshot, result))
 
 
 class TurnHandle:
@@ -861,7 +913,7 @@ class TurnHandle:
             {"turnId": self.receipt.turn_id},
             timeout=timeout,
         )
-        return TurnResult.from_wire(_object(result))
+        return cast(TurnResult, result)
 
     async def interrupt(self) -> None:
         await self._client._request(
@@ -869,13 +921,13 @@ class TurnHandle:
         )
 
     async def steer(self, input: str) -> bool:
-        result = _object(
+        return cast(
+            bool,
             await self._client._request(
                 "turn/steer",
                 {"turnId": self.receipt.turn_id, "input": input},
-            )
+            ),
         )
-        return result.get("accepted") is True
 
     async def respond(
         self,
@@ -894,7 +946,8 @@ class TurnHandle:
                 "kind": "clarify",
                 "answers": [list(answer) for answer in response],
             }
-        result = _object(
+        return cast(
+            bool,
             await self._client._request(
                 "interaction/respond",
                 {
@@ -902,9 +955,8 @@ class TurnHandle:
                     "interactionId": interaction_id,
                     "response": wire_response,
                 },
-            )
+            ),
         )
-        return result.get("accepted") is True
 
     def _receive_event(self, value: dict[str, Any]) -> None:
         if self._closed:
@@ -933,9 +985,313 @@ class TurnHandle:
         self._events.put_nowait(_EVENT_END)
 
 
-def _object(value: object) -> dict[str, Any]:
+def _result_decoder(method: str) -> Callable[[object], object]:
+    return {
+        "initialize": _decode_initialize_result,
+        "tool/register": _decode_tool_register_result,
+        "thread/start": _decode_thread_snapshot_result,
+        "thread/resume": _decode_thread_snapshot_result,
+        "thread/read": _decode_thread_snapshot_result,
+        "thread/list": _decode_thread_page_result,
+        "thread/archive": _decode_thread_archive_result,
+        "thread/compact": _decode_compaction_result,
+        "thread/fork": _decode_thread_snapshot_result,
+        "turn/start": _decode_turn_receipt_result,
+        "turn/resume": _decode_turn_receipt_result,
+        "turn/wait": _decode_turn_result,
+        "turn/interrupt": _decode_turn_interrupt_result,
+        "turn/steer": _decode_turn_steer_result,
+        "interaction/respond": _decode_interaction_response_result,
+        "shutdown": _decode_shutdown_result,
+    }.get(method, _decode_object_result)
+
+
+def _decode_rpc_error(value: object) -> ProtocolError:
+    error = _wire_object(value, "JSON-RPC error")
+    code = _wire_int(error, "code", "JSON-RPC error")
+    message = _wire_string(error, "message", "JSON-RPC error")
+    return ProtocolError(code, message, error.get("data"))
+
+
+def _decode_initialize_result(value: object) -> dict[str, Any]:
+    result = _wire_object(value, "initialize result")
+    server = _wire_object(result.get("server"), "initialize result server")
+    _wire_string(server, "name", "initialize result server")
+    _wire_string(server, "version", "initialize result server")
+    _wire_int(result, "protocolVersion", "initialize result")
+    _wire_int(result, "protocolMin", "initialize result")
+    _wire_int(result, "protocolMax", "initialize result")
+    capabilities = _wire_object(
+        result.get("capabilities"), "initialize result capabilities"
+    )
+    _wire_bool(capabilities, "threads", "initialize result capabilities")
+    _wire_bool(capabilities, "turns", "initialize result capabilities")
+    _wire_string(capabilities, "eventReplay", "initialize result capabilities")
+    _wire_bool(capabilities, "interactions", "initialize result capabilities")
+    _wire_bool(capabilities, "customTools", "initialize result capabilities")
+    return result
+
+
+def _decode_tool_register_result(value: object) -> dict[str, Any]:
+    result = _wire_object(value, "tool/register result")
+    _wire_bool(result, "registered", "tool/register result")
+    _wire_int(result, "toolCount", "tool/register result")
+    _wire_bool(result, "approvalHandler", "tool/register result")
+    _wire_bool(result, "clarifyHandler", "tool/register result")
+    return result
+
+
+def _decode_thread_snapshot_result(value: object) -> ThreadSnapshot:
+    result = _wire_object(value, "Thread snapshot")
+    _validate_thread_summary(result, "Thread snapshot")
+    for item in _wire_list(result.get("items", []), "Thread snapshot items"):
+        item = _wire_object(item, "Thread item")
+        _wire_int(item, "sessionSeq", "Thread item")
+        _wire_present(item, "message", "Thread item")
+    for interaction in _wire_list(
+        result.get("pendingInteractions", []),
+        "Thread snapshot pendingInteractions",
+    ):
+        interaction = _wire_object(interaction, "pending interaction")
+        for key in ("interactionId", "threadId", "turnId", "kind", "status"):
+            _wire_string(interaction, key, "pending interaction")
+        _wire_present(interaction, "payload", "pending interaction")
+        _wire_int(interaction, "requestedAtMs", "pending interaction")
+        _wire_optional_int(interaction, "resolvedAtMs", "pending interaction")
+    return ThreadSnapshot.from_wire(result)
+
+
+def _decode_thread_page_result(value: object) -> ThreadPage:
+    result = _wire_object(value, "thread/list result")
+    threads = _wire_list(result.get("threads"), "thread/list result threads")
+    decoded = []
+    for value in threads:
+        thread = _wire_object(value, "Thread summary")
+        _validate_thread_summary(thread, "Thread summary")
+        decoded.append(ThreadSummary.from_wire(thread))
+    next_cursor = _wire_optional_string(
+        result, "nextCursor", "thread/list result"
+    )
+    return ThreadPage(threads=tuple(decoded), next_cursor=next_cursor)
+
+
+def _decode_thread_archive_result(value: object) -> dict[str, Any]:
+    result = _wire_object(value, "thread/archive result")
+    _wire_bool(result, "archived", "thread/archive result")
+    _wire_string(result, "threadId", "thread/archive result")
+    return result
+
+
+def _decode_compaction_result(value: object) -> CompactionResult:
+    result = _wire_object(value, "thread/compact result")
+    for key in ("session_id", "reason", "message"):
+        _wire_string(result, key, "thread/compact result")
+    _wire_bool(result, "compacted", "thread/compact result")
+    for key in (
+        "checkpoint_id",
+        "first_kept_session_seq",
+        "tokens_before",
+        "tokens_after",
+    ):
+        _wire_optional_int(result, key, "thread/compact result")
+    for key in ("summary", "summary_provider", "summary_model"):
+        _wire_optional_string(result, key, "thread/compact result")
+    return CompactionResult.from_wire(result)
+
+
+def _decode_turn_receipt_result(value: object) -> TurnReceipt:
+    result = _wire_object(value, "Turn receipt")
+    _wire_bool(result, "accepted", "Turn receipt")
+    _wire_string(result, "threadId", "Turn receipt")
+    _wire_string(result, "turnId", "Turn receipt")
+    _wire_optional_string(result, "clientTurnId", "Turn receipt")
+    return TurnReceipt.from_wire(result)
+
+
+def _decode_turn_result(value: object) -> TurnResult:
+    result = _wire_object(value, "turn/wait result")
+    for key in ("threadId", "finalAnswer", "provider", "model"):
+        _wire_string(result, key, "turn/wait result")
+    outcome = _wire_string(result, "outcome", "turn/wait result")
+    if outcome not in {"completed", "stopped", "failed", "interrupted"}:
+        raise ValueError(f"turn/wait result outcome is invalid: {outcome}")
+    _wire_optional_string(result, "reasoningEffort", "turn/wait result")
+    _wire_int(result, "toolFailures", "turn/wait result")
+    _wire_optional_int(result, "contextLimit", "turn/wait result")
+    for key in (
+        "contextSnapshot",
+        "terminalReason",
+        "terminalError",
+        "selectedAgent",
+    ):
+        if key in result and result[key] is not None:
+            _wire_object(result[key], f"turn/wait result {key}")
+    for key in ("warnings", "selectedSkills"):
+        for item in _wire_list(result.get(key, []), f"turn/wait result {key}"):
+            _wire_object(item, f"turn/wait result {key} item")
+    return TurnResult.from_wire(result)
+
+
+def _decode_turn_interrupt_result(value: object) -> dict[str, Any]:
+    result = _wire_object(value, "turn/interrupt result")
+    _wire_bool(result, "interrupted", "turn/interrupt result")
+    _wire_string(result, "turnId", "turn/interrupt result")
+    return result
+
+
+def _decode_turn_steer_result(value: object) -> bool:
+    result = _wire_object(value, "turn/steer result")
+    accepted = _wire_bool(result, "accepted", "turn/steer result")
+    _wire_string(result, "turnId", "turn/steer result")
+    return accepted
+
+
+def _decode_interaction_response_result(value: object) -> bool:
+    result = _wire_object(value, "interaction/respond result")
+    accepted = _wire_bool(result, "accepted", "interaction/respond result")
+    _wire_string(result, "turnId", "interaction/respond result")
+    _wire_string(result, "interactionId", "interaction/respond result")
+    return accepted
+
+
+def _decode_shutdown_result(value: object) -> dict[str, Any]:
+    result = _wire_object(value, "shutdown result")
+    _wire_bool(result, "shutdown", "shutdown result")
+    return result
+
+
+def _decode_object_result(value: object) -> dict[str, Any]:
+    return _wire_object(value, "App Server result")
+
+
+def _validate_thread_summary(value: dict[str, Any], label: str) -> None:
+    for key in ("id", "source", "cwd"):
+        _wire_string(value, key, label)
+    _wire_optional_string(value, "title", label)
+    _wire_int(value, "startedAtMs", label)
+    _wire_int(value, "updatedAtMs", label)
+    _wire_bool(value, "archived", label)
+    _wire_int(value, "messageCount", label)
+    _wire_int(value, "toolCallCount", label)
+    _wire_optional_string(value, "activeTurnId", label)
+
+
+def _validate_turn_event(
+    event: dict[str, Any],
+    thread_id: str,
+    turn_id: str,
+) -> None:
+    event_type = _wire_string(event, "type", "turn/event event")
+    if event_type == "accepted":
+        receipt = _decode_turn_receipt_result(event.get("receipt"))
+        if receipt.thread_id != thread_id or receipt.turn_id != turn_id:
+            raise TransportError("turn/event accepted receipt has conflicting identity")
+    elif event_type in {"started", "completed", "failed"}:
+        event_thread_id = _wire_string(event, "threadId", f"{event_type} event")
+        event_turn_id = _wire_string(event, "turnId", f"{event_type} event")
+        if event_thread_id != thread_id or event_turn_id != turn_id:
+            raise TransportError(f"turn/event {event_type} has conflicting identity")
+        if event_type == "completed":
+            outcome = _wire_string(event, "outcome", "completed event")
+            if outcome not in {"completed", "stopped", "failed", "interrupted"}:
+                raise ValueError(f"completed event outcome is invalid: {outcome}")
+        elif event_type == "failed":
+            _wire_string(event, "message", "failed event")
+    elif event_type == "message":
+        _wire_stage(event, "message event")
+        _wire_present(event, "message", "message event")
+    elif event_type in {"message_delta", "reasoning_delta"}:
+        _wire_string(event, "text", f"{event_type} event")
+    elif event_type == "reasoning_completed":
+        if "text" not in event or (
+            event["text"] is not None and not isinstance(event["text"], str)
+        ):
+            raise ValueError("reasoning_completed event text must be a string or null")
+    elif event_type == "tool":
+        _wire_stage(event, "tool event")
+        _wire_present(event, "data", "tool event")
+    elif event_type == "interaction_requested":
+        _wire_string(event, "interactionId", "interaction_requested event")
+        _wire_string(event, "kind", "interaction_requested event")
+        _wire_present(event, "payload", "interaction_requested event")
+    elif event_type == "interaction_resolved":
+        _wire_string(event, "interactionId", "interaction_resolved event")
+        _wire_string(event, "reason", "interaction_resolved event")
+    elif event_type == "warning":
+        _wire_present(event, "data", "warning event")
+    elif event_type == "resync_required":
+        missed = _wire_int(event, "missed", "resync_required event")
+        if missed < 0:
+            raise ValueError("resync_required event missed must be non-negative")
+
+
+def _wire_stage(value: dict[str, Any], label: str) -> str:
+    stage = _wire_string(value, "stage", label)
+    if stage not in {"started", "updated", "completed"}:
+        raise ValueError(f"{label} stage is invalid: {stage}")
+    return stage
+
+
+def _wire_object(value: object, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise TransportError("App Server result must be a JSON object")
+        raise ValueError(f"{label} must be an object")
+    return value
+
+
+def _wire_list(value: object, label: str) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be an array")
+    return value
+
+
+def _wire_present(value: Mapping[str, object], key: str, label: str) -> object:
+    if key not in value:
+        raise ValueError(f"{label} requires {key}")
+    return value[key]
+
+
+def _wire_string(value: Mapping[str, object], key: str, label: str) -> str:
+    field = _wire_present(value, key, label)
+    if not isinstance(field, str):
+        raise ValueError(f"{label} {key} must be a string")
+    return field
+
+
+def _wire_optional_string(
+    value: Mapping[str, object], key: str, label: str
+) -> str | None:
+    field = value.get(key)
+    if field is not None and not isinstance(field, str):
+        raise ValueError(f"{label} {key} must be a string or null")
+    return field
+
+
+def _wire_int(value: Mapping[str, object], key: str, label: str) -> int:
+    field = _wire_present(value, key, label)
+    if type(field) is not int:
+        raise ValueError(f"{label} {key} must be an integer")
+    return field
+
+
+def _wire_optional_int(
+    value: Mapping[str, object], key: str, label: str
+) -> int | None:
+    field = value.get(key)
+    if field is not None and type(field) is not int:
+        raise ValueError(f"{label} {key} must be an integer or null")
+    return field
+
+
+def _wire_bool(value: Mapping[str, object], key: str, label: str) -> bool:
+    field = _wire_present(value, key, label)
+    if not isinstance(field, bool):
+        raise ValueError(f"{label} {key} must be a boolean")
+    return field
+
+
+def _callback_params(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ProtocolError(-32602, "callback params must be an object")
     return value
 
 

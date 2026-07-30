@@ -50,6 +50,7 @@ export {
   type CapabilityOperationReceipt,
   type CapabilityPollState
 } from "./capabilities-application";
+export { gatewayScopeKey } from "./scope";
 export type {
   ThreadSessionClient,
   ThreadSessionControlInput,

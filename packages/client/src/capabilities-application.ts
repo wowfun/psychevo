@@ -3,6 +3,7 @@ import type {
   GatewayRequestScope,
   GatewayRequestResults
 } from "@psychevo/protocol";
+import { gatewayScopeKey } from "./scope";
 
 import type {
   GatewayRequestInit,
@@ -122,7 +123,7 @@ export class CapabilitiesApplication implements CapabilitiesClient {
   }
 
   activate(scope: GatewayRequestScope | null): void {
-    const key = scope ? scopeKey(scope) : null;
+    const key = scope ? gatewayScopeKey(scope) : null;
     if (key === this.activeKey) return;
     this.lifecycleEpoch += 1;
     this.stopPoll();
@@ -241,7 +242,7 @@ export class CapabilitiesApplication implements CapabilitiesClient {
     const client = this.requireClient();
     const scope = requestScope(params);
     const domain = mutationDomain(method);
-    const state = scope && domain && scopeKey(scope) === this.activeKey
+    const state = scope && domain && gatewayScopeKey(scope) === this.activeKey
       ? this.activeState
       : null;
     const lifecycleEpoch = this.lifecycleEpoch;
@@ -286,7 +287,7 @@ export class CapabilitiesApplication implements CapabilitiesClient {
       params: (scope) => ({ scope, sessionId }),
       sessionId,
       successMessage: "OAuth login saved. Changes apply to the next run/session.",
-      failureMessage: (result) => stringField(result, "error") || "OAuth login failed.",
+      failureMessage: (result) => stringField(result, "message") || "OAuth login failed.",
       domain: "mcp"
     });
   }
@@ -508,16 +509,6 @@ function requestScope<M extends GatewayMethod>(
     return null;
   }
   return scope as GatewayRequestScope;
-}
-
-function scopeKey(scope: GatewayRequestScope): string {
-  return JSON.stringify([
-    scope.cwd,
-    scope.source.kind,
-    scope.source.rawId ?? null,
-    scope.source.lifetime,
-    scope.source.rawIdentity ?? null
-  ]);
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

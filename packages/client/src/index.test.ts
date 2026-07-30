@@ -8,6 +8,7 @@ import type {
 import {
   GatewayClient,
   GatewayClientError,
+  gatewayScopeKey,
   parseThreadSnapshot,
   runThreadInterrupt,
   scopeForCwd,
@@ -60,6 +61,23 @@ describe("scopeForCwd", () => {
         visibleName: null
       }
     });
+  });
+});
+
+describe("gatewayScopeKey", () => {
+  it("uses only canonical source identity fields", () => {
+    const base = scopeForCwd("/tmp/project");
+    const decorated = {
+      ...base,
+      source: {
+        ...base.source,
+        rawIdentity: { volatile: "transport-owned" },
+        visibleName: "Renamed workspace"
+      }
+    };
+
+    expect(gatewayScopeKey(base)).toBe(gatewayScopeKey(decorated));
+    expect(gatewayScopeKey(null)).toBe("");
   });
 });
 

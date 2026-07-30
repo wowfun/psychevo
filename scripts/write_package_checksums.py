@@ -25,12 +25,27 @@ def main() -> None:
     package_root = artifact_root / "package"
     package_root.mkdir(parents=True, exist_ok=True)
     suffix = ".exe" if os.name == "nt" else ""
-    candidates = [ROOT / "target" / "release" / f"pevo{suffix}"]
-    candidates.extend((package_root / "python").glob("wheels/*.whl"))
-    candidates.extend((package_root / "python").glob("sdists/*"))
-    artifacts = sorted(path for path in candidates if path.is_file())
-    if not artifacts:
-        raise RuntimeError("no package artifacts found for checksumming")
+    groups = {
+        "CLI": [package_root / "cli-target" / "release" / f"pevo{suffix}"],
+        "Python wheels": list((package_root / "python").glob("wheels/*.whl")),
+        "Python sdists": list((package_root / "python").glob("sdists/*")),
+        "Desktop bundles": [
+            path
+            for path in (
+                package_root / "desktop-target" / "release" / "bundle"
+            ).rglob("*")
+            if path.is_file()
+        ],
+    }
+    missing = [name for name, paths in groups.items() if not any(path.is_file() for path in paths)]
+    if missing:
+        raise RuntimeError(f"missing package artifacts: {', '.join(missing)}")
+    artifacts = sorted(
+        path
+        for paths in groups.values()
+        for path in paths
+        if path.is_file()
+    )
     rows = [
         f"{digest(path)}  {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}"
         for path in artifacts

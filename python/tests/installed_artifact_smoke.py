@@ -195,7 +195,12 @@ def build_and_smoke(artifact_root: Path) -> dict[str, object]:
             str(PYTHON_ROOT / "app-server-bin"),
         ]
     )
-    pevo = ROOT / "target" / "release" / ("pevo.exe" if os.name == "nt" else "pevo")
+    pevo = (
+        artifact_root.parent
+        / "cli-target"
+        / "release"
+        / ("pevo.exe" if os.name == "nt" else "pevo")
+    )
     workbench = ROOT / "apps" / "workbench" / "dist"
     run(
         [

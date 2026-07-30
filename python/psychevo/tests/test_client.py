@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from psychevo import (
     ApprovalDecision,
     Client,
+    ProtocolError,
     RequestTimeoutError,
     Tool,
     ToolResult,
@@ -62,7 +63,13 @@ for line in sys.stdin:
             "protocolVersion": 1,
             "protocolMin": 1,
             "protocolMax": 1,
-            "capabilities": {},
+            "capabilities": {
+                "threads": True,
+                "turns": True,
+                "eventReplay": "bounded",
+                "interactions": True,
+                "customTools": True,
+            },
         }
     elif method in {"thread/start", "thread/resume", "thread/read"}:
         result = thread
@@ -79,6 +86,7 @@ for line in sys.stdin:
             "registered": True,
             "toolCount": len(request["params"]["tools"]),
             "approvalHandler": request["params"]["approvalHandler"],
+            "clarifyHandler": request["params"]["clarifyHandler"],
         }
     elif method == "turn/start":
         turn_id = request["params"]["turnId"]
@@ -433,17 +441,22 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 "allowAlways": False,
                 "mcpStartup": {
                     "server": "docs",
-                    "transport": "stdio",
-                    "descriptorFingerprint": "sha256:fixture",
+                    "source": "profile:mcp:docs",
+                    "target": {
+                        "kind": "stdio",
+                        "command": "/usr/bin/docs-mcp",
+                        "args": ["--serve"],
+                        "cwd": "/workspace",
+                        "envNames": ["DOCS_TOKEN"],
+                    },
                 },
             }
         )
 
         self.assertEqual(requests[0].mcp_startup.server, "docs")
-        self.assertEqual(
-            requests[0].mcp_startup.descriptor_fingerprint,
-            "sha256:fixture",
-        )
+        self.assertEqual(requests[0].mcp_startup.source, "profile:mcp:docs")
+        self.assertEqual(requests[0].mcp_startup.target.command, "/usr/bin/docs-mcp")
+        self.assertEqual(requests[0].mcp_startup.target.env_names, ("DOCS_TOKEN",))
         self.assertIsNone(requests[0].filesystem)
 
     async def test_default_transport_never_searches_path(self) -> None:
@@ -492,7 +505,43 @@ class _StubbornTransport(_FailingTransport):
         self.aborted = True
 
 
+class _MessageTransport(_FailingTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+    async def receive(self) -> dict[str, object]:
+        return await self.messages.get()
+
+
 class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def _assert_reader_message_is_terminal(
+        self,
+        message: dict[str, object],
+        *,
+        method: str = "unknown/test",
+    ) -> None:
+        transport = _MessageTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        rpc._reader = asyncio.create_task(rpc._read_loop())
+        pending = asyncio.create_task(rpc.request(method, {}))
+        while not transport.sent:
+            await asyncio.sleep(0)
+        await transport.messages.put(message)
+        await rpc._reader
+
+        with self.assertRaises(TransportError) as raised:
+            await pending
+        self.assertIs(rpc._terminal_error, raised.exception)
+        with self.assertRaises(TransportError) as later:
+            await rpc.request("thread/read", {"threadId": "thread-1"})
+        self.assertIs(later.exception, raised.exception)
+
     async def test_default_callback_pool_has_eight_workers_and_sixty_four_backlog(
         self,
     ) -> None:
@@ -502,10 +551,46 @@ class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
             approval_handler=None,
             clarify_handler=None,
         )
+        self.assertFalse(rpc._callbacks)
         rpc._ensure_callback_workers()
 
         self.assertEqual(len(rpc._callbacks), 8)
         self.assertEqual(rpc._callback_queue.maxsize, 64)
+        await rpc.close()
+
+    async def test_start_keeps_callback_pool_idle_until_reverse_work(self) -> None:
+        transport = _MessageTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        start = asyncio.create_task(rpc.start())
+        while not transport.sent:
+            await asyncio.sleep(0)
+        await transport.messages.put(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {
+                    "server": {"name": "test", "version": "0.1.0"},
+                    "protocolVersion": 1,
+                    "protocolMin": 1,
+                    "protocolMax": 1,
+                    "capabilities": {
+                        "threads": True,
+                        "turns": True,
+                        "eventReplay": "bounded",
+                        "interactions": True,
+                        "customTools": True,
+                    },
+                },
+            }
+        )
+        await start
+
+        self.assertFalse(rpc._callbacks)
         await rpc.close()
 
     async def test_turn_wait_is_unbounded_by_default_and_accepts_a_deadline(
@@ -563,6 +648,203 @@ class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(rpc._pending)
         rpc._receive_response({"id": 1, "result": {"late": True}})
         self.assertFalse(rpc._pending)
+
+    async def test_malformed_json_rpc_envelopes_are_terminal(self) -> None:
+        malformed = (
+            {},
+            {"jsonrpc": "1.0", "id": 1, "result": {}},
+            {"jsonrpc": "2.0", "id": 1},
+            {"jsonrpc": "2.0", "id": 1, "result": {}, "error": {}},
+            {"jsonrpc": "2.0", "id": "1", "result": {}},
+            {"jsonrpc": "2.0", "method": 7},
+            {"jsonrpc": "2.0", "method": "future/event", "params": "broken"},
+            {"jsonrpc": "2.0", "method": "turn/event", "result": {}},
+            {"jsonrpc": "2.0", "id": 7, "method": "tool/call", "params": {}},
+            {"jsonrpc": "2.0", "id": 1, "error": "broken"},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": True, "message": "broken"},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": -32000, "message": 7},
+            },
+        )
+        for index, message in enumerate(malformed):
+            with self.subTest(index=index):
+                await self._assert_reader_message_is_terminal(message)
+
+    async def test_every_known_result_decoder_fails_the_connection(self) -> None:
+        methods = (
+            "initialize",
+            "tool/register",
+            "thread/start",
+            "thread/resume",
+            "thread/read",
+            "thread/list",
+            "thread/archive",
+            "thread/compact",
+            "thread/fork",
+            "turn/start",
+            "turn/resume",
+            "turn/wait",
+            "turn/interrupt",
+            "turn/steer",
+            "interaction/respond",
+            "shutdown",
+        )
+        for method in methods:
+            with self.subTest(method=method):
+                await self._assert_reader_message_is_terminal(
+                    {"jsonrpc": "2.0", "id": 1, "result": {}},
+                    method=method,
+                )
+
+    async def test_every_known_malformed_turn_event_is_terminal(self) -> None:
+        malformed_events = (
+            {"type": "accepted"},
+            {"type": "started"},
+            {"type": "message"},
+            {"type": "message_delta"},
+            {"type": "reasoning_delta"},
+            {"type": "reasoning_completed"},
+            {"type": "tool"},
+            {"type": "interaction_requested"},
+            {"type": "interaction_resolved"},
+            {"type": "warning"},
+            {"type": "completed"},
+            {"type": "failed"},
+            {"type": "resync_required"},
+        )
+        for event in malformed_events:
+            with self.subTest(event=event["type"]):
+                await self._assert_reader_message_is_terminal(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "turn/event",
+                        "params": {
+                            "threadId": "thread-1",
+                            "turnId": "turn-1",
+                            "event": event,
+                        },
+                    }
+                )
+
+    async def test_server_error_notification_is_terminal(self) -> None:
+        await self._assert_reader_message_is_terminal(
+            {
+                "jsonrpc": "2.0",
+                "method": "server/error",
+                "params": {
+                    "code": -32603,
+                    "message": "notification dispatch failed",
+                    "data": None,
+                },
+            }
+        )
+
+    async def test_terminal_decode_failure_fails_every_pending_request(self) -> None:
+        transport = _MessageTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        rpc._reader = asyncio.create_task(rpc._read_loop())
+        read = asyncio.create_task(
+            rpc.request("thread/read", {"threadId": "thread-1"})
+        )
+        waiter = asyncio.create_task(
+            rpc.request("turn/wait", {"turnId": "turn-1"}, timeout=None)
+        )
+        while len(transport.sent) < 2:
+            await asyncio.sleep(0)
+        await transport.messages.put(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"id": "missing-required-thread-fields"},
+            }
+        )
+        await rpc._reader
+
+        results = await asyncio.gather(read, waiter, return_exceptions=True)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(isinstance(result, TransportError) for result in results))
+        self.assertIs(results[0], results[1])
+        self.assertIs(results[0], rpc._terminal_error)
+
+    async def test_valid_error_is_request_local_and_late_response_is_ignored(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        pending = asyncio.create_task(rpc.request("thread/read", {}))
+        while not transport.sent:
+            await asyncio.sleep(0)
+        await rpc._receive_message(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {
+                    "code": -32602,
+                    "message": "bad params",
+                    "data": {"field": "threadId"},
+                },
+            }
+        )
+
+        with self.assertRaises(ProtocolError) as raised:
+            await pending
+        self.assertEqual(raised.exception.code, -32602)
+        self.assertIsNone(rpc._terminal_error)
+
+        await rpc._receive_message(
+            {"jsonrpc": "2.0", "id": 1, "result": {"late": True}}
+        )
+        await rpc._receive_message(
+            {
+                "jsonrpc": "2.0",
+                "method": "future/notification",
+                "params": {"value": 1},
+            }
+        )
+        self.assertIsNone(rpc._terminal_error)
+
+    async def test_unknown_callback_request_returns_method_not_found(self) -> None:
+        transport = _FailingTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+
+        await rpc._receive_message(
+            {
+                "jsonrpc": "2.0",
+                "id": "server:future-1",
+                "method": "future/callback",
+                "params": {},
+            }
+        )
+        for _ in range(100):
+            if transport.sent:
+                break
+            await asyncio.sleep(0)
+
+        self.assertEqual(transport.sent[0]["id"], "server:future-1")
+        self.assertEqual(transport.sent[0]["error"]["code"], -32601)
+        self.assertIsNone(rpc._terminal_error)
+        await rpc.close()
 
     async def test_callback_request_overload_is_bounded_and_observable(self) -> None:
         transport = _FailingTransport()
