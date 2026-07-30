@@ -38,6 +38,8 @@ An install record preserves:
 - plugin name
 - version
 - source identity
+- the resolved commit revision for Git sources, separately from the requested
+  ref embedded in source identity
 - install scope
 - package root
 - data root
@@ -64,11 +66,24 @@ private `PluginMaterializationLimits` policy and one bounded walker:
 - 64 path components.
 
 Git uses shallow, no-tags, single-branch acquisition; an explicit ref is fetched
-and checked out at depth one. Npm packing disables lifecycle scripts and shares
+and checked out at depth one. After checkout runtime records `rev-parse HEAD`,
+then removes only the staging root's top-level `.git` before bounded inspection
+and copy. Installed Git package roots therefore contain no repository metadata.
+Activating a pre-existing Git install record removes a legacy top-level `.git`
+idempotently without scanning or deleting nested package directories. Separate
+invocations may perform that migration concurrently; disappearance between
+metadata inspection and deletion is success rather than a plugin activation
+failure. Private
+credential-bearing Git URLs remain usable, but credentials enter neither the
+record, resolved revision, diagnostics, nor installed files. Npm packing
+disables lifecycle scripts and shares
 the same deadline. Every materialization subprocess owns a process tree: a Unix
 process group or a Windows kill-on-close Job. The single deadline covers direct
 process exit, descendant termination, and bounded stdout-reader completion, so
 a descendant that inherits stdout cannot extend the operation past it. The
+platform ownership and kill mechanics come from the same minimal
+`ProcessTreeGuard` used by hook commands; materialization does not retain a
+second Unix/Windows process-tree implementation. The
 streaming Rust tar/gzip extractor rejects absolute and
 parent-traversal paths, symlinks, hardlinks, devices, and other non-regular
 entries before writing, and checks every quota per entry. Installation copy
@@ -299,6 +314,17 @@ The invocation assembly explicitly retains every started worker session and
 awaits its asynchronous shutdown on both success and failure after tools and
 hooks stop using it. Process `Drop` is only an abnormal best-effort kill
 fallback; it is not the normal production teardown owner.
+
+Static manifest contributions are assembled without starting a worker. Plan
+mode does not call worker `contributions/list`; static skills, Agents, toolsets,
+MCP declarations, and hook descriptors remain available for their owning
+runtime policies, including MCP startup and its read-only Plan projection.
+Default mode starts a worker only when its dynamic tool surface is materialized
+or a selected worker hook actually runs. A per-invocation
+`PluginWorkerRuntime` is the only session owner and starts each accepted plugin
+at most once, so dynamic tool discovery and later hook/tool calls reuse the same
+process. Runtime does not add a second accepted-name registry or retain a
+parallel `worker_sessions` collection.
 
 Worker startup, calls, contribution discovery, hook dispatch, and shutdown are
 asynchronous. One owner holds the Tokio child, stdin, bounded stdout decoder,

@@ -63,6 +63,14 @@ truncated out. All summary chunks must succeed before runtime commits the one
 new checkpoint. An intermediate provider or persistence failure leaves the
 prior checkpoint and transcript unchanged.
 
+Planning renders and redacts each durable record exactly once into an
+indivisible text unit. It computes the fixed prompt cost once for each rolling
+summary value, adds the precomputed unit costs linearly, and constructs the
+provider-facing user prompt only after selecting a chunk. Provider dispatch
+receives the already-rendered chunk text; it must not traverse or render the
+same records again. This preserves tool/result atomicity and zero-write
+failure while making planning linear in rendered input size.
+
 `PreCompact` retains veto authority. After checkpoint commit, `PostCompact` is
 observation-only: stop, failure, timeout, or invalid output becomes a warning
 and cannot turn a successful compaction API result into an error.

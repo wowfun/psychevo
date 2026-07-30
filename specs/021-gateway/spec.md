@@ -91,20 +91,41 @@ Turn and Compact serialization. Gateway owns local Shell serialization and
 transport producers. Queue advancement never creates a detached execution
 task.
 
+`ApplicationRuntime` is the only owner of Framework admission, accepted task
+tracking, and FIFO lanes. It admits at most 64 executing-or-queued Framework
+operations across the Application and at most 32 per Thread. `start_thread`
+uses the Application lane; archive, delete, fork, compact, and start-turn use
+the target Thread lane. Saturation is rejected before any durable mutation with
+structured data
+`{kind:"application_overloaded",scope:"application"|"thread",limit}`.
+An accepted mutation runs in a runtime-owned task and settles through its
+result channel even if the requesting connection or caller future disappears.
+There is no second admission gate in an Application facade.
+
 Shutdown is idempotent and ordered:
 
 1. close Gateway listeners and connection admission;
 2. cancel schedulers, Channel ingress, tailers, and other transport producers;
 3. close Application admission and drain already accepted Turns;
-4. flush and close Framework event projection;
-5. close Agent Session Adapters;
-6. close Framework state after all state consumers have stopped;
-7. abort and report tasks that exceed the explicit graceful and force
+4. drain accepted mutations and Agent tasks, retry pending Agent and Turn
+   terminals, and release every FIFO reservation;
+5. flush and close Framework event projection;
+6. close Agent Session Adapters;
+7. close Framework state after all state consumers have stopped;
+8. abort and report tasks that exceed the explicit graceful and force
    deadlines.
 
 A task panic or timeout is observable in the shutdown report and cannot be
-silently detached. A child task remains local to the narrowest owner that can
-cancel and await it.
+silently detached. Graceful shutdown reports both panic and terminal-flush
+failures after completing every cleanup scope. Force shutdown aborts tracked
+tasks, stages interrupted terminals where required, and leaves neither a
+compaction checkpoint nor a FIFO permit owned by an aborted operation. A child
+task remains local to the narrowest owner that can cancel and await it.
+Gateway supervision retains only the total panic count and the first
+`{name,scope}` panic context; it does not retain task ids, successful task
+history, or cancellation history. Gateway shutdown drains producers, Turns,
+infrastructure, and Agent Session adapters before returning one combined error
+for every observed cleanup failure.
 
 Gateway-owned Channel replies, OAuth work, voice producers, and other genuinely
 detached transport work are admitted to the existing transport supervisor.
@@ -112,6 +133,13 @@ Automation obtains its supervisor permit before durably claiming a run.
 Accepted Turns continue to enter Application and never move under Gateway
 ownership. TUI compaction calls the owning `Thread::compact` operation so it
 cannot bypass the Thread FIFO.
+
+The Gateway transport supervisor retains no completed-task history or
+monotonic task id. It keeps only the total panic count and the first panic's
+task name and scope. Normal completion and cancellation leave no report entry.
+Shutdown drains every producer, Turn, and infrastructure scope even after a
+panic, then combines that bounded panic summary with any Application terminal
+flush failure instead of returning early and detaching later cleanup.
 
 ## Internal Journey Profiling
 
@@ -434,9 +462,13 @@ Framework interrupt and queue-clear actions for an accepted ACP-backed Turn.
 
 Public steering crosses `thread/action/run` with action kind `steer` and an
 `expectedTurnId`. Gateway rejects or ignores stale steering when that id does
-not match the active turn. Interrupt and compact use the same descriptor-gated
-Thread Application action boundary; there are no parallel public turn-control
-RPCs.
+not match the active turn. One steer whose serialized message exceeds the
+Control byte ceiling is rejected before a foreign-owner command is durably
+accepted. Count saturation or aggregate byte saturation caused by other queued
+inputs remains retryable; a permanently oversized legacy command is marked
+failed rather than left pending forever. Interrupt and compact use the same
+descriptor-gated Thread Application action boundary; there are no parallel
+public turn-control RPCs.
 
 ## Interaction Requests
 
@@ -546,6 +578,19 @@ flow through the process-level Event Hub. A disconnected client never has an
 unknown request replayed by Gateway; it recovers authoritative Thread state
 through `thread/resume` and related snapshot reads.
 
+Each WebSocket connection has one opaque server-generated id. A terminal
+belongs to the connection that starts it; another connection observes it as
+unknown and cannot write, resize, or terminate it. The Terminal Manager admits
+at most 64 starting or active terminals process-wide. On disconnect it removes
+and terminates every terminal owned by that connection and emits at most one
+`terminal/exited` frame per terminal with reason `connection_closed`. Natural
+exit, explicit terminate, and disconnect compete through the same map removal,
+so only the winner emits the terminal notification. If disconnect removes a
+starting reservation while PTY creation is in flight, the startup path must
+terminate the newly created child before returning its stale-start error. Any
+other startup failure after child creation, including PTY reader or writer
+acquisition, has the same explicit termination requirement.
+
 The unauthenticated HTTP readiness endpoint is `/readyz`. It returns only
 non-sensitive readiness and version information. WebSocket, download, and
 detailed status routes require authentication. Direct API clients authenticate
@@ -611,7 +656,10 @@ Every registered request has an exact Rust result type and generated TypeScript
 validator. Plugin, MCP, Skill, Tool, filesystem-approval, and MCP-startup
 results use typed shapes rather than `json_object`, `GatewayJsonResult`, or
 `resultValidation: "opaque"`. Protocol generation fails when a registry entry
-lacks a result type. Generated AJV setup registers schemars numeric formats and
+lacks a result type. For tagged enum variants, generated JSON Schema property
+names must equal the keys emitted by Serde and TypeScript, including camel-case
+variant fields; a wire/schema parity test covers each newly introduced shape.
+Generated AJV setup registers schemars numeric formats and
 compiles in strict schema mode; runtime numeric-format validation remains
 disabled in this slice. The generation gate uses strict AJV compilation over
 the complete schema surface and rejects any JSON Schema keyword outside the

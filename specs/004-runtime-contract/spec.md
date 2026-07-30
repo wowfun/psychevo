@@ -120,6 +120,22 @@ optimistic pending UI. Runtime does not own next-turn queue scheduling; product
 entrypoints may keep caller-owned queues and start later invocations through
 normal runtime entrypoints.
 
+Each invocation has one bounded control-input owner for injected and steered
+messages. The two queues retain their distinct drain semantics but share a
+maximum of 64 accepted messages and 1 MiB of UTF-8 user payload. Admission and
+pending-message updates reject the newest input with a typed closed, invalid,
+unknown-input, count-limit, or byte-limit error; accepted messages are never
+evicted. Cancel and drain reclaim their count and bytes. Interfaces must expose
+overload as an error rather than treating it as a stale Turn or silently
+dropping the input.
+
+The user-input entrypoints validate every message before serialization,
+capacity accounting, or buffer mutation. Runtime-generated Agent mailbox
+messages use a separately named hidden authoritative batch entrypoint because
+they may carry Assistant or tool-result roles. It shares the same atomic
+admission, count/byte ceilings, drain accounting, and closed-state owner without
+making the public user-input batch accept arbitrary roles.
+
 Runtime connects agent-invocation assembly facts, tool declaration snapshot facts, `agent_start` and `agent_end` events, AI generation outcomes, tool outcomes, messages, resource decisions, and terminal outcomes to an evidence sink. An evidence sink is the runtime-wired destination for durable session and agent-invocation evidence. [005 Durable Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics. [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines the persistence substrate boundary. This spec does not define record shape, storage format, trace format, replay semantics, or session storage format.
 
 When the AI layer reports normalized usage or allowlisted provider metadata,

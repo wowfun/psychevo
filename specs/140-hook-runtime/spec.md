@@ -111,6 +111,14 @@ output is larger than the capture limit, runtime truncates at a valid character
 boundary and appends a visible truncation marker; malformed input bytes degrade
 through lossy UTF-8 conversion instead of crashing the agent loop.
 
+Each command handler owns a process tree through the same minimal
+`ProcessTreeGuard` used by plugin materialization: a Unix process group or a
+Windows kill-on-close Job. One absolute handler deadline covers direct-child
+wait, stdout/stderr EOF, and cleanup. On expiry runtime terminates the whole
+tree, gives bounded readers at most one additional second to drain, aborts
+readers that still retain inherited descriptors, and returns the already
+captured bounded output. A descendant cannot keep a timed-out handler alive.
+
 Structured command stdout may return:
 
 - `continue: false` with `stopReason` to block the current event when the event

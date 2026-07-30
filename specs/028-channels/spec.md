@@ -134,6 +134,17 @@ flow such as slash commands, interrupt, new/reset conversation, permission
 approvals, and Ask replies before constructing the lower-level runtime turn
 request.
 
+Every adapter exposes asynchronous shutdown; adapters without background work
+may use the default no-op implementation. The Channel Gateway invokes shutdown
+for every started adapter from its finalization path, including error and
+external-cancellation exits, and awaits those shutdowns before reporting the
+runner stopped. The Gateway transport supervisor supplies its shutdown token
+to the tracked Channel runner and waits for that runner's finalizer; it must not
+cancel by dropping the runner future outside the adapter-owned cleanup path.
+Adapter ingress queues are bounded and apply asynchronous
+backpressure at the platform callback boundary; accepted events are neither
+silently dropped nor buffered without limit.
+
 Channel sources use Gateway persistent source lifetime. Source keys are
 deterministic for the remote lane and exclude raw local paths. Public or
 diagnostic keys must not leak raw platform identifiers when a hashed or

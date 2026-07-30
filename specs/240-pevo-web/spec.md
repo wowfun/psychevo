@@ -165,6 +165,22 @@ and makes every later connect or send fail closed. `GatewayClient.dispose()`
 awaits transport disposal after rejecting pending requests and removing its
 subscriptions.
 
+`@psychevo/client` also owns the one scope-key function used by Workbench
+applications: canonical Gateway cwd plus source kind, raw id, and lifetime.
+Source `rawIdentity` and visible labels are not identity and must not enter
+cache or stale-response keys. Workbench must not retain local
+`scopeIdentity`/`sameScopeIdentity` variants.
+
+Workspace reads capture both the scope epoch and the requested facet revision.
+Refreshing a facet invalidates its older request. `readDiff` and
+`readBranches` return `null` when their response is stale; callers must not open
+a diff tab or branch picker from that result. Session browsing retains
+profile-global cold-start results across a source-only bind, but any new browse
+or scope bind invalidates the single older-page flight and clears its loading
+state. That flight token contains client epoch, scope epoch, browse revision,
+cwd, and cursor; a late page can neither merge rows nor clear a newer loading
+indicator. Per-cwd pagination revision maps are forbidden.
+
 ## Web And PWA Builds
 
 The Web build may enable PWA installation and service-worker caching for static

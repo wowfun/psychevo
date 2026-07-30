@@ -189,6 +189,17 @@ the bound would otherwise be exceeded, the stream emits
 `GenerationEvent::Resync { snapshot, dropped_events }` so a slow consumer can
 replace local state instead of guessing across a gap.
 
+The buffer and producer share the live generation accumulator. Queue entries
+carry incremental events plus at most one internal resync marker, not a cloned
+snapshot on every producer delta. Once a marker exists, further replaceable
+deltas update the shared accumulator and dropped count without serializing or
+cloning the growing assistant snapshot. The consumer materializes the latest
+authoritative snapshot only when it removes the marker. Payload accounting for
+an adjacent string delta uses that delta's encoded growth rather than
+re-serializing the complete coalesced string. For a slow consumer receiving
+400 one-KiB deltas, at most one snapshot is materialized before draining and at
+most two including terminal settlement.
+
 Started, terminal, and completion settlement are never dropped. The terminal
 `GenerationOutput.snapshot` is authoritative regardless of which intermediate
 events a consumer observed. Event buffering is generation-local and does not

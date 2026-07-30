@@ -224,10 +224,14 @@ child-thread path.
 
 Each `Application` privately owns an `AgentSupervisor`; standalone execution
 owns the same supervisor shape at its root and children inherit that exact
-owner. The supervisor retains active runs only. It persists the child terminal
-and mailbox edge before removing the active record, and historical status is
-reconstructed from durable edges and the child Thread rather than a completed
-in-memory cache.
+owner. For each Agent id the supervisor owns exactly one `Active` or
+`PendingTerminal` slot. Registration is vacant-only. A concurrent message or
+continuation request atomically either injects the existing active run or
+creates the one continuation; it never replaces a slot or starts two child
+loops. `PendingTerminal` does not consume an active-concurrency permit, but it
+retains the Agent id until the terminal transaction commits. Historical status
+after commit is reconstructed from durable edges and the child Thread rather
+than a completed in-memory cache.
 The supervisor also owns every detached child task handle. Owner shutdown
 closes child-task admission, signals all active child controls, and awaits
 their finalizers before StateRuntime closes; forced shutdown aborts and reaps
@@ -239,7 +243,28 @@ hook, provider, persistence, and cancellation failures all pass through that
 same terminal finalizer. The active record is removed only after the terminal
 transaction commits; a commit failure retains the terminal record as the
 same-process retry owner instead of fabricating completion or silently dropping
-the run.
+the run. Normal completion, failure, panic, an external terminal edge, and
+forced abort first stage one semantic terminal draft and then call that same
+finalizer. Panic stages a failed terminal; forced abort stages interrupted.
+Terminal transaction attempts serialize per Agent id. A later retry rechecks
+both the retained phase and the exact slot generation after acquiring that
+Agent's commit lock, so an old waiter cannot commit a newly registered
+same-id continuation. Concurrent finalizer, continuation, and shutdown paths
+can commit at most one mailbox event. Closing an already `PendingTerminal`
+Agent preserves its staged semantic terminal and triggers the same retry when a
+StateRuntime is available; it never rewrites completion or failure as
+shutdown. External delegates use this finalizer on both success and error and
+never close an edge with a separate best-effort write.
+Retry happens only when a later continuation targets the Agent or during
+Application shutdown, not in an unowned timer. Shutdown retries every pending
+terminal before StateRuntime closes and reports any still-uncommitted terminal
+after all Agent tasks have been drained.
+
+`wait_agent` claims and injects at most one FIFO page of 64 pending mailbox
+notifications. Claiming the page and leaving later rows pending are one durable
+transaction. If Control admission rejects that page, only the claimed page is
+reset, so a later call can progress after capacity drains instead of repeatedly
+claiming an unbounded history.
 
 Ordinary child execution admits at most four active children per parent
 session. Team configuration may request a smaller limit but never more than

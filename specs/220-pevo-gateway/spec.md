@@ -172,14 +172,13 @@ entries from the in-memory map. This bounded housekeeping requires no periodic
 task and does not add a TTL, logout flow, or background reaper to authenticated
 browser sessions.
 
-The managed cookie authorizes cwds granted by a launch/open flow in the
-current server process, cwds created by browser workspace-management RPCs,
-and cwds explicitly adopted from human-visible global session groups. A
-browser session may adopt another cwd by resuming a stored session or by
-starting a new draft from that cwd group in the Sessions browser, but it
-may not request arbitrary cwds that have no visible stored session. Direct
-Bearer API clients may request any local cwd accessible to the Psychevo
-process.
+The managed cookie authorizes the active profile and Gateway process, not a
+directory access-control list. An authenticated browser may select any
+canonical cwd accessible to the Psychevo process, including a new draft cwd
+with no stored session. The launch cwd remains the initial navigation and
+project-filter context. Host-side external actions retain the separate,
+monotonic grant contract in [240 Pevo Web](../240-pevo-web/workbench-layout.md);
+choosing a draft cwd does not grant an OS side effect.
 
 Direct browser visits to the managed base URL without a valid browser-session
 cookie are not authorized Web Shell launches. They should return a local

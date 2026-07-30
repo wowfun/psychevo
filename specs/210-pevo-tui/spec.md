@@ -157,12 +157,27 @@ submission is only a fallback for a foreign Gateway activity projected into the
 current TUI session; the TUI must not try to rediscover its local Framework
 Turn through a Gateway source selector.
 
+Editing an unsent steer updates the exact pending Control input. Only an
+`UnknownInput` result means the old steer has already left Control and may be
+resubmitted as a new input. Count, byte, closed-input, and validation failures
+keep the editor and old preview intact and report the error; they never delete
+the old preview or submit a duplicate instruction.
+
 The TUI slash parser remains local UI behavior, but slash command effects must
 map to typed Client or interface-neutral Framework helpers. TUI must not add a
 generic `slash/exec` transport method, construct private execution options,
 call the Native run loop directly, or shell out to `pevo run` for normal
 prompting or control. The TUI remains an internal module of `psychevo-cli`; it
 is not a separate crate or package.
+
+File completion owns one `FileSearchWorker` for the fullscreen state lifetime.
+Input replaces a single latest-request slot; an unstarted older request is
+discarded rather than receiving its own thread. The running scan checks stop,
+generation, and replacement state for every filesystem entry. It retains only
+the best eight candidates in a fixed-size heap and sorts those eight for
+display. Fullscreen teardown signals stop and joins the worker. Rapid input
+therefore has one worker thread, bounded retained results, and no detached
+search work after the UI ends.
 
 ## Cross-Surface Journey Profiling
 

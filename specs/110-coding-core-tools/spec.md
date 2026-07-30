@@ -140,6 +140,9 @@ the target is replaced.
 Each root Turn or child Agent invocation owns one `FileReadTracker` across its
 provider loop. It holds at most 4,096 canonical-path freshness records, evicts
 the oldest deterministically, and is dropped when that invocation ends.
+An eviction removes the map entry only when the evicted FIFO sequence is still
+that path's current read sequence; repeated reads of one path cannot evict the
+newer stamp.
 
 One process-scoped `WorkspaceMutationCoordinator` combines canonical active
 path locks with at most 4,096 FIFO last-writer diagnostics. Process scope is
@@ -150,6 +153,15 @@ letting stale FIFO nodes grow beyond the same bound. Atomic
 replace/no-clobber behavior remains unchanged; the narrow
 external check-to-rename race is explicitly outside this slice rather than
 being hidden behind an inode or descriptor-relative filesystem framework.
+
+A replace or delete performs exactly one authoritative pre-commit content hash.
+Callers first use the invocation stamp and sibling-writer sequence as the cheap
+admission check, then pass the expected version to the mutation backend for its
+single hash comparison. Preparing a temporary replacement writes and flushes
+the supplied bytes without reading the temporary file back in full; the bytes
+already owned by the caller are the source of truth. Same-size/restored-mtime
+conflicts, atomic replacement, no-clobber creation, permissions, BOM, and line
+ending behavior remain unchanged.
 
 Successful writes return a JSON object with stable fields:
 - `path`: target path or equivalent target identifier

@@ -134,15 +134,38 @@ they reuse `SecretValue` without adding a second secrecy framework.
 Startup permission/session keys use
 `server@<descriptor-sha256>` rather than name-only matching. MCP startup
 supports allow-once or deny, never allow-always. Permission requests project a
-typed `mcpStartup` detail.
+typed `mcpStartup` detail that displays the resolved stdio command, arguments,
+cwd, and explicit environment names, or the HTTP URL and credential/header
+binding names. The HTTP approval URL retains only scheme, host, port, and path;
+userinfo, query, and fragment are omitted even though the immutable launch
+keeps the complete configured URL for the actual connection. Secret values
+never enter the detail.
 
-The Thread runtime reuses server connections while the resolved catalog and
-available environment identity are unchanged. The connection reuse key includes
-the complete resolved transport identity: stdio command, arguments, explicit
-environment, and effective cwd; or HTTP URL, headers, resolved bearer/OAuth
-credential digest, scopes, resource, and client identity. It also includes
-source, policy, and the effective MCP-startup permission environment. Secret
-values contribute only through a digest and never enter diagnostics.
+The Thread runtime reuses server connections while the resolved catalog
+identity is unchanged. The connection reuse key includes stdio command,
+arguments, explicit environment values, and effective cwd; or HTTP URL,
+headers, resolved bearer/OAuth credential digest, scopes, resource, and client
+identity. It also includes source, policy, and the effective MCP-startup
+permission environment. Secret values contribute only through a digest and
+never enter diagnostics.
+
+A stdio MCP server is an ordinary local process. It inherits the host
+environment in addition to its explicit environment entries. Ambient
+environment values are deliberately not part of descriptor or reuse identity,
+and runtime does not pin executable inode or content identity against
+replacement by the same OS user. The canonical command, arguments, cwd, and
+explicit binding names remain the approval-visible launch target. Runtime must
+not claim hermetic environment or immutable executable identity.
+
+Plan mode retains configured MCP declarations and materializes them through the
+normal startup, permission, and listing path. Resource and prompt utilities
+remain available. A dynamic MCP tool enters the Plan invocation surface only
+when its declaration has `readOnlyHint=true`; an absent or false hint omits the
+tool. The hint is server-authored effect metadata, not a security proof, and an
+MCP server may perform work while starting or listing capabilities. This
+feature/UX boundary is explicit: Plan preserves read-only documentation and
+research workflows without claiming that the remote server is confined.
+Default mode projects all tools accepted by the configured server policy.
 
 Only a snapshot whose enabled servers completed startup is cacheable. Required
 failures, permission/startup failures, and optional connection failures remain
@@ -204,6 +227,22 @@ ordinary server startup. The login flow opens a loopback callback listener,
 returns an authorization URL to the caller, stores tokens only after a completed
 callback exchange, and exposes completion status without revealing token
 values.
+
+Gateway owns OAuth login state in one `McpOAuthSessionStore`, not in
+per-session locks or detached status cells. The store admits at most 32
+sessions. Pending callback and token-exchange work has one ten-minute absolute
+deadline. A credential-store write is a blocking platform call that cannot be
+safely cancelled after it starts: the callback must enter that phase before
+the deadline, retain the session as publicly pending, and run the blocking call
+to its real success or failure without yielding its ownership. It must commit
+that terminal status before the next asynchronous suspension and must never
+detach a keyring write that can later contradict a reported terminal result.
+Succeeded and failed sessions remain queryable for two minutes. Admission,
+status reads, and callback completion prune expired entries; no reaper task is
+created. Admission may evict the oldest terminal session, but when all 32
+entries are non-terminal it returns a structured overload before binding
+another listener. Status is a discriminated result: `pending`, `succeeded`, or
+`failed { message }`; token values never appear in status or diagnostics.
 
 ## Identity And Naming
 

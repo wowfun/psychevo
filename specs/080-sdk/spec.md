@@ -68,6 +68,13 @@ per-Thread actor or resident worker. An idle Thread cell is removed when it has
 no running or queued Turn, mutation reservation, or waiter. Correctness must
 not depend on a process-lifetime map entry per Thread.
 
+Application admits at most 64 accepted or queued operations in total and at
+most 32 for one Thread. These fixed ceilings cover Turn admissions and
+start/archive/fork/compact/delete mutations; they are not public tuning knobs.
+Overload is rejected before any durable write with structured kind
+`application_overloaded`, scope `application` or `thread`, and the applicable
+limit. Work below the ceilings preserves FIFO order.
+
 ## Rust Crate Boundary
 
 The current source workspace has the following product crates:
@@ -354,6 +361,12 @@ is owned by Application supervision:
   flushes durable projection, shuts down Agent Session Adapters, and closes
   state last.
 
+The same supervision rule applies to an accepted durable mutation. Dropping the
+caller, result receiver, App Server request, or WebSocket does not cancel it.
+Application owns the task and settles its FIFO reservation on success, error,
+panic, or forced shutdown. There is no caller-owned mutation future beside the
+Application task owner.
+
 Admission is acquired before the first accepted-Turn write and held through
 active-slot registration. Caller cancellation during or after the acceptance
 transaction drops only that caller's receipt receiver. A caller therefore
@@ -599,6 +612,18 @@ replayed on the half-closed transport. Turn handles are removed after their
 terminal settles. The Client does not implement automatic reconnect or request
 replay.
 
+The transport owns only framing, the 16 MiB limit, JSON decoding, and the
+top-level object check. `_RpcClient` is the one strict JSON-RPC decoder. Each
+pending request retains its method, future, and hand-owned typed result decoder,
+so an invalid result fails the connection at the reader boundary instead of
+escaping later as a caller-local type error. Invalid JSON-RPC envelopes,
+malformed error objects, malformed known notifications, and `server/error`
+notifications enter the same terminal transition. A well-formed response whose
+numeric id is no longer pending is a late response and is ignored. Unknown
+well-formed notifications are ignored for forward extensibility; unknown
+well-formed callback requests receive JSON-RPC `-32601`. Python does not add a
+second generated schema or protocol engine for these checks.
+
 Ordinary Python RPC requests have a 30-second default timeout and each request
 may override it. `TurnHandle.wait()` retains long-operation semantics with no
 default total timeout, while accepting an explicit timeout. A timed-out request
@@ -607,10 +632,12 @@ not retry. It raises
 `RequestTimeoutError(method, timeout, delivery_unknown)`, where delivery is
 unknown only when the mutation may have crossed the transport boundary.
 
-Reverse callbacks use eight fixed workers and a bounded backlog of 64. A full
-queue returns an overload JSON-RPC error for a callback request and reports a
-notification overload through the event loop's exception handler. It never
-creates an unbounded callback task set.
+Reverse callbacks lazily start eight fixed workers when the first callback or
+clarify job arrives and use a bounded backlog of 64. An idle connection that
+never receives reverse work owns no callback tasks. A full queue returns an
+overload JSON-RPC error for a callback request and reports a notification
+overload through the event loop's exception handler. It never creates an
+unbounded callback task set.
 
 `Client.close_timeout` defaults to ten seconds. One deadline covers the
 shutdown RPC, callback worker cancellation, reader termination, transport

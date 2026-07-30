@@ -66,6 +66,10 @@ gating must not create or continue a local thread.
 
 The adapter uses the platform SDK long-connection event stream. It normalizes
 accepted inbound text and supported media into Gateway source-scoped turns.
+The SDK callback feeds one 64-entry ingress queue and awaits capacity rather
+than dropping an accepted event. Adapter shutdown signals the long-connection
+stream to stop and awaits its stream task. Gateway runner completion therefore
+cannot leave a detached Feishu/Lark stream or callback producer.
 
 Feishu/Lark can support richer delivery than text-only channels. Cards and
 buttons may be used for approvals, Ask responses, and structured status when

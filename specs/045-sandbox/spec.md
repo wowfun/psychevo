@@ -187,8 +187,13 @@ Sandboxed shell children receive these environment markers:
 
 `tty=true` is unsupported while sandbox is enabled in v1. Existing yielded
 sessions preserve streaming, reader threads, abort handling, timeouts, session
-IDs, and `write_stdin` polling semantics. Non-empty stdin remains allowed only
-for stdin-capable sessions; v1 sandboxed sessions do not add new stdin support.
+IDs, and `write_stdin` polling semantics. An empty `write_stdin` request may
+poll a session in every mode. A non-empty request is checked against the
+current invocation policy before session lookup and is denied in effective
+read-only mode even when the session was created by an earlier Execute Turn
+with the same task identity. In writable modes, non-empty stdin remains allowed
+only for stdin-capable sessions; v1 sandboxed sessions do not add new stdin
+support.
 
 Denials use the wording:
 
@@ -240,8 +245,10 @@ surface; v1 does not add new RPC request fields.
   children retain the explicitly advisory boundary above.
 - Sandboxed shell children include the `PSYCHEVO_SANDBOX*` markers.
 - Sandbox-enabled `tty=true` is rejected before spawn.
-- Backend-unavailable cases fail closed without compiling Linux-only Landlock
-  dependencies or unused Unix helpers into native Windows builds.
+- Linux requests Landlock ABI V3 with hard compatibility and accepts only a
+  fully enforced ruleset. Partial or unavailable enforcement fails closed.
+  Linux-only Landlock dependencies and unused Unix helpers are not compiled
+  into native Windows builds.
 - macOS and Linux/WSL smoke tests verify inside-root write allowed and
   outside-root write denied when the backend is available.
 - native Windows Git Bash smoke verifies startup, reads, yielding, abort, Plan

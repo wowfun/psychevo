@@ -14,6 +14,16 @@
 - Split Workbench session-browser and workspace state into narrow stores,
   hardened Desktop per-window production capabilities, and fixed cold-start,
   CSP, branch-transition, and startup-budget regressions.
+- Hardened Control, Agent, Terminal, Channel, and Application lifecycles with
+  bounded admission, atomic terminal/mailbox state, deterministic teardown,
+  process ownership, and effective Plan-mode propagation.
+- Tightened MCP, Plugin, SDK, Workbench, TUI, and CI contracts with typed
+  approvals/results, fail-closed RPC and scope handling, stale-read rejection,
+  exact plugin revisions, deferred effective-mode execution, and restored main
+  CI/package ownership.
+- Made generation, compaction, file mutation, search, callbacks, packaging,
+  OAuth persistence, mailbox delivery, durable steers, and legacy Plugin Git
+  cleanup bounded, retry-safe, and failure-preserving.
 
 ## 2026-07-28
 
