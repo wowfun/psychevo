@@ -22,6 +22,7 @@ macro_rules! framework_internal_modules {
         $visibility mod paths;
         $visibility mod plugins;
         $visibility mod process_env;
+        $visibility mod process_tree;
         $visibility mod prompt_image;
         $visibility mod prompt_templates;
         $visibility mod run;
@@ -153,13 +154,14 @@ pub use context_usage::ContextSnapshot;
 pub use error::{Error, Result};
 #[doc(hidden)]
 pub use psychevo_agent_core as __agent_core;
+pub use psychevo_agent_core::ControlInputError;
 pub use psychevo_agent_core::ToolBinding as Tool;
 #[doc(hidden)]
 pub use psychevo_ai as __ai;
 pub use psychevo_ai::Provider;
 pub use skills::SelectedSkill;
 pub use types::{
-    ApprovalHandler, ImageInput, McpServerInput, PermissionMode, ProjectContextInstructionMode,
-    PromptDisplayMetadata, RunMode, RunSandboxOverride, RunTerminalError, RunWarning,
-    SelectedAgent,
+    ApprovalHandler, ImageInput, McpServerInput, McpStartupApprovalTarget, PermissionMode,
+    ProjectContextInstructionMode, PromptDisplayMetadata, RunMode, RunSandboxOverride,
+    RunTerminalError, RunWarning, SelectedAgent,
 };

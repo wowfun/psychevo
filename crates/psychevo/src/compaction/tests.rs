@@ -9,12 +9,60 @@ pub(crate) mod tests {
         FinishReasonKind, GenerationOutcome, LanguageAdapter, LanguageAdapterEvent,
         LanguageRequest, Outcome, Provider,
     };
+    use std::alloc::{GlobalAlloc, Layout, System};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
+
+    struct MeasurementAllocator;
+
+    static MEASURE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+    static ALLOCATION_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ALLOCATION_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe impl GlobalAlloc for MeasurementAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc(layout) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            }
+            pointer
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) };
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc_zeroed(layout) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            }
+            pointer
+        }
+
+        unsafe fn realloc(
+            &self,
+            pointer: *mut u8,
+            layout: Layout,
+            new_size: usize,
+        ) -> *mut u8 {
+            let pointer = unsafe { System.realloc(pointer, layout, new_size) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(new_size, Ordering::Relaxed);
+            }
+            pointer
+        }
+    }
+
+    #[global_allocator]
+    static MEASUREMENT_ALLOCATOR: MeasurementAllocator = MeasurementAllocator;
 
     fn record(session_seq: i64, message: Message) -> SessionMessageRecord {
         SessionMessageRecord {
@@ -171,6 +219,37 @@ pub(crate) mod tests {
         .expect("summary provider")
         .language_model("summary-model")
         .expect("summary model")
+    }
+
+    #[test]
+    #[ignore = "manual modification-before/after scaling measurement"]
+    fn compaction_planning_scaling_measurement() {
+        for mebibytes in [1usize, 2, 4] {
+            let body = "x".repeat(16 * 1024);
+            let records = (0..(mebibytes * 64))
+                .map(|index| record(index as i64, user_text_message(body.clone())))
+                .collect::<Vec<_>>();
+            ALLOCATION_CALLS.store(0, Ordering::Relaxed);
+            ALLOCATION_BYTES.store(0, Ordering::Relaxed);
+            MEASURE_ALLOCATIONS.store(true, Ordering::Relaxed);
+            let started = std::time::Instant::now();
+            reset_summary_record_render_count();
+            let units = rendered_summary_units(&records);
+            let rendered_record_visits = summary_record_render_count();
+            let rendered_chars = units
+                .iter()
+                .fold(0u64, |total, unit| total.saturating_add(unit.chars));
+            let _ = estimate_char_count_tokens(rendered_chars);
+            let elapsed = started.elapsed();
+            MEASURE_ALLOCATIONS.store(false, Ordering::Relaxed);
+            eprintln!(
+                "compaction_planning_scaling mib={mebibytes} records={} rendered_record_visits={rendered_record_visits} elapsed_us={} allocation_calls={} allocation_bytes={}",
+                records.len(),
+                elapsed.as_micros(),
+                ALLOCATION_CALLS.load(Ordering::Relaxed),
+                ALLOCATION_BYTES.load(Ordering::Relaxed)
+            );
+        }
     }
 
     fn resolved_summary_provider() -> crate::config::ResolvedRunProvider {
@@ -357,6 +436,24 @@ pub(crate) mod tests {
                 .map(|unit| unit.iter().map(|record| record.session_seq).collect::<Vec<_>>())
                 .collect::<Vec<_>>(),
             vec![vec![1], vec![2, 3, 4], vec![5]]
+        );
+
+        reset_summary_record_render_count();
+        let rendered = rendered_summary_units(&messages);
+        assert_eq!(
+            summary_record_render_count(),
+            messages.len(),
+            "each durable record must be rendered exactly once"
+        );
+        let rendered_text = rendered
+            .iter()
+            .map(|unit| unit.text.as_str())
+            .collect::<String>();
+        let mut ordered_messages = messages.clone();
+        ordered_messages.sort_by_key(|record| record.session_seq);
+        assert_eq!(
+            summary_user_prompt_from_rendered(None, &rendered_text, None),
+            summary_user_prompt_text(None, &ordered_messages, None)
         );
     }
 

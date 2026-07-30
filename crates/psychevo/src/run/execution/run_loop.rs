@@ -38,7 +38,6 @@ pub(crate) async fn run_live_internal(
         })
         .await;
     let run_result = async {
-    let extension_warnings = extension_assembly.warnings.clone();
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
@@ -84,6 +83,12 @@ pub(crate) async fn run_live_internal(
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_agent.as_ref());
     let effective_mode = effective_run_mode(options.mode, selected_agent.as_ref());
+    if effective_mode == RunMode::Default {
+        extension_assembly.materialize_worker_tools().await;
+    } else {
+        extension_assembly.activate_worker_runtime();
+    }
+    let extension_warnings = extension_assembly.warnings.clone();
     let mut resolved_options = options.clone();
     if resolved_options.model.is_none()
         && let Some(model) = selected_agent
@@ -563,10 +568,14 @@ pub(crate) async fn run_live_internal(
     let permission_runtime = permission_runtime
         .with_protected_config_paths(loaded.sources.clone())
         .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
-    let mcp_server_inputs = extension_assembly.mcp_servers.clone();
     let mcp_runtime = options.mcp_runtime.clone().unwrap_or_default();
     let (mcp_snapshot, mcp_generation) = mcp_runtime
-        .snapshot(&mcp_server_inputs, &cwd, Some(&permission_runtime))
+        .snapshot(
+            &extension_assembly.mcp_servers,
+            &cwd,
+            Some(&permission_runtime),
+            effective_mode == RunMode::Plan,
+        )
         .await;
     if !mcp_snapshot.required_failures.is_empty() {
         return Err(Error::Message(format!(

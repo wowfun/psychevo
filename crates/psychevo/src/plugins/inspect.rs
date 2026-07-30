@@ -8,7 +8,8 @@ use tempfile::TempDir;
 
 use super::manifest::load_plugin_manifest;
 use super::materialization::{
-    bounded_tree, extract_tar_gz_bounded, redact_source, run_materialization_command,
+    bounded_tree, extract_tar_gz_bounded, redact_source, remove_top_level_git_metadata,
+    run_materialization_command,
 };
 use super::types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInspectOptions, PluginInspection,
@@ -22,6 +23,7 @@ pub(crate) struct PluginMaterializedSource {
     pub(crate) source_id: String,
     pub(crate) source_kind: PluginSourceKind,
     pub(crate) npm_registry: Option<String>,
+    pub(crate) resolved_revision: Option<String>,
     #[allow(dead_code)]
     pub(crate) temp_dir: Option<TempDir>,
 }
@@ -185,6 +187,7 @@ fn materialize_local(
         source_id: format!("local:{}", source_path.display()),
         source_kind: PluginSourceKind::Local,
         npm_registry: None,
+        resolved_revision: None,
         temp_dir,
     })
 }
@@ -246,6 +249,27 @@ fn materialize_git(
             false,
         )?;
     }
+    let revision_output = run_materialization_command(
+        Command::new("git")
+            .arg("-C")
+            .arg(&incoming)
+            .args(["rev-parse", "--verify", "HEAD^{commit}"]),
+        "git rev-parse",
+        &request.source,
+        true,
+    )?;
+    let resolved_revision = String::from_utf8(revision_output.stdout)
+        .map_err(|_| Error::Config("git rev-parse returned non-UTF-8 output".to_string()))?
+        .trim()
+        .to_string();
+    if !matches!(resolved_revision.len(), 40 | 64)
+        || !resolved_revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(Error::Config(
+            "git rev-parse returned an invalid commit id".to_string(),
+        ));
+    }
+    remove_top_level_git_metadata(&incoming)?;
     bounded_tree(&incoming)?;
     Ok(PluginMaterializedSource {
         root: incoming,
@@ -260,6 +284,7 @@ fn materialize_git(
         ),
         source_kind: PluginSourceKind::Git,
         npm_registry: None,
+        resolved_revision: Some(resolved_revision),
         temp_dir,
     })
 }
@@ -360,6 +385,7 @@ fn materialize_npm(
             .as_deref()
             .map(redact_source)
             .filter(|registry| !registry.is_empty()),
+        resolved_revision: None,
         temp_dir,
     })
 }

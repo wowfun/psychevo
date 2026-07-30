@@ -2,46 +2,31 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let supervisor = child.context.supervisor.clone();
     let state = child.context.state.clone();
     let id = child.id.clone();
-    let parent_session_id = child.context.parent_session_id.clone();
-    let result = run_child_agent_inner(child).await;
+    let result = match std::panic::AssertUnwindSafe(run_child_agent_inner(child))
+        .catch_unwind()
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            supervisor.stage_task_panic(&id);
+            Err(Error::Message("Agent task panicked".to_string()))
+        }
+    };
     if let Err(error) = &result {
         update_run_failed(&supervisor, &id, &error.to_string());
     }
     let record = {
-        let runs = supervisor.active();
+        let runs = supervisor.slots();
         runs.get(&id).map(|state| state.record.clone())
     };
     let Some(record) = record else {
         return result;
     };
-    let Some(child_session_id) = record.child_session_id.as_deref() else {
+    if record.child_session_id.is_none() {
         supervisor.remove(&id);
         return result;
-    };
-    let mailbox = if record.background {
-        let outcome = record.outcome.as_deref().unwrap_or("failed");
-        let summary = record
-            .final_answer
-            .as_deref()
-            .or(record.error.as_deref())
-            .unwrap_or_default();
-        Some(
-            parent_agent_mailbox_event_input(
-                &state,
-                &parent_session_id,
-                &record,
-                outcome,
-                summary,
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
-    state
-        .commit_agent_terminal(child_session_id, mailbox)
-        .await?;
-    supervisor.remove(&id);
+    }
+    supervisor.finish(&state, &id).await?;
     result
 }
 
@@ -194,6 +179,7 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
             &child.context.extension_inputs.mcp_servers,
             &child.context.cwd,
             Some(&permission_runtime),
+            effective_mode == crate::types::RunMode::Plan,
         )
         .await;
     if !mcp_snapshot.required_failures.is_empty() {

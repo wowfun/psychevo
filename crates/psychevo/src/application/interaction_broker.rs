@@ -666,8 +666,13 @@ mod tests {
             filesystem: None,
             mcp_startup: Some(crate::types::McpStartupApprovalRequest {
                 server: "docs".to_string(),
-                transport: "stdio".to_string(),
-                descriptor_fingerprint: "sha256:abc".to_string(),
+                source: "profile:mcp:docs".to_string(),
+                target: crate::types::McpStartupApprovalTarget::Stdio {
+                    command: "/usr/bin/docs-mcp".to_string(),
+                    args: vec!["--serve".to_string()],
+                    cwd: "/workspace".to_string(),
+                    env_names: vec!["DOCS_TOKEN".to_string()],
+                },
             }),
             timeout_secs: 30,
         });
@@ -675,7 +680,12 @@ mod tests {
         assert_eq!(payload["allowSession"], false);
         assert_eq!(payload["allowAlways"], false);
         assert_eq!(payload["mcpStartup"]["server"], "docs");
-        assert_eq!(payload["mcpStartup"]["transport"], "stdio");
-        assert_eq!(payload["mcpStartup"]["descriptorFingerprint"], "sha256:abc");
+        assert_eq!(payload["mcpStartup"]["source"], "profile:mcp:docs");
+        assert_eq!(payload["mcpStartup"]["target"]["kind"], "stdio");
+        assert_eq!(
+            payload["mcpStartup"]["target"]["command"],
+            "/usr/bin/docs-mcp"
+        );
+        assert_eq!(payload["mcpStartup"]["target"]["envNames"][0], "DOCS_TOKEN");
     }
 }

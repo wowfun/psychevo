@@ -4,6 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use psychevo_agent_core::{ToolBinding, ToolRouter, ToolSearchOptions};
 use psychevo_ai::AbortSignal;
@@ -1165,7 +1166,7 @@ async fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
 }
 
 #[tokio::test]
-async fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
+async fn static_plugin_discovery_defers_worker_until_default_tool_materialization() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1209,11 +1210,16 @@ async fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_too
     let assembly =
         load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
-    assert_eq!(assembly.runtime_tools.len(), 1);
-    assert_eq!(assembly.runtime_tools[0].name(), "cleanup_status");
-    assert_eq!(assembly.runtime_tools[0].source_kind(), Some("plugin"));
+    assert_eq!(assembly.worker_runtimes.len(), 1);
+    assert!(!assembly.worker_runtimes[0].started().await);
+    let (runtime_tools, warnings) =
+        materialize_plugin_worker_tools(&assembly.worker_runtimes).await;
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(runtime_tools.len(), 1);
+    assert_eq!(runtime_tools[0].name(), "cleanup_status");
+    assert_eq!(runtime_tools[0].source_kind(), Some("plugin"));
     assert!(
-        assembly.runtime_tools[0]
+        runtime_tools[0]
             .source_id()
             .is_some_and(|source| source.starts_with("plugin:cleanup@"))
     );
@@ -1242,7 +1248,7 @@ async fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_too
         ),
         clarify: ClarifyToolSurface::Disabled,
         skills: None,
-        extension_tools: assembly.runtime_tools,
+        extension_tools: runtime_tools,
         agents: None,
     });
     let declarations = ToolRouter::from_tools(surface.tools)
@@ -1256,6 +1262,7 @@ async fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_too
 
     assert!(names.contains(&"tool_search".to_string()));
     assert!(!names.contains(&"cleanup_status".to_string()));
+    assembly.shutdown_workers().await;
 }
 
 #[tokio::test]
@@ -1320,6 +1327,9 @@ for line in sys.stdin:
 
     let assembly =
         load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    assert!(!assembly.worker_runtimes[0].started().await);
+    let (_, warnings) = materialize_plugin_worker_tools(&assembly.worker_runtimes).await;
+    assert!(warnings.is_empty(), "{warnings:?}");
     assembly.shutdown_workers().await;
 
     assert_eq!(
@@ -1508,27 +1518,23 @@ for line in sys.stdin:
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect("session");
-
-    let tools = worker_tools_in_session(&session)
-        .await
-        .expect("discover tools");
-    let tool_result = super::worker::call_worker_tool_in_session(
-        &session,
-        &tools[0].name,
-        "call_1",
-        json!({}),
-        None,
-    )
-    .await
-    .expect("tool call");
-    let hook_result = session
+    let runtime = PluginWorkerRuntime::new(record, manifest, spec, BTreeMap::new());
+    assert!(!runtime.started().await);
+    let tools = runtime.tools().await.expect("discover tools");
+    let tool = PluginWorkerTool {
+        plugin_name: runtime.plugin_name().to_string(),
+        runtime: Arc::clone(&runtime),
+        descriptor: tools[0].clone(),
+    };
+    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+    let tool_result = tool
+        .execute("call_1".to_string(), json!({}), AbortSignal::new(abort_rx))
+        .await;
+    let hook_result = runtime
         .call("hooks/call", json!({"hook": {}, "payload": {}}))
         .await
         .expect("hook call");
-    session.shutdown().await.expect("shutdown");
+    runtime.shutdown().await.expect("shutdown");
 
     assert_eq!(tool_result.json["method"], "tools/call");
     assert_eq!(hook_result["method"], "hooks/call");
@@ -1791,13 +1797,16 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect("session");
+    let runtime = PluginWorkerRuntime::new(
+        record.clone(),
+        manifest,
+        spec,
+        BTreeMap::new(),
+    );
 
     let tool = PluginWorkerTool {
         plugin_name: record.name,
-        session,
+        runtime: Arc::clone(&runtime),
         descriptor: WorkerToolDescriptor {
             name: "cleanup_status".to_string(),
             description: "Remote harness vocabulary remains source-owned.".to_string(),
@@ -1820,6 +1829,7 @@ async fn worker_tool_call_timeout_returns_tool_error() {
             .unwrap_or_default()
             .contains("timed out waiting for tools/call response")
     );
+    runtime.shutdown().await.expect("worker shutdown");
 }
 
 #[test]
@@ -1876,11 +1886,15 @@ fn install_from_local_git_source_materializes_record() {
             .success()
     );
 
+    let credential_source = format!(
+        "file://private-user:private-secret@localhost{}",
+        repo.display()
+    );
     let record = install_plugin(
         &home,
         &cwd,
         PluginInstallOptions {
-            source: format!("file://{}", repo.display()),
+            source: credential_source,
             source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
@@ -1892,11 +1906,8 @@ fn install_from_local_git_source_materializes_record() {
     .expect("install git");
 
     assert_eq!(record.name, "git-plugin");
-    assert!(record.source_id.starts_with("git:file://"));
-    assert!(
-        record.package_root.join(".git/shallow").is_file(),
-        "git materialization must remain depth-1"
-    );
+    assert!(record.source_id.starts_with("git:file://localhost"));
+    assert!(!record.package_root.join(".git").exists());
     assert!(
         record
             .package_root
@@ -1916,6 +1927,11 @@ fn install_from_local_git_source_materializes_record() {
     .expect("commit utf8")
     .trim()
     .to_string();
+    assert_eq!(record.resolved_revision.as_deref(), Some(commit.as_str()));
+    let serialized = serde_json::to_string(&record).expect("serialize record");
+    assert!(!serialized.contains("private-user"));
+    assert!(!serialized.contains("private-secret"));
+    assert!(!record.package_root.display().to_string().contains("private-"));
     let ref_record = install_plugin(
         &temp.path().join("home-ref"),
         &cwd,
@@ -1931,5 +1947,68 @@ fn install_from_local_git_source_materializes_record() {
     )
     .expect("install depth-1 git ref");
     assert!(ref_record.source_id.ends_with(&format!("#{commit}")));
-    assert!(ref_record.package_root.join(".git/shallow").is_file());
+    assert_eq!(
+        ref_record.resolved_revision.as_deref(),
+        Some(commit.as_str())
+    );
+    assert!(!ref_record.package_root.join(".git").exists());
+}
+
+#[tokio::test]
+async fn activating_a_legacy_git_record_removes_only_top_level_metadata() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "legacy-git",
+              "version": "1.0.0",
+              "description": "legacy"
+            }"#,
+    );
+    let mut record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: Some(PluginSourceKind::Local),
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    record.source_kind = PluginSourceKind::Git;
+    let top_level_git = record.package_root.join(".git");
+    let nested_git = record.package_root.join("fixture/.git");
+    fs::create_dir_all(&top_level_git).expect("legacy top-level metadata");
+    fs::write(top_level_git.join("config"), "credential = private").expect("legacy config");
+    fs::create_dir_all(&nested_git).expect("nested fixture metadata");
+    fs::write(nested_git.join("keep"), "fixture").expect("nested fixture");
+    PluginStore::new(&home, &cwd, PluginScope::Global)
+        .expect("store")
+        .write_record(&record)
+        .expect("rewrite record");
+    let mut policy = PluginPolicyConfig::default();
+    policy.plugins.insert(
+        "legacy-git".to_string(),
+        PluginPolicyEntry {
+            enabled: Some(true),
+        },
+    );
+
+    let first =
+        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let second =
+        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+
+    assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+    assert!(second.warnings.is_empty(), "{:?}", second.warnings);
+    assert!(!top_level_git.exists());
+    assert!(nested_git.join("keep").is_file());
 }

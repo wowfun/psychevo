@@ -7,11 +7,11 @@ pub(crate) async fn call_worker_hook(
     metadata: &HookMetadata,
     payload: Value,
 ) -> std::result::Result<Value, String> {
-    let session = worker
-        .session
+    let runtime = worker
+        .runtime
         .as_ref()
-        .ok_or_else(|| "plugin worker session unavailable".to_string())?;
-    session
+        .ok_or_else(|| "plugin worker runtime unavailable".to_string())?;
+    runtime
         .call(
             "hooks/call",
             json!({

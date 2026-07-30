@@ -7,10 +7,10 @@ use serde_json::Value;
 
 use crate::config::{CustomToolsetConfig, PluginPolicyEntry, ToolsetContribution};
 use crate::hooks::HookSourceDescriptor;
-use crate::types::{McpServerInput, RuntimeTool};
+use crate::types::McpServerInput;
 
 use super::compatibility::PluginComponentStatus;
-use super::worker::PluginWorkerSession;
+use super::worker::PluginWorkerRuntime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -208,6 +208,8 @@ pub struct PluginInstallRecord {
     pub source_kind: PluginSourceKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npm_registry: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_revision: Option<String>,
     pub scope: PluginScope,
     pub package_root: PathBuf,
     pub data_root: PathBuf,
@@ -295,8 +297,7 @@ pub(crate) struct PluginRuntimeAssembly {
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
-    pub(crate) runtime_tools: Vec<RuntimeTool>,
-    pub(crate) worker_sessions: Vec<Arc<PluginWorkerSession>>,
+    pub(crate) worker_runtimes: Vec<Arc<PluginWorkerRuntime>>,
     pub(crate) warnings: Vec<crate::types::RunWarning>,
 }
 
@@ -304,9 +305,9 @@ impl PluginRuntimeAssembly {
     #[cfg(test)]
     pub(crate) async fn shutdown_workers(&self) {
         futures::future::join_all(
-            self.worker_sessions
+            self.worker_runtimes
                 .iter()
-                .map(|session| session.shutdown()),
+                .map(|runtime| runtime.shutdown()),
         )
         .await;
     }

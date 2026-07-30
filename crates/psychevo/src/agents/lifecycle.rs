@@ -1,7 +1,7 @@
 use super::{
-    AbortSignal, AgentEdgeRecord, AgentEdgeStatus, AgentRunState, AgentSupervisor, BTreeMap,
-    BTreeSet, ControlHandle, Error, HashMap, Map, Message, Path, PathBuf, Result, SessionSummary,
-    StateRuntime, Value, fs, json, user_text_message,
+    AbortSignal, AgentEdgeRecord, AgentEdgeStatus, AgentRunPhase, AgentRunState, AgentSupervisor,
+    BTreeMap, BTreeSet, ContinuationAdmission, ControlHandle, Error, HashMap, Map, Message, Path,
+    PathBuf, Result, SessionSummary, StateRuntime, Value, fs, json, user_text_message,
 };
 use super::{
     catalog_surface::{
@@ -20,7 +20,7 @@ pub(crate) async fn force_stop_agent_id(
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     let live = {
-        let mut runs = supervisor.active();
+        let mut runs = supervisor.slots();
         match resolve_live_key_and_record_locked(&runs, id)? {
             None => None,
             Some((live_id, previous)) => {
@@ -46,15 +46,9 @@ pub(crate) async fn force_stop_agent_id(
             }
         }
     };
-    let Some((live_id, previous, child_session)) = live else {
+    let Some((_live_id, previous, _child_session)) = live else {
         return durable_force_stop_agent_id(id, store).await;
     };
-    if let Some(store) = store
-        && let Some(child_session) = child_session
-    {
-        store.close_agent_edge_subtree(&child_session).await?;
-    }
-    supervisor.remove(&live_id);
     Ok(Some(previous))
 }
 
@@ -111,6 +105,9 @@ pub(crate) fn close_live_descendants_locked(
     }
 
     for state in runs.values_mut() {
+        if state.phase != AgentRunPhase::Active {
+            continue;
+        }
         let child_in_scope = state
             .record
             .child_session_id
@@ -147,6 +144,9 @@ pub(crate) fn interrupt_live_descendants_locked(
     }
 
     for state in runs.values_mut() {
+        if state.phase != AgentRunPhase::Active {
+            continue;
+        }
         let child_in_scope = state
             .record
             .child_session_id
@@ -174,21 +174,34 @@ pub(crate) async fn send_agent_message(
     message: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
-    {
-        let runs = supervisor.active();
+    let pending = {
+        let runs = supervisor.slots();
         if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
-            if !agent_status_is_final(record.status) {
+            let state = runs.get(&live_id).expect("resolved Agent slot");
+            if state.phase == AgentRunPhase::Active && !agent_status_is_final(record.status) {
                 if let Some(state) = runs.get(&live_id)
                     && let Some(control) = &state.control
                 {
-                    let _ = control.inject_user_message(user_text_message(message.to_string()));
+                    control
+                        .inject_user_message(user_text_message(message.to_string()))
+                        .map_err(|error| {
+                            Error::Message(format!(
+                                "failed to deliver message to agent `{live_id}`: {error}"
+                            ))
+                        })?;
                 }
                 return Ok(Some(record));
             }
             if store.is_none() {
                 return Ok(Some(record));
             }
+            (state.phase == AgentRunPhase::PendingTerminal).then_some(live_id)
+        } else {
+            None
         }
+    };
+    if let (Some(store), Some(pending)) = (store, pending) {
+        supervisor.retry_terminal(store, &pending).await?;
     }
     if let Some(store) = store
         && let Some(edge) = find_agent_edge_for_target(store, id).await?
@@ -217,18 +230,32 @@ pub(crate) async fn send_agent_message_with_context(
     if message.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
-    {
-        let runs = context.supervisor.active();
-        if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, target)?
-            && !agent_status_is_final(record.status)
-        {
-            if let Some(state) = runs.get(&live_id)
-                && let Some(control) = &state.control
-            {
-                let _ = control.inject_user_message(user_text_message(message.to_string()));
+    let pending = {
+        let runs = context.supervisor.slots();
+        if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, target)? {
+            let state = runs.get(&live_id).expect("resolved Agent slot");
+            if state.phase == AgentRunPhase::Active && !agent_status_is_final(record.status) {
+                if let Some(control) = &state.control {
+                    control
+                        .inject_user_message(user_text_message(message.to_string()))
+                        .map_err(|error| {
+                            Error::Message(format!(
+                                "failed to deliver message to agent `{live_id}`: {error}"
+                            ))
+                        })?;
+                }
+                return Ok(Some(record));
             }
-            return Ok(Some(record));
+            (state.phase == AgentRunPhase::PendingTerminal).then_some(live_id)
+        } else {
+            None
         }
+    };
+    if let Some(pending) = pending {
+        context
+            .supervisor
+            .retry_terminal(&context.state, &pending)
+            .await?;
     }
 
     let Some(edge) = find_agent_edge_for_target(&context.state, target).await? else {
@@ -280,21 +307,20 @@ pub(crate) async fn send_agent_message_with_context(
         agent_path: base.agent_path.clone(),
     };
     let (control_handle, control_receivers) = ControlHandle::new();
-    {
-        context.supervisor.register(
-            record.clone(),
-            Some(control_handle.clone()),
-            context
-                .active_team
-                .as_ref()
-                .map(|team| team.max_parallel_agents as usize)
-                .unwrap_or(super::supervisor::DEFAULT_CHILD_CONCURRENCY),
-        )?;
+    let concurrency_limit = context
+        .active_team
+        .as_ref()
+        .map(|team| team.max_parallel_agents as usize)
+        .unwrap_or(super::supervisor::DEFAULT_CHILD_CONCURRENCY);
+    match context.supervisor.register_continuation_or_inject(
+        record.clone(),
+        control_handle.clone(),
+        user_text_message(message.to_string()),
+        concurrency_limit,
+    )? {
+        ContinuationAdmission::Registered => {}
+        ContinuationAdmission::Injected(active) => return Ok(Some(*active)),
     }
-    context
-        .state
-        .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)
-        .await?;
     let mut child_context = context;
     child_context.parent_session_id = edge.parent_session_id.clone();
     let child = ChildRun {
@@ -337,7 +363,7 @@ pub(crate) async fn resume_agent_id(
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     if let Some(record) = {
-        let runs = supervisor.active();
+        let runs = supervisor.slots();
         resolve_live_record_locked(&runs, id)?
     } {
         return Ok(Some(record));

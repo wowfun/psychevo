@@ -134,6 +134,8 @@ impl StateRuntime {
                 #[cfg(test)]
                 fail_next_framework_terminal: AtomicU64::new(0),
                 #[cfg(test)]
+                fail_next_agent_terminal: AtomicU64::new(0),
+                #[cfg(test)]
                 gateway_turn_acceptance_barrier: Mutex::new(None),
             }),
         })

@@ -225,7 +225,12 @@ static BUILTIN_TOOL_SPECS: &[BuiltinToolSpec] = &[
         aliases: &[],
         modes: MODE_DEFAULT | MODE_PLAN,
         toolset: "coding-core",
-        factory: |_cwd, context| Some(Arc::new(WriteStdinTool::new(context.task_id))),
+        factory: |_cwd, context| {
+            Some(Arc::new(WriteStdinTool::new(
+                context.task_id,
+                context.sandbox_policy,
+            )))
+        },
     },
     BuiltinToolSpec {
         canonical_name: "web_fetch",

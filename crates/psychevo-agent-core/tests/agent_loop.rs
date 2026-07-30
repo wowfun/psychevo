@@ -383,9 +383,11 @@ pub(crate) async fn injected_user_shell_context_reaches_next_provider_request() 
     ));
 
     wait_for_request_count(&requests, 1).await;
-    assert!(control.inject_user_message(user_text_message(
-        "<user_shell_command><command>pwd</command><result>Exit code: 0\nDuration: 0.001 seconds\nTruncated: false\nOutput:\n/tmp</result></user_shell_command>"
-    )));
+    control
+        .inject_user_message(user_text_message(
+            "<user_shell_command><command>pwd</command><result>Exit code: 0\nDuration: 0.001 seconds\nTruncated: false\nOutput:\n/tmp</result></user_shell_command>",
+        ))
+        .expect("inject user shell context");
     let completion = task.await.expect("join").expect("loop");
     assert_eq!(completion.outcome, Outcome::Normal);
     assert!(
@@ -524,7 +526,9 @@ pub(crate) async fn pending_steer_can_be_updated_before_drain() {
     let pending_id = control
         .steer_user_message(user_text_message("original steer"))
         .expect("pending input id");
-    assert!(control.update_pending_user_message(pending_id, user_text_message("updated steer")));
+    control
+        .update_pending_user_message(pending_id, user_text_message("updated steer"))
+        .expect("update pending steer");
     let completion = task.await.expect("join").expect("loop");
     assert_eq!(completion.outcome, Outcome::Normal);
 

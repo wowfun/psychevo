@@ -402,12 +402,18 @@ mod sandbox_approval_tests {
             None,
         );
 
+        let target = crate::types::McpStartupApprovalTarget::Stdio {
+            command: "/usr/bin/docs-mcp".to_string(),
+            args: vec!["--serve".to_string()],
+            cwd: work.path().display().to_string(),
+            env_names: vec!["DOCS_TOKEN".to_string()],
+        };
         let first = runtime
-            .authorize_mcp_startup("docs", "stdio", "fingerprint-1")
+            .authorize_mcp_startup("docs", "profile:mcp:docs", &target, "fingerprint-1")
             .await;
         assert!(first.is_err(), "MCP startup accepted a session grant");
         let second = runtime
-            .authorize_mcp_startup("docs", "stdio", "fingerprint-1")
+            .authorize_mcp_startup("docs", "profile:mcp:docs", &target, "fingerprint-1")
             .await;
         assert!(second.is_err());
         assert_eq!(
@@ -420,8 +426,8 @@ mod sandbox_approval_tests {
             request.mcp_startup,
             Some(crate::types::McpStartupApprovalRequest {
                 server: "docs".to_string(),
-                transport: "stdio".to_string(),
-                descriptor_fingerprint: "fingerprint-1".to_string(),
+                source: "profile:mcp:docs".to_string(),
+                target,
             })
         );
     }

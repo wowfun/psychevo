@@ -578,6 +578,33 @@ async fn command_timeout_is_bounded_diagnostic() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn command_deadline_terminates_descendant_that_holds_output_open() {
+    let temp = tempdir().expect("temp");
+    let hooks = json!({"PreToolUse": [{"hooks": [{
+        "type": "command",
+        "command": "python3 -c 'import os,time; p=os.fork(); time.sleep(30) if p == 0 else print(\"ready\", flush=True)'",
+        "timeout": 1
+    }]}]});
+    let started = Instant::now();
+    let result = run_hook_sources(
+        &[source("agent", hooks)],
+        "PreToolUse",
+        temp.path(),
+        &json!({"tool": "exec_command"}),
+    )
+    .await;
+
+    assert_eq!(result.summaries[0].status, HookRunStatus::TimedOut);
+    assert_eq!(result.summaries[0].stdout, "ready");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "descendant kept hook alive for {:?}",
+        started.elapsed()
+    );
+}
+
 #[tokio::test]
 async fn prompt_handlers_contribute_typed_context_without_transcript_output() {
     let temp = tempdir().expect("temp");
@@ -886,14 +913,12 @@ async fn worker_handler_calls_hooks_call_adapter() {
     let manifest =
         crate::plugins::load_plugin_manifest(&record.package_root, true).expect("manifest");
     let worker_spec = manifest.worker.clone().expect("worker spec");
-    let session = crate::plugins::PluginWorkerSession::start(
-        &record,
-        &manifest,
-        &worker_spec,
-        &BTreeMap::new(),
-    )
-    .await
-    .expect("worker session");
+    let worker_runtime = crate::plugins::PluginWorkerRuntime::new(
+        record.clone(),
+        manifest.clone(),
+        worker_spec.clone(),
+        BTreeMap::new(),
+    );
     let mut source = source(
         "plugin",
         json!({"PostToolUse": [{"hooks": [{"type": "worker"}]}]}),
@@ -910,7 +935,7 @@ async fn worker_handler_calls_hooks_call_adapter() {
         command: worker_spec.command,
         args: worker_spec.args,
         env: BTreeMap::new(),
-        session: Some(session),
+        runtime: Some(Arc::clone(&worker_runtime)),
     });
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),
@@ -929,6 +954,7 @@ async fn worker_handler_calls_hooks_call_adapter() {
 
     assert_eq!(result.feedback, vec!["worker saw hook"]);
     assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
+    worker_runtime.shutdown().await.expect("worker shutdown");
 }
 
 #[tokio::test]

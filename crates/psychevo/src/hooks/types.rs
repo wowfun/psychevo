@@ -51,7 +51,7 @@ pub struct HookWorkerAdapter {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     #[serde(skip)]
-    pub(crate) session: Option<Arc<crate::plugins::PluginWorkerSession>>,
+    pub(crate) runtime: Option<Arc<crate::plugins::PluginWorkerRuntime>>,
 }
 
 impl PartialEq for HookWorkerAdapter {

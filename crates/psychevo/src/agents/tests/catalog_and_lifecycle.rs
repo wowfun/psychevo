@@ -898,7 +898,7 @@ pub(crate) async fn child_session_summary_uses_latest_assistant_usage_tokens() {
 }
 
 #[tokio::test]
-pub(crate) async fn stop_agent_with_grace_removes_terminal_run_from_active_state() {
+pub(crate) async fn stop_agent_with_grace_retains_the_id_until_its_finalizer_commits() {
     let id = format!("test-stop-{}-{:?}", now_ms(), std::thread::current().id());
     let (control, _receivers) = ControlHandle::new();
     let supervisor = AgentSupervisor::default();
@@ -938,10 +938,10 @@ pub(crate) async fn stop_agent_with_grace_removes_terminal_run_from_active_state
         .expect("previous record");
     assert_eq!(previous.status, AgentRunStatus::Running);
 
-    assert!(
-        !supervisor.active().contains_key(&id),
-        "terminal records must be reconstructed from durable state, not retained in the active map"
-    );
+    let slots = supervisor.slots();
+    let stopped = slots.get(&id).expect("finalizer still owns the Agent id");
+    assert_eq!(stopped.record.status, AgentRunStatus::Interrupted);
+    assert_eq!(stopped.phase, AgentRunPhase::Active);
 }
 
 #[tokio::test]

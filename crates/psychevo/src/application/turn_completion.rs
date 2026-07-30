@@ -220,12 +220,21 @@ impl TurnHandle {
         }
     }
 
-    pub fn steer(&self, input: impl Into<String>) -> bool {
-        self.__steer(input).is_some()
+    pub fn steer(
+        &self,
+        input: impl Into<String>,
+    ) -> std::result::Result<(), psychevo_agent_core::ControlInputError> {
+        self.__steer(input).map(|_| ())
     }
 
     #[doc(hidden)]
-    pub fn __steer(&self, input: impl Into<String>) -> Option<psychevo_agent_core::PendingInputId> {
+    pub fn __steer(
+        &self,
+        input: impl Into<String>,
+    ) -> std::result::Result<
+        psychevo_agent_core::PendingInputId,
+        psychevo_agent_core::ControlInputError,
+    > {
         self.control
             .steer_user_message(psychevo_agent_core::user_text_message(input))
     }

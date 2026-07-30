@@ -16,7 +16,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::sync::{Mutex as AsyncMutex, Notify, RwLock as AsyncRwLock, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Notify, oneshot};
 use uuid::Uuid;
 
 mod agent_session;
@@ -112,8 +112,6 @@ struct ApplicationInner {
     home: PathBuf,
     config_path: Option<PathBuf>,
     event_capacity: usize,
-    admission: Mutex<bool>,
-    admission_gate: Arc<AsyncRwLock<()>>,
     force_shutdown_requested: AtomicBool,
     force_shutdown_notify: Notify,
     shutdown_complete: Mutex<Option<ShutdownReport>>,
@@ -643,6 +641,27 @@ mod tests {
         assert!(message.contains("write failed"));
     }
 
+    #[tokio::test]
+    async fn shutdown_report_includes_agent_task_panics() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(temp.path().join("state.db"))
+            .build()
+            .await
+            .expect("application");
+        application
+            .inner
+            .runtime
+            .agent_supervisor
+            .record_task_panic();
+
+        let report = application.shutdown().await.expect("shutdown");
+
+        assert_eq!(report.task_panics, 1);
+        assert!(!report.is_clean());
+    }
+
     impl AgentSessionAdapter for ForceAwareAgentSessionAdapter {
         fn run_turn(&self, request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
             let started = self.started.clone();
@@ -1135,6 +1154,153 @@ mod tests {
                 .len(),
             1
         );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn accepted_thread_mutation_survives_a_dropped_caller() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(temp.path().join("state.db"))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let thread_id = thread.id().to_string();
+        let blocker = application
+            .inner
+            .state
+            .begin_sqlx_write()
+            .await
+            .expect("write blocker");
+        let caller = tokio::spawn(async move { thread.archive().await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while application.inner.state.diagnostics().in_flight_operations == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("archive reached the state boundary");
+        caller.abort();
+        blocker.rollback().await.expect("release write blocker");
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let summary = application
+                    .inner
+                    .state
+                    .session_summary(&thread_id)
+                    .await
+                    .expect("summary")
+                    .expect("thread");
+                if summary.archived_at_ms.is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("runtime-owned archive completed after caller drop");
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn application_overload_rejects_start_thread_before_creating_a_session() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(temp.path().join("state.db"))
+            .build()
+            .await
+            .expect("application");
+        let reservations = (0..runtime::MAX_APPLICATION_OPERATIONS)
+            .map(|index| {
+                application
+                    .inner
+                    .runtime
+                    .reserve_mutation(&format!("occupied-{index}"))
+                    .expect("fill Application capacity")
+            })
+            .collect::<Vec<_>>();
+
+        let error = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect_err("sixty-fifth operation");
+
+        assert_eq!(
+            error.structured_data(),
+            Some(&serde_json::json!({
+                "kind": "application_overloaded",
+                "scope": "application",
+                "limit": runtime::MAX_APPLICATION_OPERATIONS,
+            }))
+        );
+        assert!(
+            application
+                .inner
+                .state
+                .list_sessions_for_cwd_with_sources(temp.path(), &["sdk"])
+                .await
+                .expect("sessions")
+                .is_empty()
+        );
+        drop(reservations);
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn thread_overload_rejects_archive_before_mutating_the_session() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(temp.path().join("state.db"))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let reservations = (0..runtime::MAX_THREAD_OPERATIONS)
+            .map(|_| {
+                application
+                    .inner
+                    .runtime
+                    .reserve_mutation(thread.id())
+                    .expect("fill Thread capacity")
+            })
+            .collect::<Vec<_>>();
+
+        let error = thread.archive().await.expect_err("thirty-third operation");
+
+        assert_eq!(
+            error.structured_data(),
+            Some(&serde_json::json!({
+                "kind": "application_overloaded",
+                "scope": "thread",
+                "limit": runtime::MAX_THREAD_OPERATIONS,
+            }))
+        );
+        assert_eq!(
+            application
+                .inner
+                .state
+                .session_summary(thread.id())
+                .await
+                .expect("summary")
+                .expect("thread")
+                .archived_at_ms,
+            None
+        );
+        drop(reservations);
         application.shutdown().await.expect("shutdown");
     }
 
@@ -1696,6 +1862,7 @@ mod tests {
                 )],
                 temp.path(),
                 None,
+                false,
             )
             .await;
         assert_eq!(application.inner.runtime.mcp_runtime_count(), 1);
@@ -1869,10 +2036,16 @@ mod tests {
     async fn turn_and_thread_mutation_reservations_share_one_fifo_and_evict_when_idle() {
         let runtime = Arc::new(ApplicationRuntime::new());
         let thread_id = "thread-operation-fifo";
-        let first = runtime.reserve_turn_for_test(thread_id, "turn-1");
+        let first = runtime
+            .reserve_turn_for_test(thread_id, "turn-1")
+            .expect("first reservation");
         first.await.expect("first Turn is ready");
-        let mut mutation = runtime.reserve_mutation(thread_id);
-        let mut second = runtime.reserve_turn_for_test(thread_id, "turn-2");
+        let mut mutation = runtime
+            .reserve_mutation(thread_id)
+            .expect("mutation reservation");
+        let mut second = runtime
+            .reserve_turn_for_test(thread_id, "turn-2")
+            .expect("second reservation");
 
         assert!(matches!(
             mutation
@@ -2248,11 +2421,7 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert!(
-            *application
-                .inner
-                .admission
-                .lock()
-                .expect("application admission poisoned"),
+            application.client().ensure_open().is_ok(),
             "shutdown must wait for the admitted start section"
         );
         blocker.rollback().await.expect("release write blocker");

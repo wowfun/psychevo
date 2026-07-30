@@ -96,6 +96,7 @@ pub fn install_plugin(
         source_id: materialized.source_id.clone(),
         source_kind: materialized.source_kind,
         npm_registry: materialized.npm_registry.clone(),
+        resolved_revision: materialized.resolved_revision.clone(),
         temp_dir: None,
     };
     let installed_inspection = inspect_materialized_source(&installed)?;
@@ -121,6 +122,7 @@ pub fn install_plugin(
         source_slug,
         source_kind: materialized.source_kind,
         npm_registry: materialized.npm_registry,
+        resolved_revision: materialized.resolved_revision,
         scope: options.scope,
         package_root,
         data_root,

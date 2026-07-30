@@ -163,6 +163,11 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         }
         _ => None,
     };
+    if mode == RunMode::Default {
+        extension_assembly.materialize_worker_tools().await;
+    } else {
+        extension_assembly.activate_worker_runtime();
+    }
     let skills_home = resolve_skills_home(&env, &cwd)?;
     let mut explicit_skill_inputs = Vec::new();
     if let Some(agent) = &selected_agent {
@@ -483,6 +488,11 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
     let effective_mode = effective_run_mode(options.mode, selected_parent_agent.as_ref());
+    if effective_mode == RunMode::Default {
+        extension_assembly.materialize_worker_tools().await;
+    } else {
+        extension_assembly.activate_worker_runtime();
+    }
     let child_agent = resolve_agent_definition(&agent_catalog, &options.agent, &cwd, &loaded.env)?;
     if selected_parent_agent
         .as_ref()

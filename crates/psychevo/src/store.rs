@@ -707,6 +707,8 @@ pub(crate) struct StateRuntimeInner {
     #[cfg(test)]
     pub(crate) fail_next_framework_terminal: AtomicU64,
     #[cfg(test)]
+    pub(crate) fail_next_agent_terminal: AtomicU64,
+    #[cfg(test)]
     pub(crate) gateway_turn_acceptance_barrier:
         Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }

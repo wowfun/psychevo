@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use flate2::read::GzDecoder;
 
 use crate::error::{Error, Result};
+use crate::process_tree::ProcessTreeGuard;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PluginMaterializationLimits {
@@ -181,6 +182,29 @@ pub(crate) fn copy_tree_bounded(source: &Path, destination: &Path) -> Result<()>
     Ok(())
 }
 
+pub(crate) fn remove_top_level_git_metadata(root: &Path) -> Result<()> {
+    let path = root.join(".git");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    remove_git_metadata_path(&path, &metadata)
+}
+
+fn remove_git_metadata_path(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    let result = if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub(crate) fn extract_tar_gz_bounded(archive_path: &Path, destination: &Path) -> Result<()> {
     extract_tar_gz_with_limits(
         archive_path,
@@ -297,14 +321,14 @@ fn run_materialization_command_with_limits(
             Stdio::null()
         })
         .stderr(Stdio::null());
-    configure_materialization_process_group(command);
+    ProcessTreeGuard::configure_std(command);
     let mut child = command.spawn().map_err(|error| {
         Error::Config(format!(
             "{operation} failed to start for {}: {error}",
             redact_source(source_display)
         ))
     })?;
-    let mut process_tree = MaterializationProcessTree::attach(&child).map_err(|error| {
+    let mut process_tree = ProcessTreeGuard::attach_std(&child).map_err(|error| {
         let _ = child.kill();
         let _ = child.wait();
         Error::Config(format!(
@@ -405,97 +429,6 @@ fn materialization_deadline_error(
         limits.subprocess_deadline.as_secs_f64(),
         redact_source(source_display)
     ))
-}
-
-#[cfg(unix)]
-fn configure_materialization_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    command.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_materialization_process_group(_command: &mut Command) {}
-
-struct MaterializationProcessTree {
-    #[cfg(unix)]
-    process_group: libc::pid_t,
-    #[cfg(windows)]
-    job: std::os::windows::io::OwnedHandle,
-}
-
-impl MaterializationProcessTree {
-    fn attach(child: &std::process::Child) -> io::Result<Self> {
-        #[cfg(unix)]
-        {
-            Ok(Self {
-                process_group: child.id() as libc::pid_t,
-            })
-        }
-        #[cfg(windows)]
-        {
-            create_materialization_job(child)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = child;
-            Ok(Self {})
-        }
-    }
-
-    fn terminate(&mut self) {
-        #[cfg(unix)]
-        unsafe {
-            let _ = libc::killpg(self.process_group, libc::SIGKILL);
-        }
-        #[cfg(windows)]
-        unsafe {
-            use std::os::windows::io::AsRawHandle;
-            use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-            let _ = TerminateJobObject(self.job.as_raw_handle() as _, 1);
-        }
-    }
-}
-
-#[cfg(windows)]
-fn create_materialization_job(
-    child: &std::process::Child,
-) -> io::Result<MaterializationProcessTree> {
-    use std::ffi::c_void;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject,
-    };
-
-    let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
-    if raw_job.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-    let job = unsafe { OwnedHandle::from_raw_handle(raw_job as _) };
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if unsafe {
-        SetInformationJobObject(
-            job.as_raw_handle() as _,
-            JobObjectExtendedLimitInformation,
-            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
-            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    if unsafe {
-        AssignProcessToJobObject(
-            job.as_raw_handle() as _,
-            child.as_raw_handle() as _,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(MaterializationProcessTree { job })
 }
 
 pub(crate) fn redact_source(source: &str) -> String {
@@ -705,7 +638,22 @@ mod tests {
             redact_source("https://user:secret@example.test/repo.git?token=secret#main"),
             "https://example.test/repo.git"
         );
+        assert_eq!(
+            redact_source("file://user:secret@localhost/tmp/plugin.git"),
+            "file://localhost/tmp/plugin.git"
+        );
         assert_eq!(redact_source("git@example.test:repo.git"), "git@example.test:repo.git");
+    }
+
+    #[test]
+    fn concurrent_git_metadata_cleanup_is_idempotent_after_metadata_read() {
+        let temp = tempdir().expect("temp");
+        let git = temp.path().join(".git");
+        fs::create_dir(&git).expect("git dir");
+        let metadata = fs::symlink_metadata(&git).expect("metadata");
+        fs::remove_dir(&git).expect("concurrent cleanup");
+
+        remove_git_metadata_path(&git, &metadata).expect("already removed is success");
     }
 
     #[cfg(unix)]

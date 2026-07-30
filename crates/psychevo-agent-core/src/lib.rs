@@ -11,7 +11,7 @@ pub(crate) use psychevo_ai::{
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
 pub(crate) use thiserror::Error;
-pub(crate) use tokio::sync::{mpsc, watch};
+pub(crate) use tokio::sync::watch;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

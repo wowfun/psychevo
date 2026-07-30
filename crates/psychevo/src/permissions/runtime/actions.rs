@@ -16,7 +16,8 @@ pub(crate) enum PermissionAction {
     },
     McpStartup {
         server: String,
-        transport: String,
+        source: String,
+        target: crate::types::McpStartupApprovalTarget,
         descriptor_fingerprint: String,
     },
     Mcp {
@@ -120,21 +121,25 @@ impl PermissionAction {
                 .and_then(Value::as_str)
                 .map(|query| Self::WebSearch { query: query.to_string() }),
             "mcp_startup" => {
-                args.get("server")
-                    .and_then(Value::as_str)
-                    .map(|server| Self::McpStartup {
+                match args.get("server").and_then(Value::as_str) {
+                    Some(server) => Some(Self::McpStartup {
                         server: server.to_string(),
-                        transport: args
-                            .get("transport")
+                        source: args
+                            .get("source")
                             .and_then(Value::as_str)
                             .unwrap_or("unknown")
                             .to_string(),
+                        target: serde_json::from_value(
+                            args.get("target").cloned().unwrap_or(Value::Null),
+                        )?,
                         descriptor_fingerprint: args
                             .get("descriptorFingerprint")
                             .and_then(Value::as_str)
                             .unwrap_or("missing")
                             .to_string(),
-                    })
+                    }),
+                    None => None,
+                }
             }
             _ => crate::mcp::mcp_utility_action(tool_name, args)
                 .or_else(|| {
@@ -329,16 +334,17 @@ impl PermissionAction {
     ) -> Option<crate::types::McpStartupApprovalRequest> {
         let Self::McpStartup {
             server,
-            transport,
-            descriptor_fingerprint,
+            source,
+            target,
+            ..
         } = self
         else {
             return None;
         };
         Some(crate::types::McpStartupApprovalRequest {
             server: server.clone(),
-            transport: transport.clone(),
-            descriptor_fingerprint: descriptor_fingerprint.clone(),
+            source: source.clone(),
+            target: target.clone(),
         })
     }
 

@@ -4,14 +4,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use futures::FutureExt;
-use tokio::sync::oneshot;
+use tokio::sync::{OwnedRwLockReadGuard, RwLock, oneshot};
 use tokio_util::task::TaskTracker;
 
 use super::{Error, PendingTerminal, Result, TurnHandle};
 
+pub(super) const MAX_APPLICATION_OPERATIONS: usize = 64;
+pub(super) const MAX_THREAD_OPERATIONS: usize = 32;
+
 pub(super) struct ApplicationRuntime {
     pub(super) tasks: TaskTracker,
     pub(super) state: Mutex<ApplicationRuntimeState>,
+    admission_gate: Arc<RwLock<()>>,
     task_aborts: Mutex<HashMap<u64, tokio::task::AbortHandle>>,
     next_task_id: AtomicU64,
     next_operation_id: AtomicU64,
@@ -20,8 +24,10 @@ pub(super) struct ApplicationRuntime {
     pub(super) agent_supervisor: crate::agents::AgentSupervisor,
 }
 
-#[derive(Default)]
 pub(super) struct ApplicationRuntimeState {
+    open: bool,
+    accepted_operations: usize,
+    application_operations: ThreadCell,
     pub(super) threads: HashMap<String, ThreadCell>,
     pub(super) turns: HashMap<String, TurnSlot>,
 }
@@ -58,13 +64,45 @@ impl ApplicationRuntime {
     pub(super) fn new() -> Self {
         Self {
             tasks: TaskTracker::new(),
-            state: Mutex::new(ApplicationRuntimeState::default()),
+            state: Mutex::new(ApplicationRuntimeState {
+                open: true,
+                accepted_operations: 0,
+                application_operations: ThreadCell::default(),
+                threads: HashMap::new(),
+                turns: HashMap::new(),
+            }),
+            admission_gate: Arc::new(RwLock::new(())),
             task_aborts: Mutex::new(HashMap::new()),
             next_task_id: AtomicU64::new(1),
             next_operation_id: AtomicU64::new(1),
             task_panics: AtomicU64::new(0),
             mcp_runtimes: crate::mcp::McpRuntimeRegistry::default(),
             agent_supervisor: crate::agents::AgentSupervisor::default(),
+        }
+    }
+
+    pub(super) async fn begin_admission(&self) -> Result<OwnedRwLockReadGuard<()>> {
+        let guard = self.admission_gate.clone().read_owned().await;
+        self.ensure_open()?;
+        Ok(guard)
+    }
+
+    pub(super) fn ensure_open(&self) -> Result<()> {
+        if self.lock_state().open {
+            Ok(())
+        } else {
+            Err(Error::Message(
+                "Psychevo Application is shutting down".to_string(),
+            ))
+        }
+    }
+
+    pub(super) async fn close_admission(&self) {
+        let _gate = self.admission_gate.write().await;
+        let mut state = self.lock_state();
+        if state.open {
+            state.open = false;
+            self.tasks.close();
         }
     }
 
@@ -134,10 +172,13 @@ impl ApplicationRuntime {
         &self,
         thread_id: &str,
         turn_id: &str,
-    ) -> oneshot::Receiver<()> {
+    ) -> Result<oneshot::Receiver<()>> {
         let mut state = self.lock_state();
+        Self::admit_thread_operation(&state, thread_id)?;
         let cell = state.threads.entry(thread_id.to_string()).or_default();
-        cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()))
+        let ready = cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()));
+        state.accepted_operations += 1;
+        Ok(ready)
     }
 
     pub(super) fn register_turn(
@@ -147,6 +188,7 @@ impl ApplicationRuntime {
         handle: TurnHandle,
     ) -> Result<oneshot::Receiver<()>> {
         let mut state = self.lock_state();
+        Self::admit_thread_operation(&state, thread_id)?;
         if state.turns.contains_key(turn_id) {
             return Err(Error::Message(format!(
                 "Turn id is already registered: {turn_id}"
@@ -157,6 +199,7 @@ impl ApplicationRuntime {
             .entry(thread_id.to_string())
             .or_default()
             .reserve(ThreadOperationKind::Turn(turn_id.to_string()));
+        state.accepted_operations += 1;
         state.turns.insert(
             turn_id.to_string(),
             TurnSlot {
@@ -206,6 +249,7 @@ impl ApplicationRuntime {
         if remove {
             state.threads.remove(thread_id);
         }
+        state.accepted_operations = state.accepted_operations.saturating_sub(1);
     }
 
     pub(super) fn turn_handle(&self, turn_id: &str) -> Option<TurnHandle> {
@@ -274,17 +318,39 @@ impl ApplicationRuntime {
             .collect()
     }
 
-    pub(super) fn reserve_mutation(self: &Arc<Self>, thread_id: &str) -> ThreadMutationReservation {
+    pub(super) fn reserve_application_operation(
+        self: &Arc<Self>,
+    ) -> Result<ApplicationOperationReservation> {
         let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
         let mut state = self.lock_state();
+        Self::admit_application_operation(&state)?;
+        let ready = state
+            .application_operations
+            .reserve(ThreadOperationKind::Mutation(operation_id));
+        state.accepted_operations += 1;
+        Ok(ApplicationOperationReservation {
+            runtime: Arc::clone(self),
+            operation_id,
+            ready: Some(ready),
+        })
+    }
+
+    pub(super) fn reserve_mutation(
+        self: &Arc<Self>,
+        thread_id: &str,
+    ) -> Result<ThreadMutationReservation> {
+        let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
+        let mut state = self.lock_state();
+        Self::admit_thread_operation(&state, thread_id)?;
         let cell = state.threads.entry(thread_id.to_string()).or_default();
         let ready = cell.reserve(ThreadOperationKind::Mutation(operation_id));
-        ThreadMutationReservation {
+        state.accepted_operations += 1;
+        Ok(ThreadMutationReservation {
             runtime: Arc::clone(self),
             thread_id: thread_id.to_string(),
             operation_id,
             ready: Some(ready),
-        }
+        })
     }
 
     fn finish_mutation(&self, thread_id: &str, operation_id: u64) {
@@ -300,6 +366,42 @@ impl ApplicationRuntime {
         if remove {
             state.threads.remove(thread_id);
         }
+        state.accepted_operations = state.accepted_operations.saturating_sub(1);
+    }
+
+    fn finish_application_operation(&self, operation_id: u64) {
+        let mut state = self.lock_state();
+        state.application_operations.release(
+            |kind| matches!(kind, ThreadOperationKind::Mutation(id) if *id == operation_id),
+        );
+        state.accepted_operations = state.accepted_operations.saturating_sub(1);
+    }
+
+    fn admit_application_operation(state: &ApplicationRuntimeState) -> Result<()> {
+        if !state.open {
+            return Err(Error::Message(
+                "Psychevo Application is shutting down".to_string(),
+            ));
+        }
+        if state.accepted_operations >= MAX_APPLICATION_OPERATIONS {
+            return Err(application_overloaded(
+                "application",
+                MAX_APPLICATION_OPERATIONS,
+            ));
+        }
+        Ok(())
+    }
+
+    fn admit_thread_operation(state: &ApplicationRuntimeState, thread_id: &str) -> Result<()> {
+        Self::admit_application_operation(state)?;
+        let thread_operations = state
+            .threads
+            .get(thread_id)
+            .map_or(0, |cell| cell.operations.len());
+        if thread_operations >= MAX_THREAD_OPERATIONS {
+            return Err(application_overloaded("thread", MAX_THREAD_OPERATIONS));
+        }
+        Ok(())
     }
 
     pub(super) fn take_turn_slots(&self) -> Vec<TurnSlot> {
@@ -310,6 +412,8 @@ impl ApplicationRuntime {
             .map(|(_, slot)| slot)
             .collect::<Vec<_>>();
         state.threads.clear();
+        state.application_operations.operations.clear();
+        state.accepted_operations = 0;
         slots
     }
 
@@ -324,6 +428,17 @@ impl ApplicationRuntime {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+fn application_overloaded(scope: &str, limit: usize) -> Error {
+    Error::structured(
+        format!("Psychevo Application {scope} operation limit reached ({limit})"),
+        serde_json::json!({
+            "kind": "application_overloaded",
+            "scope": scope,
+            "limit": limit,
+        }),
+    )
 }
 
 impl ThreadCell {
@@ -384,6 +499,12 @@ pub(super) struct ThreadMutationReservation {
     pub(super) ready: Option<oneshot::Receiver<()>>,
 }
 
+pub(super) struct ApplicationOperationReservation {
+    runtime: Arc<ApplicationRuntime>,
+    operation_id: u64,
+    ready: Option<oneshot::Receiver<()>>,
+}
+
 impl ThreadMutationReservation {
     pub(super) async fn acquire(mut self) -> Result<Self> {
         self.ready
@@ -402,11 +523,92 @@ impl Drop for ThreadMutationReservation {
     }
 }
 
+impl ApplicationOperationReservation {
+    pub(super) async fn acquire(mut self) -> Result<Self> {
+        self.ready
+            .take()
+            .expect("Application operation reservation already acquired")
+            .await
+            .map_err(|_| {
+                Error::Message("Application operation reservation was cancelled".to_string())
+            })?;
+        Ok(self)
+    }
+}
+
+impl Drop for ApplicationOperationReservation {
+    fn drop(&mut self) {
+        self.runtime.finish_application_operation(self.operation_id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ApplicationRuntime;
+    use super::{ApplicationRuntime, MAX_APPLICATION_OPERATIONS, MAX_THREAD_OPERATIONS};
     use crate::types::{McpServerInput, McpTransportInput};
+    use serde_json::json;
     use std::path::Path;
+    use std::sync::Arc;
+
+    #[test]
+    fn thread_capacity_rejects_before_admitting_the_thirty_third_operation() {
+        let runtime = Arc::new(ApplicationRuntime::new());
+        let mut reservations = Vec::new();
+        for _ in 0..MAX_THREAD_OPERATIONS {
+            reservations.push(
+                runtime
+                    .reserve_mutation("thread")
+                    .expect("operation below Thread capacity"),
+            );
+        }
+
+        let error = runtime
+            .reserve_mutation("thread")
+            .err()
+            .expect("thirty-third Thread operation");
+        assert_eq!(
+            error.structured_data(),
+            Some(&json!({
+                "kind": "application_overloaded",
+                "scope": "thread",
+                "limit": MAX_THREAD_OPERATIONS,
+            }))
+        );
+        assert_eq!(
+            runtime.lock_state().accepted_operations,
+            MAX_THREAD_OPERATIONS
+        );
+    }
+
+    #[test]
+    fn application_capacity_rejects_before_admitting_the_sixty_fifth_operation() {
+        let runtime = Arc::new(ApplicationRuntime::new());
+        let mut reservations = Vec::new();
+        for index in 0..MAX_APPLICATION_OPERATIONS {
+            reservations.push(
+                runtime
+                    .reserve_mutation(&format!("thread-{index}"))
+                    .expect("operation below Application capacity"),
+            );
+        }
+
+        let error = runtime
+            .reserve_mutation("overflow")
+            .err()
+            .expect("sixty-fifth Application operation");
+        assert_eq!(
+            error.structured_data(),
+            Some(&json!({
+                "kind": "application_overloaded",
+                "scope": "application",
+                "limit": MAX_APPLICATION_OPERATIONS,
+            }))
+        );
+        assert_eq!(
+            runtime.lock_state().accepted_operations,
+            MAX_APPLICATION_OPERATIONS
+        );
+    }
 
     #[tokio::test]
     async fn mcp_runtime_is_lazy_thread_owned_and_released_with_thread_lifecycle() {
@@ -420,7 +622,7 @@ mod tests {
             0,
             "constructing a lazy Thread handle must not materialize a registry entry"
         );
-        first.snapshot(&[], Path::new("."), None).await;
+        first.snapshot(&[], Path::new("."), None, false).await;
         assert_eq!(
             runtime.mcp_runtimes.len(),
             0,
@@ -436,6 +638,7 @@ mod tests {
                 )],
                 Path::new("."),
                 None,
+                false,
             )
             .await;
         assert_eq!(runtime.mcp_runtimes.len(), 1);
@@ -455,6 +658,7 @@ mod tests {
                 )],
                 Path::new("."),
                 None,
+                false,
             )
             .await;
         assert_eq!(runtime.mcp_runtimes.len(), 1);

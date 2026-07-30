@@ -114,8 +114,16 @@ pub async fn run_user_shell_command_streaming_controlled(
                 &[],
             )
             .await?;
-        if let Some(handle) = options.inject_into {
-            let _ = handle.inject_user_message(message);
+        if let Some(handle) = options.inject_into
+            && let Err(error) = handle.inject_user_message(message)
+        {
+            stream(RunStreamEvent::value(json!({
+                "type": "warning",
+                "kind": "control_input",
+                "message": format!(
+                    "Shell command completed, but its result could not be injected into the active turn: {error}"
+                ),
+            })));
         }
         (Some(prepared_context.session_id), Some(context_text))
     } else {

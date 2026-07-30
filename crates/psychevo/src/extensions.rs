@@ -87,8 +87,10 @@ pub(crate) struct ExtensionAssembly {
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) warnings: Vec<RunWarning>,
+    worker_runtimes: Vec<Arc<crate::plugins::PluginWorkerRuntime>>,
     worker_owner: Option<PluginWorkerOwner>,
     worker_lease: Option<PluginWorkerLease>,
+    worker_tools_materialized: bool,
 }
 
 #[derive(Clone, Default)]
@@ -101,7 +103,8 @@ pub(crate) struct AcceptedExtensionInputs {
 }
 
 impl ExtensionAssembly {
-    pub(crate) fn accepted_inputs(&self) -> AcceptedExtensionInputs {
+    pub(crate) fn accepted_inputs(&mut self) -> AcceptedExtensionInputs {
+        self.activate_worker_runtime();
         AcceptedExtensionInputs {
             mcp_servers: self.mcp_servers.clone(),
             runtime_tools: self.runtime_tools.clone(),
@@ -116,6 +119,30 @@ impl ExtensionAssembly {
             lease.shutdown().await;
         }
     }
+
+    pub(crate) async fn materialize_worker_tools(&mut self) {
+        self.activate_worker_runtime();
+        if self.worker_tools_materialized {
+            return;
+        }
+        self.worker_tools_materialized = true;
+        let Some(owner) = self.worker_owner.as_ref() else {
+            return;
+        };
+        let (tools, warnings) =
+            crate::plugins::materialize_plugin_worker_tools(&owner.inner.runtimes).await;
+        self.runtime_tools.extend(tools);
+        self.warnings.extend(warnings);
+    }
+
+    pub(crate) fn activate_worker_runtime(&mut self) {
+        if self.worker_owner.is_some() {
+            return;
+        }
+        self.worker_owner = PluginWorkerOwner::new(self.worker_runtimes.clone());
+        self.worker_lease = self.worker_owner.as_ref().map(PluginWorkerOwner::acquire);
+    }
+
 }
 
 impl AcceptedExtensionInputs {
@@ -130,15 +157,15 @@ struct PluginWorkerOwner {
 }
 
 struct PluginWorkerOwnerInner {
-    sessions: Vec<Arc<crate::plugins::PluginWorkerSession>>,
+    runtimes: Vec<Arc<crate::plugins::PluginWorkerRuntime>>,
     leases: AtomicUsize,
 }
 
 impl PluginWorkerOwner {
-    fn new(sessions: Vec<Arc<crate::plugins::PluginWorkerSession>>) -> Option<Self> {
-        (!sessions.is_empty()).then(|| Self {
+    fn new(runtimes: Vec<Arc<crate::plugins::PluginWorkerRuntime>>) -> Option<Self> {
+        (!runtimes.is_empty()).then(|| Self {
             inner: Arc::new(PluginWorkerOwnerInner {
-                sessions,
+                runtimes,
                 leases: AtomicUsize::new(0),
             }),
         })
@@ -164,9 +191,9 @@ impl PluginWorkerLease {
             futures::future::join_all(
                 self.owner
                     .inner
-                    .sessions
+                    .runtimes
                     .iter()
-                    .map(|session| session.shutdown()),
+                    .map(|runtime| runtime.shutdown()),
             )
             .await;
         }
@@ -295,16 +322,13 @@ pub(crate) async fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Ex
     let plugin_assembly =
         load_enabled_plugin_contributions(input.home, input.cwd, input.env, input.plugin_policy)
             .await;
-    let worker_owner = PluginWorkerOwner::new(plugin_assembly.worker_sessions.clone());
-    let worker_lease = worker_owner.as_ref().map(PluginWorkerOwner::acquire);
     let selected_root_contributions =
         selected_root_contributions(input.cwd, input.selected_capability_roots);
 
     let mut mcp_servers = input.mcp_servers;
     mcp_servers.extend(selected_root_contributions.mcp_servers.iter().cloned());
     mcp_servers.extend(plugin_assembly.mcp_servers.iter().cloned());
-    let mut runtime_tools = input.runtime_tools;
-    runtime_tools.extend(plugin_assembly.runtime_tools.iter().cloned());
+    let runtime_tools = input.runtime_tools;
 
     let mut warnings = plugin_assembly.warnings.clone();
     warnings.extend(selected_root_contributions.warnings.clone());
@@ -337,8 +361,10 @@ pub(crate) async fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Ex
             .chain(selected_root_contributions.toolsets)
             .collect(),
         warnings,
-        worker_owner,
-        worker_lease,
+        worker_runtimes: plugin_assembly.worker_runtimes,
+        worker_owner: None,
+        worker_lease: None,
+        worker_tools_materialized: false,
     }
 }
 
@@ -612,7 +638,7 @@ mod tests {
         )
         .expect("manifest");
 
-        let assembly = assemble_extensions(ExtensionAssemblyInput {
+        let mut assembly = assemble_extensions(ExtensionAssemblyInput {
             home: &home,
             cwd: temp.path(),
             env: &BTreeMap::new(),

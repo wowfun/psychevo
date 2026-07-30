@@ -23,6 +23,7 @@ pub use compatibility::{
 };
 pub(crate) use contributions::{
     load_enabled_plugin_contributions, load_enabled_plugin_hook_sources,
+    materialize_plugin_worker_tools,
 };
 pub use inspect::plugin_import_inspect_value;
 pub use install::{install_plugin, plugin_install_value};
@@ -37,13 +38,13 @@ pub use types::{
 };
 pub use util::external_plugin_fingerprint;
 
-pub(crate) use worker::PluginWorkerSession;
+pub(crate) use worker::PluginWorkerRuntime;
 
 #[cfg(test)]
 pub(crate) use store::PluginStore;
 #[cfg(test)]
 pub(crate) use worker::{
-    PluginWorkerTool, WorkerToolDescriptor, call_worker_tool, worker_tools,
+    PluginWorkerSession, PluginWorkerTool, WorkerToolDescriptor, call_worker_tool, worker_tools,
     worker_tools_in_session,
 };
 

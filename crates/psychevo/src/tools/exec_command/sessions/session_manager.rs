@@ -10,6 +10,7 @@ pub(crate) struct ExecCommandTool(CwdTool);
 
 pub(crate) struct WriteStdinTool {
     task_id: String,
+    sandbox_policy: SandboxPolicy,
 }
 
 pub(crate) static EXEC_SESSIONS: LazyLock<Mutex<ExecSessionRegistry>> =
@@ -26,8 +27,11 @@ impl ExecCommandTool {
 }
 
 impl WriteStdinTool {
-    pub(crate) fn new(task_id: String) -> Self {
-        Self { task_id }
+    pub(crate) fn new(task_id: String, sandbox_policy: SandboxPolicy) -> Self {
+        Self {
+            task_id,
+            sandbox_policy,
+        }
     }
 }
 
@@ -158,8 +162,17 @@ impl ToolBinding for WriteStdinTool {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let task_id = self.task_id.clone();
+        let sandbox_policy = self.sandbox_policy.clone();
         Box::pin(async move {
-            match write_stdin_tool_impl_with_call(task_id, tool_call_id, args, abort).await {
+            match write_stdin_tool_impl_with_call(
+                task_id,
+                tool_call_id,
+                sandbox_policy,
+                args,
+                abort,
+            )
+            .await
+            {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -277,6 +290,7 @@ pub(crate) async fn write_stdin_tool_impl(args: Value, abort: AbortSignal) -> Re
     write_stdin_tool_impl_with_call(
         "default".to_string(),
         "write_stdin".to_string(),
+        SandboxPolicy::disabled(),
         args,
         abort,
     )
@@ -286,11 +300,15 @@ pub(crate) async fn write_stdin_tool_impl(args: Value, abort: AbortSignal) -> Re
 pub(crate) async fn write_stdin_tool_impl_with_call(
     task_id: String,
     tool_call_id: String,
+    sandbox_policy: SandboxPolicy,
     args: Value,
     abort: AbortSignal,
 ) -> Result<Value> {
     let session_id = required_u64(&args, "session_id")?;
     let chars = optional_string(&args, "chars")?.unwrap_or("").to_string();
+    if !chars.is_empty() {
+        sandbox_policy.ensure_stdin_write_allowed()?;
+    }
     let yield_ms = if chars.is_empty() {
         clamp_yield_ms(
             optional_i64(&args, "yield_time_ms")?,

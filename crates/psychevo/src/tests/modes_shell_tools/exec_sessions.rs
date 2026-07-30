@@ -247,6 +247,71 @@ pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_conten
     );
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+pub(crate) async fn plan_exec_command_landlock_blocks_create_and_truncate() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let existing = cwd.join("existing.txt");
+    fs::write(&existing, "preserved").expect("fixture");
+    let policy = crate::sandbox::SandboxPolicy::from_config(
+        &crate::config::SandboxConfig {
+            enabled: false,
+            mode: crate::sandbox::SandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        },
+        &cwd,
+        RunMode::Plan,
+        &BTreeMap::new(),
+    )
+    .expect("Plan sandbox");
+    let tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &cwd,
+        RunMode::Plan,
+        crate::tools::ToolRuntimeContext {
+            task_id: "plan-landlock-write-test".to_string(),
+            lsp: crate::config::LspConfig::default(),
+            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            allow_login_shell: false,
+            env: BTreeMap::new(),
+            path_prefixes: Vec::new(),
+            sandbox_policy: policy,
+            sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+            ..crate::tools::ToolRuntimeContext::default()
+        },
+    );
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+    let create = exec
+        .execute(
+            "plan-create".to_string(),
+            json!({"cmd": "printf created > created.txt"}),
+            receivers.abort_signal(),
+        )
+        .await;
+    assert!(!create.is_error, "{:?}", create.json);
+    assert_ne!(create.json["exit_code"], 0, "{:?}", create.json);
+    assert!(!cwd.join("created.txt").exists());
+
+    let truncate = exec
+        .execute(
+            "plan-truncate".to_string(),
+            json!({"cmd": "printf changed > existing.txt"}),
+            receivers.abort_signal(),
+        )
+        .await;
+    assert!(!truncate.is_error, "{:?}", truncate.json);
+    assert_ne!(truncate.json["exit_code"], 0, "{:?}", truncate.json);
+    assert_eq!(fs::read_to_string(existing).expect("existing"), "preserved");
+}
+
 #[tokio::test]
 pub(crate) async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands() {
     let temp = tempdir().expect("temp");
@@ -454,6 +519,95 @@ pub(crate) async fn write_stdin_rejects_session_owned_by_another_task() {
     assert_eq!(
         result.json["error"],
         format!("unknown exec_command session_id: {session_id}")
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn plan_write_stdin_cannot_mutate_a_default_turn_session() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let target = cwd.join("plan-stdin-must-not-write");
+    let task_id = "shared-default-plan-task";
+    let default_tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &cwd,
+        RunMode::Default,
+        crate::tools::ToolRuntimeContext {
+            task_id: task_id.to_string(),
+            ..crate::tools::ToolRuntimeContext::default()
+        },
+    );
+    let plan_policy = crate::sandbox::SandboxPolicy::from_config(
+        &crate::sandbox::SandboxConfig::default(),
+        &cwd,
+        RunMode::Plan,
+        &BTreeMap::new(),
+    )
+    .expect("Plan sandbox policy");
+    let plan_tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &cwd,
+        RunMode::Plan,
+        crate::tools::ToolRuntimeContext {
+            task_id: task_id.to_string(),
+            sandbox_policy: plan_policy,
+            ..crate::tools::ToolRuntimeContext::default()
+        },
+    );
+    let exec = default_tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    let write_stdin = plan_tools
+        .iter()
+        .find(|tool| tool.name() == "write_stdin")
+        .expect("write_stdin");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let start = exec
+        .execute(
+            "default-start".to_string(),
+            json!({
+                "cmd": format!("read line; test \"$line\" = mutate && touch {}", target.display()),
+                "tty": true,
+                "yield_time_ms": 250
+            }),
+            receivers.abort_signal(),
+        )
+        .await;
+    assert!(!start.is_error, "{:?}", start.json);
+    let session_id = start.json["session_id"].as_u64().expect("session id");
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let denied = write_stdin
+        .execute(
+            "plan-write".to_string(),
+            json!({"session_id": session_id, "chars": "mutate\n"}),
+            receivers.abort_signal(),
+        )
+        .await;
+    assert!(denied.is_error, "{:?}", denied.json);
+    assert!(
+        denied.json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("denied by sandbox policy")),
+        "{:?}",
+        denied.json
+    );
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let poll = write_stdin
+        .execute(
+            "plan-poll".to_string(),
+            json!({"session_id": session_id, "chars": "", "yield_time_ms": 5000}),
+            receivers.abort_signal(),
+        )
+        .await;
+    crate::tools::interrupt_exec_sessions_for_task(task_id);
+
+    assert!(!poll.is_error, "{:?}", poll.json);
+    assert!(
+        !target.exists(),
+        "Plan stdin must not reach the Default shell"
     );
 }
 

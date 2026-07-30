@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
     AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolDisplaySpec,
@@ -56,7 +57,9 @@ pub use catalog_surface::{
 };
 #[path = "agents/supervisor.rs"]
 mod supervisor;
-pub(crate) use supervisor::{AgentRunState, AgentSupervisor};
+pub(crate) use supervisor::{
+    AgentRunPhase, AgentRunState, AgentSupervisor, ContinuationAdmission,
+};
 pub(crate) use catalog_surface::{
     AgentToolContext, agent_catalog_for_prompt, agent_catalog_for_selected_policy,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, agent_tools,

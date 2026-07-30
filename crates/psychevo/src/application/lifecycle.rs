@@ -70,8 +70,6 @@ impl Application {
                 home,
                 config_path,
                 event_capacity: DEFAULT_EVENT_CAPACITY,
-                admission: Mutex::new(true),
-                admission_gate: Arc::new(AsyncRwLock::new(())),
                 force_shutdown_requested: AtomicBool::new(false),
                 force_shutdown_notify: Notify::new(),
                 shutdown_complete: Mutex::new(None),
@@ -91,18 +89,7 @@ impl Application {
         {
             return Ok(report);
         }
-        {
-            let _admission_gate = self.inner.admission_gate.write().await;
-            let mut open = self
-                .inner
-                .admission
-                .lock()
-                .expect("application admission poisoned");
-            if *open {
-                *open = false;
-                self.inner.runtime.tasks.close();
-            }
-        }
+        self.inner.runtime.close_admission().await;
         if force {
             self.inner
                 .force_shutdown_requested
@@ -144,7 +131,12 @@ impl Application {
             }
         }
         self.inner.runtime.clear_mcp_runtimes();
-        report.task_panics = self.inner.runtime.task_panics.load(AtomicOrdering::Relaxed);
+        report.task_panics = self
+            .inner
+            .runtime
+            .task_panics
+            .load(AtomicOrdering::Relaxed)
+            .saturating_add(self.inner.runtime.agent_supervisor.task_panics());
         *self
             .inner
             .shutdown_complete
@@ -160,6 +152,11 @@ impl Application {
             .agent_supervisor
             .shutdown_graceful()
             .await;
+        self.inner
+            .runtime
+            .agent_supervisor
+            .stage_remaining_interrupted("application shutdown");
+        self.flush_agent_terminals(report).await;
         if let Err(error) = self.inner.agent_sessions.shutdown(false).await {
             report.adapter = ShutdownAdapterStatus::Failed {
                 message: error.to_string(),
@@ -223,6 +220,11 @@ impl Application {
             }
         }
 
+        self.inner
+            .runtime
+            .agent_supervisor
+            .stage_remaining_interrupted("application force shutdown");
+        self.flush_agent_terminals(report).await;
         self.retry_and_settle_terminal_slots(report, Some(deadline))
             .await;
         if tokio::time::timeout_at(deadline, self.inner.state.close())
@@ -233,6 +235,21 @@ impl Application {
                 message: "State close exceeded the force-shutdown deadline".to_string(),
             };
         }
+    }
+
+    async fn flush_agent_terminals(&self, report: &mut ShutdownReport) {
+        report.pending_terminal_failures.extend(
+            self.inner
+                .runtime
+                .agent_supervisor
+                .flush_pending_terminals(&self.inner.state)
+                .await
+                .into_iter()
+                .map(|(id, message)| PendingTerminalFailure {
+                    turn_id: format!("agent:{id}"),
+                    message,
+                }),
+        );
     }
 
     async fn retry_and_settle_terminal_slots(
@@ -389,8 +406,6 @@ impl ApplicationBuilder {
                 home,
                 config_path: self.config_path,
                 event_capacity,
-                admission: Mutex::new(true),
-                admission_gate: Arc::new(AsyncRwLock::new(())),
                 force_shutdown_requested: AtomicBool::new(false),
                 force_shutdown_notify: Notify::new(),
                 shutdown_complete: Mutex::new(None),
@@ -412,18 +427,7 @@ impl fmt::Debug for Client {
 
 impl Client {
     pub(super) fn ensure_open(&self) -> Result<()> {
-        if *self
-            .inner
-            .admission
-            .lock()
-            .expect("application admission poisoned")
-        {
-            Ok(())
-        } else {
-            Err(Error::Message(
-                "Psychevo Application is shutting down".to_string(),
-            ))
-        }
+        self.inner.runtime.ensure_open()
     }
 
     pub(super) fn application_environment(

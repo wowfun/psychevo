@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason, ToolBinding,
+    ControlHandle, ControlInputError, ControlReceivers, Message, PendingInputId, TerminalReason,
+    ToolBinding,
 };
 use psychevo_ai::{AbortSignal, Outcome, SecretValue};
 use serde::{Deserialize, Serialize};
@@ -748,8 +749,33 @@ pub struct FilesystemApprovalRequest {
 #[serde(rename_all = "camelCase")]
 pub struct McpStartupApprovalRequest {
     pub server: String,
-    pub transport: String,
-    pub descriptor_fingerprint: String,
+    pub source: String,
+    pub target: McpStartupApprovalTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub enum McpStartupApprovalTarget {
+    Stdio {
+        command: String,
+        args: Vec<String>,
+        cwd: String,
+        env_names: Vec<String>,
+    },
+    Http {
+        url: String,
+        header_names: Vec<String>,
+        credential_names: Vec<String>,
+    },
+}
+
+impl McpStartupApprovalTarget {
+    pub(crate) fn transport_kind(&self) -> &'static str {
+        match self {
+            Self::Stdio { .. } => "stdio",
+            Self::Http { .. } => "streamable_http",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

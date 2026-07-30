@@ -494,7 +494,17 @@ print(len(data))""#;
 
     #[test]
     fn mcp_startup_defaults_to_ask_and_matches_rules() {
-        let args = json!({"server": "repo_tools", "transport": "stdio"});
+        let args = json!({
+            "server": "repo_tools",
+            "source": "profile:mcp:repo_tools",
+            "target": crate::types::McpStartupApprovalTarget::Stdio {
+                command: "/usr/bin/repo-tools".to_string(),
+                args: Vec::new(),
+                cwd: "/workspace".to_string(),
+                env_names: Vec::new(),
+            },
+            "descriptorFingerprint": "fixture-fingerprint",
+        });
         let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
         let decision = default_runtime.evaluate("mcp_startup", &args);
         assert!(matches!(decision, PermissionDecision::Ask { .. }));

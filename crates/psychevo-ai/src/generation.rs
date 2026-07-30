@@ -89,9 +89,15 @@ pub struct Generation {
 }
 
 struct EventQueueState {
-    pending: VecDeque<EventItem>,
+    pending: VecDeque<QueuedEvent>,
     non_snapshot_bytes: usize,
     closed: bool,
+    accumulator: GenerationAccumulator,
+}
+
+enum QueuedEvent {
+    Item { item: Box<EventItem>, bytes: usize },
+    ResyncMarker { dropped_events: u64 },
 }
 
 struct EventSender {
@@ -105,11 +111,12 @@ struct EventReceiver {
     signal_rx: mpsc::Receiver<()>,
 }
 
-fn event_channel() -> (EventSender, EventReceiver) {
+fn event_channel(model: ModelDescriptor) -> (EventSender, EventReceiver) {
     let state = Arc::new(Mutex::new(EventQueueState {
         pending: VecDeque::new(),
         non_snapshot_bytes: 0,
         closed: false,
+        accumulator: GenerationAccumulator::new(model),
     }));
     let (signal_tx, signal_rx) = mpsc::channel(1);
     (
@@ -126,51 +133,79 @@ fn event_channel() -> (EventSender, EventReceiver) {
 }
 
 impl EventSender {
-    fn send(&self, item: EventItem, snapshot: Option<GenerationSnapshot>) {
+    fn accept(
+        &self,
+        event: LanguageAdapterEvent,
+    ) -> Result<Option<Box<GenerationOutput>>, ProviderError> {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if state.closed {
-            return;
-        }
-        let essential = event_is_essential(&item);
-        let updated_resync = update_pending_resync(&mut state, snapshot.as_ref());
-        if !essential && updated_resync {
-            drop(state);
-            let _ = self.signal.try_send(());
-            return;
-        }
-        if !essential && coalesce_event(&mut state, &item) {
-            if state.non_snapshot_bytes > MAX_PENDING_GENERATION_BYTES {
-                let dropped = drop_incremental_events(&mut state);
-                if let Some(snapshot) = snapshot {
-                    insert_or_update_resync(&mut state, snapshot, dropped.max(1));
-                }
+        let accepted = state.accumulator.accept(event)?;
+        let output = match accepted {
+            AcceptedEvent::Public(event) => {
+                enqueue_item(&mut state, Ok(event));
+                None
             }
-            drop(state);
-            let _ = self.signal.try_send(());
-            return;
-        }
-        let item_bytes = event_payload_bytes(&item);
-        if state.pending.len() + 1 > MAX_PENDING_GENERATION_EVENTS
-            || state.non_snapshot_bytes.saturating_add(item_bytes) > MAX_PENDING_GENERATION_BYTES
-        {
-            let dropped = drop_incremental_events(&mut state);
-            if let Some(snapshot) = snapshot {
-                insert_or_update_resync(&mut state, snapshot, dropped.max(1));
+            AcceptedEvent::Finished(output, event) => {
+                enqueue_item(&mut state, Ok(event));
+                Some(output)
             }
-            if !essential {
-                drop(state);
-                let _ = self.signal.try_send(());
-                return;
-            }
-        }
-        state.non_snapshot_bytes = state.non_snapshot_bytes.saturating_add(item_bytes);
-        state.pending.push_back(item);
+        };
+        drop(state);
+        let _ = self.signal.try_send(());
+        Ok(output)
+    }
+
+    fn snapshot(&self) -> GenerationSnapshot {
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .accumulator
+            .snapshot()
+    }
+
+    fn send_item(&self, item: EventItem) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        enqueue_item(&mut state, item);
         drop(state);
         let _ = self.signal.try_send(());
     }
+}
+
+fn enqueue_item(state: &mut EventQueueState, item: EventItem) {
+    if state.closed {
+        return;
+    }
+    let essential = event_is_essential(&item);
+    if !essential && increment_pending_resync(state, 1) {
+        return;
+    }
+    let item_bytes = event_payload_bytes(&item);
+    if !essential && coalesce_event(state, &item, item_bytes) {
+        if state.non_snapshot_bytes > MAX_PENDING_GENERATION_BYTES {
+            let dropped = drop_incremental_events(state);
+            insert_or_update_resync(state, dropped.max(1));
+        }
+        return;
+    }
+    if state.pending.len() + 1 > MAX_PENDING_GENERATION_EVENTS
+        || state.non_snapshot_bytes.saturating_add(item_bytes) > MAX_PENDING_GENERATION_BYTES
+    {
+        let dropped = drop_incremental_events(state);
+        insert_or_update_resync(state, dropped.max(1));
+        if !essential {
+            return;
+        }
+    }
+    state.non_snapshot_bytes = state.non_snapshot_bytes.saturating_add(item_bytes);
+    state.pending.push_back(QueuedEvent::Item {
+        item: Box::new(item),
+        bytes: item_bytes,
+    });
 }
 
 impl Drop for EventSender {
@@ -203,10 +238,17 @@ impl EventReceiver {
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let item = state.pending.pop_front()?;
-        state.non_snapshot_bytes = state
-            .non_snapshot_bytes
-            .saturating_sub(event_payload_bytes(&item));
+        let queued = state.pending.pop_front()?;
+        let item = match queued {
+            QueuedEvent::Item { item, bytes } => {
+                state.non_snapshot_bytes = state.non_snapshot_bytes.saturating_sub(bytes);
+                *item
+            }
+            QueuedEvent::ResyncMarker { dropped_events } => Ok(GenerationEvent::Resync {
+                snapshot: Box::new(state.accumulator.snapshot()),
+                dropped_events,
+            }),
+        };
         let has_more = !state.pending.is_empty();
         drop(state);
         if has_more {
@@ -255,95 +297,87 @@ fn event_payload_bytes(item: &EventItem) -> usize {
     }
 }
 
-fn update_pending_resync(
-    state: &mut EventQueueState,
-    snapshot: Option<&GenerationSnapshot>,
-) -> bool {
-    let Some(snapshot) = snapshot else {
-        return false;
-    };
-    let Some(Ok(GenerationEvent::Resync {
-        snapshot: retained,
-        dropped_events,
-    })) = state
+fn increment_pending_resync(state: &mut EventQueueState, dropped: u64) -> bool {
+    let Some(QueuedEvent::ResyncMarker { dropped_events }) = state
         .pending
         .iter_mut()
-        .find(|item| matches!(item, Ok(GenerationEvent::Resync { .. })))
+        .find(|item| matches!(item, QueuedEvent::ResyncMarker { .. }))
     else {
         return false;
     };
-    *retained = snapshot.clone();
-    *dropped_events = dropped_events.saturating_add(1);
+    *dropped_events = dropped_events.saturating_add(dropped);
     true
 }
 
-fn insert_or_update_resync(
-    state: &mut EventQueueState,
-    snapshot: GenerationSnapshot,
-    dropped: u64,
-) {
-    if let Some(Ok(GenerationEvent::Resync {
-        snapshot: retained,
-        dropped_events,
-    })) = state
-        .pending
-        .iter_mut()
-        .find(|item| matches!(item, Ok(GenerationEvent::Resync { .. })))
-    {
-        *retained = snapshot;
-        *dropped_events = dropped_events.saturating_add(dropped);
+fn insert_or_update_resync(state: &mut EventQueueState, dropped: u64) {
+    if increment_pending_resync(state, dropped) {
         return;
     }
-    state.pending.push_back(Ok(GenerationEvent::Resync {
-        snapshot,
+    state.pending.push_back(QueuedEvent::ResyncMarker {
         dropped_events: dropped,
-    }));
+    });
 }
 
 fn drop_incremental_events(state: &mut EventQueueState) -> u64 {
     let mut dropped = 0u64;
     let mut retained = VecDeque::new();
-    while let Some(item) = state.pending.pop_front() {
-        if event_is_essential(&item) {
-            retained.push_back(item);
-        } else {
-            dropped = dropped.saturating_add(match item {
-                Ok(GenerationEvent::Resync { dropped_events, .. }) => {
-                    dropped_events.saturating_add(1)
-                }
-                _ => 1,
-            });
+    while let Some(queued) = state.pending.pop_front() {
+        match queued {
+            QueuedEvent::Item { ref item, .. } if event_is_essential(item.as_ref()) => {
+                retained.push_back(queued);
+            }
+            QueuedEvent::Item { .. } => dropped = dropped.saturating_add(1),
+            QueuedEvent::ResyncMarker { dropped_events } => {
+                dropped = dropped.saturating_add(dropped_events);
+            }
         }
     }
     state.pending = retained;
-    state.non_snapshot_bytes = state.pending.iter().map(event_payload_bytes).sum();
+    state.non_snapshot_bytes = state
+        .pending
+        .iter()
+        .map(|queued| match queued {
+            QueuedEvent::Item { bytes, .. } => *bytes,
+            QueuedEvent::ResyncMarker { .. } => 0,
+        })
+        .sum();
     dropped
 }
 
-fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
+fn coalesce_event(
+    state: &mut EventQueueState,
+    incoming: &EventItem,
+    incoming_bytes: usize,
+) -> bool {
     let Ok(incoming) = incoming else {
         return false;
     };
     let replacement_index = match incoming {
-        GenerationEvent::Usage { .. } => state
-            .pending
-            .iter()
-            .rposition(|item| matches!(item, Ok(GenerationEvent::Usage { .. }))),
-        GenerationEvent::Metadata { .. } => state
-            .pending
-            .iter()
-            .rposition(|item| matches!(item, Ok(GenerationEvent::Metadata { .. }))),
+        GenerationEvent::Usage { .. } => state.pending.iter().rposition(|item| {
+            matches!(item, QueuedEvent::Item { item, .. }
+                if matches!(item.as_ref(), Ok(GenerationEvent::Usage { .. })))
+        }),
+        GenerationEvent::Metadata { .. } => state.pending.iter().rposition(|item| {
+            matches!(item, QueuedEvent::Item { item, .. }
+                if matches!(item.as_ref(), Ok(GenerationEvent::Metadata { .. })))
+        }),
         _ => state.pending.len().checked_sub(1),
     };
     let Some(index) = replacement_index else {
         return false;
     };
-    let Some(Ok(retained)) = state.pending.get_mut(index) else {
+    let Some(QueuedEvent::Item {
+        item,
+        bytes: retained_bytes,
+    }) = state.pending.get_mut(index)
+    else {
         return false;
     };
-    let old_bytes = serde_json::to_vec(retained)
-        .map(|bytes| bytes.len())
-        .unwrap_or(0);
+    let Ok(retained) = item.as_mut() else {
+        return false;
+    };
+    let old_bytes = *retained_bytes;
+    let mut growth = 0usize;
     let merged = match (retained, incoming) {
         (
             GenerationEvent::TextDelta {
@@ -356,6 +390,7 @@ fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
             },
         ) if retained_index == content_index => {
             retained.push_str(delta);
+            growth = encoded_string_content_bytes(delta);
             true
         }
         (
@@ -371,7 +406,13 @@ fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
             },
         ) if retained_index == content_index => {
             retained_delta.push_str(delta);
+            growth = encoded_string_content_bytes(delta);
             if let Some(evidence) = provider_evidence.clone() {
+                growth = growth.saturating_add(
+                    serde_json::to_vec(&evidence)
+                        .map(|bytes| bytes.len())
+                        .unwrap_or(0),
+                );
                 merge_provider_evidence(retained_evidence, evidence);
             }
             true
@@ -387,10 +428,12 @@ fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
             },
         ) if retained_index == content_index => {
             retained.push_str(delta);
+            growth = encoded_string_content_bytes(delta);
             true
         }
         (GenerationEvent::Usage { usage: retained }, GenerationEvent::Usage { usage }) => {
             *retained = usage.clone();
+            *retained_bytes = incoming_bytes;
             true
         }
         (
@@ -398,26 +441,27 @@ fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
             GenerationEvent::Metadata { metadata },
         ) => {
             retained.extend(metadata.clone());
+            growth = incoming_bytes;
             true
         }
         _ => false,
     };
     if merged {
-        let new_bytes = serde_json::to_vec(
-            state
-                .pending
-                .get(index)
-                .and_then(|item| item.as_ref().ok())
-                .expect("coalesced generation event"),
-        )
-        .map(|bytes| bytes.len())
-        .unwrap_or(0);
+        if !matches!(incoming, GenerationEvent::Usage { .. }) {
+            *retained_bytes = retained_bytes.saturating_add(growth);
+        }
         state.non_snapshot_bytes = state
             .non_snapshot_bytes
             .saturating_sub(old_bytes)
-            .saturating_add(new_bytes);
+            .saturating_add(*retained_bytes);
     }
     merged
+}
+
+fn encoded_string_content_bytes(value: &str) -> usize {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len().saturating_sub(2))
+        .unwrap_or(value.len())
 }
 
 impl std::fmt::Debug for Generation {
@@ -489,16 +533,13 @@ pub(crate) fn start_generation(
     target: LanguageInvocationTarget,
     request: LanguageRequest,
 ) -> Generation {
-    let (event_tx, event_rx) = event_channel();
+    let descriptor = target.descriptor.clone();
+    let (event_tx, event_rx) = event_channel(descriptor.clone());
     let (completion_tx, completion_rx) = watch::channel(None);
     let (abort, abort_signal) = abort_pair();
-    let descriptor = target.descriptor.clone();
-    event_tx.send(
-        Ok(GenerationEvent::Started {
-            model: descriptor.clone(),
-        }),
-        None,
-    );
+    event_tx.send_item(Ok(GenerationEvent::Started {
+        model: descriptor.clone(),
+    }));
 
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
@@ -511,11 +552,9 @@ pub(crate) fn start_generation(
             ));
         }
         Err(_) => {
-            let error = GenerationError::new(
-                ProviderError::runtime_unavailable(),
-                GenerationSnapshot::empty(descriptor),
-            );
-            event_tx.send(Err(error.clone()), Some(error.partial.clone()));
+            let error =
+                GenerationError::new(ProviderError::runtime_unavailable(), event_tx.snapshot());
+            event_tx.send_item(Err(error.clone()));
             let _ = completion_tx.send(Some(Err(Arc::new(error))));
         }
     }
@@ -537,7 +576,6 @@ async fn run_generation(
     events: EventSender,
     completion: watch::Sender<Option<SharedGenerationResult>>,
 ) {
-    let mut accumulator = GenerationAccumulator::new(target.descriptor.clone());
     let total_deadline = target
         .timeout_policy
         .total_deadline()
@@ -548,7 +586,7 @@ async fn run_generation(
     let headers = match merge_safe_headers(&target.deployment_headers, &request.headers) {
         Ok(headers) => headers,
         Err(error) => {
-            complete_error(error, &accumulator, &events, &completion);
+            complete_error(error, &events, &completion);
             return;
         }
     };
@@ -563,21 +601,21 @@ async fn run_generation(
     let credentials = tokio::select! {
         biased;
         _ = abort.wait_for_abort() => {
-            complete_aborted(&accumulator, &events, &completion);
+            complete_aborted(&events, &completion);
             return;
         }
         _ = wait_for_deadline(total_deadline) => {
-            complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Credentials), &accumulator, &events, &completion);
+            complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Credentials), &events, &completion);
             return;
         }
         _ = wait_for_deadline(idle_deadline) => {
-            complete_error(timeout_error("credential resolution made no progress", ErrorPhase::Credentials), &accumulator, &events, &completion);
+            complete_error(timeout_error("credential resolution made no progress", ErrorPhase::Credentials), &events, &completion);
             return;
         }
         result = &mut resolve => match result {
             Ok(credentials) => credentials,
             Err(error) => {
-                complete_error(error, &accumulator, &events, &completion);
+                complete_error(error, &events, &completion);
                 return;
             }
         }
@@ -603,21 +641,21 @@ async fn run_generation(
     let mut stream = tokio::select! {
         biased;
         _ = abort.wait_for_abort() => {
-            complete_aborted(&accumulator, &events, &completion);
+            complete_aborted(&events, &completion);
             return;
         }
         _ = wait_for_deadline(total_deadline) => {
-            complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Dispatch), &accumulator, &events, &completion);
+            complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Dispatch), &events, &completion);
             return;
         }
         _ = wait_for_deadline(idle_deadline) => {
-            complete_error(timeout_error("provider dispatch made no progress", ErrorPhase::Dispatch), &accumulator, &events, &completion);
+            complete_error(timeout_error("provider dispatch made no progress", ErrorPhase::Dispatch), &events, &completion);
             return;
         }
         result = &mut adapter_start => match result {
             Ok(stream) => stream,
             Err(error) => {
-                complete_error(error, &accumulator, &events, &completion);
+                complete_error(error, &events, &completion);
                 return;
             }
         }
@@ -628,15 +666,15 @@ async fn run_generation(
         let next = tokio::select! {
             biased;
             _ = abort.wait_for_abort() => {
-                complete_aborted(&accumulator, &events, &completion);
+                complete_aborted(&events, &completion);
                 return;
             }
             _ = wait_for_deadline(total_deadline) => {
-                complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Stream), &accumulator, &events, &completion);
+                complete_error(timeout_error("generation total deadline elapsed", ErrorPhase::Stream), &events, &completion);
                 return;
             }
             _ = wait_for_deadline(idle_deadline) => {
-                complete_error(timeout_error("provider made no generation progress", ErrorPhase::Stream), &accumulator, &events, &completion);
+                complete_error(timeout_error("provider made no generation progress", ErrorPhase::Stream), &events, &completion);
                 return;
             }
             next = stream.next() => next,
@@ -644,7 +682,6 @@ async fn run_generation(
         let Some(next) = next else {
             complete_error(
                 ProviderError::protocol("provider stream ended before Finish"),
-                &accumulator,
                 &events,
                 &completion,
             );
@@ -653,24 +690,21 @@ async fn run_generation(
         let adapter_event = match next {
             Ok(event) => event,
             Err(error) => {
-                complete_error(error, &accumulator, &events, &completion);
+                complete_error(error, &events, &completion);
                 return;
             }
         };
         if adapter_event_is_progress(&adapter_event) {
             idle_deadline = idle_timeout.map(|duration| Instant::now() + duration);
         }
-        match accumulator.accept(adapter_event) {
-            Ok(AcceptedEvent::Public(event)) => {
-                events.send(Ok(event), Some(accumulator.snapshot()));
-            }
-            Ok(AcceptedEvent::Finished(output, event)) => {
-                events.send(Ok(event), Some(output.snapshot.clone()));
+        match events.accept(adapter_event) {
+            Ok(None) => {}
+            Ok(Some(output)) => {
                 let _ = completion.send(Some(Ok(Arc::new(*output))));
                 return;
             }
             Err(error) => {
-                complete_error(error, &accumulator, &events, &completion);
+                complete_error(error, &events, &completion);
                 return;
             }
         }
@@ -683,32 +717,27 @@ fn timeout_error(summary: &str, phase: ErrorPhase) -> ProviderError {
 
 fn complete_error(
     error: ProviderError,
-    accumulator: &GenerationAccumulator,
     events: &EventSender,
     completion: &watch::Sender<Option<SharedGenerationResult>>,
 ) {
-    let error = GenerationError::new(error, accumulator.snapshot());
-    events.send(Err(error.clone()), Some(error.partial.clone()));
+    let error = GenerationError::new(error, events.snapshot());
+    events.send_item(Err(error.clone()));
     let _ = completion.send(Some(Err(Arc::new(error))));
 }
 
 fn complete_aborted(
-    accumulator: &GenerationAccumulator,
     events: &EventSender,
     completion: &watch::Sender<Option<SharedGenerationResult>>,
 ) {
     let output = GenerationOutput {
-        snapshot: accumulator.snapshot(),
+        snapshot: events.snapshot(),
         outcome: GenerationOutcome::Aborted,
         finish_reason: None,
     };
-    events.send(
-        Ok(GenerationEvent::Finish {
-            outcome: GenerationOutcome::Aborted,
-            finish_reason: None,
-        }),
-        Some(output.snapshot.clone()),
-    );
+    events.send_item(Ok(GenerationEvent::Finish {
+        outcome: GenerationOutcome::Aborted,
+        finish_reason: None,
+    }));
     let _ = completion.send(Some(Ok(Arc::new(output))));
 }
 
@@ -772,7 +801,6 @@ enum AcceptedEvent {
     Finished(Box<GenerationOutput>, GenerationEvent),
 }
 
-#[derive(Clone)]
 struct GenerationAccumulator {
     model: ModelDescriptor,
     contents: BTreeMap<usize, ContentState>,
@@ -781,6 +809,8 @@ struct GenerationAccumulator {
     warnings: Vec<Warning>,
     provider_metadata: Extensions,
     finished: bool,
+    #[cfg(test)]
+    snapshot_materializations: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Clone)]
@@ -819,6 +849,8 @@ impl GenerationAccumulator {
             warnings: Vec::new(),
             provider_metadata: Extensions::new(),
             finished: false,
+            #[cfg(test)]
+            snapshot_materializations: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -1139,6 +1171,9 @@ impl GenerationAccumulator {
     }
 
     fn snapshot(&self) -> GenerationSnapshot {
+        #[cfg(test)]
+        self.snapshot_materializations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let content = self
             .contents
             .values()
@@ -1248,6 +1283,50 @@ fn content_lifecycle_error(action: &str, content_index: usize) -> ProviderError 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    struct MeasurementAllocator;
+
+    static MEASURE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+    static ALLOCATION_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static ALLOCATION_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe impl GlobalAlloc for MeasurementAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc(layout) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            }
+            pointer
+        }
+
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) };
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc_zeroed(layout) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            }
+            pointer
+        }
+
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let pointer = unsafe { System.realloc(pointer, layout, new_size) };
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                ALLOCATION_CALLS.fetch_add(1, Ordering::Relaxed);
+                ALLOCATION_BYTES.fetch_add(new_size, Ordering::Relaxed);
+            }
+            pointer
+        }
+    }
+
+    #[global_allocator]
+    static MEASUREMENT_ALLOCATOR: MeasurementAllocator = MeasurementAllocator;
 
     fn descriptor() -> ModelDescriptor {
         ModelDescriptor {
@@ -1342,49 +1421,39 @@ mod tests {
 
     #[tokio::test]
     async fn slow_consumer_receives_bounded_resync_and_terminal_snapshot() {
-        let (events, mut receiver) = event_channel();
-        let mut accumulator = GenerationAccumulator::new(descriptor());
-        events.send(
-            Ok(GenerationEvent::Started {
-                model: descriptor(),
-            }),
-            None,
+        let (events, mut receiver) = event_channel(descriptor());
+        events.send_item(Ok(GenerationEvent::Started {
+            model: descriptor(),
+        }));
+        assert!(
+            events
+                .accept(LanguageAdapterEvent::TextStart { content_index: 0 })
+                .expect("text start")
+                .is_none()
         );
-        let AcceptedEvent::Public(start) = accumulator
-            .accept(LanguageAdapterEvent::TextStart { content_index: 0 })
-            .expect("text start")
-        else {
-            panic!("public start");
-        };
-        events.send(Ok(start), Some(accumulator.snapshot()));
         for _ in 0..400 {
-            let AcceptedEvent::Public(delta) = accumulator
-                .accept(LanguageAdapterEvent::TextDelta {
-                    content_index: 0,
-                    delta: "x".repeat(1024),
-                })
-                .expect("text delta")
-            else {
-                panic!("public delta");
-            };
-            events.send(Ok(delta), Some(accumulator.snapshot()));
+            assert!(
+                events
+                    .accept(LanguageAdapterEvent::TextDelta {
+                        content_index: 0,
+                        delta: "x".repeat(1024),
+                    })
+                    .expect("text delta")
+                    .is_none()
+            );
         }
-        let AcceptedEvent::Public(end) = accumulator
-            .accept(LanguageAdapterEvent::TextEnd { content_index: 0 })
-            .expect("text end")
-        else {
-            panic!("public end");
-        };
-        events.send(Ok(end), Some(accumulator.snapshot()));
-        let AcceptedEvent::Finished(output, finish) = accumulator
+        assert!(
+            events
+                .accept(LanguageAdapterEvent::TextEnd { content_index: 0 })
+                .expect("text end")
+                .is_none()
+        );
+        let output = events
             .accept(LanguageAdapterEvent::Finish {
                 finish_reason: None,
             })
             .expect("finish")
-        else {
-            panic!("finished output");
-        };
-        events.send(Ok(finish), Some(output.snapshot.clone()));
+            .expect("finished output");
 
         {
             let state = events
@@ -1394,6 +1463,17 @@ mod tests {
             assert!(state.pending.len() <= MAX_PENDING_GENERATION_EVENTS);
             assert!(state.non_snapshot_bytes <= MAX_PENDING_GENERATION_BYTES);
         }
+        assert_eq!(
+            events
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .accumulator
+                .snapshot_materializations
+                .load(Ordering::Relaxed),
+            1,
+            "only terminal settlement may materialize before consumer drain"
+        );
         drop(events);
 
         let mut saw_started = false;
@@ -1418,6 +1498,64 @@ mod tests {
         assert!(dropped_events > 0);
         assert!(saw_started);
         assert!(saw_finish);
-        assert_eq!(snapshot, output.snapshot);
+        assert_eq!(snapshot.as_ref(), &output.snapshot);
+        assert_eq!(
+            receiver
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .accumulator
+                .snapshot_materializations
+                .load(Ordering::Relaxed),
+            2,
+            "one resync plus terminal settlement"
+        );
+    }
+
+    #[test]
+    #[ignore = "manual modification-before/after scaling measurement"]
+    fn generation_queue_scaling_measurement() {
+        for mebibytes in [1usize, 2, 4] {
+            let (events, _receiver) = event_channel(descriptor());
+            assert!(
+                events
+                    .accept(LanguageAdapterEvent::TextStart { content_index: 0 })
+                    .expect("text start")
+                    .is_none()
+            );
+            let chunk = "x".repeat(16 * 1024);
+            let chunks = mebibytes * 1024 * 1024 / chunk.len();
+            ALLOCATION_CALLS.store(0, Ordering::Relaxed);
+            ALLOCATION_BYTES.store(0, Ordering::Relaxed);
+            MEASURE_ALLOCATIONS.store(true, Ordering::Relaxed);
+            let started = std::time::Instant::now();
+            for _ in 0..chunks {
+                assert!(
+                    events
+                        .accept(LanguageAdapterEvent::TextDelta {
+                            content_index: 0,
+                            delta: chunk.clone(),
+                        })
+                        .expect("text delta")
+                        .is_none()
+                );
+            }
+            let elapsed = started.elapsed();
+            MEASURE_ALLOCATIONS.store(false, Ordering::Relaxed);
+            let marker_count = events
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .pending
+                .iter()
+                .filter(|event| matches!(event, QueuedEvent::ResyncMarker { .. }))
+                .count();
+            eprintln!(
+                "generation_queue_scaling mib={mebibytes} chunks={chunks} queued_resync_markers={marker_count} producer_snapshot_materializations=0 elapsed_us={} allocation_calls={} allocation_bytes={}",
+                elapsed.as_micros(),
+                ALLOCATION_CALLS.load(Ordering::Relaxed),
+                ALLOCATION_BYTES.load(Ordering::Relaxed)
+            );
+        }
     }
 }

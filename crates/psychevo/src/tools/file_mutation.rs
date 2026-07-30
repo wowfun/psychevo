@@ -4,6 +4,11 @@ pub(crate) use super::*;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
+#[cfg(test)]
+std::thread_local! {
+    static SHA256_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FileVersion {
     pub(crate) len: u64,
@@ -140,7 +145,6 @@ impl FileMutationBackend for LocalFileMutation {
         expected: FileVersion,
         content: &[u8],
     ) -> MutationResult<()> {
-        ensure_file_version(path, expected)?;
         let metadata = fs::metadata(path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 MutationError::Conflict(MutationConflict::TargetMissing {
@@ -199,13 +203,6 @@ fn prepared_temp_file(
     let mut temp = builder.tempfile_in(parent)?;
     temp.write_all(content)?;
     temp.flush()?;
-    let verify = fs::read(temp.path())?;
-    if verify != content {
-        return Err(MutationError::Message(format!(
-            "temporary-file verification failed for {}",
-            parent.display()
-        )));
-    }
     Ok(temp)
 }
 
@@ -256,6 +253,8 @@ fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
 }
 
 fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    #[cfg(test)]
+    SHA256_FILE_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -273,12 +272,7 @@ pub(crate) fn ensure_file_version(
     path: &Path,
     expected: FileVersion,
 ) -> std::result::Result<(), MutationConflict> {
-    let metadata = current_file_metadata(path)?;
-    if metadata.len != expected.len || metadata.modified != expected.modified {
-        return Err(MutationConflict::Modified {
-            path: path.to_path_buf(),
-        });
-    }
+    ensure_file_metadata_version(path, expected)?;
     if sha256_file(path).map_err(|_| MutationConflict::VersionUnavailable {
         path: path.to_path_buf(),
     })? != expected.sha256
@@ -288,6 +282,19 @@ pub(crate) fn ensure_file_version(
         });
     }
     Ok(())
+}
+
+fn ensure_file_metadata_version(
+    path: &Path,
+    expected: FileVersion,
+) -> std::result::Result<(), MutationConflict> {
+    let metadata = current_file_metadata(path)?;
+    if metadata.len == expected.len && metadata.modified == expected.modified {
+        return Ok(());
+    }
+    Err(MutationConflict::Modified {
+        path: path.to_path_buf(),
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -326,7 +333,7 @@ impl FileReadTracker {
             },
         );
         state.fifo.push_back((path, seq));
-        while state.reads.len() > 4096 {
+        while state.fifo.len() > 4096 {
             let Some((path, evicted_seq)) = state.fifo.pop_front() else {
                 break;
             };
@@ -517,7 +524,6 @@ pub(crate) fn require_fresh_read(
         return Err(MutationConflict::SiblingWrite { path, writer });
     }
     let version = stamp.version;
-    ensure_file_version(&path, version)?;
     Ok(version)
 }
 
@@ -616,6 +622,40 @@ pub(crate) mod file_mutation_tests {
     }
 
     #[test]
+    fn local_replace_performs_one_authoritative_precommit_hash() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("note.txt");
+        fs::write(&path, "old\n").expect("seed");
+        let snapshot = LOCAL_FILE_MUTATION.snapshot(&path).expect("snapshot");
+        SHA256_FILE_CALLS.with(|calls| calls.set(0));
+
+        LOCAL_FILE_MUTATION
+            .replace("agent", &path, snapshot.version, b"new\n")
+            .expect("replace");
+
+        assert_eq!(SHA256_FILE_CALLS.with(std::cell::Cell::get), 1);
+        assert_eq!(fs::read_to_string(path).expect("replaced"), "new\n");
+    }
+
+    #[test]
+    fn freshness_admission_uses_only_the_invocation_stamp_and_sibling_writer() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("note.txt");
+        fs::write(&path, "old\n").expect("seed");
+        let snapshot = LOCAL_FILE_MUTATION.snapshot(&path).expect("snapshot");
+        let tracker = FileReadTracker::default();
+        record_file_read(&tracker, &path, snapshot.version, false);
+        fs::remove_file(&path).expect("remove after read");
+        SHA256_FILE_CALLS.with(|calls| calls.set(0));
+
+        assert_eq!(
+            require_fresh_read(&tracker, "reader", &path).expect("stamp admission"),
+            snapshot.version
+        );
+        assert_eq!(SHA256_FILE_CALLS.with(std::cell::Cell::get), 0);
+    }
+
+    #[test]
     fn read_tracker_is_per_invocation_bounded_and_dropped_with_its_owner() {
         let first = FileReadTracker::default();
         let shared_clone = first.clone();
@@ -642,6 +682,28 @@ pub(crate) mod file_mutation_tests {
         assert!(
             weak.upgrade().is_none(),
             "the invocation read set must be reclaimed"
+        );
+    }
+
+    #[test]
+    fn repeated_reads_keep_the_fifo_bounded_without_evicting_the_latest_stamp() {
+        let tracker = FileReadTracker::default();
+        let path = Path::new("/tracker/repeated");
+        let version = FileVersion {
+            len: 0,
+            modified: SystemTime::UNIX_EPOCH,
+            sha256: [0; 32],
+        };
+        for _ in 0..5000 {
+            tracker.record(path, version, 0, false);
+        }
+
+        let state = tracker.inner.lock().expect("tracker");
+        assert_eq!(state.reads.len(), 1);
+        assert!(state.fifo.len() <= 4096);
+        assert_eq!(
+            state.reads.get(path).map(|stamp| stamp.tracker_seq),
+            Some(state.seq)
         );
     }
 

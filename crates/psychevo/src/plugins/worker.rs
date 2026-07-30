@@ -37,7 +37,7 @@ pub(crate) struct WorkerToolDescriptor {
 #[derive(Clone)]
 pub(crate) struct PluginWorkerTool {
     pub(crate) plugin_name: String,
-    pub(crate) session: Arc<PluginWorkerSession>,
+    pub(crate) runtime: Arc<PluginWorkerRuntime>,
     pub(crate) descriptor: WorkerToolDescriptor,
 }
 
@@ -80,18 +80,13 @@ impl ToolBinding for PluginWorkerTool {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let plugin_name = self.plugin_name.clone();
-        let session = Arc::clone(&self.session);
+        let runtime = Arc::clone(&self.runtime);
         let descriptor = self.descriptor.clone();
         Box::pin(async move {
             let error_tool = descriptor.name.clone();
-            match call_worker_tool_in_session(
-                &session,
-                &descriptor.name,
-                &tool_call_id,
-                args,
-                Some(abort),
-            )
-            .await
+            match runtime
+                .call_tool(&descriptor.name, &tool_call_id, args, Some(abort))
+                .await
             {
                 Ok(output) => output,
                 Err(err) => ToolOutput::error(format!(
@@ -100,6 +95,96 @@ impl ToolBinding for PluginWorkerTool {
                 )),
             }
         })
+    }
+}
+
+pub(crate) struct PluginWorkerRuntime {
+    record: PluginInstallRecord,
+    manifest: LoadedPluginManifest,
+    spec: PluginWorkerSpec,
+    env: BTreeMap<String, String>,
+    session: Mutex<Option<Arc<PluginWorkerSession>>>,
+}
+
+impl std::fmt::Debug for PluginWorkerRuntime {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PluginWorkerRuntime")
+            .field("plugin", &self.record.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PluginWorkerRuntime {
+    pub(crate) fn new(
+        record: PluginInstallRecord,
+        manifest: LoadedPluginManifest,
+        spec: PluginWorkerSpec,
+        env: BTreeMap<String, String>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            record,
+            manifest,
+            spec,
+            env,
+            session: Mutex::new(None),
+        })
+    }
+
+    pub(crate) fn plugin_name(&self) -> &str {
+        &self.record.name
+    }
+
+    pub(crate) fn source_id(&self) -> String {
+        format!("plugin:{}@{}", self.record.name, self.record.source_slug)
+    }
+
+    async fn session(&self) -> std::result::Result<Arc<PluginWorkerSession>, String> {
+        let mut session = self.session.lock().await;
+        if let Some(session) = session.as_ref() {
+            return Ok(Arc::clone(session));
+        }
+        let started =
+            PluginWorkerSession::start(&self.record, &self.manifest, &self.spec, &self.env).await?;
+        *session = Some(Arc::clone(&started));
+        Ok(started)
+    }
+
+    pub(crate) async fn tools(&self) -> std::result::Result<Vec<WorkerToolDescriptor>, String> {
+        let session = self.session().await?;
+        worker_tools_in_session(&session).await
+    }
+
+    pub(crate) async fn call(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> std::result::Result<Value, String> {
+        self.session().await?.call(method, params).await
+    }
+
+    async fn call_tool(
+        &self,
+        tool_name: &str,
+        tool_call_id: &str,
+        args: Value,
+        abort: Option<AbortSignal>,
+    ) -> std::result::Result<ToolOutput, String> {
+        let session = self.session().await?;
+        call_worker_tool_in_session(&session, tool_name, tool_call_id, args, abort).await
+    }
+
+    pub(crate) async fn shutdown(&self) -> std::result::Result<(), String> {
+        let session = self.session.lock().await.take();
+        match session {
+            Some(session) => session.shutdown().await,
+            None => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn started(&self) -> bool {
+        self.session.lock().await.is_some()
     }
 }
 

@@ -2,19 +2,32 @@ use super::*;
 
 impl Client {
     pub async fn start_thread(&self, request: StartThreadRequest) -> Result<Thread> {
-        self.ensure_open()?;
         let cwd = canonicalize_cwd(&request.cwd)?;
-        let id = self
-            .inner
-            .state
-            .create_session_with_metadata(
-                &cwd,
-                &request.source,
-                "pending",
-                "pending",
-                request.metadata,
-            )
-            .await?;
+        let runtime = self.inner.runtime.clone();
+        let admission = runtime.begin_admission().await?;
+        let reservation = runtime.reserve_application_operation()?;
+        let state = self.inner.state.clone();
+        let (result_tx, result_rx) = oneshot::channel();
+        runtime.spawn(async move {
+            drop(admission);
+            let result = async {
+                let _reservation = reservation.acquire().await?;
+                state
+                    .create_session_with_metadata(
+                        &cwd,
+                        &request.source,
+                        "pending",
+                        "pending",
+                        request.metadata,
+                    )
+                    .await
+            }
+            .await;
+            let _ = result_tx.send(result);
+        });
+        let id = result_rx.await.map_err(|_| {
+            Error::Message("accepted start_thread task ended without a result".to_string())
+        })??;
         Ok(Thread {
             client: self.clone(),
             id,
@@ -187,29 +200,26 @@ impl Thread {
     }
 
     pub async fn archive(&self) -> Result<()> {
-        let _mutation = self
-            .client
-            .inner
-            .runtime
-            .reserve_mutation(&self.id)
-            .acquire()
-            .await?;
-        self.client.inner.state.archive_session(&self.id).await?;
-        self.client.inner.runtime.remove_mcp_runtime(&self.id);
-        Ok(())
+        self.enqueue_mutation(|thread| async move {
+            thread
+                .client
+                .inner
+                .state
+                .archive_session(&thread.id)
+                .await?;
+            thread.client.inner.runtime.remove_mcp_runtime(&thread.id);
+            Ok(())
+        })
+        .await
     }
 
     pub async fn delete(&self) -> Result<()> {
-        let _mutation = self
-            .client
-            .inner
-            .runtime
-            .reserve_mutation(&self.id)
-            .acquire()
-            .await?;
-        self.client.inner.state.delete_session(&self.id).await?;
-        self.client.inner.runtime.remove_mcp_runtime(&self.id);
-        Ok(())
+        self.enqueue_mutation(|thread| async move {
+            thread.client.inner.state.delete_session(&thread.id).await?;
+            thread.client.inner.runtime.remove_mcp_runtime(&thread.id);
+            Ok(())
+        })
+        .await
     }
 
     pub async fn compact(&self, request: CompactThreadRequest) -> Result<CompactionResult> {
@@ -220,12 +230,7 @@ impl Thread {
         &self,
         request: CompactThreadRequest,
     ) -> BoxFuture<'static, Result<CompactionResult>> {
-        let mutation = self.client.inner.runtime.reserve_mutation(&self.id);
-        let thread = self.clone();
-        Box::pin(async move {
-            let _mutation = mutation.acquire().await?;
-            thread.compact_reserved(request).await
-        })
+        self.enqueue_mutation(move |thread| async move { thread.compact_reserved(request).await })
     }
 
     async fn compact_reserved(&self, request: CompactThreadRequest) -> Result<CompactionResult> {
@@ -258,25 +263,48 @@ impl Thread {
     }
 
     pub async fn fork(&self, request: ForkThreadRequest) -> Result<Thread> {
-        let _mutation = self
-            .client
-            .inner
-            .runtime
-            .reserve_mutation(&self.id)
-            .acquire()
-            .await?;
-        let id = self
-            .client
-            .inner
-            .state
-            .fork_native_session_history(NativeSessionForkInput {
-                source_session_id: &self.id,
-                before_session_seq: request.before_session_seq,
+        self.enqueue_mutation(move |thread| async move {
+            let id = thread
+                .client
+                .inner
+                .state
+                .fork_native_session_history(NativeSessionForkInput {
+                    source_session_id: &thread.id,
+                    before_session_seq: request.before_session_seq,
+                })
+                .await?;
+            Ok(Thread {
+                client: thread.client,
+                id,
             })
-            .await?;
-        Ok(Thread {
-            client: self.client.clone(),
-            id,
+        })
+        .await
+    }
+
+    fn enqueue_mutation<T, F, Fut>(&self, operation: F) -> BoxFuture<'static, Result<T>>
+    where
+        T: Send + 'static,
+        F: FnOnce(Thread) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T>> + Send + 'static,
+    {
+        let thread = self.clone();
+        Box::pin(async move {
+            let runtime = thread.client.inner.runtime.clone();
+            let admission = runtime.begin_admission().await?;
+            let reservation = runtime.reserve_mutation(&thread.id)?;
+            let (result_tx, result_rx) = oneshot::channel();
+            runtime.spawn(async move {
+                drop(admission);
+                let result = async {
+                    let _reservation = reservation.acquire().await?;
+                    operation(thread).await
+                }
+                .await;
+                let _ = result_tx.send(result);
+            });
+            result_rx.await.map_err(|_| {
+                Error::Message("accepted Thread mutation ended without a result".to_string())
+            })?
         })
     }
 
@@ -323,16 +351,19 @@ impl Thread {
 
     #[doc(hidden)]
     #[cfg(feature = "product")]
-    pub fn __steer(&self, expected_turn_id: &str, input: impl Into<String>) -> bool {
+    pub fn __steer(
+        &self,
+        expected_turn_id: &str,
+        input: impl Into<String>,
+    ) -> std::result::Result<bool, psychevo_agent_core::ControlInputError> {
         let (_, active_turn_id, _) = self.client.inner.runtime.thread_activity(&self.id);
         if active_turn_id.as_deref() != Some(expected_turn_id) {
-            return false;
+            return Ok(false);
         }
-        self.client
-            .inner
-            .runtime
-            .turn_handle(expected_turn_id)
-            .is_some_and(|turn| turn.steer(input))
+        match self.client.inner.runtime.turn_handle(expected_turn_id) {
+            Some(turn) => turn.steer(input).map(|()| true),
+            None => Ok(false),
+        }
     }
 
     pub async fn pending_interactions(&self) -> Result<Vec<PendingInteraction>> {

@@ -802,7 +802,7 @@ pub(crate) async fn agent_status_records(
             records.push(agent_record_from_edge(store, edge).await);
         }
     }
-    let runs = supervisor.active();
+    let runs = supervisor.slots();
     for state in runs.values() {
         if !all && let Some(parent) = parent_session_id {
             let in_scope = state.record.parent_session_id == parent
@@ -860,7 +860,7 @@ fn resolve_supervised_record(
     supervisor: &AgentSupervisor,
     id: &str,
 ) -> Result<Option<AgentRunRecord>> {
-    let runs = supervisor.active();
+    let runs = supervisor.slots();
     resolve_live_record_locked(&runs, id)
 }
 
@@ -895,37 +895,46 @@ pub(crate) async fn close_agent_id(
     id: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
+    let mut pending_terminal = None;
     let live = {
-        let mut runs = supervisor.active();
+        let mut runs = supervisor.slots();
         if let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? {
-            let child_session = {
-                let state = runs.get_mut(&live_id).expect("live record exists");
-                if let Some(control) = &state.control {
-                    control.stop();
+            if runs
+                .get(&live_id)
+                .is_some_and(|state| state.phase == AgentRunPhase::PendingTerminal)
+            {
+                pending_terminal = Some((live_id, previous));
+                None
+            } else {
+                let child_session = {
+                    let state = runs.get_mut(&live_id).expect("live record exists");
+                    if let Some(control) = &state.control {
+                        control.stop();
+                    }
+                    state.record.status = AgentRunStatus::Shutdown;
+                    state.record.edge_status = Some(AgentEdgeStatus::Closed);
+                    state.record.ended_at_ms = Some(now_ms());
+                    state.record.outcome = Some("shutdown".to_string());
+                    state.record.child_session_id.clone()
+                };
+                if let Some(child_session) = child_session.as_deref() {
+                    close_live_descendants_locked(&mut runs, child_session);
                 }
-                state.record.status = AgentRunStatus::Shutdown;
-                state.record.edge_status = Some(AgentEdgeStatus::Closed);
-                state.record.ended_at_ms = Some(now_ms());
-                state.record.outcome = Some("shutdown".to_string());
-                state.record.child_session_id.clone()
-            };
-            if let Some(child_session) = child_session.as_deref() {
-                close_live_descendants_locked(&mut runs, child_session);
+                Some((live_id, previous, child_session))
             }
-            Some((live_id, previous, child_session))
         } else {
             None
         }
     };
-    let Some((live_id, previous, child_session)) = live else {
+    if let Some((live_id, previous)) = pending_terminal {
+        if let Some(store) = store {
+            supervisor.retry_terminal(store, &live_id).await?;
+        }
+        return Ok(Some(previous));
+    }
+    let Some((_live_id, previous, _child_session)) = live else {
         return close_persisted_agent(id, store).await;
     };
-    if let Some(store) = store
-        && let Some(child_session) = child_session
-    {
-        store.close_agent_edge_subtree(&child_session).await?;
-    }
-    supervisor.remove(&live_id);
     Ok(Some(previous))
 }
 
@@ -961,7 +970,7 @@ pub(crate) fn request_agent_stop_id(
     supervisor: &AgentSupervisor,
     id: &str,
 ) -> Result<Option<AgentRunRecord>> {
-    let runs = supervisor.active();
+    let runs = supervisor.slots();
     let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? else {
         return Ok(None);
     };

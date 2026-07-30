@@ -82,12 +82,14 @@ impl PermissionRuntime {
     pub(crate) async fn authorize_mcp_startup(
         &self,
         server: &str,
-        transport: &str,
+        source: &str,
+        target: &crate::types::McpStartupApprovalTarget,
         descriptor_fingerprint: &str,
     ) -> std::result::Result<(), String> {
         let args = json!({
             "server": server,
-            "transport": transport,
+            "source": source,
+            "target": target,
             "descriptorFingerprint": descriptor_fingerprint,
         });
         self.authorize(

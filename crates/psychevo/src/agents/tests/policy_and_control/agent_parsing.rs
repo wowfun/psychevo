@@ -4,6 +4,7 @@ pub(crate) use super::*;
 #[derive(Debug, Default)]
 struct FakeExternalAgentDelegate {
     calls: Arc<Mutex<Vec<ExternalAgentDelegateRequest>>>,
+    failure: Option<String>,
 }
 
 impl crate::types::ExternalAgentDelegate for FakeExternalAgentDelegate {
@@ -15,7 +16,11 @@ impl crate::types::ExternalAgentDelegate for FakeExternalAgentDelegate {
             .lock()
             .expect("delegate calls lock poisoned")
             .push(request.clone());
+        let failure = self.failure.clone();
         Box::pin(async move {
+            if let Some(message) = failure {
+                return Err(Error::Message(message));
+            }
             Ok(crate::types::ExternalAgentDelegateResult {
                 child_session_id: request.child_session_id,
                 final_answer: "delegated final".to_string(),

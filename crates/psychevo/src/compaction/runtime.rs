@@ -507,41 +507,43 @@ pub(crate) async fn generate_summary(
     instructions: Option<&str>,
 ) -> Result<String> {
     let budget = compaction_generation_budget(resolved)?;
-    let units = atomic_summary_units(messages);
+    let units = rendered_summary_units(messages);
     let mut previous_summary = previous.map(|record| record.summary_text.clone());
-    validate_fixed_summary_input(
-        previous_summary.as_deref(),
-        instructions,
-        budget.input_tokens,
-    )?;
     let mut unit_index = 0usize;
     let mut generated_any = false;
     while unit_index < units.len() || !generated_any {
-        let mut chunk = Vec::new();
+        let fixed_user_prompt =
+            summary_user_prompt_from_rendered(previous_summary.as_deref(), "", instructions);
+        let system_tokens = estimate_text_tokens(summary_system_prompt());
+        let fixed_user_chars = fixed_user_prompt.chars().count() as u64;
+        let fixed_tokens =
+            system_tokens.saturating_add(estimate_char_count_tokens(fixed_user_chars));
+        validate_fixed_summary_input(fixed_tokens, budget.input_tokens)?;
+        let chunk_start = unit_index;
+        let mut chunk_chars = 0u64;
         while unit_index < units.len() {
-            let mut candidate = chunk.clone();
-            candidate.extend(units[unit_index].iter().cloned());
-            if summary_request_tokens(
-                previous_summary.as_deref(),
-                &candidate,
-                instructions,
-            ) <= budget.input_tokens
+            let candidate_chars =
+                fixed_user_chars.saturating_add(chunk_chars).saturating_add(units[unit_index].chars);
+            let candidate_tokens =
+                system_tokens.saturating_add(estimate_char_count_tokens(candidate_chars));
+            if candidate_tokens <= budget.input_tokens
             {
-                chunk = candidate;
+                chunk_chars = chunk_chars.saturating_add(units[unit_index].chars);
                 unit_index += 1;
                 continue;
             }
-            if chunk.is_empty() {
+            if unit_index == chunk_start {
                 return Err(Error::Message(format!(
                     "compaction atomic message unit at session_seq {} exceeds the {} token input budget",
-                    units[unit_index]
-                        .first()
-                        .map(|record| record.session_seq)
-                        .unwrap_or_default(),
+                    units[unit_index].first_session_seq,
                     budget.input_tokens
                 )));
             }
             break;
+        }
+        let mut chunk = String::with_capacity(chunk_chars.min(usize::MAX as u64) as usize);
+        for unit in &units[chunk_start..unit_index] {
+            chunk.push_str(&unit.text);
         }
         previous_summary = Some(
             generate_summary_chunk(
@@ -609,11 +611,9 @@ pub(crate) fn compaction_generation_budget(
 }
 
 fn validate_fixed_summary_input(
-    previous_summary: Option<&str>,
-    instructions: Option<&str>,
+    fixed_tokens: u64,
     input_tokens: u64,
 ) -> Result<()> {
-    let fixed_tokens = summary_request_tokens(previous_summary, &[], instructions);
     if fixed_tokens <= input_tokens {
         return Ok(());
     }
@@ -622,14 +622,8 @@ fn validate_fixed_summary_input(
     )))
 }
 
-fn summary_request_tokens(
-    previous_summary: Option<&str>,
-    messages: &[SessionMessageRecord],
-    instructions: Option<&str>,
-) -> u64 {
-    estimate_text_tokens(summary_system_prompt()).saturating_add(estimate_text_tokens(
-        &summary_user_prompt_text(previous_summary, messages, instructions),
-    ))
+fn estimate_char_count_tokens(chars: u64) -> u64 {
+    (chars.saturating_add(3) / 4).max(1)
 }
 
 pub(crate) fn atomic_summary_units(
@@ -662,11 +656,67 @@ pub(crate) fn atomic_summary_units(
     units
 }
 
+#[derive(Debug)]
+struct RenderedSummaryUnit {
+    first_session_seq: i64,
+    text: String,
+    chars: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    static SUMMARY_RECORD_RENDER_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_summary_record_render_count() {
+    SUMMARY_RECORD_RENDER_COUNT.set(0);
+}
+
+#[cfg(test)]
+fn summary_record_render_count() -> usize {
+    SUMMARY_RECORD_RENDER_COUNT.get()
+}
+
+fn rendered_summary_units(messages: &[SessionMessageRecord]) -> Vec<RenderedSummaryUnit> {
+    atomic_summary_units(messages)
+        .into_iter()
+        .map(|unit| {
+            let first_session_seq = unit
+                .first()
+                .map(|record| record.session_seq)
+                .unwrap_or_default();
+            let mut text = String::new();
+            for record in unit {
+                text.push_str(&render_summary_record(&record));
+            }
+            RenderedSummaryUnit {
+                first_session_seq,
+                chars: text.chars().count() as u64,
+                text,
+            }
+        })
+        .collect()
+}
+
+fn render_summary_record(record: &SessionMessageRecord) -> String {
+    #[cfg(test)]
+    SUMMARY_RECORD_RENDER_COUNT
+        .with(|count| count.set(count.get().saturating_add(1)));
+    format!(
+        "\n[session_seq={} role={}]\n{}\n",
+        record.session_seq,
+        record.message.role(),
+        message_summary_text(&record.message)
+    )
+}
+
 async fn generate_summary_chunk(
     provider: &LanguageModel,
     resolved: &crate::config::ResolvedRunProvider,
     previous_summary: Option<&str>,
-    messages: &[SessionMessageRecord],
+    messages_text: &str,
     instructions: Option<&str>,
     output_tokens: u64,
 ) -> Result<String> {
@@ -684,9 +734,9 @@ async fn generate_summary_chunk(
     let request = LanguageRequest {
         messages: vec![
             psychevo_ai::Message::system(summary_system_prompt()),
-            psychevo_ai::Message::user(summary_user_prompt_text(
+            psychevo_ai::Message::user(summary_user_prompt_from_rendered(
                 previous_summary,
-                messages,
+                messages_text,
                 instructions,
             )),
         ],
@@ -751,9 +801,22 @@ pub(crate) fn summary_system_prompt() -> &'static str {
     prompt_templates::compaction_summary_system()
 }
 
+#[cfg(test)]
 pub(crate) fn summary_user_prompt_text(
     previous_summary: Option<&str>,
     messages: &[SessionMessageRecord],
+    instructions: Option<&str>,
+) -> String {
+    let mut messages_text = String::new();
+    for record in messages {
+        messages_text.push_str(&render_summary_record(record));
+    }
+    summary_user_prompt_from_rendered(previous_summary, &messages_text, instructions)
+}
+
+fn summary_user_prompt_from_rendered(
+    previous_summary: Option<&str>,
+    messages_text: &str,
     instructions: Option<&str>,
 ) -> String {
     let manual_focus_section = if let Some(instructions) = instructions
@@ -771,19 +834,10 @@ pub(crate) fn summary_user_prompt_text(
     } else {
         String::new()
     };
-    let mut messages_text = String::new();
-    for record in messages {
-        messages_text.push_str(&format!(
-            "\n[session_seq={} role={}]\n{}\n",
-            record.session_seq,
-            record.message.role(),
-            message_summary_text(&record.message)
-        ));
-    }
     prompt_templates::compaction_summary_user(
         &manual_focus_section,
         &previous_summary_section,
-        &messages_text,
+        messages_text,
     )
 }
 

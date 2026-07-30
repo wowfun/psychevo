@@ -185,8 +185,7 @@ impl Client {
 
 impl Thread {
     pub async fn start_turn(&self, mut request: TurnRequest) -> Result<TurnHandle> {
-        let admission_gate = self.client.inner.admission_gate.clone().read_owned().await;
-        self.client.ensure_open()?;
+        let admission_guard = self.client.inner.runtime.begin_admission().await?;
         request.inherited_env = Some(
             self.client
                 .application_environment(request.inherited_env.take()),
@@ -312,7 +311,7 @@ impl Thread {
                     receipt: task_receipt.clone(),
                 });
                 let _ = acceptance_tx.send(Ok(()));
-                drop(admission_gate);
+                drop(admission_guard);
                 if lane.await.is_err() {
                     let message: Arc<str> = Arc::from("Thread operation reservation was cancelled");
                     finalizer

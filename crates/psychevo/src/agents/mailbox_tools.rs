@@ -165,7 +165,7 @@ pub(crate) fn update_run_child_session(
     id: &str,
     child_session: &str,
 ) {
-    let mut runs = supervisor.active();
+    let mut runs = supervisor.slots();
     if let Some(state) = runs.get_mut(id) {
         state.record.child_session_id = Some(child_session.to_string());
     }
@@ -177,7 +177,7 @@ pub(crate) fn update_run_completed(
     outcome: Outcome,
     final_answer: String,
 ) -> AgentRunRecord {
-    let mut runs = supervisor.active();
+    let mut runs = supervisor.slots();
     let state = runs.get_mut(id).expect("agent run exists");
     if agent_status_is_final(state.record.status) {
         return state.record.clone();
@@ -195,7 +195,7 @@ pub(crate) fn update_run_completed(
 }
 
 pub(crate) fn update_run_failed(supervisor: &AgentSupervisor, id: &str, error: &str) {
-    let mut runs = supervisor.active();
+    let mut runs = supervisor.slots();
     if let Some(state) = runs.get_mut(id) {
         if agent_status_is_final(state.record.status) {
             return;
@@ -336,11 +336,32 @@ impl ToolBinding for WaitAgentTool {
                     Err(err) => return ToolOutput::error(err.to_string()),
                 };
                 if let Some(handle) = control_handle {
-                    for record in delivered.iter().filter(|record| {
-                        record.delivered_tool_call_id.as_deref() == Some(tool_call_id.as_str())
-                            && record.delivered_after_session_seq == Some(delivered_after_seq)
-                    }) {
-                        let _ = handle.inject_user_message(agent_mailbox_event_message(record));
+                    let messages = delivered
+                        .iter()
+                        .filter(|record| {
+                            record.delivered_tool_call_id.as_deref()
+                                == Some(tool_call_id.as_str())
+                                && record.delivered_after_session_seq == Some(delivered_after_seq)
+                        })
+                        .map(agent_mailbox_event_message)
+                        .collect();
+                    if let Err(error) = handle.inject_authoritative_messages(messages) {
+                        if let Err(reset_error) = store
+                            .reset_agent_mailbox_delivery_for_tool(
+                                &parent_session_id,
+                                &tool_call_id,
+                                delivered_after_seq,
+                            )
+                            .await
+                        {
+                            return ToolOutput::error(format!(
+                                "failed to inject delivered agent mailbox events: {error}; \
+                                 failed to restore mailbox delivery: {reset_error}"
+                            ));
+                        }
+                        return ToolOutput::error(format!(
+                            "failed to inject delivered agent mailbox events: {error}"
+                        ));
                     }
                 }
             }

@@ -182,7 +182,7 @@ pub(crate) async fn invalid_child_model_is_rejected_before_lifecycle_state() {
         0,
         "{sessions:#?}"
     );
-    let runs = supervisor.active();
+    let runs = supervisor.slots();
     assert!(
         runs.values()
             .all(|state| state.record.parent_session_id != parent),
@@ -255,6 +255,124 @@ pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
         .await
         .expect("timeout");
     assert_eq!(value["timed_out"], true);
+}
+
+#[tokio::test]
+pub(crate) async fn wait_agent_restores_mailbox_delivery_when_control_input_is_full() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let record = test_agent_run_record(parent.clone(), None);
+    append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
+        .await
+        .expect("mailbox event");
+
+    let (control, _receivers) = ControlHandle::new();
+    for index in 0..psychevo_agent_core::MAX_CONTROL_INPUT_ITEMS {
+        control
+            .inject_user_message(user_text_message(format!("queued-{index}")))
+            .expect("fill control input");
+    }
+    let mut context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent.clone(),
+        AgentCatalog::default(),
+    );
+    context.control_handle = Some(control);
+    let (_tx, rx) = watch::channel(false);
+
+    let output = WaitAgentTool::new(context)
+        .execute(
+            "call-wait".to_string(),
+            json!({"timeout_ms": 0}),
+            AbortSignal::new(rx),
+        )
+        .await;
+
+    assert!(output.is_error);
+    assert!(
+        output.json["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("count limit"))
+    );
+    let events = store
+        .load_agent_mailbox_events(&parent)
+        .await
+        .expect("mailbox events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].delivered_at_ms, None);
+    assert_eq!(events[0].delivered_tool_call_id, None);
+    assert_eq!(events[0].delivered_after_session_seq, None);
+}
+
+#[tokio::test]
+pub(crate) async fn wait_agent_delivers_one_bounded_mailbox_page() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let record = test_agent_run_record(parent.clone(), None);
+    for index in 0..(psychevo_agent_core::MAX_CONTROL_INPUT_ITEMS + 1) {
+        append_parent_agent_mailbox_event(
+            &store,
+            &parent,
+            &record,
+            "normal",
+            &format!("mailbox final {index}"),
+        )
+        .await
+        .expect("mailbox event");
+    }
+
+    let (control, _receivers) = ControlHandle::new();
+    let mut context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent.clone(),
+        AgentCatalog::default(),
+    );
+    context.control_handle = Some(control);
+    let (_tx, rx) = watch::channel(false);
+
+    let output = WaitAgentTool::new(context)
+        .execute(
+            "call-wait".to_string(),
+            json!({"timeout_ms": 0}),
+            AbortSignal::new(rx),
+        )
+        .await;
+
+    assert!(!output.is_error, "{:?}", output.json);
+    let events = store
+        .load_agent_mailbox_events(&parent)
+        .await
+        .expect("mailbox events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.delivered_at_ms.is_some())
+            .count(),
+        psychevo_agent_core::MAX_CONTROL_INPUT_ITEMS
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.delivered_at_ms.is_none())
+            .count(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -704,10 +822,12 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let manifest =
         crate::plugins::load_plugin_manifest(&record.package_root, true).expect("manifest");
     let worker = manifest.worker.clone().expect("worker");
-    let worker_session =
-        crate::plugins::PluginWorkerSession::start(&record, &manifest, &worker, &BTreeMap::new())
-            .await
-            .expect("plugin worker session");
+    let worker_runtime = crate::plugins::PluginWorkerRuntime::new(
+        record.clone(),
+        manifest.clone(),
+        worker.clone(),
+        BTreeMap::new(),
+    );
     let plugin_source = crate::hooks::HookSourceDescriptor {
         source_id: format!("plugin:{}@{}", record.name, record.source_slug),
         source_kind: "plugin".to_string(),
@@ -726,7 +846,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
             command: worker.command,
             args: worker.args,
             env: BTreeMap::new(),
-            session: Some(worker_session),
+            runtime: Some(Arc::clone(&worker_runtime)),
         }),
     };
     write_trusted_hook_config(&home, &cwd, std::slice::from_ref(&plugin_source));
@@ -780,6 +900,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let plugin_log =
         fs::read_to_string(record.data_root.join("child-hook.jsonl")).expect("plugin hook log");
     assert!(plugin_log.contains("PostToolUse"), "{plugin_log}");
+    worker_runtime.shutdown().await.expect("worker shutdown");
 }
 
 #[tokio::test]
@@ -1067,7 +1188,7 @@ pub(crate) async fn background_required_mcp_failure_commits_terminal_edge_and_ma
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if !supervisor.active().contains_key(&id) {
+            if !supervisor.slots().contains_key(&id) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1301,6 +1422,179 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
     assert_eq!(calls[0].prompt, "List your tools.");
     assert_eq!(calls[0].child_session_id, child_session);
+}
+
+#[tokio::test]
+pub(crate) async fn external_agent_terminal_failure_retains_the_slot_for_retry() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![backend_backed_agent("opencode", "opencode")],
+        shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate::default());
+    let mut context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let supervisor = context.supervisor.clone();
+    store.fail_next_agent_terminal_for_test();
+    let (_tx, rx) = watch::channel(false);
+
+    let error = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: Some("opencode".to_string()),
+            message: "List your tools.".to_string(),
+            task_name: "test_task".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect_err("terminal transaction failure must surface");
+
+    assert!(error.to_string().contains("injected Agent terminal"));
+    let (run_id, child_session_id) = {
+        let calls = delegate.calls.lock().expect("delegate calls");
+        let call = calls.first().expect("delegate call");
+        (call.run_id.clone(), call.child_session_id.clone())
+    };
+    assert_eq!(
+        supervisor
+            .slots()
+            .get(&run_id)
+            .expect("retained external Agent terminal")
+            .phase,
+        AgentRunPhase::PendingTerminal
+    );
+    assert_eq!(
+        store
+            .find_agent_edge(&child_session_id)
+            .await
+            .expect("edge query")
+            .expect("edge")
+            .status,
+        AgentEdgeStatus::Open
+    );
+
+    supervisor
+        .retry_terminal(&store, &run_id)
+        .await
+        .expect("terminal retry");
+    assert!(!supervisor.slots().contains_key(&run_id));
+    assert_eq!(
+        store
+            .find_agent_edge(&child_session_id)
+            .await
+            .expect("edge query")
+            .expect("edge")
+            .status,
+        AgentEdgeStatus::Closed
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn failed_external_agent_uses_the_same_retryable_terminal_transaction() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![backend_backed_agent("opencode", "opencode")],
+        shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let delegate = Arc::new(FakeExternalAgentDelegate {
+        failure: Some("delegate failed".to_string()),
+        ..FakeExternalAgentDelegate::default()
+    });
+    let mut context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent,
+        catalog,
+    );
+    context.external_delegate =
+        Some(delegate.clone() as Arc<dyn crate::types::ExternalAgentDelegate>);
+    let supervisor = context.supervisor.clone();
+    store.fail_next_agent_terminal_for_test();
+    let (_tx, rx) = watch::channel(false);
+
+    let error = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: Some("opencode".to_string()),
+            message: "List your tools.".to_string(),
+            task_name: "test_task".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: None,
+            max_spawn_depth: None,
+            team_member: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect_err("failed Agent terminal transaction must surface");
+
+    assert!(error.to_string().contains("injected Agent terminal"));
+    let (run_id, child_session_id) = {
+        let calls = delegate.calls.lock().expect("delegate calls");
+        let call = calls.first().expect("delegate call");
+        (call.run_id.clone(), call.child_session_id.clone())
+    };
+    {
+        let slots = supervisor.slots();
+        let retained = slots.get(&run_id).expect("retained failed terminal");
+        assert_eq!(retained.phase, AgentRunPhase::PendingTerminal);
+        assert_eq!(retained.record.status, AgentRunStatus::Errored);
+        assert_eq!(retained.record.error.as_deref(), Some("delegate failed"));
+    }
+
+    supervisor
+        .retry_terminal(&store, &run_id)
+        .await
+        .expect("terminal retry");
+    assert!(!supervisor.slots().contains_key(&run_id));
+    assert_eq!(
+        store
+            .find_agent_edge(&child_session_id)
+            .await
+            .expect("edge query")
+            .expect("edge")
+            .status,
+        AgentEdgeStatus::Closed
+    );
 }
 
 #[tokio::test]

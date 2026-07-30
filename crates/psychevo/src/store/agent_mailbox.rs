@@ -7,6 +7,13 @@ use super::store_message_fields::optional_json_string;
 use super::{AgentMailboxEventInput, AgentMailboxEventRecord, StateRuntime};
 
 impl StateRuntime {
+    #[cfg(test)]
+    pub(crate) fn fail_next_agent_terminal_for_test(&self) {
+        self.inner
+            .fail_next_agent_terminal
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub async fn append_agent_mailbox_event(&self, input: AgentMailboxEventInput) -> Result<i64> {
         let now = now_ms();
         let payload_json = serde_json::to_string(&input.payload)?;
@@ -46,6 +53,17 @@ impl StateRuntime {
         child_session_id: &str,
         mailbox: Option<AgentMailboxEventInput>,
     ) -> Result<()> {
+        #[cfg(test)]
+        if self
+            .inner
+            .fail_next_agent_terminal
+            .swap(0, std::sync::atomic::Ordering::SeqCst)
+            > 0
+        {
+            return Err(Error::Message(
+                "injected Agent terminal persistence failure".to_string(),
+            ));
+        }
         let mailbox = mailbox.map(|input| (input, psychevo_agent_core::now_ms()));
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
@@ -172,23 +190,73 @@ impl StateRuntime {
                 SET delivered_at_ms = ?1,
                     delivered_after_session_seq = ?2,
                     delivered_tool_call_id = ?3
-                WHERE parent_session_id = ?4 AND delivered_at_ms IS NULL
+                WHERE id IN (
+                    SELECT id
+                    FROM agent_mailbox_events
+                    WHERE parent_session_id = ?4 AND delivered_at_ms IS NULL
+                    ORDER BY created_at_ms ASC, id ASC
+                    LIMIT ?5
+                )
                 "#,
             )
             .bind(now)
             .bind(delivered_after_session_seq)
             .bind(tool_call_id)
             .bind(parent_session_id)
+            .bind(psychevo_agent_core::MAX_CONTROL_INPUT_ITEMS as i64)
             .execute(&mut *tx)
             .await?;
-            let rows = sqlx::query(AGENT_MAILBOX_EVENTS_QUERY)
+            let rows = sqlx::query(
+                r#"
+                SELECT id, parent_session_id, child_session_id, agent_id, task_name,
+                       agent_name, created_at_ms, delivered_at_ms,
+                       delivered_prompt_session_seq, delivered_after_session_seq,
+                       delivered_tool_call_id, content_text, payload_json, metadata_json
+                FROM agent_mailbox_events
+                WHERE parent_session_id = ?1
+                  AND delivered_tool_call_id = ?2
+                  AND delivered_after_session_seq = ?3
+                ORDER BY created_at_ms ASC, id ASC
+                "#,
+            )
                 .bind(parent_session_id)
+                .bind(tool_call_id)
+                .bind(delivered_after_session_seq)
                 .fetch_all(&mut *tx)
                 .await?;
             tx.commit().await?;
             rows.into_iter()
                 .map(|row| agent_mailbox_event_from_row(&row))
                 .collect()
+        })
+        .await
+    }
+
+    pub async fn reset_agent_mailbox_delivery_for_tool(
+        &self,
+        parent_session_id: &str,
+        tool_call_id: &str,
+        delivered_after_session_seq: i64,
+    ) -> Result<()> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
+                UPDATE agent_mailbox_events
+                SET delivered_at_ms = NULL,
+                    delivered_after_session_seq = NULL,
+                    delivered_tool_call_id = NULL
+                WHERE parent_session_id = ?1
+                  AND delivered_tool_call_id = ?2
+                  AND delivered_after_session_seq = ?3
+                "#,
+            )
+            .bind(parent_session_id)
+            .bind(tool_call_id)
+            .bind(delivered_after_session_seq)
+            .execute(&mut *conn)
+            .await?;
+            Ok(())
         })
         .await
     }

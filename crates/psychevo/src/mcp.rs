@@ -30,7 +30,10 @@ use crate::config::{
 };
 use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
 use crate::permissions::PermissionRuntime;
-use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput, RunOptions, RunWarning};
+use crate::types::{
+    McpServerInput, McpServerPolicy, McpStartupApprovalTarget, McpTransportInput, RunOptions,
+    RunWarning,
+};
 
 const LIST_MCP_RESOURCES_TOOL: &str = "list_mcp_resources";
 const LIST_MCP_RESOURCE_TEMPLATES_TOOL: &str = "list_mcp_resource_templates";
@@ -377,10 +380,11 @@ impl McpRuntime {
         inputs: &[McpServerInput],
         cwd: &Path,
         permission_runtime: Option<&PermissionRuntime>,
+        read_only_tools: bool,
     ) -> (McpRuntimeSnapshot, u64) {
         if inputs.is_empty() && matches!(self.owner, McpRuntimeOwner::Thread { .. }) {
             return (
-                mcp_runtime_snapshot(inputs, cwd, permission_runtime).await,
+                mcp_runtime_snapshot(inputs, cwd, permission_runtime, read_only_tools).await,
                 0,
             );
         }
@@ -392,7 +396,9 @@ impl McpRuntime {
             } => registry.manager(thread_id),
         };
         let mut manager = manager.lock().await;
-        let snapshot = manager.snapshot(inputs, cwd, permission_runtime).await;
+        let snapshot = manager
+            .snapshot(inputs, cwd, permission_runtime, read_only_tools)
+            .await;
         (snapshot, manager.generation())
     }
 
@@ -496,9 +502,14 @@ impl McpConnectionManager {
         inputs: &[McpServerInput],
         cwd: &Path,
         permission_runtime: Option<&PermissionRuntime>,
+        read_only_tools: bool,
     ) -> McpRuntimeSnapshot {
-        let connection_identity_hash =
-            mcp_connection_identity_hash(inputs, cwd, permission_runtime);
+        let connection_identity_hash = mcp_connection_identity_hash(
+            inputs,
+            cwd,
+            permission_runtime,
+            read_only_tools,
+        );
         let cwd = cwd.to_path_buf();
         if self.dirty_servers.is_empty()
             && let Some(cached) = &self.cached
@@ -508,7 +519,8 @@ impl McpConnectionManager {
             return cached.snapshot.clone();
         }
 
-        let snapshot = mcp_runtime_snapshot(inputs, &cwd, permission_runtime).await;
+        let snapshot =
+            mcp_runtime_snapshot(inputs, &cwd, permission_runtime, read_only_tools).await;
         self.generation = self.generation.saturating_add(1);
         self.dirty_servers.clear();
         self.cached = snapshot.reusable.then(|| McpCachedSnapshot {
@@ -524,10 +536,12 @@ fn mcp_connection_identity_hash(
     inputs: &[McpServerInput],
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
+    read_only_tools: bool,
 ) -> String {
     let catalog = McpSourceCatalog::resolve(inputs);
     let mut hasher = Sha256::new();
     hasher.update(catalog.hash().as_bytes());
+    hasher.update([u8::from(read_only_tools)]);
     update_mcp_hash_value(&mut hasher, &cwd.to_string_lossy());
     for entry in &catalog.entries {
         match &entry.input.transport {
@@ -582,6 +596,7 @@ pub(crate) async fn mcp_runtime_snapshot(
     inputs: &[McpServerInput],
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
+    read_only_tools: bool,
 ) -> McpRuntimeSnapshot {
     let catalog = McpSourceCatalog::resolve(inputs);
     let mut tools = Vec::<Arc<dyn ToolBinding>>::new();
@@ -650,7 +665,9 @@ pub(crate) async fn mcp_runtime_snapshot(
 
         for tool in prepared.tools {
             let raw_tool_name = tool.name.to_string();
-            if !mcp_tool_allowed_by_policy(&entry.input.policy, &raw_tool_name) {
+            if !mcp_tool_allowed_by_policy(&entry.input.policy, &raw_tool_name)
+                || !mcp_tool_allowed_by_effect_policy(&tool, read_only_tools)
+            {
                 continue;
             }
             let title = tool
@@ -811,7 +828,12 @@ impl ResolvedMcpLaunch {
                 *url = normalize_mcp_http_url(&configured_url);
                 bearer_token
             }
-            McpTransportInput::Unsupported { .. } => None,
+            McpTransportInput::Unsupported { kind } => {
+                return Err(format!(
+                    "MCP server `{}` uses unsupported transport `{kind}`",
+                    input.name
+                ));
+            }
         };
         let descriptor_fingerprint = mcp_descriptor_fingerprint(&entry, &input);
         Ok(Self {
@@ -827,6 +849,46 @@ impl ResolvedMcpLaunch {
             "{}@{}",
             self.entry.normalized_name, self.descriptor_fingerprint
         )
+    }
+
+    fn approval_target(&self) -> McpStartupApprovalTarget {
+        match &self.input.transport {
+            McpTransportInput::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            } => McpStartupApprovalTarget::Stdio {
+                command: command.to_string_lossy().into_owned(),
+                args: args.clone(),
+                cwd: cwd
+                    .as_deref()
+                    .expect("resolved stdio MCP launch has an effective cwd")
+                    .to_string_lossy()
+                    .into_owned(),
+                env_names: env.keys().cloned().collect(),
+            },
+            McpTransportInput::StreamableHttp {
+                url,
+                headers,
+                bearer_token_env_var,
+                oauth_client_id,
+                ..
+            } => {
+                let mut credential_names = bearer_token_env_var.iter().cloned().collect::<Vec<_>>();
+                if oauth_client_id.is_some() {
+                    credential_names.push("oauth_client_id".to_string());
+                }
+                McpStartupApprovalTarget::Http {
+                    url: mcp_http_approval_url(url),
+                    header_names: headers.keys().cloned().collect(),
+                    credential_names,
+                }
+            }
+            McpTransportInput::Unsupported { kind } => {
+                unreachable!("unsupported MCP transport `{kind}` cannot resolve")
+            }
+        }
     }
 }
 
@@ -886,7 +948,8 @@ async fn prepare_mcp_server_within_deadline(
         && let Err(err) = permission_runtime
             .authorize_mcp_startup(
                 &server_name,
-                mcp_transport_kind(&launch.input.transport),
+                &launch.entry.source_id,
+                &launch.approval_target(),
                 &launch.descriptor_fingerprint,
             )
             .await
@@ -939,6 +1002,17 @@ fn normalize_mcp_http_url(url: &str) -> String {
     url.parse::<http::Uri>()
         .map(|uri| uri.to_string())
         .unwrap_or_else(|_| url.trim().to_string())
+}
+
+fn mcp_http_approval_url(url: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(url) else {
+        return "<invalid MCP URL>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.into()
 }
 
 fn mcp_descriptor_fingerprint(entry: &McpCatalogEntry, input: &McpServerInput) -> String {
@@ -1410,6 +1484,15 @@ fn mcp_tool_allowed_by_policy(policy: &McpServerPolicy, raw_tool_name: &str) -> 
         .disabled_tools
         .iter()
         .any(|tool| tool == raw_tool_name)
+}
+
+fn mcp_tool_allowed_by_effect_policy(tool: &rmcp::model::Tool, read_only_tools: bool) -> bool {
+    !read_only_tools
+        || tool
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.read_only_hint)
+            == Some(true)
 }
 
 pub(crate) fn mcp_tool_description(
@@ -2154,6 +2237,48 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn http_startup_approval_omits_url_credentials() {
+        let input = McpServerInput::with_source(
+            "remote",
+            McpTransportInput::StreamableHttp {
+                url: "https://user:password@example.test:8443/mcp?signature=secret#fragment"
+                    .to_string(),
+                headers: BTreeMap::from([(
+                    "Authorization".to_string(),
+                    "secret header".to_string(),
+                )]),
+                bearer_token_env_var: Some("MCP_TOKEN".to_string()),
+                scopes: Vec::new(),
+                oauth_resource: None,
+                oauth_client_id: None,
+            },
+            "profile:mcp:remote",
+            "profile",
+        );
+        let entry = McpSourceCatalog::resolve(std::slice::from_ref(&input))
+            .entries
+            .into_iter()
+            .next()
+            .expect("catalog entry");
+        let launch = ResolvedMcpLaunch::resolve(entry, Path::new(".")).expect("resolved launch");
+
+        assert!(matches!(
+            &launch.input.transport,
+            McpTransportInput::StreamableHttp { url, .. }
+                if url.contains("user:password")
+                    && url.contains("signature=secret")
+        ));
+        assert_eq!(
+            launch.approval_target(),
+            McpStartupApprovalTarget::Http {
+                url: "https://example.test:8443/mcp".to_string(),
+                header_names: vec!["Authorization".to_string()],
+                credential_names: vec!["MCP_TOKEN".to_string()],
+            }
+        );
+    }
+
+    #[test]
     fn source_catalog_applies_codex_style_precedence() {
         let plugin = McpServerInput::with_source(
             "repo tools",
@@ -2215,7 +2340,7 @@ pub(crate) mod tests {
             ..McpServerPolicy::default()
         });
 
-        let snapshot = mcp_runtime_snapshot(&[input], Path::new("."), None).await;
+        let snapshot = mcp_runtime_snapshot(&[input], Path::new("."), None, false).await;
 
         assert!(snapshot.tools.is_empty());
         assert_eq!(snapshot.required_failures.len(), 1);
@@ -2261,6 +2386,22 @@ pub(crate) mod tests {
             }),
             7
         );
+    }
+
+    #[test]
+    fn read_only_projection_requires_an_explicit_server_hint() {
+        let unannotated = rmcp::model::Tool::default();
+        let mut read_only = rmcp::model::Tool::default();
+        read_only.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+        let mut effectful = rmcp::model::Tool::default();
+        effectful.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(false));
+
+        assert!(mcp_tool_allowed_by_effect_policy(&unannotated, false));
+        assert!(mcp_tool_allowed_by_effect_policy(&read_only, false));
+        assert!(mcp_tool_allowed_by_effect_policy(&effectful, false));
+        assert!(!mcp_tool_allowed_by_effect_policy(&unannotated, true));
+        assert!(mcp_tool_allowed_by_effect_policy(&read_only, true));
+        assert!(!mcp_tool_allowed_by_effect_policy(&effectful, true));
     }
 
     #[derive(Debug)]
@@ -2309,8 +2450,14 @@ pub(crate) mod tests {
         );
         let input = McpServerInput::with_source(
             "pending",
-            McpTransportInput::Unsupported {
-                kind: "pending".to_string(),
+            McpTransportInput::Stdio {
+                command: std::env::current_exe().expect("current executable"),
+                args: Vec::new(),
+                env: BTreeMap::from([(
+                    "PRIVATE_MCP_TOKEN".to_string(),
+                    "never-project-this-value".to_string(),
+                )]),
+                cwd: Some(cwd.clone()),
             },
             "test:mcp:pending",
             "session",
@@ -2341,8 +2488,14 @@ pub(crate) mod tests {
         let tool_call_id = request.tool_call_id.clone();
         let startup = request.mcp_startup.expect("mcp startup detail");
         assert_eq!(startup.server, "pending");
-        assert_eq!(startup.transport, "unsupported");
-        assert_eq!(startup.descriptor_fingerprint.len(), 64);
+        assert_eq!(startup.source, "test:mcp:pending");
+        let serialized = serde_json::to_string(&startup).expect("serialize startup detail");
+        assert!(serialized.contains("PRIVATE_MCP_TOKEN"));
+        assert!(!serialized.contains("never-project-this-value"));
+        assert!(matches!(
+            startup.target,
+            McpStartupApprovalTarget::Stdio { .. }
+        ));
         assert_eq!(
             cancelled_id.lock().expect("cancelled id").as_deref(),
             Some(tool_call_id.as_str())
@@ -2517,9 +2670,26 @@ pub(crate) mod tests {
             mcp_connection_identity_hash(
                 std::slice::from_ref(&input),
                 &cwd,
-                Some(&default_permissions)
+                Some(&default_permissions),
+                false,
             ),
-            mcp_connection_identity_hash(&[input], &cwd, Some(&bypass_permissions))
+            mcp_connection_identity_hash(&[input], &cwd, Some(&bypass_permissions), false)
+        );
+    }
+
+    #[test]
+    fn connection_identity_hash_separates_read_only_mcp_surface() {
+        let input = McpServerInput::new(
+            "repo",
+            McpTransportInput::Unsupported {
+                kind: "stdio".to_string(),
+            },
+        );
+        let cwd = PathBuf::from("/repo");
+
+        assert_ne!(
+            mcp_connection_identity_hash(std::slice::from_ref(&input), &cwd, None, false),
+            mcp_connection_identity_hash(&[input], &cwd, None, true),
         );
     }
 
@@ -2537,7 +2707,7 @@ pub(crate) mod tests {
         );
 
         manager
-            .snapshot(std::slice::from_ref(&unavailable), &cwd, None)
+            .snapshot(std::slice::from_ref(&unavailable), &cwd, None, false)
             .await;
         let first_generation = manager.generation();
         assert!(
@@ -2545,7 +2715,7 @@ pub(crate) mod tests {
             "startup failure must remain retryable"
         );
 
-        manager.snapshot(&[unavailable], &cwd, None).await;
+        manager.snapshot(&[unavailable], &cwd, None, false).await;
         assert_eq!(
             manager.generation(),
             first_generation + 1,
@@ -2558,21 +2728,21 @@ pub(crate) mod tests {
         let mut manager = McpConnectionManager::default();
         let cwd = std::env::temp_dir();
 
-        let first = manager.snapshot(&[], &cwd, None).await;
+        let first = manager.snapshot(&[], &cwd, None, false).await;
         let first_generation = manager.generation();
-        let second = manager.snapshot(&[], &cwd, None).await;
+        let second = manager.snapshot(&[], &cwd, None, false).await;
 
         assert_eq!(first.snapshot_hash, second.snapshot_hash);
         assert_eq!(manager.generation(), first_generation);
 
         manager.mark_tools_changed("repo");
-        let refreshed = manager.snapshot(&[], &cwd, None).await;
+        let refreshed = manager.snapshot(&[], &cwd, None, false).await;
 
         assert_eq!(refreshed.snapshot_hash, first.snapshot_hash);
         assert_eq!(manager.generation(), first_generation + 1);
 
         manager.mark_all_dirty();
-        let refreshed_again = manager.snapshot(&[], &cwd, None).await;
+        let refreshed_again = manager.snapshot(&[], &cwd, None, false).await;
         assert_eq!(refreshed_again.snapshot_hash, first.snapshot_hash);
         assert_eq!(manager.generation(), first_generation + 2);
     }

@@ -1,7 +1,7 @@
 use super::{
     AbortSignal, AgentEdgeStatus, AgentLoopRequest, BTreeMap, ClarifyToolSurface,
     CompactSessionOptions, CompactionReason, ContextRecorder, ControlHandle, Error, LanguageModel,
-    ExternalAgentDelegateRequest, Instant, Message, Mutex, PersistenceSink,
+    ExternalAgentDelegateRequest, FutureExt, Instant, Message, Mutex, PersistenceSink,
     PromptPrefixRecordInput, Result, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
     SelectedAgent, SmokeControl, ToolOutput, ToolSurfaceAssembly, Uuid, Value, compact_session,
     json, load_projected_messages, user_text_message,
@@ -20,8 +20,7 @@ use super::{
     lifecycle::{agent_child_session_summary_value, model_content_string, subagent_summary_value},
     mailbox_tools::{
         append_parent_agent_start_notification, fork_messages, now_ms,
-        parent_agent_mailbox_event_input, update_run_child_session, update_run_completed,
-        update_run_failed,
+        update_run_child_session, update_run_completed, update_run_failed,
     },
     prompt_prefix_record,
     teams::AgentTeamMember,
@@ -44,6 +43,6 @@ impl ActiveAgentRunGuard {
 
 impl Drop for ActiveAgentRunGuard {
     fn drop(&mut self) {
-        self.supervisor.remove(&self.id);
+        self.supervisor.remove_unpersisted(&self.id);
     }
 }

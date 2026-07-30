@@ -393,6 +393,15 @@ impl SandboxPolicy {
         }
     }
 
+    pub(crate) fn ensure_stdin_write_allowed(&self) -> Result<()> {
+        if matches!(self.effective_mode, SandboxMode::ReadOnly) {
+            return Err(sandbox_denied(
+                "read-only mode forbids non-empty write_stdin input",
+            ));
+        }
+        Ok(())
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn shell_writable_roots(&self) -> Vec<PathBuf> {
         let mut roots = self.writable_roots.clone();
@@ -511,20 +520,20 @@ pub(crate) fn sandbox_denied(message: impl Into<String>) -> Error {
 pub(crate) fn apply_landlock(policy: &SandboxPolicy) -> std::io::Result<()> {
     use landlock::{
         ABI, Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr, RulesetCreatedAttr,
-        RulesetStatus, path_beneath_rules,
+        path_beneath_rules,
     };
 
     if !policy.enabled {
         return Ok(());
     }
 
-    let abi = ABI::V5;
+    let abi = ABI::V3;
     let read_access = AccessFs::from_read(abi);
     let write_access = AccessFs::from_all(abi);
     let writable_roots = policy.shell_writable_roots();
 
     let mut ruleset = Ruleset::default()
-        .set_compatibility(CompatLevel::BestEffort)
+        .set_compatibility(CompatLevel::HardRequirement)
         .handle_access(read_access | write_access)
         .map_err(landlock_io_error)?
         .create()
@@ -542,12 +551,18 @@ pub(crate) fn apply_landlock(policy: &SandboxPolicy) -> std::io::Result<()> {
         .no_new_privs(true)
         .restrict_self()
         .map_err(landlock_io_error)?;
-    if matches!(status.ruleset, RulesetStatus::NotEnforced) {
-        return Err(std::io::Error::other(
-            "landlock did not enforce the sandbox ruleset",
-        ));
+    ensure_landlock_fully_enforced(status.ruleset)
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_landlock_fully_enforced(status: landlock::RulesetStatus) -> std::io::Result<()> {
+    if matches!(status, landlock::RulesetStatus::FullyEnforced) {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(
+            "landlock did not fully enforce the sandbox ruleset",
+        ))
     }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -828,6 +843,17 @@ mod tests {
         assert!(policy.writable_roots.is_empty());
         assert!(policy.shell_extra_roots.is_empty());
         assert!(!matches!(policy.backend, SandboxBackend::Disabled));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn landlock_partial_or_missing_enforcement_fails_closed() {
+        assert!(
+            ensure_landlock_fully_enforced(landlock::RulesetStatus::PartiallyEnforced).is_err()
+        );
+        assert!(ensure_landlock_fully_enforced(landlock::RulesetStatus::NotEnforced).is_err());
+        ensure_landlock_fully_enforced(landlock::RulesetStatus::FullyEnforced)
+            .expect("full enforcement");
     }
 
     #[test]

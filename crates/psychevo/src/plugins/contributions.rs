@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::manifest::load_plugin_manifest;
+use super::materialization::remove_top_level_git_metadata;
 use super::records::{all_records, policy_entry};
 use super::types::{
     EnabledPluginManifest, LoadedPluginManifest, PluginInstallRecord, PluginRuntimeAssembly,
 };
-use super::worker::{PluginWorkerSession, PluginWorkerTool, worker_tools_in_session};
+use super::worker::{PluginWorkerRuntime, PluginWorkerTool};
 use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolsetContribution};
 use crate::hooks::{HookSourceDescriptor, HookWorkerAdapter};
 use crate::types::{McpServerInput, RuntimeTool};
@@ -25,60 +26,61 @@ pub(crate) async fn load_enabled_plugin_contributions(
         hook_sources: Vec::new(),
         mcp_servers: Vec::new(),
         toolsets: Vec::new(),
-        runtime_tools: Vec::new(),
-        worker_sessions: Vec::new(),
+        worker_runtimes: Vec::new(),
         warnings: Vec::new(),
     };
     let enabled = enabled_plugin_manifests(home, cwd, policy, &mut assembly.warnings);
     for enabled in enabled {
-        let worker_session = if let Some(worker) = enabled.manifest.worker.as_ref() {
-            match PluginWorkerSession::start(&enabled.record, &enabled.manifest, worker, env).await {
-                Ok(session) => Some(session),
-                Err(err) => {
-                    assembly.warnings.push(plugin_warning(format!(
-                        "plugin `{}` worker unavailable: {err}",
-                        enabled.record.name
-                    )));
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        let worker_runtime = enabled.manifest.worker.as_ref().map(|worker| {
+            PluginWorkerRuntime::new(
+                enabled.record.clone(),
+                enabled.manifest.clone(),
+                worker.clone(),
+                env.clone(),
+            )
+        });
         add_static_contributions(
             &mut assembly,
             &enabled.record,
             &enabled.manifest,
             &enabled.policy,
             env,
-            worker_session.clone(),
+            worker_runtime.clone(),
         );
-        if let Some(session) = worker_session {
-            assembly.worker_sessions.push(Arc::clone(&session));
-            match worker_tools_in_session(&session).await {
-                Ok(tools) => {
-                    for tool in tools {
-                        assembly.runtime_tools.push(RuntimeTool::with_source(
-                            Arc::new(PluginWorkerTool {
-                                plugin_name: enabled.record.name.clone(),
-                                session: Arc::clone(&session),
-                                descriptor: tool,
-                            }),
-                            plugin_source_id(&enabled.record),
-                            "plugin",
-                        ));
-                    }
-                }
-                Err(err) => {
-                    assembly.warnings.push(plugin_warning(format!(
-                        "plugin `{}` worker unavailable: {err}",
-                        enabled.record.name
-                    )));
-                }
-            }
+        if let Some(runtime) = worker_runtime {
+            assembly.worker_runtimes.push(runtime);
         }
     }
     assembly
+}
+
+pub(crate) async fn materialize_plugin_worker_tools(
+    runtimes: &[Arc<PluginWorkerRuntime>],
+) -> (Vec<RuntimeTool>, Vec<crate::types::RunWarning>) {
+    let mut runtime_tools = Vec::new();
+    let mut warnings = Vec::new();
+    for runtime in runtimes {
+        match runtime.tools().await {
+            Ok(tools) => {
+                for tool in tools {
+                    runtime_tools.push(RuntimeTool::with_source(
+                        Arc::new(PluginWorkerTool {
+                            plugin_name: runtime.plugin_name().to_string(),
+                            runtime: Arc::clone(runtime),
+                            descriptor: tool,
+                        }),
+                        runtime.source_id(),
+                        "plugin",
+                    ));
+                }
+            }
+            Err(err) => warnings.push(plugin_warning(format!(
+                "plugin `{}` worker unavailable: {err}",
+                runtime.plugin_name()
+            ))),
+        }
+    }
+    (runtime_tools, warnings)
 }
 
 pub(crate) fn load_enabled_plugin_hook_sources(
@@ -125,6 +127,15 @@ fn enabled_plugin_manifests(
         if !policy.plugin_enabled() {
             continue;
         }
+        if record.source_kind == super::types::PluginSourceKind::Git
+            && let Err(err) = remove_top_level_git_metadata(&record.package_root)
+        {
+            warnings.push(plugin_warning(format!(
+                "plugin `{}` skipped: failed to remove legacy Git metadata: {err}",
+                record.name
+            )));
+            continue;
+        }
         let manifest = match load_plugin_manifest(&record.package_root, true) {
             Ok(manifest) => manifest,
             Err(err) => {
@@ -150,7 +161,7 @@ fn add_static_contributions(
     manifest: &LoadedPluginManifest,
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
-    worker_session: Option<Arc<PluginWorkerSession>>,
+    worker_runtime: Option<Arc<PluginWorkerRuntime>>,
 ) {
     let source_id = plugin_source_id(record);
     for root in &manifest.skill_roots {
@@ -160,7 +171,7 @@ fn add_static_contributions(
         assembly.agent_inputs.push(agent);
     }
     if let Some(source) =
-        hook_source_from_manifest(record, manifest, policy, env, worker_session)
+        hook_source_from_manifest(record, manifest, policy, env, worker_runtime)
     {
         assembly.hook_sources.push(source);
     }
@@ -190,7 +201,7 @@ fn hook_source_from_manifest(
     manifest: &LoadedPluginManifest,
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
-    worker_session: Option<Arc<PluginWorkerSession>>,
+    worker_runtime: Option<Arc<PluginWorkerRuntime>>,
 ) -> Option<HookSourceDescriptor> {
     if !policy.plugin_enabled() {
         return None;
@@ -214,7 +225,7 @@ fn hook_source_from_manifest(
             command: worker.command,
             args: worker.args,
             env: env.clone(),
-            session: worker_session,
+            runtime: worker_runtime,
         }),
     })
 }

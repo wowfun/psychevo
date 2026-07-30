@@ -226,7 +226,7 @@ pub enum GenerationEvent {
         warning: Warning,
     },
     Resync {
-        snapshot: crate::GenerationSnapshot,
+        snapshot: Box<crate::GenerationSnapshot>,
         dropped_events: u64,
     },
     Finish {

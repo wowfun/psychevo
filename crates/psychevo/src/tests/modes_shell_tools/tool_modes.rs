@@ -826,6 +826,57 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
 }
 
 #[tokio::test]
+pub(crate) async fn user_shell_reports_injection_failure_without_failing_completed_command() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let context = configured_user_shell_context(&temp, &cwd).await;
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_stream = Arc::clone(&captured);
+    let stream: RunStreamSink = Arc::new(move |event| {
+        captured_for_stream
+            .lock()
+            .expect("captured stream lock")
+            .push(event);
+    });
+    let (inject_handle, inject_control) = run_control();
+    drop(inject_control);
+    let (_handle, control) = run_control();
+
+    let result = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            cwd,
+            command: "printf 'completed\\n'".to_string(),
+            context: Some(context),
+            inject_into: Some(inject_handle),
+        },
+        stream,
+        control,
+    )
+    .await
+    .expect("completed shell result");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    assert_eq!(result.result["output"], "completed\n");
+    assert!(
+        captured
+            .lock()
+            .expect("captured stream lock")
+            .iter()
+            .any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "warning"
+                        && value["kind"] == "control_input"
+                        && value["message"].as_str().is_some_and(
+                            |message| message.contains("command completed")
+                                && message.contains("control input is closed")
+                        )
+            ))
+    );
+}
+
+#[tokio::test]
 pub(crate) async fn user_shell_context_missing_config_rejects_before_execution() {
     let temp = tempdir().expect("temp");
     let cwd = temp.path().join("work");

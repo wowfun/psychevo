@@ -550,59 +550,18 @@ async fn spawn_external_subagent(
                 result.outcome,
                 result.final_answer.clone(),
             );
-            let _ = context
-                .state
-
-                .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed)
-                .await;
-            context.supervisor.remove(&id);
+            context.supervisor.finish(&context.state, &id).await?;
             record
         }
         Err(err) => {
             update_run_failed(&context.supervisor, &id, &err.to_string());
-            let _ = context
-                .state
-
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
-                .await;
             let record = {
-                let runs = context.supervisor.active();
+                let runs = context.supervisor.slots();
                 runs.get(&id)
                     .map(|state| state.record.clone())
-                    .unwrap_or_else(|| AgentRunRecord {
-                        id: id.clone(),
-                        task_name: None,
-                        agent_name: agent.name.clone(),
-                        task: args.message.clone(),
-                        parent_session_id: context.parent_session_id.clone(),
-                        child_session_id: Some(child_session.clone()),
-                        role: AgentInvocationRole::Subagent,
-                        background: false,
-                        status: AgentRunStatus::Errored,
-                        edge_status: Some(AgentEdgeStatus::Closed),
-                        started_at_ms: now_ms(),
-                        ended_at_ms: Some(now_ms()),
-                        outcome: Some("failed".to_string()),
-                        final_answer: None,
-                        error: Some(err.to_string()),
-                        effective_max_spawn_depth: Some(spawn_depth_remaining),
-                        team_run_id: context
-                            .active_team
-                            .as_ref()
-                            .map(|team| team.team_run_id.clone()),
-                        mission_run_id: context
-                            .active_team
-                            .as_ref()
-                            .and_then(|team| team.mission_run_id.clone()),
-                        team_name: context
-                            .active_team
-                            .as_ref()
-                            .map(|team| team.team_name.clone()),
-                        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
-                        agent_path: Some(agent_path(&task_name)),
-                    })
+                    .expect("external Agent run exists")
             };
-            context.supervisor.remove(&id);
+            context.supervisor.finish(&context.state, &id).await?;
             let model_value =
                 subagent_summary_value(Some(&context.state), &record, false).await;
             return Ok(ToolOutput::error(model_content_string(&model_value)));

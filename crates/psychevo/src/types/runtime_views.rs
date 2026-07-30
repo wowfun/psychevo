@@ -1031,15 +1031,25 @@ impl RunControlHandle {
         self.inner.abort();
     }
 
-    pub fn inject_user_message(&self, message: Message) -> bool {
+    pub fn inject_user_message(
+        &self,
+        message: Message,
+    ) -> std::result::Result<(), ControlInputError> {
         self.inner.inject_user_message(message)
     }
 
-    pub fn steer_user_message(&self, message: Message) -> Option<PendingInputId> {
+    pub fn steer_user_message(
+        &self,
+        message: Message,
+    ) -> std::result::Result<PendingInputId, ControlInputError> {
         self.inner.steer_user_message(message)
     }
 
-    pub fn update_pending_user_message(&self, id: PendingInputId, message: Message) -> bool {
+    pub fn update_pending_user_message(
+        &self,
+        id: PendingInputId,
+        message: Message,
+    ) -> std::result::Result<(), ControlInputError> {
         self.inner.update_pending_user_message(id, message)
     }
 
