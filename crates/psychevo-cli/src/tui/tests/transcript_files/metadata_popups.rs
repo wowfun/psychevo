@@ -284,28 +284,23 @@ pub(crate) async fn stale_file_search_results_are_ignored() {
         selected: 0,
         waiting: true,
     });
-    state
-        .tx
-        .send(FileSearchResult {
-            generation: 1,
-            query: "old".to_string(),
-            matches: vec![FileSearchMatch {
-                path: "old.rs".to_string(),
-                kind: FileSearchMatchKind::File,
-            }],
-        })
-        .expect("send stale");
-    state
-        .tx
-        .send(FileSearchResult {
-            generation: 2,
-            query: "new".to_string(),
-            matches: vec![FileSearchMatch {
-                path: "new.rs".to_string(),
-                kind: FileSearchMatchKind::File,
-            }],
-        })
-        .expect("send current");
+    state.inject_result(FileSearchResult {
+        generation: 1,
+        query: "old".to_string(),
+        matches: vec![FileSearchMatch {
+            path: "old.rs".to_string(),
+            kind: FileSearchMatchKind::File,
+        }],
+    });
+    state.drain_results();
+    state.inject_result(FileSearchResult {
+        generation: 2,
+        query: "new".to_string(),
+        matches: vec![FileSearchMatch {
+            path: "new.rs".to_string(),
+            kind: FileSearchMatchKind::File,
+        }],
+    });
 
     state.drain_results();
 
@@ -318,6 +313,51 @@ pub(crate) async fn stale_file_search_results_are_ignored() {
         }]
     );
     assert!(!popup.waiting);
+}
+
+#[tokio::test]
+pub(crate) async fn rapid_file_search_uses_one_joined_worker_and_latest_request() {
+    let temp = tempdir().expect("temp");
+    for index in 0..100 {
+        fs::write(
+            temp.path().join(format!("item-{index:03}.txt")),
+            format!("{index}\n"),
+        )
+        .expect("fixture");
+    }
+    let cancel = AtomicBool::new(false);
+    let matches = search_cwd_files(temp.path(), "item", &cancel);
+    assert_eq!(matches.len(), FILE_POPUP_MAX_ROWS);
+    assert_eq!(matches[0].path, "item-000.txt");
+    assert_eq!(matches[7].path, "item-007.txt");
+
+    let mut state = FileSearchState::new();
+    let (thread_starts, thread_alive) = state.worker_probe();
+    for index in 0..100 {
+        state.start_search(temp.path(), format!("item-{index:03}"));
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        state.drain_results();
+        if state.popup.as_ref().is_some_and(|popup| !popup.waiting) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "latest search timed out"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    assert_eq!(thread_starts.load(Ordering::Acquire), 1);
+    let popup = state.popup.as_ref().expect("popup");
+    assert_eq!(popup.query, "item-099");
+    assert_eq!(popup.matches[0].path, "item-099.txt");
+    drop(state);
+    assert!(
+        !thread_alive.load(Ordering::Acquire),
+        "worker was not joined"
+    );
 }
 
 #[tokio::test]

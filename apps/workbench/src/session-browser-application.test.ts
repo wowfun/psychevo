@@ -135,4 +135,77 @@ describe("SessionBrowserApplication", () => {
     expect(application.getSnapshot().loadingOlderCwd).toBeNull();
     expect(application.getSnapshot().pinnedSessionIds).toEqual(["newer"]);
   });
+
+  it("does not let an old page merge or clear a newer scope loading state", async () => {
+    const olderA = deferred<ThreadBrowserResult>();
+    const olderB = deferred<ThreadBrowserResult>();
+    const request = vi.fn((_method: string, params: unknown) => {
+      const input = params as {
+        cwd?: string | null;
+        cursor?: { offset: number } | null;
+      };
+      if (input.cursor && input.cwd === "/a") {
+        return olderA.promise;
+      }
+      if (input.cursor && input.cwd === "/b") {
+        return olderB.promise;
+      }
+      const cwd = input.cwd ?? "/a";
+      return Promise.resolve(browserResult(
+        cwd,
+        [session(`${cwd}-new`, cwd, 2)],
+        20
+      ));
+    });
+    const client = { request } as unknown as GatewayClient;
+    const application = new SessionBrowserApplication();
+
+    await application.refreshHistory(client, {
+      activeScope: scope("/a"),
+      currentThreadId: null,
+      cwd: "/a"
+    });
+    const pageA = application.loadOlder(client, {
+      activeScope: scope("/a"),
+      currentThreadId: null,
+      cwd: "/a"
+    });
+    expect(application.getSnapshot().loadingOlderCwd).toBe("/a");
+
+    await application.refreshHistory(client, {
+      activeScope: scope("/b"),
+      currentThreadId: null,
+      cwd: "/b"
+    });
+    expect(application.getSnapshot().loadingOlderCwd).toBeNull();
+    const pageB = application.loadOlder(client, {
+      activeScope: scope("/b"),
+      currentThreadId: null,
+      cwd: "/b"
+    });
+    expect(application.getSnapshot().loadingOlderCwd).toBe("/b");
+
+    olderA.resolve(browserResult(
+      "/a",
+      [session("/a-old", "/a", 1)],
+      null
+    ));
+    await pageA;
+    expect(application.getSnapshot().loadingOlderCwd).toBe("/b");
+    expect(application.getSnapshot().sessions.map((item) => item.id)).toEqual([
+      "/b-new"
+    ]);
+
+    olderB.resolve(browserResult(
+      "/b",
+      [session("/b-old", "/b", 1)],
+      null
+    ));
+    await pageB;
+    expect(application.getSnapshot().loadingOlderCwd).toBeNull();
+    expect(application.getSnapshot().sessions.map((item) => item.id)).toEqual([
+      "/b-new",
+      "/b-old"
+    ]);
+  });
 });

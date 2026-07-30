@@ -729,6 +729,7 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
+    tokio::task::yield_now().await;
     ui.textarea = textarea_with_text("revise the current answer");
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))

@@ -3,7 +3,9 @@ pub(crate) use std::fs;
 pub(crate) use std::io::{self, BufRead, IsTerminal, Write};
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::process::{Command as StdCommand, ExitCode, Stdio};
-pub(crate) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(test)]
+pub(crate) use std::sync::atomic::AtomicBool;
+pub(crate) use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 

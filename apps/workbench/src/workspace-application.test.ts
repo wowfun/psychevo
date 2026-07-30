@@ -37,8 +37,8 @@ describe("WorkspaceApplication", () => {
     const client = { request } as unknown as GatewayClient;
     const application = new WorkspaceApplication();
 
-    const a1 = application.refresh("files", client, scope("/a"));
-    const a2 = application.refresh("files", client, scope("/a"));
+    const a1 = application.ensure("files", client, scope("/a"));
+    const a2 = application.ensure("files", client, scope("/a"));
     expect(request).toHaveBeenCalledTimes(1);
 
     const b = application.refresh("files", client, scope("/b"));
@@ -49,6 +49,67 @@ describe("WorkspaceApplication", () => {
     second.resolve(files("/b"));
     await b;
     expect(application.getSnapshot().files?.root).toBe("/b");
+  });
+
+  it("invalidates an older refresh and returns null from stale diff and branch reads", async () => {
+    const firstFiles = deferred<WorkspaceFilesResult>();
+    const secondFiles = deferred<WorkspaceFilesResult>();
+    const staleDiff = deferred<Record<string, unknown>>();
+    const staleBranches = deferred<Record<string, unknown>>();
+    let fileReads = 0;
+    const request = vi.fn((method: string) => {
+      if (method === "workspace/files") {
+        fileReads += 1;
+        return fileReads === 1 ? firstFiles.promise : secondFiles.promise;
+      }
+      if (method === "workspace/diff") {
+        return staleDiff.promise;
+      }
+      if (method === "workspace/git/branches") {
+        return staleBranches.promise;
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const client = { request } as unknown as GatewayClient;
+    const application = new WorkspaceApplication();
+    const activeScope = scope("/a");
+
+    const firstRefresh = application.refresh("files", client, activeScope);
+    const secondRefresh = application.refresh("files", client, activeScope);
+    firstFiles.resolve(files("/stale-refresh"));
+    await firstRefresh;
+    expect(application.getSnapshot().files).toBeNull();
+    secondFiles.resolve(files("/fresh-refresh"));
+    await secondRefresh;
+    expect(application.getSnapshot().files?.root).toBe("/fresh-refresh");
+
+    const diff = application.readDiff("src/main.ts", client, activeScope);
+    const branches = application.readBranches(client, activeScope);
+    application.bind(client, scope("/b"));
+    staleDiff.resolve({
+      isGitRepo: true,
+      files: [],
+      unifiedDiff: "",
+      truncation: {
+        truncated: false,
+        maxBytes: 1,
+        maxLines: 1,
+        omittedBytes: 0,
+        omittedLines: 0
+      },
+      selectedPath: "src/main.ts"
+    });
+    staleBranches.resolve({
+      branches: ["main"],
+      current: "main",
+      detached: false,
+      isGitRepo: true
+    });
+
+    expect(await diff).toBeNull();
+    expect(await branches).toBeNull();
+    expect(application.getSnapshot().branch).toBeUndefined();
+    expect(application.getSnapshot().diff).toBeNull();
   });
 
   it("keeps facet revisions independent and mutations beat late reads", async () => {

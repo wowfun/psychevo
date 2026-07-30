@@ -277,7 +277,7 @@ export function createAppActions(params: AppActionsParams) {
     return params.client.request("workspace/folders", { scope: scope(), path });
   }
 
-  async function readWorkspaceGitBranches(): Promise<WorkspaceGitBranchesResult> {
+  async function readWorkspaceGitBranches(): Promise<WorkspaceGitBranchesResult | null> {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
     }
@@ -560,6 +560,9 @@ export function createAppActions(params: AppActionsParams) {
       params.client,
       scope()
     );
+    if (!result) {
+      return;
+    }
     params.openReviewTab(result, path ?? null);
   }
 

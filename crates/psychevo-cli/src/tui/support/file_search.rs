@@ -31,9 +31,7 @@ pub(crate) struct FileSearchState {
     pub(crate) generation: u64,
     pub(crate) popup: Option<FileSearchPopupState>,
     pub(crate) dismissed_query: Option<String>,
-    pub(crate) cancel: Option<Arc<AtomicBool>>,
-    pub(crate) tx: mpsc::UnboundedSender<FileSearchResult>,
-    pub(crate) rx: mpsc::UnboundedReceiver<FileSearchResult>,
+    worker: FileSearchWorker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,14 +44,11 @@ pub(crate) struct FileSearchPopupState {
 
 impl FileSearchState {
     pub(crate) fn new() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
         Self {
             generation: 0,
             popup: None,
             dismissed_query: None,
-            cancel: None,
-            tx,
-            rx,
+            worker: FileSearchWorker::new(),
         }
     }
 
@@ -89,25 +84,16 @@ impl FileSearchState {
             waiting: true,
         });
         let generation = self.generation;
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancel = Some(Arc::clone(&cancel));
-        let tx = self.tx.clone();
-        let root = root.to_path_buf();
-        std::thread::spawn(move || {
-            let matches = search_cwd_files(&root, &query, &cancel);
-            if !cancel.load(Ordering::Relaxed) {
-                let _ = tx.send(FileSearchResult {
-                    generation,
-                    query,
-                    matches,
-                });
-            }
+        self.worker.submit(FileSearchRequest {
+            generation,
+            root: root.to_path_buf(),
+            query,
         });
     }
 
     pub(crate) fn drain_results(&mut self) -> bool {
         let mut changed = false;
-        while let Ok(result) = self.rx.try_recv() {
+        while let Some(result) = self.worker.take_result() {
             if result.generation != self.generation {
                 continue;
             }
@@ -136,9 +122,7 @@ impl FileSearchState {
     }
 
     pub(crate) fn cancel_current(&mut self) {
-        if let Some(cancel) = self.cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
+        self.worker.cancel();
     }
 
     pub(crate) fn selected_path(&self) -> Option<String> {
@@ -158,5 +142,155 @@ impl FileSearchState {
         } else {
             index.min(len.saturating_sub(1))
         };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn worker_probe(&self) -> (Arc<std::sync::atomic::AtomicUsize>, Arc<AtomicBool>) {
+        (
+            Arc::clone(&self.worker.thread_starts),
+            Arc::clone(&self.worker.thread_alive),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_result(&self, result: FileSearchResult) {
+        self.worker.store_result(result);
+    }
+}
+
+struct FileSearchRequest {
+    generation: u64,
+    root: PathBuf,
+    query: String,
+}
+
+#[derive(Default)]
+struct FileSearchWorkerState {
+    latest: Option<FileSearchRequest>,
+    active_generation: Option<u64>,
+    result: Option<FileSearchResult>,
+    stopped: bool,
+}
+
+struct FileSearchWorker {
+    shared: Arc<(Mutex<FileSearchWorkerState>, std::sync::Condvar)>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    #[cfg(test)]
+    thread_starts: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    thread_alive: Arc<AtomicBool>,
+}
+
+impl FileSearchWorker {
+    fn new() -> Self {
+        let shared = Arc::new((
+            Mutex::new(FileSearchWorkerState::default()),
+            std::sync::Condvar::new(),
+        ));
+        let worker_shared = Arc::clone(&shared);
+        #[cfg(test)]
+        let thread_starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        #[cfg(test)]
+        let worker_thread_starts = Arc::clone(&thread_starts);
+        #[cfg(test)]
+        let thread_alive = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let worker_thread_alive = Arc::clone(&thread_alive);
+        let handle = std::thread::spawn(move || {
+            #[cfg(test)]
+            {
+                worker_thread_starts.fetch_add(1, Ordering::Relaxed);
+                worker_thread_alive.store(true, Ordering::Release);
+            }
+            loop {
+                let request = {
+                    let (lock, wake) = &*worker_shared;
+                    let mut state = lock.lock().expect("file search worker");
+                    while state.latest.is_none() && !state.stopped {
+                        state = wake.wait(state).expect("file search worker");
+                    }
+                    if state.stopped {
+                        break;
+                    }
+                    state.latest.take().expect("latest file search")
+                };
+                let generation = request.generation;
+                let cancelled = || {
+                    let state = worker_shared.0.lock().expect("file search worker");
+                    state.stopped || state.active_generation != Some(generation)
+                };
+                let matches = search_cwd_files_while(&request.root, &request.query, cancelled);
+                let mut state = worker_shared.0.lock().expect("file search worker");
+                if !state.stopped && state.active_generation == Some(generation) {
+                    state.result = Some(FileSearchResult {
+                        generation,
+                        query: request.query,
+                        matches,
+                    });
+                }
+            }
+            #[cfg(test)]
+            worker_thread_alive.store(false, Ordering::Release);
+        });
+        Self {
+            shared,
+            handle: Some(handle),
+            #[cfg(test)]
+            thread_starts,
+            #[cfg(test)]
+            thread_alive,
+        }
+    }
+
+    fn submit(&self, request: FileSearchRequest) {
+        let (lock, wake) = &*self.shared;
+        let mut state = lock.lock().expect("file search worker");
+        state.active_generation = Some(request.generation);
+        state.latest = Some(request);
+        state.result = None;
+        wake.notify_one();
+    }
+
+    fn cancel(&self) {
+        let (lock, _) = &*self.shared;
+        let mut state = lock.lock().expect("file search worker");
+        state.active_generation = None;
+        state.latest = None;
+        state.result = None;
+    }
+
+    fn take_result(&self) -> Option<FileSearchResult> {
+        self.shared
+            .0
+            .lock()
+            .expect("file search worker")
+            .result
+            .take()
+    }
+
+    #[cfg(test)]
+    fn store_result(&self, result: FileSearchResult) {
+        self.shared.0.lock().expect("file search worker").result = Some(result);
+    }
+
+    fn stop(&mut self) {
+        let (lock, wake) = &*self.shared;
+        {
+            let mut state = lock.lock().expect("file search worker");
+            state.stopped = true;
+            state.latest = None;
+            state.active_generation = None;
+            state.result = None;
+        }
+        wake.notify_one();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for FileSearchWorker {
+    fn drop(&mut self) {
+        self.stop();
     }
 }

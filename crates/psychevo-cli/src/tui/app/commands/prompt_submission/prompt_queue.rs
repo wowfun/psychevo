@@ -303,9 +303,12 @@ impl TuiApp {
             false,
         )?
         .message;
-        let Some(id) = control.steer_user_message(message) else {
-            ui.set_ephemeral_error("unable to steer current turn");
-            return Ok(());
+        let id = match control.steer_user_message(message) {
+            Ok(id) => id,
+            Err(error) => {
+                ui.set_ephemeral_error(format!("unable to steer current turn: {error}"));
+                return Ok(());
+            }
         };
         let session_id = ui
             .running

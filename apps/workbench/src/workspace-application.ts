@@ -1,4 +1,4 @@
-import type { GatewayClient } from "@psychevo/client";
+import { gatewayScopeKey, type GatewayClient } from "@psychevo/client";
 import {
   WorkspaceChangesResultSchema,
   WorkspaceDiffResultSchema,
@@ -21,18 +21,6 @@ export type WorkspaceSnapshot = {
 };
 
 type ValueUpdate<T> = T | ((current: T) => T);
-
-function scopeIdentity(scope: GatewayRequestScope | null): string {
-  if (!scope) {
-    return "";
-  }
-  return JSON.stringify([
-    scope.cwd,
-    scope.source.kind,
-    scope.source.rawId ?? null,
-    scope.source.lifetime
-  ]);
-}
 
 function resolveUpdate<T>(current: T, update: ValueUpdate<T>): T {
   return typeof update === "function"
@@ -74,7 +62,7 @@ export class WorkspaceApplication {
   };
 
   bind(client: GatewayClient | null, scope: GatewayRequestScope | null): void {
-    const nextScopeKey = scopeIdentity(scope);
+    const nextScopeKey = gatewayScopeKey(scope);
     if (this.client === client && this.scopeKey === nextScopeKey) {
       return;
     }
@@ -114,6 +102,9 @@ export class WorkspaceApplication {
     client: GatewayClient | null = this.client,
     scope: GatewayRequestScope | null = this.scope
   ): Promise<void> {
+    if (client && scope) {
+      this.bind(client, scope);
+    }
     const value = this.snapshot[facet];
     if (
       this.committedEpochs[facet] === this.snapshot.scopeEpoch
@@ -121,7 +112,11 @@ export class WorkspaceApplication {
     ) {
       return Promise.resolve();
     }
-    return this.refresh(facet, client, scope);
+    const existing = this.flights.get(facet);
+    if (existing) {
+      return existing as Promise<void>;
+    }
+    return this.startFacetRead(facet, client, scope);
   }
 
   refresh(
@@ -133,9 +128,16 @@ export class WorkspaceApplication {
       return Promise.resolve();
     }
     this.bind(client, scope);
-    const existing = this.flights.get(facet);
-    if (existing) {
-      return existing as Promise<void>;
+    return this.startFacetRead(facet, client, scope);
+  }
+
+  private startFacetRead(
+    facet: WorkspaceFacet,
+    client: GatewayClient | null,
+    scope: GatewayRequestScope | null
+  ): Promise<void> {
+    if (!client || !scope) {
+      return Promise.resolve();
     }
     const revision = this.revisions[facet] + 1;
     this.revisions[facet] = revision;
@@ -173,16 +175,26 @@ export class WorkspaceApplication {
     path: string | null,
     client: GatewayClient | null = this.client,
     scope: GatewayRequestScope | null = this.scope
-  ): Promise<WorkspaceDiffResult> {
+  ): Promise<WorkspaceDiffResult | null> {
     if (!client || !scope) {
       throw new Error("Workspace is unavailable");
     }
     this.bind(client, scope);
+    const revision = this.revisions.diff + 1;
+    this.revisions.diff = revision;
+    this.flights.delete("diff");
+    const epoch = this.snapshot.scopeEpoch;
     const result = WorkspaceDiffResultSchema.parse(
       await client.request("workspace/diff", { scope, path })
     );
+    if (
+      epoch !== this.snapshot.scopeEpoch
+      || revision !== this.revisions.diff
+    ) {
+      return null;
+    }
     if (path === null) {
-      this.setDiff(result);
+      this.commitFacet("diff", result);
     }
     return result;
   }
@@ -190,7 +202,7 @@ export class WorkspaceApplication {
   async readBranches(
     client: GatewayClient | null = this.client,
     scope: GatewayRequestScope | null = this.scope
-  ): Promise<WorkspaceGitBranchesResult> {
+  ): Promise<WorkspaceGitBranchesResult | null> {
     if (!client || !scope) {
       throw new Error("Workspace is unavailable");
     }
@@ -205,8 +217,9 @@ export class WorkspaceApplication {
       && revision === this.revisions.branch
     ) {
       this.commitFacet("branch", result.current?.trim() || null);
+      return result;
     }
-    return result;
+    return null;
   }
 
   private async requestFacet(

@@ -1,4 +1,4 @@
-import type { GatewayClient } from "@psychevo/client";
+import { gatewayScopeKey, type GatewayClient } from "@psychevo/client";
 import {
   ThreadBrowserResultSchema,
   ThreadListResultSchema,
@@ -35,17 +35,10 @@ type LoadOlderOptions = {
   cwd: string;
 };
 
-function scopeIdentity(scope: GatewayRequestScope | null): string {
-  if (!scope) {
-    return "";
-  }
-  return JSON.stringify([
-    scope.cwd,
-    scope.source.kind,
-    scope.source.rawId ?? null,
-    scope.source.lifetime
-  ]);
-}
+type OlderFlight = {
+  promise: Promise<void>;
+  token: string;
+};
 
 function mergeSessionSummaries(
   current: SessionSummary[],
@@ -79,7 +72,8 @@ export class SessionBrowserApplication {
   private scopeKey = "";
   private recentRevision = 0;
   private archiveRevision = 0;
-  private readonly pageRevisions = new Map<string, number>();
+  private browseRevision = 0;
+  private olderFlight: OlderFlight | null = null;
   private readonly flights = new Map<string, Promise<unknown>>();
   private readonly listeners = new Set<() => void>();
   private snapshot: SessionBrowserSnapshot;
@@ -103,26 +97,25 @@ export class SessionBrowserApplication {
   };
 
   bind(client: GatewayClient | null, scope: GatewayRequestScope | null): void {
-    const nextScopeKey = scopeIdentity(scope);
+    const nextScopeKey = gatewayScopeKey(scope);
     if (this.client === client && this.scopeKey === nextScopeKey) {
       return;
     }
     const clientChanged = this.client !== client;
     this.client = client;
     this.scopeKey = nextScopeKey;
+    this.browseRevision += 1;
+    this.olderFlight = null;
     if (clientChanged) {
       this.clientEpoch += 1;
       this.recentRevision += 1;
       this.archiveRevision += 1;
-      this.pageRevisions.clear();
       this.flights.clear();
     }
-    this.update(clientChanged
-      ? {
-          loadingOlderCwd: null,
-          scopeEpoch: this.snapshot.scopeEpoch + 1
-        }
-      : { scopeEpoch: this.snapshot.scopeEpoch + 1 });
+    this.update({
+      loadingOlderCwd: null,
+      scopeEpoch: this.snapshot.scopeEpoch + 1
+    });
   }
 
   setPinnedSessionIds = (pinnedSessionIds: string[]): void => {
@@ -183,6 +176,7 @@ export class SessionBrowserApplication {
       return this.trackFlight(key, request);
     }
 
+    this.invalidateOlder();
     const includeSessionIds = this.includeSessionIds(options.currentThreadId);
     const key = `recent:${this.clientEpoch}:${JSON.stringify([cwd, includeSessionIds])}`;
     const existing = this.flights.get(key);
@@ -226,18 +220,20 @@ export class SessionBrowserApplication {
     if (!cursor) {
       return;
     }
-    const key = `page:${this.clientEpoch}:${options.cwd}:${JSON.stringify(cursor)}`;
-    const existing = this.flights.get(key);
-    if (existing) {
-      await existing;
+    const token = JSON.stringify([
+      this.clientEpoch,
+      this.snapshot.scopeEpoch,
+      this.browseRevision,
+      options.cwd,
+      cursor
+    ]);
+    if (this.olderFlight?.token === token) {
+      await this.olderFlight.promise;
       return;
     }
-    if (this.snapshot.loadingOlderCwd && this.snapshot.loadingOlderCwd !== options.cwd) {
+    if (this.olderFlight) {
       return;
     }
-    const revision = (this.pageRevisions.get(options.cwd) ?? 0) + 1;
-    this.pageRevisions.set(options.cwd, revision);
-    const epoch = this.clientEpoch;
     this.update({ loadingOlderCwd: options.cwd });
     const request = client.request("thread/browser", {
       archived: false,
@@ -248,10 +244,7 @@ export class SessionBrowserApplication {
       cwd: options.cwd
     }).then((value) => {
       const result = ThreadBrowserResultSchema.parse(value);
-      if (
-        epoch === this.clientEpoch
-        && revision === this.pageRevisions.get(options.cwd)
-      ) {
+      if (this.olderFlight?.token === token) {
         this.update({
           sessions: mergeSessionSummaries(
             this.snapshot.sessions,
@@ -264,15 +257,13 @@ export class SessionBrowserApplication {
         });
       }
     }).finally(() => {
-      if (
-        epoch === this.clientEpoch
-        && revision === this.pageRevisions.get(options.cwd)
-        && this.snapshot.loadingOlderCwd === options.cwd
-      ) {
+      if (this.olderFlight?.token === token) {
+        this.olderFlight = null;
         this.update({ loadingOlderCwd: null });
       }
     });
-    await this.trackFlight(key, request);
+    this.olderFlight = { promise: request, token };
+    await request;
   }
 
   private includeSessionIds(currentThreadId: string | null): string[] {
@@ -291,6 +282,14 @@ export class SessionBrowserApplication {
     };
     request.then(clear, clear);
     return request;
+  }
+
+  private invalidateOlder(): void {
+    this.browseRevision += 1;
+    this.olderFlight = null;
+    if (this.snapshot.loadingOlderCwd !== null) {
+      this.update({ loadingOlderCwd: null });
+    }
   }
 
   private update(patch: Partial<SessionBrowserSnapshot>): void {

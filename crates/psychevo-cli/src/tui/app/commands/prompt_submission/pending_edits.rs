@@ -1,3 +1,9 @@
+enum PendingSteerUpdate {
+    Updated,
+    Stale,
+    Rejected,
+}
+
 impl TuiApp {
     pub(crate) fn cancel_pending_fullscreen_inputs(&mut self, ui: &mut FullscreenUi<'_>) {
         let control = ui.running.as_ref().map(|running| running.control.clone());
@@ -105,35 +111,48 @@ impl TuiApp {
             ui.set_ephemeral_error("pending input cannot be empty");
             return Ok(());
         }
-        let edit = ui.pending_input_edit.take().expect("pending input edit");
-        match edit.target {
+        let target = ui
+            .pending_input_edit
+            .as_ref()
+            .expect("pending input edit")
+            .target;
+        match target {
             PendingInputRef::Steer(id) => {
-                if self.update_pending_steer_input(ui, id, display_prompt.clone(), &images)? {
-                    ui.set_ephemeral_status("pending input updated");
-                    return Ok(());
+                match self.update_pending_steer_input(ui, id, display_prompt.clone(), &images)? {
+                    PendingSteerUpdate::Updated => {
+                        ui.pending_input_edit = None;
+                        ui.set_ephemeral_status("pending input updated");
+                    }
+                    PendingSteerUpdate::Stale => {
+                        ui.pending_input_edit = None;
+                        ui.pending_steers.retain(|input| input.id != id);
+                        self.submit_pending_edit_as_new(ui, display_prompt, images)
+                            .await?;
+                    }
+                    PendingSteerUpdate::Rejected => {}
                 }
-                ui.pending_steers.retain(|input| input.id != id);
-                self.submit_pending_edit_as_new(ui, display_prompt, images)
-                    .await
+                Ok(())
             }
             PendingInputRef::Queue(sequence) => {
                 if self.update_queued_prompt_input(ui, sequence, display_prompt.clone(), &images) {
+                    ui.pending_input_edit = None;
                     ui.set_ephemeral_status("pending input updated");
                     return Ok(());
                 }
+                ui.pending_input_edit = None;
                 self.submit_pending_edit_as_new(ui, display_prompt, images)
                     .await
             }
         }
     }
 
-    pub(crate) fn update_pending_steer_input(
+    fn update_pending_steer_input(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         id: PendingInputId,
         display_prompt: String,
         images: &[PendingImageAttachment],
-    ) -> Result<bool> {
+    ) -> Result<PendingSteerUpdate> {
         let prompt = prompt_without_image_placeholders(&display_prompt, images);
         let image_inputs = images
             .iter()
@@ -152,19 +171,25 @@ impl TuiApp {
             false,
         )?
         .message;
-        let updated = ui
-            .running
-            .as_ref()
-            .is_some_and(|running| running.control.update_pending_user_message(id, message));
-        if !updated {
-            return Ok(false);
-        }
+        let Some(running) = ui.running.as_ref() else {
+            return Ok(PendingSteerUpdate::Stale);
+        };
+        match running.control.update_pending_user_message(id, message) {
+            Ok(()) => {}
+            Err(psychevo::ControlInputError::UnknownInput { .. }) => {
+                return Ok(PendingSteerUpdate::Stale);
+            }
+            Err(error) => {
+                ui.set_ephemeral_error(format!("unable to update pending input: {error}"));
+                return Ok(PendingSteerUpdate::Rejected);
+            }
+        };
         if let Some(input) = ui.pending_steers.iter_mut().find(|input| input.id == id) {
             input.prompt = prompt;
             input.display_prompt = display_prompt;
             input.images = images.to_vec();
         }
-        Ok(true)
+        Ok(PendingSteerUpdate::Updated)
     }
 
     pub(crate) fn update_queued_prompt_input(

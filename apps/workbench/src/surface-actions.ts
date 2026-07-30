@@ -2,6 +2,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
   parseThreadSnapshot,
   reconcileThreadSnapshot,
+  gatewayScopeKey,
   scopeForCwd,
   type GatewayClient
 } from "@psychevo/client";
@@ -60,13 +61,6 @@ type SurfaceActionsParams = {
   setTraceState: Dispatch<SetStateAction<TraceState>>;
   onSnapshotAdopted(): void;
 };
-
-function sameScopeIdentity(left: GatewayRequestScope | null, right: GatewayRequestScope): boolean {
-  return left?.cwd === right.cwd
-    && left.source.kind === right.source.kind
-    && (left.source.rawId ?? null) === (right.source.rawId ?? null)
-    && left.source.lifetime === right.source.lifetime;
-}
 
 export function createSurfaceActions(params: SurfaceActionsParams) {
   function defaultScope(): GatewayRequestScope {
@@ -163,7 +157,9 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     params.scopeRef.current = scope;
-    params.setActiveScope((current) => sameScopeIdentity(current, scope) ? current : scope);
+    params.setActiveScope((current) => (
+      gatewayScopeKey(current) === gatewayScopeKey(scope) ? current : scope
+    ));
   }
 
   async function refreshSettings(

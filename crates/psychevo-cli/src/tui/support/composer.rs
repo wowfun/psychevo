@@ -353,10 +353,19 @@ pub(crate) fn prompt_file_path(path: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn search_cwd_files(
     root: &Path,
     query: &str,
     cancel: &AtomicBool,
+) -> Vec<FileSearchMatch> {
+    search_cwd_files_while(root, query, || cancel.load(Ordering::Relaxed))
+}
+
+pub(crate) fn search_cwd_files_while(
+    root: &Path,
+    query: &str,
+    cancelled: impl Fn() -> bool,
 ) -> Vec<FileSearchMatch> {
     let mut builder = ignore::WalkBuilder::new(root);
     builder
@@ -368,9 +377,9 @@ pub(crate) fn search_cwd_files(
         .ignore(true)
         .parents(true);
     builder.filter_entry(|entry| entry.depth() == 0 || !is_vcs_dir_entry(entry));
-    let mut matches = Vec::new();
+    let mut matches = std::collections::BinaryHeap::with_capacity(FILE_POPUP_MAX_ROWS);
     for entry in builder.build() {
-        if cancel.load(Ordering::Relaxed) {
+        if cancelled() {
             break;
         }
         let Ok(entry) = entry else {
@@ -397,25 +406,46 @@ pub(crate) fn search_cwd_files(
         let Some(rank) = file_match_rank(&path_text, query) else {
             continue;
         };
-        matches.push((
+        let candidate = RankedFileMatch {
             rank,
-            FileSearchMatch {
+            kind_rank: file_kind_rank(kind),
+            entry: FileSearchMatch {
                 path: path_text,
                 kind,
             },
-        ));
+        };
+        if matches.len() < FILE_POPUP_MAX_ROWS {
+            matches.push(candidate);
+        } else if matches.peek().is_some_and(|worst| candidate < *worst) {
+            matches.pop();
+            matches.push(candidate);
+        }
     }
-    matches.sort_by(|(left_rank, left), (right_rank, right)| {
-        left_rank
-            .cmp(right_rank)
-            .then_with(|| file_kind_rank(left.kind).cmp(&file_kind_rank(right.kind)))
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    matches
-        .into_iter()
-        .take(FILE_POPUP_MAX_ROWS)
-        .map(|(_, file_match)| file_match)
-        .collect()
+    let mut matches = matches.into_vec();
+    matches.sort();
+    matches.into_iter().map(|ranked| ranked.entry).collect()
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct RankedFileMatch {
+    rank: (u8, usize),
+    kind_rank: u8,
+    entry: FileSearchMatch,
+}
+
+impl Ord for RankedFileMatch {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.rank
+            .cmp(&other.rank)
+            .then_with(|| self.kind_rank.cmp(&other.kind_rank))
+            .then_with(|| self.entry.path.cmp(&other.entry.path))
+    }
+}
+
+impl PartialOrd for RankedFileMatch {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 pub(crate) fn is_vcs_dir_entry(entry: &ignore::DirEntry) -> bool {

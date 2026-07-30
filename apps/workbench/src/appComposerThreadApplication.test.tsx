@@ -564,8 +564,14 @@ describe("Workbench public Thread Application interactions", () => {
         alwaysAuthorizationLifetime: "permanent",
         mcpStartup: {
           server: "docs",
-          transport: "stdio",
-          descriptorFingerprint: "sha256:abc123"
+          source: "profile:mcp:docs",
+          target: {
+            kind: "stdio",
+            command: "/usr/bin/docs-mcp",
+            args: ["--serve"],
+            cwd: "/workspace",
+            envNames: ["DOCS_TOKEN"]
+          }
         }
       },
       threadId: "thread-1",
@@ -578,8 +584,12 @@ describe("Workbench public Thread Application interactions", () => {
     const requestCard = requestHeading.closest(".composerRequest");
     expect(requestCard).not.toBeNull();
     expect(within(requestCard as HTMLElement).getByText("docs")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("profile:mcp:docs")).toBeTruthy();
     expect(within(requestCard as HTMLElement).getByText("stdio")).toBeTruthy();
-    expect(within(requestCard as HTMLElement).getByText("sha256:abc123")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("/usr/bin/docs-mcp")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("--serve")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("/workspace")).toBeTruthy();
+    expect(within(requestCard as HTMLElement).getByText("DOCS_TOKEN")).toBeTruthy();
     expect(within(requestCard as HTMLElement).queryByRole("button", { name: "Session" })).toBeNull();
     expect(within(requestCard as HTMLElement).queryByRole("button", { name: "Always" })).toBeNull();
     expect(within(requestCard as HTMLElement).getByRole("button", { name: "Once" })).toBeTruthy();

@@ -103,6 +103,47 @@ pub(crate) async fn pending_preview_steer_edit_updates_before_drain() {
 }
 
 #[tokio::test]
+pub(crate) async fn pending_preview_capacity_error_preserves_the_edit_and_original_steer() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    attach_pending_agent_running(&mut ui);
+
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("keep me".to_string()))
+        .await
+        .expect("steer");
+    let id = ui.pending_steers[0].id;
+    ui.running
+        .as_ref()
+        .expect("running")
+        .control
+        .steer_user_message(psychevo::__agent_core::user_text_message(
+            "x".repeat(900_000),
+        ))
+        .expect("large peer steer below the individual limit");
+    assert!(ui.start_pending_input_edit(PendingInputRef::Steer(id)));
+    ui.pending_input_edit.as_mut().expect("edit").textarea =
+        textarea_with_text(&"y".repeat(200_000));
+
+    app.confirm_pending_input_edit(&mut ui)
+        .await
+        .expect("capacity rejection is a handled UI error");
+
+    assert_eq!(
+        ui.pending_input_edit.as_ref().map(|edit| edit.target),
+        Some(PendingInputRef::Steer(id))
+    );
+    assert_eq!(ui.pending_steers.len(), 1);
+    assert_eq!(ui.pending_steers[0].id, id);
+    assert_eq!(ui.pending_steers[0].display_prompt, "keep me");
+    assert!(
+        ui.ephemeral_status
+            .as_ref()
+            .is_some_and(|status| status.text.contains("byte limit"))
+    );
+}
+
+#[tokio::test]
 pub(crate) async fn pending_preview_late_confirm_resubmits_as_new_input() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;

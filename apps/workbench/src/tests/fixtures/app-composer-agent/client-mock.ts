@@ -2791,6 +2791,7 @@ vi.mock("@psychevo/client", async () => {
     applyLiveTranscriptEvent: actual.applyLiveTranscriptEvent,
     bindThreadSnapshot: actual.bindThreadSnapshot,
     emptyThreadSnapshot: actual.emptyThreadSnapshot,
+    gatewayScopeKey: actual.gatewayScopeKey,
     latestAssistantTranscriptText: actual.latestAssistantTranscriptText,
     parseThreadSnapshot: (value: unknown) => value,
     prepareThreadTurn: (current: unknown, text: string, requestedThreadId?: string | null) => {

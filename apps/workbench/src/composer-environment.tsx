@@ -44,7 +44,7 @@ export function ComposerEnvironment({
   workspaces: Array<{ cwd: string; displayPath?: string }>;
   onBranchChange(branch: string, create: boolean): Promise<WorkspaceGitBranchesResult>;
   onOpenFiles(): void;
-  onReadBranches(): Promise<WorkspaceGitBranchesResult>;
+  onReadBranches(): Promise<WorkspaceGitBranchesResult | null>;
   onReadFolders(path: string | null): Promise<WorkspaceFolderListResult>;
   onRuntimeControlChange(control: ThreadControlDescriptorView, value: unknown): void;
   onWorkspaceChange(cwd: string): Promise<unknown>;
@@ -97,13 +97,18 @@ export function ComposerEnvironment({
 
   async function openBranchMenu() {
     setWorkspaceMenuOpen(false);
-    setBranchMenuOpen(true);
     setLoadingBranches(true);
     setMenuError(null);
     try {
-      setBranchState(await onReadBranches());
+      const result = await onReadBranches();
+      if (!result) {
+        return;
+      }
+      setBranchState(result);
+      setBranchMenuOpen(true);
     } catch (error) {
       setMenuError(errorMessage(error));
+      setBranchMenuOpen(true);
     } finally {
       setLoadingBranches(false);
     }

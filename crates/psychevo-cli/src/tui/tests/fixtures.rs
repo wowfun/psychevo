@@ -784,10 +784,14 @@ pub(crate) fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
 
 pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
+    let (control, run_control) = run_control();
+    let task = tokio::spawn(async move {
+        let result =
+            std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>()
+                .await;
+        drop(run_control);
+        result
     });
-    let (control, _) = run_control();
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
@@ -800,10 +804,14 @@ pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
 
 pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
+    let (control, run_control) = run_control();
+    let task = tokio::spawn(async move {
+        let result =
+            std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>()
+                .await;
+        drop(run_control);
+        result
     });
-    let (control, _) = run_control();
     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
         session_id: Some(session_id.to_string()),
         child_session_id: None,

@@ -100,10 +100,31 @@ function PermissionComposerRequest({
             <div className="composerPermissionPath">
               <span>Server</span>
               <code>{mcpStartup.server}</code>
+              <span>Source</span>
+              <code>{mcpStartup.source}</code>
               <span>Transport</span>
-              <code>{mcpStartup.transport}</code>
-              <span>Fingerprint</span>
-              <code>{mcpStartup.descriptorFingerprint}</code>
+              <code>{mcpStartup.target.kind === "stdio" ? "stdio" : "HTTP"}</code>
+              {mcpStartup.target.kind === "stdio" ? (
+                <>
+                  <span>Command</span>
+                  <code>{mcpStartup.target.command}</code>
+                  <span>Arguments</span>
+                  <code>{mcpStartup.target.args.join(" ") || "(none)"}</code>
+                  <span>Working directory</span>
+                  <code>{mcpStartup.target.cwd}</code>
+                  <span>Environment</span>
+                  <code>{mcpStartup.target.envNames.join(", ") || "(none)"}</code>
+                </>
+              ) : (
+                <>
+                  <span>URL</span>
+                  <code>{mcpStartup.target.url}</code>
+                  <span>Headers</span>
+                  <code>{mcpStartup.target.headerNames.join(", ") || "(none)"}</code>
+                  <span>Credentials</span>
+                  <code>{mcpStartup.target.credentialNames.join(", ") || "(none)"}</code>
+                </>
+              )}
             </div>
           </div>
         </>
@@ -487,8 +508,10 @@ type PermissionFilesystem = {
 
 type PermissionMcpStartup = {
   server: string;
-  transport: string;
-  descriptorFingerprint: string;
+  source: string;
+  target:
+    | { kind: "stdio"; command: string; args: string[]; cwd: string; envNames: string[] }
+    | { kind: "http"; url: string; headerNames: string[]; credentialNames: string[] };
 };
 
 function permissionFilesystem(action: PendingActionView): PermissionFilesystem | null {
@@ -509,13 +532,38 @@ function permissionFilesystem(action: PendingActionView): PermissionFilesystem |
 
 function permissionMcpStartup(action: PendingActionView): PermissionMcpStartup | null {
   const detail = asRecord(actionPayload(action).mcpStartup);
+  const target = asRecord(detail.target);
+  const strings = (value: unknown): string[] | null => (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+      ? value
+      : null
+  );
+  let parsedTarget: PermissionMcpStartup["target"] | null = null;
+  if (target.kind === "stdio") {
+    const args = strings(target.args);
+    const envNames = strings(target.envNames);
+    if (
+      typeof target.command === "string"
+      && typeof target.cwd === "string"
+      && args
+      && envNames
+    ) {
+      parsedTarget = { kind: "stdio", command: target.command, args, cwd: target.cwd, envNames };
+    }
+  } else if (target.kind === "http") {
+    const headerNames = strings(target.headerNames);
+    const credentialNames = strings(target.credentialNames);
+    if (typeof target.url === "string" && headerNames && credentialNames) {
+      parsedTarget = { kind: "http", url: target.url, headerNames, credentialNames };
+    }
+  }
   return typeof detail.server === "string"
-    && typeof detail.transport === "string"
-    && typeof detail.descriptorFingerprint === "string"
+    && typeof detail.source === "string"
+    && parsedTarget
     ? {
       server: detail.server,
-      transport: detail.transport,
-      descriptorFingerprint: detail.descriptorFingerprint
+      source: detail.source,
+      target: parsedTarget
     }
     : null;
 }
