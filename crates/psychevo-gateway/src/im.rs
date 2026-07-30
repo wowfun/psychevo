@@ -99,6 +99,9 @@ pub trait ImAdapter: Send + Sync {
     fn platform(&self) -> &str;
     fn poll(&self) -> BoxFuture<'static, Result<Vec<ImInboundMessage>>>;
     fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, Result<()>>;
+    fn shutdown(&self) -> BoxFuture<'static, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -187,6 +190,16 @@ impl ChannelGateway {
                 Error::Message(format!("unknown channel connection `{connection_id}`"))
             })?;
         binding.adapter.send(message).await
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        let mut first_error = None;
+        for binding in &self.adapters {
+            if let Err(err) = binding.adapter.shutdown().await {
+                first_error.get_or_insert(err);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 }
 
@@ -472,6 +485,40 @@ fn stable_source_hash(value: &str) -> String {
 mod tests {
     use super::*;
 
+    #[derive(Clone)]
+    struct ShutdownAdapter {
+        platform: &'static str,
+        shutdowns: Arc<Mutex<usize>>,
+        fails: bool,
+    }
+
+    impl ImAdapter for ShutdownAdapter {
+        fn platform(&self) -> &str {
+            self.platform
+        }
+
+        fn poll(&self) -> BoxFuture<'static, Result<Vec<ImInboundMessage>>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn send(&self, _message: ImOutboundMessage) -> BoxFuture<'static, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn shutdown(&self) -> BoxFuture<'static, Result<()>> {
+            let shutdowns = Arc::clone(&self.shutdowns);
+            let fails = self.fails;
+            Box::pin(async move {
+                *shutdowns.lock().expect("shutdown count poisoned") += 1;
+                if fails {
+                    Err(Error::Message("shutdown failed".to_string()))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+    }
+
     fn inbound(chat_id: &str, user_id: &str, task_key: Option<&str>) -> ImInboundMessage {
         ImInboundMessage {
             identity: ImIdentity {
@@ -659,5 +706,37 @@ mod tests {
 
         assert!(release.sent().is_empty());
         assert_eq!(alerts.sent().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn channel_gateway_shuts_down_every_adapter_after_an_error() {
+        let first_shutdowns = Arc::new(Mutex::new(0));
+        let second_shutdowns = Arc::new(Mutex::new(0));
+        let gateway = ChannelGateway::new(vec![
+            ChannelAdapterBinding::new(
+                "first",
+                Arc::new(ShutdownAdapter {
+                    platform: "first",
+                    shutdowns: Arc::clone(&first_shutdowns),
+                    fails: true,
+                }),
+                ChannelAllowlist::default(),
+            ),
+            ChannelAdapterBinding::new(
+                "second",
+                Arc::new(ShutdownAdapter {
+                    platform: "second",
+                    shutdowns: Arc::clone(&second_shutdowns),
+                    fails: false,
+                }),
+                ChannelAllowlist::default(),
+            ),
+        ]);
+
+        let error = gateway.shutdown().await.expect_err("first shutdown fails");
+
+        assert_eq!(error.to_string(), "shutdown failed");
+        assert_eq!(*first_shutdowns.lock().expect("first count"), 1);
+        assert_eq!(*second_shutdowns.lock().expect("second count"), 1);
     }
 }

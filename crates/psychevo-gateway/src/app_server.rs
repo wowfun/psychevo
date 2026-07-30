@@ -286,6 +286,27 @@ impl RpcError {
             data: None,
         }
     }
+
+    fn control_input(error: psychevo::ControlInputError) -> Self {
+        let data = match &error {
+            psychevo::ControlInputError::CountLimit { limit } => Some(json!({
+                "kind": "control_input_overload",
+                "resource": "count",
+                "limit": limit,
+            })),
+            psychevo::ControlInputError::ByteLimit { limit } => Some(json!({
+                "kind": "control_input_overload",
+                "resource": "bytes",
+                "limit": limit,
+            })),
+            _ => None,
+        };
+        Self {
+            code: if data.is_some() { -32001 } else { -32000 },
+            message: error.to_string(),
+            data,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -592,8 +613,29 @@ impl ApprovalHandler for RemoteApprovalHandler {
                     .mcp_startup
                     .map(|value| wire::AppMcpStartupApprovalRequest {
                         server: value.server,
-                        transport: value.transport,
-                        descriptor_fingerprint: value.descriptor_fingerprint,
+                        source: value.source,
+                        target: match value.target {
+                            psychevo::McpStartupApprovalTarget::Stdio {
+                                command,
+                                args,
+                                cwd,
+                                env_names,
+                            } => wire::AppMcpStartupApprovalTarget::Stdio {
+                                command,
+                                args,
+                                cwd,
+                                env_names,
+                            },
+                            psychevo::McpStartupApprovalTarget::Http {
+                                url,
+                                header_names,
+                                credential_names,
+                            } => wire::AppMcpStartupApprovalTarget::Http {
+                                url,
+                                header_names,
+                                credential_names,
+                            },
+                        },
                     }),
             };
             let timeout = Duration::from_secs(request.timeout_secs.max(1));
@@ -974,7 +1016,11 @@ impl AppServerConnection {
             }
             AppMethod::TurnSteer => {
                 let params = required_params::<wire::AppTurnSteerParams>(request.params)?;
-                let accepted = self.turn(&params.turn_id).await?.steer(params.input);
+                let accepted = match self.turn(&params.turn_id).await?.steer(params.input) {
+                    Ok(()) => true,
+                    Err(psychevo::ControlInputError::Closed) => false,
+                    Err(error) => return Err(RpcError::control_input(error)),
+                };
                 Ok(json!({ "accepted": accepted, "turnId": params.turn_id }))
             }
             AppMethod::InteractionRespond => {
@@ -1618,10 +1664,11 @@ mod tests {
     impl AgentSessionAdapter for BlockingAdapter {
         fn run_turn(
             &self,
-            request: AgentTurnRequest,
+            mut request: AgentTurnRequest,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             let started = Arc::clone(&self.started);
             Box::pin(async move {
+                let _native_control = request.__take_native_control()?;
                 started.notify_one();
                 while !request.control.is_interrupted() {
                     tokio::task::yield_now().await;

@@ -59,12 +59,13 @@ impl FeishuLarkLongConnectionConfig {
 pub struct FeishuLarkLongConnectionAdapter {
     config: Arc<FeishuLarkLongConnectionConfig>,
     client: feishu_sdk::Client,
-    inbound_tx: mpsc::UnboundedSender<ImInboundMessage>,
-    inbound_rx: Arc<Mutex<mpsc::UnboundedReceiver<ImInboundMessage>>>,
+    inbound_tx: mpsc::Sender<ImInboundMessage>,
+    inbound_rx: Arc<Mutex<mpsc::Receiver<ImInboundMessage>>>,
     stream_task: Arc<Mutex<Option<FeishuStreamTask>>>,
 }
 
 type FeishuStreamTask = tokio::task::JoinHandle<std::result::Result<(), feishu_sdk::core::Error>>;
+const FEISHU_INGRESS_CAPACITY: usize = 64;
 
 impl FeishuLarkLongConnectionAdapter {
     pub fn new(config: FeishuLarkLongConnectionConfig) -> Result<Self> {
@@ -82,7 +83,7 @@ impl FeishuLarkLongConnectionAdapter {
             .log_level(feishu_sdk::core::LogLevel::Error)
             .build();
         let client = feishu_sdk::Client::new(sdk_config).map_err(feishu_error)?;
-        let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+        let (inbound_tx, inbound_rx) = mpsc::channel(FEISHU_INGRESS_CAPACITY);
         Ok(Self {
             config: Arc::new(config),
             client,
@@ -139,6 +140,21 @@ impl FeishuLarkLongConnectionAdapter {
         }
         messages
     }
+
+    async fn stop_long_connection(&self) -> Result<()> {
+        let Some(task) = self.stream_task.lock().await.take() else {
+            return Ok(());
+        };
+        task.abort();
+        match task.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(feishu_error(err)),
+            Err(err) if err.is_cancelled() => Ok(()),
+            Err(err) => Err(Error::Message(format!(
+                "Feishu/Lark stream task failed: {err}"
+            ))),
+        }
+    }
 }
 
 impl ImAdapter for FeishuLarkLongConnectionAdapter {
@@ -191,19 +207,24 @@ impl ImAdapter for FeishuLarkLongConnectionAdapter {
             }
         })
     }
+
+    fn shutdown(&self) -> BoxFuture<'static, Result<()>> {
+        let adapter = self.clone();
+        Box::pin(async move { adapter.stop_long_connection().await })
+    }
 }
 
 struct FeishuQueueHandler {
     event_type: String,
     config: Arc<FeishuLarkLongConnectionConfig>,
-    tx: mpsc::UnboundedSender<ImInboundMessage>,
+    tx: mpsc::Sender<ImInboundMessage>,
 }
 
 impl FeishuQueueHandler {
     fn new(
         event_type: impl Into<String>,
         config: Arc<FeishuLarkLongConnectionConfig>,
-        tx: mpsc::UnboundedSender<ImInboundMessage>,
+        tx: mpsc::Sender<ImInboundMessage>,
     ) -> Self {
         Self {
             event_type: event_type.into(),
@@ -226,7 +247,7 @@ impl feishu_sdk::event::EventHandler for FeishuQueueHandler {
         let tx = self.tx.clone();
         Box::pin(async move {
             if let Some(message) = feishu_event_to_inbound(&event, &config) {
-                let _ = tx.send(message);
+                let _ = tx.send(message).await;
             }
             Ok(None)
         })
@@ -306,4 +327,94 @@ pub(super) fn feishu_event_to_inbound(
 
 fn feishu_error(err: feishu_sdk::core::Error) -> Error {
     Error::Message(format!("Feishu/Lark adapter failed: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    fn adapter() -> FeishuLarkLongConnectionAdapter {
+        FeishuLarkLongConnectionAdapter::new(FeishuLarkLongConnectionConfig::new(
+            FeishuLarkDomain::Feishu,
+            "test-app",
+            "test-secret",
+        ))
+        .expect("test adapter")
+    }
+
+    fn inbound(index: usize) -> ImInboundMessage {
+        ImInboundMessage {
+            identity: ImIdentity {
+                connection_id: Some("test".to_string()),
+                platform: "feishu".to_string(),
+                domain: Some("feishu".to_string()),
+                workspace_id: None,
+                chat_type: Some("group".to_string()),
+                chat_id: "chat".to_string(),
+                thread_id: None,
+                user_id: Some("user".to_string()),
+                operator_id: None,
+                reply_to: None,
+            },
+            message_id: format!("message-{index}"),
+            text: "hello".to_string(),
+            attachments: Vec::new(),
+            task_key: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn ingress_waits_for_capacity_instead_of_dropping_the_sixty_fifth_event() {
+        let adapter = adapter();
+        for index in 0..FEISHU_INGRESS_CAPACITY {
+            adapter
+                .inbound_tx
+                .try_send(inbound(index))
+                .expect("entry below capacity");
+        }
+        let sender = adapter.inbound_tx.clone();
+        let blocked = tokio::spawn(async move {
+            sender
+                .send(inbound(FEISHU_INGRESS_CAPACITY))
+                .await
+                .expect("receiver remains open");
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !blocked.is_finished(),
+            "sixty-fifth event was not backpressured"
+        );
+
+        assert_eq!(adapter.drain_inbound().await.len(), FEISHU_INGRESS_CAPACITY);
+        blocked.await.expect("blocked sender");
+        assert_eq!(adapter.drain_inbound().await.len(), 1);
+    }
+
+    struct Dropped(Arc<AtomicBool>);
+
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_and_awaits_the_long_connection_task() {
+        let adapter = adapter();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let dropped_for_task = Arc::clone(&dropped);
+        *adapter.stream_task.lock().await = Some(tokio::spawn(async move {
+            let _dropped = Dropped(dropped_for_task);
+            std::future::pending::<()>().await;
+            Ok(())
+        }));
+        tokio::task::yield_now().await;
+
+        adapter.shutdown().await.expect("shutdown");
+
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(adapter.stream_task.lock().await.is_none());
+    }
 }

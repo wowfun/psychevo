@@ -39,22 +39,94 @@
     },
     "AppMcpStartupApprovalRequest": {
       "properties": {
-        "descriptorFingerprint": {
-          "type": "string"
-        },
         "server": {
           "type": "string"
         },
-        "transport": {
+        "source": {
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/definitions/AppMcpStartupApprovalTarget"
         }
       },
       "required": [
-        "descriptorFingerprint",
         "server",
-        "transport"
+        "source",
+        "target"
       ],
       "type": "object"
+    },
+    "AppMcpStartupApprovalTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "envNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "cwd",
+            "envNames",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "credentialNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "headerNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "credentialNames",
+            "headerNames",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {

@@ -60,16 +60,20 @@ async fn reconcile_inner(state: WebState) -> psychevo::Result<()> {
                 let worker_state = state.clone();
                 let worker_connection = connection.clone();
                 let gateway = state.inner.gateway.clone();
-                gateway.spawn_background(format!("channel:{}", worker_connection.id), async move {
-                    run_channel_loop(
-                        worker_state,
-                        runtime,
-                        worker_connection,
-                        channel_gateway,
-                        cancel,
-                    )
-                    .await;
-                });
+                gateway.spawn_shutdown_aware_background(
+                    format!("channel:{}", worker_connection.id),
+                    move |gateway_shutdown| async move {
+                        run_channel_loop(
+                            worker_state,
+                            runtime,
+                            worker_connection,
+                            channel_gateway,
+                            cancel,
+                            gateway_shutdown,
+                        )
+                        .await;
+                    },
+                );
             }
             Err(err) => {
                 state.inner.channel_runtime.deactivate(&connection.id);

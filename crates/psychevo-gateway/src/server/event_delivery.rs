@@ -81,6 +81,7 @@ struct OutboxState {
 
 #[derive(Debug)]
 pub(super) struct ConnectionOutboxInner {
+    id: Arc<str>,
     state: Mutex<OutboxState>,
     ready: Notify,
     closed: Notify,
@@ -107,12 +108,22 @@ pub(super) struct ConnectionSendError;
 #[derive(Clone)]
 pub(super) enum ConnectionSender {
     Bounded(Arc<ConnectionOutboxInner>),
-    InternalUnbounded(mpsc::UnboundedSender<String>),
+    InternalUnbounded {
+        id: Arc<str>,
+        sender: mpsc::UnboundedSender<String>,
+    },
 }
 
 impl ConnectionSender {
     pub(super) fn is_internal_adapter(&self) -> bool {
-        matches!(self, Self::InternalUnbounded(_))
+        matches!(self, Self::InternalUnbounded { .. })
+    }
+
+    pub(super) fn id(&self) -> &str {
+        match self {
+            Self::Bounded(inner) => &inner.id,
+            Self::InternalUnbounded { id, .. } => id,
+        }
     }
 
     pub(super) fn send(&self, text: String) -> Result<(), ConnectionSendError> {
@@ -176,7 +187,7 @@ impl ConnectionSender {
                 inner.ready.notify_one();
                 Ok(())
             }
-            Self::InternalUnbounded(sender) => sender
+            Self::InternalUnbounded { sender, .. } => sender
                 .send(text.to_string())
                 .map_err(|_| ConnectionSendError),
         }
@@ -211,7 +222,10 @@ impl ConnectionSender {
 
 impl From<mpsc::UnboundedSender<String>> for ConnectionSender {
     fn from(value: mpsc::UnboundedSender<String>) -> Self {
-        Self::InternalUnbounded(value)
+        Self::InternalUnbounded {
+            id: uuid::Uuid::now_v7().to_string().into(),
+            sender: value,
+        }
     }
 }
 
@@ -245,6 +259,7 @@ impl ConnectionOutboxReceiver {
 
 pub(super) fn connection_outbox() -> (ConnectionSender, ConnectionOutboxReceiver) {
     let inner = Arc::new(ConnectionOutboxInner {
+        id: uuid::Uuid::now_v7().to_string().into(),
         state: Mutex::new(OutboxState::default()),
         ready: Notify::new(),
         closed: Notify::new(),

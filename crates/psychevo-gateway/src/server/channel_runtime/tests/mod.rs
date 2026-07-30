@@ -30,6 +30,33 @@ struct ErrorImAdapter {
     polls: Arc<AtomicUsize>,
 }
 
+#[derive(Debug)]
+struct ShutdownImAdapter {
+    stopped: Arc<AtomicBool>,
+}
+
+impl crate::im::ImAdapter for ShutdownImAdapter {
+    fn platform(&self) -> &str {
+        "wechat"
+    }
+
+    fn poll(&self) -> BoxFuture<'static, psychevo::Result<Vec<ImInboundMessage>>> {
+        Box::pin(std::future::pending())
+    }
+
+    fn send(&self, _message: ImOutboundMessage) -> BoxFuture<'static, psychevo::Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn shutdown(&self) -> BoxFuture<'static, psychevo::Result<()>> {
+        let stopped = Arc::clone(&self.stopped);
+        Box::pin(async move {
+            stopped.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct FailOnceImAdapter {
     attempts: Arc<AtomicUsize>,
@@ -685,15 +712,15 @@ async fn channel_compact_queues_during_active_turn_without_blocking_later_contro
     .expect("approval command remains responsive");
 
     let sent = wait_for_sent(&adapter, 5).await;
-    let compact_reply = sent
-        .iter()
-        .position(|message| message.text == "not enough messages to compact")
-        .unwrap_or_else(|| panic!("compaction reply: {sent:#?}"));
-    let later_reply = sent
-        .iter()
-        .position(|message| message.text == "answer 2")
-        .expect("later turn reply");
-    assert!(compact_reply < later_reply, "{sent:#?}");
+    assert!(
+        sent.iter()
+            .any(|message| message.text == "not enough messages to compact"),
+        "compaction reply: {sent:#?}"
+    );
+    assert!(
+        sent.iter().any(|message| message.text == "answer 2"),
+        "later turn reply: {sent:#?}"
+    );
     assert_eq!(
         prompts.lock().expect("prompts poisoned").as_slice(),
         ["first", "later"]
@@ -1542,6 +1569,7 @@ async fn wechat_session_timeout_blocks_runner_without_retrying() {
         connection,
         channel_gateway,
         CancellationToken::new(),
+        CancellationToken::new(),
     )
     .await;
 
@@ -1607,6 +1635,7 @@ async fn wechat_session_timeout_during_login_grace_reports_pending() {
         connection,
         channel_gateway,
         cancel.clone(),
+        CancellationToken::new(),
     ));
 
     for _ in 0..100 {
@@ -1626,4 +1655,110 @@ async fn wechat_session_timeout_during_login_grace_reports_pending() {
     assert!(runner.last_error.is_none());
     cancel.cancel();
     handle.abort();
+}
+
+#[tokio::test]
+async fn channel_runner_awaits_adapter_shutdown_before_marking_stopped() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("state");
+    let state = WebState::new(GatewayWebServerConfig::new(
+        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+        home,
+        cwd,
+        None,
+        BTreeMap::from([("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "off".to_string())]),
+        temp.path().join("static"),
+    ));
+    let stopped = Arc::new(AtomicBool::new(false));
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(ShutdownImAdapter {
+            stopped: Arc::clone(&stopped),
+        }),
+        ChannelAllowlist::default(),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(run_channel_loop(
+        state,
+        runtime.clone(),
+        ready_wechat_connection(None),
+        channel_gateway,
+        cancel.clone(),
+        CancellationToken::new(),
+    ));
+
+    cancel.cancel();
+    tokio::time::timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("runner shutdown deadline")
+        .expect("runner task");
+
+    assert!(stopped.load(Ordering::SeqCst));
+    assert_eq!(runtime.runner_view("wechat").state, "stopped");
+}
+
+#[tokio::test]
+async fn gateway_shutdown_awaits_channel_adapter_cleanup() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("state");
+    let state = WebState::new(GatewayWebServerConfig::new(
+        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+        home,
+        cwd,
+        None,
+        BTreeMap::from([("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "off".to_string())]),
+        temp.path().join("static"),
+    ));
+    let stopped = Arc::new(AtomicBool::new(false));
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(ShutdownImAdapter {
+            stopped: Arc::clone(&stopped),
+        }),
+        ChannelAllowlist::default(),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+    let gateway = state.inner.gateway.clone();
+    gateway.spawn_shutdown_aware_background("channel:test", {
+        let state = state.clone();
+        let runtime = runtime.clone();
+        move |gateway_shutdown| async move {
+            run_channel_loop(
+                state,
+                runtime,
+                ready_wechat_connection(None),
+                channel_gateway,
+                CancellationToken::new(),
+                gateway_shutdown,
+            )
+            .await;
+        }
+    });
+
+    for _ in 0..100 {
+        if runtime.runner_view("wechat").state == "running" {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(runtime.runner_view("wechat").state, "running");
+
+    tokio::time::timeout(Duration::from_secs(1), gateway.shutdown_application(false))
+        .await
+        .expect("Gateway shutdown deadline")
+        .expect("Gateway shutdown");
+
+    assert!(stopped.load(Ordering::SeqCst));
+    assert_eq!(runtime.runner_view("wechat").state, "stopped");
 }

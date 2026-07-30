@@ -1991,48 +1991,95 @@ export const gatewayMcpRequestSchemas = {
 },
   McpOAuthStartResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "authorizationUrl": {
-      "type": "string"
-    },
-    "sessionId": {
-      "type": "string"
-    },
-    "status": {
-      "type": "string"
+  "oneOf": [
+    {
+      "properties": {
+        "authorizationUrl": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "authorizationUrl",
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
     }
-  },
-  "required": [
-    "authorizationUrl",
-    "sessionId",
-    "status"
   ],
-  "title": "McpOAuthStartResult",
-  "type": "object"
+  "title": "McpOAuthStartResult"
 },
   McpOAuthStatusResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "error": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+  "oneOf": [
+    {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
     },
-    "sessionId": {
-      "type": "string"
+    {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "succeeded"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
     },
-    "status": {
-      "type": "string"
+    {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
     }
-  },
-  "required": [
-    "sessionId",
-    "status"
   ],
-  "title": "McpOAuthStatusResult",
-  "type": "object"
+  "title": "McpOAuthStatusResult"
 },
   McpOAuthLogoutResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",

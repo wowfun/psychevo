@@ -50,7 +50,9 @@ export type AppFilesystemApprovalTarget = { requestedPath: string, resolvedPath:
 
 export type AppFilesystemApprovalRequest = { targets: Array<AppFilesystemApprovalTarget>, scopeCandidates: Array<string>, };
 
-export type AppMcpStartupApprovalRequest = { server: string, transport: string, descriptorFingerprint: string, };
+export type AppMcpStartupApprovalRequest = { server: string, source: string, target: AppMcpStartupApprovalTarget, };
+
+export type AppMcpStartupApprovalTarget = { "kind": "stdio", command: string, args: Array<string>, cwd: string, envNames: Array<string>, } | { "kind": "http", url: string, headerNames: Array<string>, credentialNames: Array<string>, };
 
 export type AppApprovalOutcome = "allow_once" | "allow_turn" | "allow_session" | "allow_always" | "deny";
 
@@ -430,7 +432,7 @@ export type PluginInspectionView = { source_kind: string, source_id: string, fra
 
 export type PluginInspectResult = { success: boolean, inspection: PluginInspectionView, };
 
-export type PluginInstallRecordView = { name: string, version: string, description: string, source_id: string, source_slug: string, source_kind: string, npm_registry?: string | null, scope: string, package_root: string, data_root: string, manifest_path: string, manifest_kind: string, compatibility_profile: string, component_statuses?: Array<PluginComponentStatusView>, manifest_resources: Array<string>, psychevo_extensions: Array<string>, diagnostics: Array<PluginDiagnosticView>, };
+export type PluginInstallRecordView = { name: string, version: string, description: string, source_id: string, source_slug: string, source_kind: string, npm_registry?: string | null, resolved_revision?: string | null, scope: string, package_root: string, data_root: string, manifest_path: string, manifest_kind: string, compatibility_profile: string, component_statuses?: Array<PluginComponentStatusView>, manifest_resources: Array<string>, psychevo_extensions: Array<string>, diagnostics: Array<PluginDiagnosticView>, };
 
 export type PluginInstallResult = { success?: boolean | null, plugin?: PluginInstallRecordView | null, authority?: PluginAuthorityIdentityView | null, partial?: boolean | null, completedSteps?: Array<string>, failedStep?: string | null, reason?: string | null, safeState?: string | null, materialization?: unknown, fingerprint?: string | null, policy?: PluginPolicyView | null, trust?: PluginTrustView | null, generation?: number | null, };
 
@@ -546,9 +548,9 @@ export type McpToolSummaryView = { name: string, title?: string | null, descript
 
 export type McpTestResult = { ok: boolean, name: string, transport: string, tools?: Array<McpToolSummaryView>, error?: string | null, };
 
-export type McpOAuthStartResult = { sessionId: string, authorizationUrl: string, status: string, };
+export type McpOAuthStartResult = { "status": "pending", sessionId: string, authorizationUrl: string, };
 
-export type McpOAuthStatusResult = { sessionId: string, status: string, error?: string | null, };
+export type McpOAuthStatusResult = { "status": "pending", sessionId: string, } | { "status": "succeeded", sessionId: string, } | { "status": "failed", sessionId: string, message: string, };
 
 export type McpOAuthLogoutResult = { success: boolean, name: string, removed: boolean, };
 

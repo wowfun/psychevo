@@ -64,6 +64,45 @@ mod thread_application_contract_tests {
     }
 
     #[test]
+    fn mcp_startup_target_schema_matches_camel_case_wire_fields() {
+        for target in [
+            AppMcpStartupApprovalTarget::Stdio {
+                command: "/usr/bin/mcp".to_string(),
+                args: vec!["serve".to_string()],
+                cwd: "/workspace".to_string(),
+                env_names: vec!["MCP_TOKEN".to_string()],
+            },
+            AppMcpStartupApprovalTarget::Http {
+                url: "https://example.test/mcp".to_string(),
+                header_names: vec!["X-Tenant".to_string()],
+                credential_names: vec!["MCP_TOKEN".to_string()],
+            },
+        ] {
+            let serialized = serde_json::to_value(&target).expect("serialize MCP target");
+            let kind = serialized["kind"].as_str().expect("target kind");
+            let schema = serde_json::to_value(schemars::schema_for!(AppMcpStartupApprovalTarget))
+                .expect("MCP target schema");
+            let branch = schema["oneOf"]
+                .as_array()
+                .expect("target branches")
+                .iter()
+                .find(|branch| {
+                    branch["properties"]["kind"]["enum"]
+                        .as_array()
+                        .is_some_and(|values| values.iter().any(|value| value == kind))
+                })
+                .expect("target branch");
+            let properties = branch["properties"].as_object().expect("target properties");
+            for key in serialized.as_object().expect("serialized target").keys() {
+                assert!(
+                    properties.contains_key(key),
+                    "serialized MCP target key `{key}` is absent from schema branch {kind}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn generated_typescript_follows_wire_requiredness() {
         let list = typescript_decl_with_schema_optionality(
             &export_ts_decl(ThreadListParams::decl()),

@@ -6153,6 +6153,13 @@ export const gatewayPluginRequestSchemas = {
       },
       "type": "array"
     },
+    "resolved_revision": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scope": {
       "type": "string"
     },
@@ -6353,6 +6360,13 @@ export const gatewayPluginRequestSchemas = {
             "type": "string"
           },
           "type": "array"
+        },
+        "resolved_revision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "scope": {
           "type": "string"

@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "envNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "stdio"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "args",
+        "command",
+        "cwd",
+        "envNames",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "credentialNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "headerNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "http"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credentialNames",
+        "headerNames",
+        "kind",
+        "url"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AppMcpStartupApprovalTarget"
+}

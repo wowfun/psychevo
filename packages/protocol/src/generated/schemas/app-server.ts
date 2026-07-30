@@ -792,22 +792,94 @@ export const appServerSchemas = {
     },
     "AppMcpStartupApprovalRequest": {
       "properties": {
-        "descriptorFingerprint": {
-          "type": "string"
-        },
         "server": {
           "type": "string"
         },
-        "transport": {
+        "source": {
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/definitions/AppMcpStartupApprovalTarget"
         }
       },
       "required": [
-        "descriptorFingerprint",
         "server",
-        "transport"
+        "source",
+        "target"
       ],
       "type": "object"
+    },
+    "AppMcpStartupApprovalTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "envNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "cwd",
+            "envNames",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "credentialNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "headerNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "credentialNames",
+            "headerNames",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {
@@ -941,24 +1013,172 @@ export const appServerSchemas = {
 },
   AppMcpStartupApprovalRequest: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppMcpStartupApprovalTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "envNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "cwd",
+            "envNames",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "credentialNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "headerNames": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "credentialNames",
+            "headerNames",
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
   "properties": {
-    "descriptorFingerprint": {
-      "type": "string"
-    },
     "server": {
       "type": "string"
     },
-    "transport": {
+    "source": {
       "type": "string"
+    },
+    "target": {
+      "$ref": "#/definitions/AppMcpStartupApprovalTarget"
     }
   },
   "required": [
-    "descriptorFingerprint",
     "server",
-    "transport"
+    "source",
+    "target"
   ],
   "title": "AppMcpStartupApprovalRequest",
   "type": "object"
+},
+  AppMcpStartupApprovalTarget: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "envNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "stdio"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "args",
+        "command",
+        "cwd",
+        "envNames",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "credentialNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "headerNames": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "http"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credentialNames",
+        "headerNames",
+        "kind",
+        "url"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AppMcpStartupApprovalTarget"
 },
   AppApprovalOutcome: {
   "$schema": "http://json-schema.org/draft-07/schema#",

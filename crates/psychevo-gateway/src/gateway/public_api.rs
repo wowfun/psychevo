@@ -263,7 +263,30 @@ impl Gateway {
             self.supervisor.close_infrastructure();
         }
         self.supervisor.wait_for_infrastructure().await;
-        self.agent_sessions.shutdown(force).await
+        let adapter = self.agent_sessions.shutdown(force).await;
+        let panics = self.supervisor.panic_summary();
+        let mut failures = Vec::new();
+        if panics.count > 0 {
+            let first = panics
+                .first
+                .map(|panic| format!("{} ({:?})", panic.name, panic.scope))
+                .unwrap_or_else(|| "unknown task".to_string());
+            failures.push(format!(
+                "{} supervised Gateway task(s) panicked; first: {first}",
+                panics.count
+            ));
+        }
+        if let Err(error) = adapter {
+            failures.push(format!("Agent Session adapter shutdown failed: {error}"));
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::Message(format!(
+                "Gateway shutdown was not clean: {}",
+                failures.join("; ")
+            )))
+        }
     }
 
     #[cfg(test)]
@@ -276,6 +299,18 @@ impl Gateway {
         F: std::future::Future<Output = ()> + Send + 'static,
     {
         self.supervisor.spawn_producer(name, future);
+    }
+
+    pub(crate) fn spawn_shutdown_aware_background<B, F>(
+        &self,
+        name: impl Into<Arc<str>>,
+        build: B,
+    ) where
+        B: FnOnce(tokio_util::sync::CancellationToken) -> F,
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.supervisor
+            .spawn_shutdown_aware_producer(name, build);
     }
 
     pub(crate) fn spawn_accepted_turn<F>(&self, name: impl Into<Arc<str>>, future: F)

@@ -80,6 +80,7 @@ export const gatewaySchemas = {
   AppFilesystemApprovalTarget: appServerSchemas.AppFilesystemApprovalTarget,
   AppFilesystemApprovalRequest: appServerSchemas.AppFilesystemApprovalRequest,
   AppMcpStartupApprovalRequest: appServerSchemas.AppMcpStartupApprovalRequest,
+  AppMcpStartupApprovalTarget: appServerSchemas.AppMcpStartupApprovalTarget,
   AppApprovalOutcome: appServerSchemas.AppApprovalOutcome,
   AppApprovalResult: appServerSchemas.AppApprovalResult,
   AppPendingInteraction: appServerSchemas.AppPendingInteraction,

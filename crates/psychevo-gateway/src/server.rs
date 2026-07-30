@@ -3,7 +3,7 @@ use std::io::{Error as IoError, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{AgentErrorStage, agent_error_view, agent_session_error};
 use axum::Router;
@@ -170,6 +170,7 @@ mod codex_capability_broker;
 mod commands;
 mod completion;
 mod event_delivery;
+mod mcp_oauth_store;
 mod runtime_profiles;
 mod session_application;
 mod session_import_application;
@@ -209,6 +210,7 @@ use commands::{
 use completion::active_completion_token;
 use completion::completion_list_value;
 use event_delivery::{ConnectionSender, GatewayEventHub, OutboxReceive, connection_outbox};
+use mcp_oauth_store::{McpOAuthSessionStatus, McpOAuthSessionStore};
 use runtime_profiles::{
     RunnableTargetCatalog, ThreadDraftPrepareWork, apply_thread_control_precedence,
     cached_thread_history_descriptor, delete_runtime_profile,

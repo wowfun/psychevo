@@ -23,6 +23,28 @@ struct DurableGatewayActivityClaim<'a> {
     intent: Option<Value>,
 }
 
+enum GatewayControlApply {
+    Applied,
+    Retry,
+    Failed(&'static str),
+}
+
+fn durable_steer_message(
+    payload: &Value,
+) -> Result<psychevo::__agent_core::Message, &'static str> {
+    let Some(message) = payload.get("message").cloned() else {
+        return Err("missing steer message");
+    };
+    let message = serde_json::from_value(message).map_err(|_| "invalid steer message")?;
+    psychevo::__agent_core::validate_steer_message(&message).map_err(|error| match error {
+        psychevo::ControlInputError::ByteLimit { .. } => {
+            "steer message exceeds the control input byte limit"
+        }
+        _ => "invalid steer message",
+    })?;
+    Ok(message)
+}
+
 #[derive(Default)]
 struct PersistGatewayEventResult {
     accepted_thread_id: Option<String>,
@@ -693,6 +715,9 @@ impl Gateway {
         command_kind: &str,
         payload: Value,
     ) -> bool {
+        if command_kind == "steer" && durable_steer_message(&payload).is_err() {
+            return false;
+        }
         let now = gateway_now_ms();
         for key in self.selector_keys(selector) {
             let Ok(Some(record)) = self.durable_activity_for_key(&key).await else {
@@ -726,6 +751,9 @@ impl Gateway {
         command_kind: &str,
         payload: Value,
     ) -> bool {
+        if command_kind == "steer" && durable_steer_message(&payload).is_err() {
+            return false;
+        }
         self.state
             .enqueue_gateway_control_command(GatewayControlCommandInput {
                 activity_id,
@@ -756,28 +784,45 @@ impl Gateway {
             return;
         };
         for command in commands {
-            let applied = match command.command_kind.as_str() {
+            let outcome = match command.command_kind.as_str() {
                 "interrupt" => self
                     .control_for_activity_id(&command.activity_id)
                     .map(|control| {
                         control.abort();
-                        true
+                        GatewayControlApply::Applied
                     })
-                    .unwrap_or(false),
-                "takeover" => self
-                    .apply_takeover_control_command(&command.activity_id)
-                    .await,
+                    .unwrap_or(GatewayControlApply::Failed("no matching active control")),
+                "takeover" => {
+                    if self
+                        .apply_takeover_control_command(&command.activity_id)
+                        .await
+                    {
+                        GatewayControlApply::Applied
+                    } else {
+                        GatewayControlApply::Failed("no matching active control")
+                    }
+                }
                 "steer" => self.apply_steer_control_command(&command.activity_id, &command.payload),
-                "clarify" => self.apply_clarify_control_command(&command.payload),
-                _ => false,
+                "clarify" => {
+                    if self.apply_clarify_control_command(&command.payload) {
+                        GatewayControlApply::Applied
+                    } else {
+                        GatewayControlApply::Failed("no matching active control")
+                    }
+                }
+                _ => GatewayControlApply::Failed("unknown control command"),
             };
             let store = &self.state;
-            let _ = if applied {
-                store.mark_gateway_control_command_applied(command.id).await
-            } else {
-                store
-                    .mark_gateway_control_command_failed(command.id, "no matching active control")
-                    .await
+            let _ = match outcome {
+                GatewayControlApply::Applied => {
+                    store.mark_gateway_control_command_applied(command.id).await
+                }
+                GatewayControlApply::Retry => continue,
+                GatewayControlApply::Failed(error) => {
+                    store
+                        .mark_gateway_control_command_failed(command.id, error)
+                        .await
+                }
             };
         }
     }
@@ -805,21 +850,34 @@ impl Gateway {
         released || control.is_some()
     }
 
-    fn apply_steer_control_command(&self, activity_id: &str, payload: &Value) -> bool {
+    fn apply_steer_control_command(
+        &self,
+        activity_id: &str,
+        payload: &Value,
+    ) -> GatewayControlApply {
         if let Some(expected_turn_id) = payload.get("expectedTurnId").and_then(Value::as_str)
             && expected_turn_id != activity_id
         {
-            return false;
+            return GatewayControlApply::Failed("stale expected turn");
         }
-        let Some(message_value) = payload.get("message").cloned() else {
-            return false;
+        let message = match durable_steer_message(payload) {
+            Ok(message) => message,
+            Err(error) => return GatewayControlApply::Failed(error),
         };
-        let Ok(message) = serde_json::from_value(message_value) else {
-            return false;
+        let Some(control) = self.control_for_activity_id(activity_id) else {
+            return GatewayControlApply::Failed("no matching active control");
         };
-        self.control_for_activity_id(activity_id)
-            .and_then(|control| control.steer_user_message(message))
-            .is_some()
+        match control.steer_user_message(message) {
+            Ok(_) => GatewayControlApply::Applied,
+            Err(
+                psychevo::ControlInputError::CountLimit { .. }
+                | psychevo::ControlInputError::ByteLimit { .. },
+            ) => GatewayControlApply::Retry,
+            Err(psychevo::ControlInputError::Closed) => {
+                GatewayControlApply::Failed("no matching active control")
+            }
+            Err(_) => GatewayControlApply::Failed("invalid steer message"),
+        }
     }
 
     fn apply_clarify_control_command(&self, payload: &Value) -> bool {

@@ -326,6 +326,8 @@ pub struct PluginInstallRecordView {
     pub source_kind: String,
     #[serde(default)]
     pub npm_registry: Option<String>,
+    #[serde(default)]
+    pub resolved_revision: Option<String>,
     pub scope: String,
     pub package_root: String,
     pub data_root: String,
@@ -975,22 +977,39 @@ pub struct McpTestResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct McpOAuthStartResult {
-    pub session_id: String,
-    pub authorization_url: String,
-    pub status: String,
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(tag = "status", rename_all = "snake_case")]
+pub enum McpOAuthStartResult {
+    Pending {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "authorizationUrl")]
+        #[ts(rename = "authorizationUrl")]
+        authorization_url: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct McpOAuthStatusResult {
-    pub session_id: String,
-    pub status: String,
-    #[serde(default)]
-    pub error: Option<String>,
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(tag = "status", rename_all = "snake_case")]
+pub enum McpOAuthStatusResult {
+    Pending {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+    },
+    Succeeded {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+    },
+    Failed {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

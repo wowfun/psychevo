@@ -462,19 +462,24 @@ impl PsychevoAcpAgent {
         let Some(turn) = session.turn.clone() else {
             return Ok(SlashPromptAction::RunPrompt(prompt));
         };
-        let Some(id) = turn.__steer(&prompt) else {
-            session.queued_prompts.push_back(prompt.clone());
-            return Ok(send_slash_text(
-                cx,
-                session_id,
-                format!("turn is not ready for steering; queued prompt: {prompt}"),
-            ));
-        };
-        session.pending_steers.push(id);
-        Ok(send_slash_text(
-            cx,
-            session_id,
-            format!("steer queued: {prompt}"),
-        ))
+        match turn.__steer(&prompt) {
+            Ok(id) => {
+                session.pending_steers.push(id);
+                Ok(send_slash_text(
+                    cx,
+                    session_id,
+                    format!("steer queued: {prompt}"),
+                ))
+            }
+            Err(psychevo::ControlInputError::Closed) => {
+                session.queued_prompts.push_back(prompt.clone());
+                Ok(send_slash_text(
+                    cx,
+                    session_id,
+                    format!("queued prompt: {prompt}"),
+                ))
+            }
+            Err(error) => Err(acp_internal_error(error)),
+        }
     }
 }

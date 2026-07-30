@@ -372,7 +372,7 @@ struct WebStateInner {
     workspace_preview_origins: BTreeSet<String>,
     pending_actions: Mutex<HashMap<String, PendingActionView>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
-    mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
+    mcp_oauth_sessions: Arc<Mutex<McpOAuthSessionStore>>,
     voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
     runnable_target_catalog_generation: std::sync::atomic::AtomicU64,
@@ -466,18 +466,6 @@ impl AgentSessionImportRegistry {
 }
 
 #[derive(Debug, Clone)]
-struct McpOAuthSession {
-    status: Arc<Mutex<McpOAuthSessionStatus>>,
-}
-
-#[derive(Debug, Clone)]
-enum McpOAuthSessionStatus {
-    Pending,
-    Succeeded,
-    Failed(String),
-}
-
-#[derive(Debug, Clone)]
 struct BrowserSession {
     cwd: PathBuf,
     source: GatewaySource,
@@ -567,7 +555,7 @@ impl WebState {
                 workspace_preview_origins: config.workspace_preview_origins,
                 pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
-                mcp_oauth_sessions: Mutex::new(HashMap::new()),
+                mcp_oauth_sessions: Arc::new(Mutex::new(McpOAuthSessionStore::default())),
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
                 runnable_target_catalog_generation: std::sync::atomic::AtomicU64::new(1),

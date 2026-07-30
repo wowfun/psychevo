@@ -1308,12 +1308,17 @@ pub(super) async fn run_routed_action(
                 Some(wire::ThreadActivityView::FrameworkTurn { turn_id, .. })
                     if turn_id == expected_turn_id =>
                 {
-                    state
+                    match state
                         .inner
                         .framework
                         .resume_thread(&params.thread_id)
                         .await?
                         .__steer(&expected_turn_id, text)
+                    {
+                        Ok(accepted) => accepted,
+                        Err(psychevo::ControlInputError::Closed) => false,
+                        Err(error) => return Err(control_input_application_error(error)),
+                    }
                 }
                 Some(wire::ThreadActivityView::Foreign {
                     owner_id,
@@ -1419,6 +1424,25 @@ pub(super) async fn run_routed_action(
             })
         }
     }
+}
+
+fn control_input_application_error(error: psychevo::ControlInputError) -> psychevo::Error {
+    let data = match &error {
+        psychevo::ControlInputError::CountLimit { limit } => json!({
+            "kind": "control_input_overload",
+            "resource": "count",
+            "limit": limit,
+        }),
+        psychevo::ControlInputError::ByteLimit { limit } => json!({
+            "kind": "control_input_overload",
+            "resource": "bytes",
+            "limit": limit,
+        }),
+        _ => json!({
+            "kind": "control_input_rejected",
+        }),
+    };
+    psychevo::Error::structured(error.to_string(), data)
 }
 
 /// Accepts a routed compaction at the Thread Application boundary and returns

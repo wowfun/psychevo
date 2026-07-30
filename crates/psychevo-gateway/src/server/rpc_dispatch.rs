@@ -1395,11 +1395,15 @@ where
         }
         "terminal/write" => {
             let params = request.required_params::<wire::TerminalWriteParams>()?;
-            Ok(serde_json::to_value(state.inner.terminals.write(params)?)?)
+            Ok(serde_json::to_value(
+                state.inner.terminals.write(out_tx.id(), params)?,
+            )?)
         }
         "terminal/resize" => {
             let params = request.required_params::<wire::TerminalResizeParams>()?;
-            Ok(serde_json::to_value(state.inner.terminals.resize(params)?)?)
+            Ok(serde_json::to_value(
+                state.inner.terminals.resize(out_tx.id(), params)?,
+            )?)
         }
         "terminal/terminate" => {
             let params = request.required_params::<wire::TerminalTerminateParams>()?;
@@ -1612,61 +1616,96 @@ async fn mcp_oauth_start_value(
     params: wire::McpOAuthStartParams,
 ) -> psychevo::Result<Value> {
     let metadata = mcp_oauth_metadata(&state, &scope, &params.name)?;
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
-    let redirect_uri = format!("http://{}/callback", listener.local_addr()?);
     let session_id = Uuid::now_v7().to_string();
     let state_token = Uuid::now_v7().to_string();
-    let authorization_url = mcp_authorization_url(&metadata, &redirect_uri, &state_token)?;
-    let status = Arc::new(Mutex::new(McpOAuthSessionStatus::Pending));
-    state
+    let deadline = state
         .inner
         .mcp_oauth_sessions
         .lock()
         .expect("mcp oauth sessions poisoned")
-        .insert(
-            session_id.clone(),
-            McpOAuthSession {
-                status: Arc::clone(&status),
-            },
-        );
+        .admit(session_id.clone(), Instant::now())?;
+    let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            state
+                .inner
+                .mcp_oauth_sessions
+                .lock()
+                .expect("mcp oauth sessions poisoned")
+                .remove(&session_id);
+            return Err(err.into());
+        }
+    };
+    let redirect_uri = match listener.local_addr() {
+        Ok(addr) => format!("http://{addr}/callback"),
+        Err(err) => {
+            state
+                .inner
+                .mcp_oauth_sessions
+                .lock()
+                .expect("mcp oauth sessions poisoned")
+                .remove(&session_id);
+            return Err(err.into());
+        }
+    };
+    let authorization_url = match mcp_authorization_url(&metadata, &redirect_uri, &state_token) {
+        Ok(url) => url,
+        Err(err) => {
+            state
+                .inner
+                .mcp_oauth_sessions
+                .lock()
+                .expect("mcp oauth sessions poisoned")
+                .remove(&session_id);
+            return Err(err);
+        }
+    };
+    let sessions = Arc::clone(&state.inner.mcp_oauth_sessions);
     state.inner.gateway.spawn_background(
         format!("mcp-oauth-callback:{session_id}"),
-        run_mcp_oauth_callback(listener, metadata, redirect_uri, state_token, status),
+        run_mcp_oauth_callback(
+            listener,
+            metadata,
+            redirect_uri,
+            state_token,
+            session_id.clone(),
+            deadline,
+            sessions,
+        ),
     );
-    Ok(json!({
-        "sessionId": session_id,
-        "authorizationUrl": authorization_url,
-        "status": "pending",
-    }))
+    Ok(serde_json::to_value(wire::McpOAuthStartResult::Pending {
+        session_id,
+        authorization_url,
+    })?)
 }
 
 fn mcp_oauth_status_value(state: &WebState, session_id: &str) -> psychevo::Result<Value> {
-    let sessions = state
+    let status = state
         .inner
         .mcp_oauth_sessions
         .lock()
-        .expect("mcp oauth sessions poisoned");
-    let Some(session) = sessions.get(session_id) else {
+        .expect("mcp oauth sessions poisoned")
+        .status(session_id, Instant::now());
+    let Some(status) = status else {
         return Err(Error::Config(format!(
             "unknown MCP OAuth session: {session_id}"
         )));
     };
-    let status = session.status.lock().expect("mcp oauth session poisoned");
-    Ok(match &*status {
-        McpOAuthSessionStatus::Pending => json!({
-            "sessionId": session_id,
-            "status": "pending",
-        }),
-        McpOAuthSessionStatus::Succeeded => json!({
-            "sessionId": session_id,
-            "status": "succeeded",
-        }),
-        McpOAuthSessionStatus::Failed(error) => json!({
-            "sessionId": session_id,
-            "status": "failed",
-            "error": error,
-        }),
-    })
+    let result = match status {
+        McpOAuthSessionStatus::Pending | McpOAuthSessionStatus::Persisting => {
+            wire::McpOAuthStatusResult::Pending {
+                session_id: session_id.to_string(),
+            }
+        }
+        McpOAuthSessionStatus::Succeeded => wire::McpOAuthStatusResult::Succeeded {
+            session_id: session_id.to_string(),
+        },
+        McpOAuthSessionStatus::Failed { message } => wire::McpOAuthStatusResult::Failed {
+            session_id: session_id.to_string(),
+            message,
+        },
+    };
+    Ok(serde_json::to_value(result)?)
 }
 
 fn mcp_oauth_logout_value(
@@ -1778,9 +1817,11 @@ async fn run_mcp_oauth_callback(
     metadata: McpOAuthMetadata,
     redirect_uri: String,
     state_token: String,
-    status: Arc<Mutex<McpOAuthSessionStatus>>,
+    session_id: String,
+    deadline: Instant,
+    sessions: Arc<Mutex<McpOAuthSessionStore>>,
 ) {
-    let result = async {
+    let callback = async {
         let (mut stream, _) = listener.accept().await?;
         let mut buffer = vec![0_u8; 8192];
         let size = stream.read(&mut buffer).await?;
@@ -1806,22 +1847,62 @@ async fn run_mcp_oauth_callback(
                 "OAuth callback did not include code".to_string(),
             ));
         };
-        write_oauth_callback_response(&mut stream, true).await?;
-        let token = exchange_mcp_oauth_code(&metadata, &redirect_uri, &code).await?;
-        save_mcp_oauth_access_token(
-            &metadata.profile_home,
-            &metadata.name,
-            &metadata.url,
-            &token,
-        )?;
-        Ok::<(), Error>(())
-    }
-    .await;
-    let mut status = status.lock().expect("mcp oauth session poisoned");
-    *status = match result {
-        Ok(()) => McpOAuthSessionStatus::Succeeded,
-        Err(err) => McpOAuthSessionStatus::Failed(err.to_string()),
+        let token = match exchange_mcp_oauth_code(&metadata, &redirect_uri, &code).await {
+            Ok(token) => token,
+            Err(error) => {
+                let _ = write_oauth_callback_response(&mut stream, false).await;
+                return Err(error);
+            }
+        };
+        Ok::<_, Error>((stream, token))
     };
+    let result = match tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        callback,
+    )
+    .await
+    {
+        Ok(Ok((mut stream, token))) => {
+            let persistence_admitted = sessions
+                .lock()
+                .expect("mcp oauth sessions poisoned")
+                .begin_persistence(&session_id, Instant::now());
+            if !persistence_admitted {
+                let _ = write_oauth_callback_response(&mut stream, false).await;
+                Err(Error::Config("MCP OAuth login timed out".to_string()))
+            } else {
+                let persisted = save_mcp_oauth_access_token(
+                    &metadata.profile_home,
+                    &metadata.name,
+                    &metadata.url,
+                    &token,
+                );
+                complete_mcp_oauth_session(&sessions, &session_id, &persisted);
+                let _ = write_oauth_callback_response(&mut stream, persisted.is_ok()).await;
+                return;
+            }
+        }
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(Error::Config("MCP OAuth login timed out".to_string())),
+    };
+    complete_mcp_oauth_session(&sessions, &session_id, &result);
+}
+
+fn complete_mcp_oauth_session(
+    sessions: &Mutex<McpOAuthSessionStore>,
+    session_id: &str,
+    result: &psychevo::Result<()>,
+) {
+    let status = match result {
+        Ok(()) => McpOAuthSessionStatus::Succeeded,
+        Err(err) => McpOAuthSessionStatus::Failed {
+            message: err.to_string(),
+        },
+    };
+    sessions
+        .lock()
+        .expect("mcp oauth sessions poisoned")
+        .complete(session_id, status, Instant::now());
 }
 
 async fn write_oauth_callback_response(

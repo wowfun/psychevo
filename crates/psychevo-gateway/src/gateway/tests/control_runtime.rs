@@ -29,15 +29,161 @@
             .await
             .expect("Framework Thread");
         let active_turn_id = thread.__activity().1.expect("active turn id");
-        assert!(!thread.__steer("stale-turn", "steer"));
-        assert!(thread.__steer(&active_turn_id, "steer"));
+        assert!(!thread.__steer("stale-turn", "steer").expect("stale result"));
+        assert!(
+            thread
+                .__steer(&active_turn_id, "steer")
+                .expect("active steer")
+        );
 
         wait.release.notify_one();
         first.await.expect("first task").expect("first turn");
     }
 
     #[tokio::test]
-        async fn native_agent_adapter_lowers_runtime_control_map_without_dispatch_name_branch() {
+    async fn durable_steer_remains_pending_until_control_capacity_recovers() {
+        let harness = harness(Arc::new(FakeBackend::default())).await;
+        let activity_id = "foreign-turn".to_string();
+        let (handle, mut control) = run_control();
+        let mut pending_ids = Vec::new();
+        for index in 0..psychevo::__agent_core::MAX_CONTROL_INPUT_ITEMS {
+            pending_ids.push(
+                handle
+                    .steer_user_message(psychevo::__agent_core::user_text_message(format!(
+                        "queued-{index}"
+                    )))
+                    .expect("fill control input"),
+            );
+        }
+        harness.gateway.register_active(
+            "foreign-control",
+            activity_id.clone(),
+            Some(handle.clone()),
+            ActiveActivityKind::Shell,
+        );
+        harness
+            .state
+            .enqueue_gateway_control_command(GatewayControlCommandInput {
+                activity_id: &activity_id,
+                owner_id: harness.gateway.owner_id(),
+                command_kind: "steer",
+                payload: json!({
+                    "expectedTurnId": activity_id,
+                    "message": psychevo::__agent_core::user_text_message("foreign steer"),
+                }),
+            })
+            .await
+            .expect("enqueue steer");
+
+        harness
+            .gateway
+            .apply_pending_gateway_control_commands()
+            .await;
+        assert_eq!(
+            harness
+                .state
+                .pending_gateway_control_commands(harness.gateway.owner_id(), 10)
+                .await
+                .expect("pending commands")
+                .len(),
+            1
+        );
+
+        assert!(handle.cancel_pending_user_message(pending_ids[0]));
+        harness
+            .gateway
+            .apply_pending_gateway_control_commands()
+            .await;
+        assert!(
+            harness
+                .state
+                .pending_gateway_control_commands(harness.gateway.owner_id(), 10)
+                .await
+                .expect("pending commands")
+                .is_empty()
+        );
+        assert!(control.drain_pending_user_messages().iter().any(|(_, message)| {
+            matches!(
+                message,
+                psychevo::__agent_core::Message::User { content, .. }
+                    if content.iter().any(
+                        |block| block.text_value() == Some("foreign steer")
+                    )
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn permanently_oversized_durable_steer_is_rejected_before_acceptance() {
+        let harness = harness(Arc::new(FakeBackend::default())).await;
+        let activity_id = "foreign-turn";
+        let accepted = harness
+            .gateway
+            .enqueue_exact_foreign_control_command(
+                activity_id,
+                harness.gateway.owner_id(),
+                "steer",
+                json!({
+                    "expectedTurnId": activity_id,
+                    "message": psychevo::__agent_core::user_text_message(
+                        "x".repeat(psychevo::__agent_core::MAX_CONTROL_INPUT_BYTES + 1)
+                    ),
+                }),
+            )
+            .await;
+
+        assert!(!accepted);
+        assert!(
+            harness
+                .state
+                .pending_gateway_control_commands(harness.gateway.owner_id(), 10)
+                .await
+                .expect("pending commands")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_shutdown_drains_every_scope_before_reporting_a_task_panic() {
+        let harness = harness(Arc::new(FakeBackend::default())).await;
+        let producer_started = Arc::new(tokio::sync::Notify::new());
+        let producer_started_for_task = Arc::clone(&producer_started);
+        let turn_completed = Arc::new(AtomicBool::new(false));
+        let turn_completed_for_task = turn_completed.clone();
+        let infrastructure_completed = Arc::new(AtomicBool::new(false));
+        let infrastructure_completed_for_task = infrastructure_completed.clone();
+        harness
+            .gateway
+            .supervisor
+            .spawn_producer("panic-producer", async move {
+                producer_started_for_task.notify_one();
+                panic!("injected Gateway producer panic");
+            });
+        producer_started.notified().await;
+        harness.gateway.supervisor.spawn_turn("turn", async move {
+            turn_completed_for_task.store(true, Ordering::Release);
+        });
+        harness
+            .gateway
+            .supervisor
+            .spawn_infrastructure("infrastructure", async move {
+                infrastructure_completed_for_task.store(true, Ordering::Release);
+            });
+
+        let error = harness
+            .gateway
+            .shutdown_application(false)
+            .await
+            .expect_err("panic must make shutdown non-clean");
+
+        assert!(turn_completed.load(Ordering::Acquire));
+        assert!(infrastructure_completed.load(Ordering::Acquire));
+        assert!(error.to_string().contains("panic-producer"));
+        assert!(error.to_string().contains("Producer"));
+    }
+
+    #[tokio::test]
+    async fn native_agent_adapter_lowers_runtime_control_map_without_dispatch_name_branch() {
         let backend = Arc::new(FakeBackend::default());
         let harness = harness(backend.clone()).await;
         let mut request = request(

@@ -39,11 +39,12 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
         .expect("scope")
         .to_wire_scope();
     let (tx, mut rx) = mpsc::unbounded_channel();
+    let out_tx = ConnectionSender::from(tx);
 
     let started = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
-        tx.clone(),
+        out_tx.clone(),
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
@@ -66,7 +67,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
     let resize = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
-        tx.clone(),
+        out_tx.clone(),
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
@@ -86,7 +87,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
     let write = handle_rpc(
         state,
         AuthContext::Bearer,
-        tx,
+        out_tx,
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
@@ -129,6 +130,100 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
 
     assert!(output.contains("pevo-terminal-ok"), "{output:?}");
     assert!(saw_exit);
+}
+
+#[tokio::test]
+async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() {
+    let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
+    let (_temp, state) =
+        web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())])).await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (owner_tx, mut owner_rx) = mpsc::unbounded_channel();
+    let owner = ConnectionSender::from(owner_tx);
+    let (other_tx, _other_rx) = mpsc::unbounded_channel();
+    let other = ConnectionSender::from(other_tx);
+
+    let started = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        owner.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "terminal/start".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "cwd": null,
+                "cols": 80,
+                "rows": 24
+            })),
+        },
+    )
+    .await
+    .expect("terminal/start");
+    let terminal_id = started["terminalId"]
+        .as_str()
+        .expect("terminal id")
+        .to_string();
+
+    let cross_write = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        other.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("2")),
+            method: "terminal/write".to_string(),
+            params: Some(json!({
+                "terminalId": terminal_id.clone(),
+                "dataBase64": BASE64_STANDARD.encode(b"exit\n")
+            })),
+        },
+    )
+    .await
+    .expect_err("foreign connection cannot see terminal");
+    assert!(cross_write.to_string().contains("unknown terminal"));
+
+    let cross_terminate = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        other,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("3")),
+            method: "terminal/terminate".to_string(),
+            params: Some(json!({"terminalId": terminal_id.clone()})),
+        },
+    )
+    .await
+    .expect("foreign terminate");
+    assert_eq!(cross_terminate["accepted"], false);
+
+    assert_eq!(state.inner.terminals.terminate_owner(&owner), 1);
+    assert_eq!(state.inner.terminals.terminate_owner(&owner), 0);
+    let exits = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut exits = 0;
+        while let Some(message) = owner_rx.recv().await {
+            let notification: Value = serde_json::from_str(&message).expect("notification");
+            if notification["method"] == "terminal/exited"
+                && notification["params"]["terminalId"] == terminal_id
+            {
+                assert_eq!(
+                    notification["params"]["reason"],
+                    "connection_closed",
+                    "{notification:#}"
+                );
+                exits += 1;
+                break;
+            }
+        }
+        exits
+    })
+    .await
+    .expect("disconnect terminal notification");
+    assert_eq!(exits, 1);
 }
 
 #[tokio::test]

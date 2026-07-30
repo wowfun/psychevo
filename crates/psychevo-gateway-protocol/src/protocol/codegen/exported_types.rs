@@ -26,6 +26,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(AppFilesystemApprovalTarget),
         exported_type!(AppFilesystemApprovalRequest),
         exported_type!(AppMcpStartupApprovalRequest),
+        exported_type!(AppMcpStartupApprovalTarget),
         exported_type!(AppApprovalOutcome),
         exported_type!(AppApprovalResult),
         exported_type!(AppPendingInteraction),

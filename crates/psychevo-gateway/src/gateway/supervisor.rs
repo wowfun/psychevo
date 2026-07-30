@@ -17,18 +17,15 @@ pub(crate) enum GatewayTaskScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GatewayTaskOutcome {
-    Completed,
-    Cancelled,
-    Panicked,
+pub(crate) struct GatewayTaskPanic {
+    pub(crate) name: Arc<str>,
+    pub(crate) scope: GatewayTaskScope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GatewayTaskReport {
-    pub(crate) id: u64,
-    pub(crate) name: Arc<str>,
-    pub(crate) scope: GatewayTaskScope,
-    pub(crate) outcome: GatewayTaskOutcome,
+pub(crate) struct GatewayPanicSummary {
+    pub(crate) count: u64,
+    pub(crate) first: Option<GatewayTaskPanic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,22 +39,17 @@ impl fmt::Display for GatewayAdmissionClosed {
 
 impl std::error::Error for GatewayAdmissionClosed {}
 
-#[derive(Default)]
-struct GatewaySupervisorReports {
-    tasks: Vec<GatewayTaskReport>,
-}
-
 struct GatewaySupervisorInner {
     activity_admission: Mutex<()>,
     accepting_turns: AtomicBool,
-    next_task_id: AtomicU64,
     producer_cancel: CancellationToken,
     infrastructure_cancel: CancellationToken,
     turn_cancel: CancellationToken,
     infrastructure: TaskTracker,
     producers: TaskTracker,
     turns: TaskTracker,
-    reports: Mutex<GatewaySupervisorReports>,
+    panic_count: AtomicU64,
+    first_panic: Mutex<Option<GatewayTaskPanic>>,
 }
 
 #[derive(Clone)]
@@ -76,14 +68,14 @@ impl Default for GatewaySupervisor {
             inner: Arc::new(GatewaySupervisorInner {
                 activity_admission: Mutex::new(()),
                 accepting_turns: AtomicBool::new(true),
-                next_task_id: AtomicU64::new(1),
                 producer_cancel: CancellationToken::new(),
                 infrastructure_cancel: CancellationToken::new(),
                 turn_cancel: CancellationToken::new(),
                 infrastructure: TaskTracker::new(),
                 producers: TaskTracker::new(),
                 turns: TaskTracker::new(),
-                reports: Mutex::new(GatewaySupervisorReports::default()),
+                panic_count: AtomicU64::new(0),
+                first_panic: Mutex::new(None),
             }),
         }
     }
@@ -144,9 +136,24 @@ impl GatewaySupervisor {
         self.spawn(
             GatewayTaskScope::Producer,
             name.into(),
-            self.inner.producer_cancel.clone(),
+            Some(self.inner.producer_cancel.clone()),
             None,
             future,
+        );
+    }
+
+    pub(crate) fn spawn_shutdown_aware_producer<B, F>(&self, name: impl Into<Arc<str>>, build: B)
+    where
+        B: FnOnce(CancellationToken) -> F,
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let shutdown = self.inner.producer_cancel.clone();
+        self.spawn(
+            GatewayTaskScope::Producer,
+            name.into(),
+            None,
+            None,
+            build(shutdown),
         );
     }
 
@@ -157,7 +164,7 @@ impl GatewaySupervisor {
         self.spawn(
             GatewayTaskScope::Turn,
             name.into(),
-            self.inner.turn_cancel.clone(),
+            Some(self.inner.turn_cancel.clone()),
             None,
             future,
         );
@@ -174,7 +181,7 @@ impl GatewaySupervisor {
         self.spawn(
             GatewayTaskScope::Turn,
             name.into(),
-            self.inner.turn_cancel.clone(),
+            Some(self.inner.turn_cancel.clone()),
             Some(permit),
             future,
         );
@@ -187,7 +194,7 @@ impl GatewaySupervisor {
         self.spawn(
             GatewayTaskScope::Infrastructure,
             name.into(),
-            self.inner.infrastructure_cancel.clone(),
+            Some(self.inner.infrastructure_cancel.clone()),
             None,
             future,
         );
@@ -197,13 +204,12 @@ impl GatewaySupervisor {
         &self,
         scope: GatewayTaskScope,
         name: Arc<str>,
-        cancellation: CancellationToken,
+        cancellation: Option<CancellationToken>,
         permit: Option<GatewayActivityPermit>,
         future: F,
     ) where
         F: Future<Output = ()> + Send + 'static,
     {
-        let id = self.inner.next_task_id.fetch_add(1, Ordering::Relaxed);
         let supervisor = self.clone();
         // Keep large turn futures behind a heap boundary. `run_routed_turn`
         // contains the complete application workflow and otherwise makes the
@@ -212,27 +218,19 @@ impl GatewaySupervisor {
         let future = Box::pin(future);
         let task = async move {
             let _permit = permit;
-            let outcome = tokio::select! {
-                _ = cancellation.cancelled() => GatewayTaskOutcome::Cancelled,
-                outcome = AssertUnwindSafe(future).catch_unwind() => {
-                    match outcome {
-                        Ok(()) => GatewayTaskOutcome::Completed,
-                        Err(_) => GatewayTaskOutcome::Panicked,
+            let panicked = if let Some(cancellation) = cancellation {
+                tokio::select! {
+                    _ = cancellation.cancelled() => false,
+                    outcome = AssertUnwindSafe(future).catch_unwind() => {
+                        outcome.is_err()
                     }
                 }
+            } else {
+                AssertUnwindSafe(future).catch_unwind().await.is_err()
             };
-            supervisor
-                .inner
-                .reports
-                .lock()
-                .expect("gateway supervisor report lock poisoned")
-                .tasks
-                .push(GatewayTaskReport {
-                    id,
-                    name,
-                    scope,
-                    outcome,
-                });
+            if panicked {
+                supervisor.record_panic(name, scope);
+            }
         };
         match scope {
             GatewayTaskScope::Infrastructure => {
@@ -283,14 +281,27 @@ impl GatewaySupervisor {
         self.inner.turn_cancel.cancel();
     }
 
-    #[cfg(test)]
-    pub(crate) fn reports(&self) -> Vec<GatewayTaskReport> {
-        self.inner
-            .reports
-            .lock()
-            .expect("gateway supervisor report lock poisoned")
-            .tasks
-            .clone()
+    pub(crate) fn panic_summary(&self) -> GatewayPanicSummary {
+        GatewayPanicSummary {
+            count: self.inner.panic_count.load(Ordering::Relaxed),
+            first: self
+                .inner
+                .first_panic
+                .lock()
+                .expect("gateway supervisor panic lock poisoned")
+                .clone(),
+        }
+    }
+
+    fn record_panic(&self, name: Arc<str>, scope: GatewayTaskScope) {
+        if self.inner.panic_count.fetch_add(1, Ordering::Relaxed) == 0 {
+            *self
+                .inner
+                .first_panic
+                .lock()
+                .expect("gateway supervisor panic lock poisoned") =
+                Some(GatewayTaskPanic { name, scope });
+        }
     }
 }
 
@@ -315,8 +326,11 @@ mod tests {
 
         let release_turn = Arc::new(Notify::new());
         let release_turn_for_task = release_turn.clone();
+        let turn_completed = Arc::new(AtomicBool::new(false));
+        let turn_completed_for_task = turn_completed.clone();
         supervisor.spawn_turn("turn", async move {
             release_turn_for_task.notified().await;
+            turn_completed_for_task.store(true, Ordering::Release);
         });
 
         supervisor.close_turn_admission();
@@ -329,17 +343,14 @@ mod tests {
         release_turn.notify_one();
         supervisor.wait_for_turns().await;
 
-        let reports = supervisor.reports();
-        assert!(reports.iter().any(|report| {
-            report.name.as_ref() == "tailer"
-                && report.scope == GatewayTaskScope::Producer
-                && report.outcome == GatewayTaskOutcome::Cancelled
-        }));
-        assert!(reports.iter().any(|report| {
-            report.name.as_ref() == "turn"
-                && report.scope == GatewayTaskScope::Turn
-                && report.outcome == GatewayTaskOutcome::Completed
-        }));
+        assert!(turn_completed.load(Ordering::Acquire));
+        assert_eq!(
+            supervisor.panic_summary(),
+            GatewayPanicSummary {
+                count: 0,
+                first: None,
+            }
+        );
     }
 
     #[tokio::test]
@@ -355,13 +366,16 @@ mod tests {
         supervisor.force_cancel_turns();
         supervisor.wait_for_turns().await;
 
-        let reports = supervisor.reports();
-        assert!(reports.iter().any(|report| {
-            report.name.as_ref() == "panic" && report.outcome == GatewayTaskOutcome::Panicked
-        }));
-        assert!(reports.iter().any(|report| {
-            report.name.as_ref() == "hung" && report.outcome == GatewayTaskOutcome::Cancelled
-        }));
+        assert_eq!(
+            supervisor.panic_summary(),
+            GatewayPanicSummary {
+                count: 1,
+                first: Some(GatewayTaskPanic {
+                    name: Arc::from("panic"),
+                    scope: GatewayTaskScope::Producer,
+                }),
+            }
+        );
     }
 
     #[tokio::test]
@@ -385,10 +399,6 @@ mod tests {
 
         supervisor.spawn_permitted_activity("admitted", permit, async {});
         supervisor.wait_for_turns().await;
-        assert!(supervisor.reports().iter().any(|report| {
-            report.name.as_ref() == "admitted"
-                && report.scope == GatewayTaskScope::Turn
-                && report.outcome == GatewayTaskOutcome::Completed
-        }));
+        assert_eq!(supervisor.panic_summary().count, 0);
     }
 }

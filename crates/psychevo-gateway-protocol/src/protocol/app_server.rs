@@ -283,8 +283,28 @@ pub struct AppFilesystemApprovalRequest {
 #[ts(rename_all = "camelCase")]
 pub struct AppMcpStartupApprovalRequest {
     pub server: String,
-    pub transport: String,
-    pub descriptor_fingerprint: String,
+    pub source: String,
+    pub target: AppMcpStartupApprovalTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[ts(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+pub enum AppMcpStartupApprovalTarget {
+    Stdio {
+        command: String,
+        args: Vec<String>,
+        cwd: String,
+        #[schemars(rename = "envNames")]
+        env_names: Vec<String>,
+    },
+    Http {
+        url: String,
+        #[schemars(rename = "headerNames")]
+        header_names: Vec<String>,
+        #[schemars(rename = "credentialNames")]
+        credential_names: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS)]

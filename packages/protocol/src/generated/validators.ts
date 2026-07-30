@@ -27,6 +27,7 @@ export const strictlyCompiledGatewaySchemaNames = [
   "AppFilesystemApprovalTarget",
   "AppFilesystemApprovalRequest",
   "AppMcpStartupApprovalRequest",
+  "AppMcpStartupApprovalTarget",
   "AppApprovalOutcome",
   "AppApprovalResult",
   "AppPendingInteraction",

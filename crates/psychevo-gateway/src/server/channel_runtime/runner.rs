@@ -10,6 +10,7 @@ pub(super) async fn run_channel_loop(
     connection: ChannelRuntimeConnection,
     channel_gateway: ChannelGateway,
     cancel: CancellationToken,
+    gateway_shutdown: CancellationToken,
 ) {
     runtime.mark_running(&connection.id);
     eprintln!(
@@ -27,15 +28,13 @@ pub(super) async fn run_channel_loop(
             redact_channel_error(&err.to_string())
         );
     }
-    loop {
+    let cancelled = loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                runtime.mark_stopped(&connection.id);
-                eprintln!(
-                    "channel runner stopped: id={} channel={}",
-                    connection.id, connection.channel
-                );
-                break;
+                break true;
+            }
+            _ = gateway_shutdown.cancelled() => {
+                break true;
             }
             result = channel_gateway.poll_once() => {
                 match result {
@@ -100,7 +99,7 @@ pub(super) async fn run_channel_loop(
                                 connection.channel,
                                 redact_channel_error(&message)
                             );
-                            break;
+                            break false;
                         }
                         runtime.mark_error(&connection.id, &err);
                         eprintln!(
@@ -114,6 +113,23 @@ pub(super) async fn run_channel_loop(
                 }
             }
         }
+    };
+    if let Err(err) = channel_gateway.shutdown().await {
+        runtime.mark_error(&connection.id, &err);
+        eprintln!(
+            "channel shutdown failed: id={} channel={} error={}",
+            connection.id,
+            connection.channel,
+            redact_channel_error(&err.to_string())
+        );
+        return;
+    }
+    if cancelled {
+        runtime.mark_stopped(&connection.id);
+        eprintln!(
+            "channel runner stopped: id={} channel={}",
+            connection.id, connection.channel
+        );
     }
 }
 

@@ -163,6 +163,13 @@
           },
           "type": "array"
         },
+        "resolved_revision": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "type": "string"
         },

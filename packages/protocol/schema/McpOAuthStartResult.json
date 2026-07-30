@@ -1,21 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "authorizationUrl": {
-      "type": "string"
-    },
-    "sessionId": {
-      "type": "string"
-    },
-    "status": {
-      "type": "string"
+  "oneOf": [
+    {
+      "properties": {
+        "authorizationUrl": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "authorizationUrl",
+        "sessionId",
+        "status"
+      ],
+      "type": "object"
     }
-  },
-  "required": [
-    "authorizationUrl",
-    "sessionId",
-    "status"
   ],
-  "title": "McpOAuthStartResult",
-  "type": "object"
+  "title": "McpOAuthStartResult"
 }

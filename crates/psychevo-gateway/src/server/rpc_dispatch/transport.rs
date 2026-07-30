@@ -281,6 +281,7 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     }
     requests.abort_all();
     while requests.join_next().await.is_some() {}
+    state.inner.terminals.terminate_owner(&out_tx);
     relay.abort();
     out_tx.close("gateway connection closed");
     let _ = relay.await;
