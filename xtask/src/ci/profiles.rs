@@ -234,6 +234,20 @@ const LIVE_STEPS: &[WorkflowStep] = &[WorkflowStep {
 
 const PACKAGE_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
+        id: "check-rust-sdk-surface",
+        description: "Compile the standalone Rust SDK surface from the locked graph",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "check",
+            "--locked",
+            "-p",
+            "psychevo",
+            "--no-default-features",
+            "--all-targets",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
         id: "verify-rust-sdk-packages",
         description: "Package and compile the three publishable Rust SDK crates",
         action: WorkflowStepAction::Command(&["sh", "scripts/verify-sdk-packages.sh"]),
@@ -262,7 +276,7 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
         id: "verify-python-package-contracts",
         description: "Build and install all Python wheel and sdist contracts",
         action: WorkflowStepAction::Command(&[
-            "python3",
+            "python",
             "-m",
             "unittest",
             "discover",
@@ -275,7 +289,19 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
         id: "build-cli-release",
         description: "Build release CLI artifact",
-        action: WorkflowStepAction::Command(&["cargo", "build", "-p", "psychevo-cli", "--release"]),
+        action: WorkflowStepAction::ArtifactCommand {
+            command: &[
+                "cargo",
+                "build",
+                "--locked",
+                "--release",
+                "-p",
+                "psychevo-cli",
+                "--bin",
+                "pevo",
+            ],
+            target_dir: "cli-target",
+        },
         live: false,
     },
     WorkflowStep {
@@ -285,10 +311,19 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
         live: false,
     },
     WorkflowStep {
+        id: "build-desktop-bundle",
+        description: "Build the host Desktop bundle",
+        action: WorkflowStepAction::ArtifactCommand {
+            command: &["pnpm", "--filter", "@psychevo/desktop", "tauri:build"],
+            target_dir: "desktop-target",
+        },
+        live: false,
+    },
+    WorkflowStep {
         id: "smoke-installed-python-artifacts",
         description: "Run the installed SDK through the real bundled App Server and fake provider",
         action: WorkflowStepAction::Command(&[
-            "python3",
+            "python",
             "python/tests/installed_artifact_smoke.py",
         ]),
         live: false,
@@ -296,7 +331,7 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
         id: "checksum-local-artifacts",
         description: "Write local checksums without publishing artifacts",
-        action: WorkflowStepAction::Command(&["python3", "scripts/write_package_checksums.py"]),
+        action: WorkflowStepAction::Command(&["python", "scripts/write_package_checksums.py"]),
         live: false,
     },
 ];
@@ -537,15 +572,43 @@ mod tests {
         assert_eq!(
             plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
             vec![
+                "check-rust-sdk-surface",
                 "verify-rust-sdk-packages",
                 "test-python-sdk-client",
                 "verify-python-package-contracts",
                 "build-cli-release",
                 "build-workbench",
+                "build-desktop-bundle",
                 "smoke-installed-python-artifacts",
                 "checksum-local-artifacts",
             ]
         );
+        let command = |id| {
+            plan.steps
+                .iter()
+                .find(|step| step.id == id)
+                .expect("package step")
+                .command
+                .join(" ")
+        };
+        assert_eq!(
+            command("build-cli-release"),
+            "cargo build --locked --release -p psychevo-cli --bin pevo"
+        );
+        assert_eq!(
+            command("build-desktop-bundle"),
+            "pnpm --filter @psychevo/desktop tauri:build"
+        );
+        for id in [
+            "verify-python-package-contracts",
+            "smoke-installed-python-artifacts",
+            "checksum-local-artifacts",
+        ] {
+            assert!(
+                command(id).starts_with("python "),
+                "{id} must use the cross-platform Python launcher"
+            );
+        }
         let forbidden = ["publish", "deploy", "upload", "tag", "push"];
         for step in plan.steps {
             let command = step.command.join(" ").to_ascii_lowercase();

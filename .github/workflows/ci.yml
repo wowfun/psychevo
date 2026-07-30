@@ -2,11 +2,9 @@ name: CI
 
 on:
   pull_request:
-  # Push-triggered CI is temporarily disabled; pull-request CI remains enabled.
-  # To restore CI for main updates, uncomment the push block below.
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read

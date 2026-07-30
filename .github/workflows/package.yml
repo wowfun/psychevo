@@ -1,11 +1,9 @@
 name: Package
 
 on:
-  # Push-triggered packaging is temporarily disabled; manual dispatch remains enabled.
-  # To restore packaging for main updates, uncomment the push block below.
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -17,10 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-24.04
-          - macos-15
-          - windows-2025
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["ubuntu-24.04","macos-15","windows-2025"]' || '["ubuntu-24.04"]') }}
     runs-on: ${{ matrix.os }}
     env:
       PSYCHEVO_CI_ARTIFACT_ROOT: .local/package-matrix/${{ matrix.os }}
@@ -63,36 +58,21 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check standalone Rust SDK surface
-        run: cargo check --locked -p psychevo --no-default-features --all-targets
-
-      - name: Run Python SDK tests
-        run: uv run --no-project --with "websockets>=15,<16" python -m unittest discover -s python/psychevo/tests -v
-
-      - name: Run Python package contract tests
-        run: python -m unittest discover -s python/tests -v
-
-      - name: Build release CLI
-        run: cargo build --locked --release -p psychevo-cli --bin pevo
-
-      - name: Build Workbench
-        run: pnpm --filter @psychevo/workbench build
-
-      - name: Build host Desktop bundle
-        run: pnpm --filter @psychevo/desktop tauri:build
-
-      - name: Install and smoke real Python artifacts
-        run: python python/tests/installed_artifact_smoke.py
-
-      - name: Write checksums
-        run: python scripts/write_package_checksums.py
+      - name: Build, test, and smoke host artifacts
+        run: cargo xtask ci run --profile package --package --artifact-root "${{ env.PSYCHEVO_CI_ARTIFACT_ROOT }}"
 
       - name: Retain reviewable host artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: psychevo-${{ runner.os }}-${{ runner.arch }}
           include-hidden-files: true
           if-no-files-found: error
           path: |
-            .local/package-matrix/${{ matrix.os }}/package
-            apps/desktop/src-tauri/target/release/bundle
+            .local/package-matrix/${{ matrix.os }}/plan.json
+            .local/package-matrix/${{ matrix.os }}/results.json
+            .local/package-matrix/${{ matrix.os }}/logs
+            .local/package-matrix/${{ matrix.os }}/package/checksums.sha256
+            .local/package-matrix/${{ matrix.os }}/package/python
+            .local/package-matrix/${{ matrix.os }}/package/cli-target/release/pevo*
+            .local/package-matrix/${{ matrix.os }}/package/desktop-target/release/bundle

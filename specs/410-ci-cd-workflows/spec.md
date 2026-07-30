@@ -101,7 +101,11 @@ Initial profiles:
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
   does not enable the test-only `wdio-test` feature or duplicate Desktop
-  renderer validation from `web`.
+  renderer validation from `web`. The tracked Tauri schema artifacts remain the
+  `wdio-test` superset so they describe both production capabilities and the
+  checked-in test-only `capabilities/wdio.json`; after a production-only build
+  rewrites those files, the feature-enabled schema generation is the canonical
+  finalization step.
 - `web`: all JavaScript workspace unit tests, all workspace typechecks, and all
   workspace production builds, including Workbench and Desktop. Workspace
   tests execute with bounded workspace concurrency so packages that own process
@@ -140,24 +144,43 @@ development package required to compile Tauri, and runs
 `packageManager` version with a frozen lockfile and runs
 `cargo xtask ci run --profile web`.
 
-Push-triggered hosted CI is temporarily disabled. The `main` push block remains
-commented in the workflow with an explicit restoration note; pull-request
-validation remains enabled.
+Hosted CI runs for pull requests and pushes to `main`.
 
-A separate artifact-only workflow runs only through explicit manual dispatch
-across Linux, macOS, and Windows while its `main` push block is temporarily
-disabled and retained as commented restoration guidance. Every matrix runner
-builds the Workbench, release CLI and Desktop bundle for that host, builds the
-real Python SDK/App Server/CLI artifacts, installs them into a clean
-environment, and runs the fake-provider stdio smoke through the installed
-Python Client. A platform is release-eligible only after its own runner
-succeeds; the existence or local validation of the workflow does not claim that
-another operating system passed. This workflow never publishes packages,
-creates a hosted release, or uses provider credentials. Its artifact upload
-explicitly includes hidden paths because the Python wheel, sdist, and checksum
-staging root is `.local`; the presence of a non-hidden Desktop bundle cannot
-mask missing Python artifacts. The profile output root and upload path use the
-same matrix operating-system key; runner display names are not filesystem keys.
+The separate artifact-only workflow runs Linux on pushes to `main`; explicit
+manual dispatch runs Linux, macOS, and Windows. YAML prepares host dependencies,
+invokes exactly `cargo xtask ci run --profile package --package
+--artifact-root <root>`, and uploads its plan, results, logs, checksums, Python
+packages, release CLI, and host Desktop bundle. Build intermediates under the
+artifact-owned Cargo target directories are not uploaded. The package profile exclusively
+owns the locked standalone Rust SDK check, Python SDK and package tests,
+locked release CLI build, Workbench build, host Desktop bundle, installed
+artifact smoke, and checksums. YAML must not duplicate those build/test
+commands. The CLI and Desktop builds use artifact-root-owned Cargo target
+directories, and checksum generation covers the CLI, Desktop bundle files, and
+Python artifacts and fails when any category is absent. A platform is
+release-eligible only after its own runner succeeds;
+the existence or local validation of the workflow does not claim that another
+operating system passed. This workflow never publishes packages, creates a
+hosted release, or uses provider credentials. Its artifact upload explicitly
+includes hidden paths because package staging lives under `.local`.
+
+The Linux artifact runner executes AppImage build tools in extraction mode so
+local, container, WSL, and hosted runners do not require a mounted FUSE device
+or the legacy `libfuse.so.2` runtime. This changes only how the packaging tool
+starts; the emitted AppImage remains the same host artifact.
+
+Package-profile steps must not mutate the workspace `Cargo.lock`. The Rust SDK
+package verifier may use temporary extracted packages and temporary
+`patch.crates-io` resolution to compile unpublished sibling crates, but patch
+metadata from that isolated verification must not enter the workspace lockfile
+or make a later `--locked` delivery step fail.
+
+After execution begins, `results.json` records every completed step through the
+first failed or internally errored step as well as a fully successful run. A
+step failure must not leave only logs and a plan without the structured result
+needed by local review and artifact upload. The hosted upload step runs after a
+failed package profile as well as after success so those diagnostics remain
+reviewable.
 
 Hosted workflows have no aggregate release job, live provider work, nightly,
 fuzz, or soak work. Full visual and live profiles remain manual, artifact-owned

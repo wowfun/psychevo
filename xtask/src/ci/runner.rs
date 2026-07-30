@@ -76,6 +76,18 @@ pub(crate) fn execute_profile(
         let execution = match run_step(root, &artifact_root, profile, step, live_env, &log_path) {
             Ok(execution) => execution,
             Err(error) => {
+                steps.push(
+                    step_execution(
+                        step,
+                        &log_path,
+                        step.action.command_for_plan(),
+                        false,
+                        None,
+                        false,
+                    )
+                    .output,
+                );
+                write_run_output(profile, live_env, &artifact_root, steps)?;
                 if use_default_artifact_root {
                     warn_if_ci_retention_cleanup_fails(root, &artifact_root);
                 }
@@ -89,6 +101,7 @@ pub(crate) fn execute_profile(
                 eprintln!("last log output from {}:\n{}", log_path.display(), tail);
             }
             steps.push(execution.output);
+            write_run_output(profile, live_env, &artifact_root, steps)?;
             if use_default_artifact_root {
                 warn_if_ci_retention_cleanup_fails(root, &artifact_root);
             }
@@ -97,12 +110,25 @@ pub(crate) fn execute_profile(
         steps.push(execution.output);
     }
 
+    let run = write_run_output(profile, live_env, &artifact_root, steps)?;
+    if use_default_artifact_root {
+        warn_if_ci_retention_cleanup_fails(root, &artifact_root);
+    }
+    Ok(run)
+}
+
+fn write_run_output(
+    profile: &WorkflowProfile,
+    live_env: LiveEnvMode,
+    artifact_root: &Path,
+    steps: Vec<StepRunOutput>,
+) -> Result<RunOutput> {
     let run = RunOutput {
         profile: super::model::profile_summary(profile),
         environment: profile
             .live
             .then_some(CiEnvironmentOutput { mode: live_env }),
-        artifact_root: display_path(&artifact_root),
+        artifact_root: display_path(artifact_root),
         steps,
     };
     fs::write(
@@ -110,9 +136,6 @@ pub(crate) fn execute_profile(
         serde_json::to_vec_pretty(&run)?,
     )
     .with_context(|| format!("write {}", artifact_root.join("results.json").display()))?;
-    if use_default_artifact_root {
-        warn_if_ci_retention_cleanup_fails(root, &artifact_root);
-    }
     Ok(run)
 }
 
@@ -154,6 +177,10 @@ fn run_step(
                 false,
             ))
         }
+        WorkflowStepAction::ArtifactCommand {
+            command,
+            target_dir,
+        } => run_artifact_command_step(root, artifact_root, step, command, target_dir, log_path),
         WorkflowStepAction::SdkArchitecture => {
             create_step_log(log_path)?;
             check_sdk_architecture(root)?;
@@ -183,6 +210,46 @@ fn run_step(
             run_workbench_visual_step(root, artifact_root, step, log_path)
         }
     }
+}
+
+fn run_artifact_command_step(
+    root: &Path,
+    artifact_root: &Path,
+    step: &WorkflowStep,
+    command: &'static [&'static str],
+    target_dir: &str,
+    log_path: &Path,
+) -> Result<StepExecution> {
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| anyhow!("step '{}' has an empty command", step.id))?;
+    let log = create_step_log(log_path)?;
+    let target_dir = artifact_root.join("package").join(target_dir);
+    fs::create_dir_all(&target_dir)
+        .with_context(|| format!("create Desktop target root {}", target_dir.display()))?;
+    let mut process = ProcessCommand::new(program);
+    process
+        .args(args)
+        .current_dir(root)
+        .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
+        .env("CARGO_TARGET_DIR", target_dir);
+    if cfg!(target_os = "linux") && step.id == "build-desktop-bundle" {
+        process.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    }
+    let outcome = run_logged_process(step.id, &mut process, log)?;
+    println!(
+        "ci step {}: {}",
+        step.id,
+        if outcome.passed { "ok" } else { "failed" }
+    );
+    Ok(step_execution(
+        step,
+        log_path,
+        command,
+        outcome.passed,
+        outcome.exit_code,
+        outcome.had_suppressed_output,
+    ))
 }
 
 fn run_surface_profile_step(
@@ -477,6 +544,31 @@ mod tests {
             "CI/CD profile 'changed' failed at step 'demo'; log: /tmp/demo.log"
         );
         assert_eq!(tail_lines("one\ntwo\nthree\n", 2), "two\nthree\n");
+    }
+
+    #[test]
+    fn failed_step_is_preserved_in_results_json() {
+        let artifact_root = test_log_path("failed-result").with_extension("");
+        fs::create_dir_all(&artifact_root).expect("artifact root");
+        let profile = find_profile("changed").expect("profile");
+        let output = StepRunOutput {
+            id: "demo",
+            description: "Demo",
+            command: vec!["false".to_string()],
+            live: false,
+            status: StepStatus::Failed,
+            exit_code: Some(1),
+            log_path: "/tmp/demo.log".to_string(),
+        };
+
+        write_run_output(profile, LiveEnvMode::Isolated, &artifact_root, vec![output])
+            .expect("write failed result");
+        let result: serde_json::Value = serde_json::from_slice(
+            &fs::read(artifact_root.join("results.json")).expect("read result"),
+        )
+        .expect("decode result");
+        assert_eq!(result["steps"][0]["status"], "failed");
+        fs::remove_dir_all(artifact_root).expect("remove artifact root");
     }
 
     #[test]
