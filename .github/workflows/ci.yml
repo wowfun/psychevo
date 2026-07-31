@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  # To restore CI for main updates, uncomment the push block below.
+  # push:
+  #   branches:
+  #     - main
 
 permissions:
   contents: read
