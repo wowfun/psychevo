@@ -240,12 +240,13 @@ pub(super) async fn channel_source_list_result(
             .resume_thread(&binding.thread_id)
             .await
         {
-            let (running, active_turn_id, queued_turns) = thread.__activity();
-            activity.running |= running;
-            if active_turn_id.is_some() {
-                activity.active_turn_id = active_turn_id.clone();
+            let framework_activity = thread.__activity();
+            activity.framework_revision = Some(framework_activity.revision.to_string());
+            activity.running |= framework_activity.running;
+            if framework_activity.active_turn_id.is_some() {
+                activity.active_turn_id = framework_activity.active_turn_id.clone();
             }
-            if let Some(turn_id) = active_turn_id {
+            if let Some(turn_id) = framework_activity.active_turn_id {
                 let kind = summary
                     .as_ref()
                     .filter(|summary| summary.parent_session_id.is_some())
@@ -258,11 +259,11 @@ pub(super) async fn channel_source_list_result(
                         activity_id: turn_id.clone(),
                         turn_id,
                         kind,
-                        queued_turns,
+                        queued_turns: framework_activity.queued_turns,
                     },
                 );
             }
-            activity.queued_turns = queued_turns;
+            activity.queued_turns = framework_activity.queued_turns;
         }
         let activity_status = if activity.running {
             "running"

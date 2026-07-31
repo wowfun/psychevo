@@ -1,3 +1,37 @@
+#[test]
+fn framework_activity_merge_projects_application_owned_turn_state() {
+    let mut activity = GatewayActivity {
+        active_turn_id: Some("foreign-turn".to_string()),
+        queued_turns: 7,
+        owner_id: Some("foreign-gateway".to_string()),
+        owner_surface: Some("tui".to_string()),
+        ..GatewayActivity::default()
+    };
+
+    merge_framework_activity(
+        &mut activity,
+        true,
+        Some("framework-turn".to_string()),
+        2,
+        wire::FrameworkTurnKind::Root,
+    );
+
+    assert!(activity.running);
+    assert_eq!(activity.active_turn_id.as_deref(), Some("framework-turn"));
+    assert_eq!(activity.queued_turns, 2);
+    assert_eq!(activity.owner_id.as_deref(), Some("foreign-gateway"));
+    assert_eq!(activity.owner_surface.as_deref(), Some("tui"));
+    assert!(matches!(
+        activity.activities.first(),
+        Some(wire::ThreadActivityView::FrameworkTurn {
+            activity_id,
+            turn_id,
+            kind: wire::FrameworkTurnKind::Root,
+            queued_turns: 2,
+        }) if activity_id == "framework-turn" && turn_id == "framework-turn"
+    ));
+}
+
 #[tokio::test]
 async fn thread_list_returns_global_top_level_sessions_without_source_partition() {
     let (temp, state) = web_state().await;
@@ -79,6 +113,10 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
     assert!(listed.get("visibleEntryCount").is_none());
     assert!(listed.get("preview").is_none());
     assert!(listed.get("source").is_none());
+    assert!(
+        listed["activity"]["frameworkRevision"].is_string(),
+        "idle rows carry the Framework activity replay barrier"
+    );
 }
 
 #[tokio::test]

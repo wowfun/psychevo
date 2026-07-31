@@ -476,7 +476,7 @@ async fn conformance_per_thread_ordering_and_cross_thread_concurrency(
         .await
         .expect("same Framework Thread");
     wait_for_agent_conformance_condition("same-thread turn to enter Framework queue", || {
-        same_thread.__activity().2 == 1
+        same_thread.__activity().queued_turns == 1
     })
     .await;
     assert_eq!(

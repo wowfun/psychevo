@@ -2,6 +2,7 @@
 #[serde(rename_all = "camelCase")]
 pub struct GatewayActivity {
     pub activities: Vec<ThreadActivityView>,
+    pub framework_revision: Option<String>,
     pub running: bool,
     pub active_turn_id: Option<String>,
     pub queued_turns: usize,
@@ -454,6 +455,27 @@ fn gateway_event_from_framework_turn(
     fallback_turn_id: Option<&str>,
 ) -> Option<GatewayEvent> {
     match event {
+        psychevo::TurnEvent::ActivityChanged {
+            thread_id,
+            activity,
+        } => Some(GatewayEvent::ActivityChanged {
+            thread_id: Some(thread_id),
+            activity: GatewayActivityView {
+                framework_revision: Some(activity.revision.to_string()),
+                running: activity.running,
+                active_turn_id: activity.active_turn_id,
+                queued_turns: activity.queued_turns,
+                ..GatewayActivityView::default()
+            },
+        }),
+        psychevo::TurnEvent::Accepted {
+            receipt,
+            queue_position: Some(queue_position),
+        } => Some(GatewayEvent::TurnQueued {
+            thread_id: Some(receipt.thread_id),
+            turn_id: receipt.turn_id,
+            queue_position,
+        }),
         psychevo::TurnEvent::Started { thread_id, turn_id } => {
             Some(GatewayEvent::TurnStarted {
                 thread_id: Some(thread_id),
@@ -579,6 +601,65 @@ fn gateway_event_from_framework_turn(
 #[cfg(test)]
 mod framework_projection_tests {
     use super::*;
+
+    #[test]
+    fn framework_queued_acceptance_projects_public_turn_queued() {
+        let event = gateway_event_from_framework_turn(
+            psychevo::TurnEvent::Accepted {
+                receipt: psychevo::TurnReceipt {
+                    accepted: true,
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-2".to_string(),
+                    client_turn_id: Some("client-turn-2".to_string()),
+                },
+                queue_position: Some(1),
+            },
+            "thread-1",
+            Some("turn-2"),
+        )
+        .expect("queued acceptance projection");
+
+        assert!(matches!(
+            event,
+            GatewayEvent::TurnQueued {
+                thread_id: Some(thread_id),
+                turn_id,
+                queue_position: 1,
+            } if thread_id == "thread-1" && turn_id == "turn-2"
+        ));
+    }
+
+    #[test]
+    fn framework_activity_projects_complete_revisioned_state() {
+        let event = gateway_event_from_framework_turn(
+            psychevo::TurnEvent::ActivityChanged {
+                thread_id: "thread-1".to_string(),
+                activity: psychevo::ThreadActivitySnapshot {
+                    revision: 42,
+                    running: true,
+                    active_turn_id: Some("turn-1".to_string()),
+                    queued_turns: 2,
+                },
+            },
+            "thread-1",
+            Some("turn-1"),
+        )
+        .expect("activity projection");
+
+        assert!(matches!(
+            event,
+            GatewayEvent::ActivityChanged {
+                thread_id: Some(thread_id),
+                activity: GatewayActivityView {
+                    framework_revision: Some(revision),
+                    running: true,
+                    active_turn_id: Some(turn_id),
+                    queued_turns: 2,
+                    ..
+                },
+            } if thread_id == "thread-1" && turn_id == "turn-1" && revision == "42"
+        ));
+    }
 
     #[test]
     fn framework_stream_keeps_stateful_acp_plan_projection() {

@@ -14,7 +14,7 @@ async fn thread_browser_value(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let activity_snapshot = state.inner.gateway.session_activity_snapshot().await?;
+    let (framework_revision, activity_snapshot) = state.session_activity_snapshot().await?;
     let active_ids = activity_snapshot
         .iter()
         .filter(|(_, activity)| activity.running || activity.takeover_state.is_some())
@@ -52,7 +52,10 @@ async fn thread_browser_value(
                     let activity = activity_snapshot
                         .get(&projection.summary.id)
                         .cloned()
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| GatewayActivity {
+                            framework_revision: Some(framework_revision.clone()),
+                            ..GatewayActivity::default()
+                        });
                     session_summary_value(projection, activity)
                 })
                 .collect::<Vec<_>>();

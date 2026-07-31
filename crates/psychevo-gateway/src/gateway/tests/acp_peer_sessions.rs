@@ -225,13 +225,13 @@ Use the captured child session.
         .resume_thread(&child_thread_id)
         .await
         .expect("child Framework Thread");
-    let (child_running, child_active_turn_id, child_queued_turns) = child.__activity();
-    assert!(child_running);
+    let child_activity = child.__activity();
+    assert!(child_activity.running);
     assert_eq!(
-        child_active_turn_id.as_deref(),
+        child_activity.active_turn_id.as_deref(),
         Some(child_turn_id.as_str())
     );
-    assert_eq!(child_queued_turns, 0);
+    assert_eq!(child_activity.queued_turns, 0);
     let gateway_child = harness
         .gateway
         .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread_id))
@@ -264,10 +264,10 @@ Use the captured child session.
     assert!(!child_entries.is_empty());
     assert!(child_entries.iter().all(|turn_id| turn_id == &child_turn_id));
 
-    let (child_running, child_active_turn_id, child_queued_turns) = child.__activity();
-    assert!(!child_running);
-    assert_eq!(child_active_turn_id, None);
-    assert_eq!(child_queued_turns, 0);
+    let child_activity = child.__activity();
+    assert!(!child_activity.running);
+    assert_eq!(child_activity.active_turn_id, None);
+    assert_eq!(child_activity.queued_turns, 0);
     let terminal_edge = harness
         .state
         .find_agent_edge(&child_thread_id)

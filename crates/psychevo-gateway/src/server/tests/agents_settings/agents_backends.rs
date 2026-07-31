@@ -1285,6 +1285,10 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
 
 #[tokio::test]
 async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_change() {
+    Box::pin(thread_context_immutable_agent_binding_contract()).await;
+}
+
+async fn thread_context_immutable_agent_binding_contract() {
     let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let profile = super::runtime_profiles::generated_runtime_profiles()

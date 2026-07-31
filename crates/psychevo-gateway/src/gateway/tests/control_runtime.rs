@@ -28,7 +28,10 @@
             .resume_thread(&thread_id)
             .await
             .expect("Framework Thread");
-        let active_turn_id = thread.__activity().1.expect("active turn id");
+        let active_turn_id = thread
+            .__activity()
+            .active_turn_id
+            .expect("active turn id");
         assert!(!thread.__steer("stale-turn", "steer").expect("stale result"));
         assert!(
             thread

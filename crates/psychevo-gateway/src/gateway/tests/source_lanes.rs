@@ -615,7 +615,7 @@ model = "lmstudio/test-model"
                 .await
                 .expect("running Framework Thread")
                 .__activity()
-                .0
+                .running
         );
         assert!(
             !harness

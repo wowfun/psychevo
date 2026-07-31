@@ -502,6 +502,39 @@ impl AuthContext {
     }
 }
 
+fn merge_framework_activity(
+    activity: &mut GatewayActivity,
+    running: bool,
+    active_turn_id: Option<String>,
+    queued_turns: usize,
+    kind: wire::FrameworkTurnKind,
+) {
+    activity.running |= running;
+    if let Some(turn_id) = active_turn_id {
+        activity.active_turn_id = Some(turn_id.clone());
+        if !activity.activities.iter().any(|candidate| {
+            matches!(
+                candidate,
+                wire::ThreadActivityView::FrameworkTurn {
+                    turn_id: candidate_turn_id,
+                    ..
+                } if candidate_turn_id == &turn_id
+            )
+        }) {
+            activity.activities.insert(
+                0,
+                wire::ThreadActivityView::FrameworkTurn {
+                    activity_id: turn_id.clone(),
+                    turn_id,
+                    kind,
+                    queued_turns,
+                },
+            );
+        }
+    }
+    activity.queued_turns = queued_turns;
+}
+
 impl WebState {
     #[cfg(test)]
     fn new(config: GatewayWebServerConfig) -> Self {
@@ -624,39 +657,70 @@ impl WebState {
         if let Some(thread_id) = framework_thread_id
             && let Ok(thread) = self.inner.framework.resume_thread(&thread_id).await
         {
-            let (running, active_turn_id, queued_turns) = thread.__activity();
-            if running {
-                activity.running = true;
-            }
-            if active_turn_id.is_some() {
-                activity.active_turn_id = active_turn_id.clone();
-            }
-            if let Some(turn_id) = active_turn_id {
-                let kind = self
-                    .inner
-                    .state
-                    .session_summary(&thread_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .filter(|summary| summary.parent_session_id.is_some())
-                    .map_or(
-                        wire::FrameworkTurnKind::Root,
-                        |_| wire::FrameworkTurnKind::DelegatedChild,
-                    );
-                activity.activities.insert(
-                    0,
-                    wire::ThreadActivityView::FrameworkTurn {
-                        activity_id: turn_id.clone(),
-                        turn_id,
-                        kind,
-                        queued_turns,
-                    },
+            let framework_activity = thread.__activity();
+            activity.framework_revision = Some(framework_activity.revision.to_string());
+            let kind = self
+                .inner
+                .state
+                .session_summary(&thread_id)
+                .await
+                .ok()
+                .flatten()
+                .filter(|summary| summary.parent_session_id.is_some())
+                .map_or(
+                    wire::FrameworkTurnKind::Root,
+                    |_| wire::FrameworkTurnKind::DelegatedChild,
                 );
-            }
-            activity.queued_turns = queued_turns;
+            merge_framework_activity(
+                &mut activity,
+                framework_activity.running,
+                framework_activity.active_turn_id,
+                framework_activity.queued_turns,
+                kind,
+            );
+        } else {
+            activity.framework_revision = Some(
+                self.inner
+                    .framework
+                    .__activity_snapshot()
+                    .revision
+                    .to_string(),
+            );
         }
         activity
+    }
+
+    async fn session_activity_snapshot(
+        &self,
+    ) -> psychevo::Result<(String, BTreeMap<String, GatewayActivity>)> {
+        let mut snapshot = self.inner.gateway.session_activity_snapshot().await?;
+        let framework_snapshot = self.inner.framework.__activity_snapshot();
+        let revision = framework_snapshot.revision.to_string();
+        for activity in snapshot.values_mut() {
+            activity.framework_revision = Some(revision.clone());
+        }
+        for (thread_id, framework_activity) in framework_snapshot.threads {
+            let kind = self
+                .inner
+                .state
+                .session_summary(&thread_id)
+                .await?
+                .filter(|summary| summary.parent_session_id.is_some())
+                .map_or(
+                    wire::FrameworkTurnKind::Root,
+                    |_| wire::FrameworkTurnKind::DelegatedChild,
+                );
+            let activity = snapshot.entry(thread_id).or_default();
+            activity.framework_revision = Some(revision.clone());
+            merge_framework_activity(
+                activity,
+                framework_activity.running,
+                framework_activity.active_turn_id,
+                framework_activity.queued_turns,
+                kind,
+            );
+        }
+        Ok((revision, snapshot))
     }
 
     fn run_options(&self, cwd: PathBuf, thread_id: Option<String>) -> RunOptions {

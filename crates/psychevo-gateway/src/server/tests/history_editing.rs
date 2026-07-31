@@ -1,5 +1,9 @@
 #[tokio::test]
 async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contract() {
+    Box::pin(native_history_draft_edit_restore_and_point_fork_contract()).await;
+}
+
+async fn native_history_draft_edit_restore_and_point_fork_contract() {
     let (_temp, state) = web_state().await;
     let session_id = state
         .inner

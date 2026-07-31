@@ -96,7 +96,7 @@ pub(super) async fn list(
         .as_deref()
         .map(|cursor| decode_thread_list_cursor(cursor, cwd.as_deref(), archived))
         .transpose()?;
-    let activity_snapshot = state.inner.gateway.session_activity_snapshot().await?;
+    let (framework_revision, activity_snapshot) = state.session_activity_snapshot().await?;
     let page = state
         .inner
         .state
@@ -109,7 +109,10 @@ pub(super) async fn list(
             let activity = activity_snapshot
                 .get(&projection.summary.id)
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_else(|| GatewayActivity {
+                    framework_revision: Some(framework_revision.clone()),
+                    ..GatewayActivity::default()
+                });
             decode_result(session_summary_value(projection, activity), "thread/list")
         })
         .collect::<psychevo::Result<Vec<_>>>()?;

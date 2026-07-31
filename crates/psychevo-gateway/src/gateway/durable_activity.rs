@@ -954,6 +954,7 @@ impl Gateway {
 fn gateway_activity_view(activity: &GatewayActivity) -> GatewayActivityView {
     GatewayActivityView {
         activities: activity.activities.clone(),
+        framework_revision: activity.framework_revision.clone(),
         running: activity.running,
         active_turn_id: activity.active_turn_id.clone(),
         queued_turns: activity.queued_turns,
