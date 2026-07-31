@@ -361,6 +361,20 @@ Successful text results return stable fields including `url`, `final_url`,
 requested. Output is bounded; downloads larger than the fixed fetch limit fail
 or stop before unbounded memory growth.
 
+Only a final 2xx HTTP response is a successful fetch. Subject to the same
+response-size and redirect ceilings as successful content, a delivered final
+non-redirect non-2xx response is a failed tool result that preserves bounded
+structured diagnostics: requested and final URL, status, content type,
+converted response body, byte counts, truncation state, and a non-empty
+top-level `error`. This distinguishes a fetched anti-bot, authentication,
+rate-limit, or server error page from useful page content.
+
+Requests use browser-compatible navigation headers, including a format-aware
+`Accept` value and `Accept-Language`, without claiming to execute JavaScript,
+retain a browser cookie jar, or solve interactive challenges. Sites that require
+those capabilities return an observable failed result; `web_fetch` does not
+silently present the challenge page as a successful article.
+
 Image responses return JSON metadata and an image attachment. Providers whose
 tool-result channel only accepts text receive the normal text tool result plus a
 runtime-originated image context message when the selected model supports image

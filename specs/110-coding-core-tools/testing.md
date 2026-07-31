@@ -104,6 +104,14 @@ failure isolation should be covered with fake installers and fake LSP servers.
 - `web_fetch` fetches a local deterministic HTTP fixture, follows bounded
   redirects, converts HTML to markdown/text/html, truncates bounded output, and
   reports oversized, timeout, and unsupported binary responses.
+- `web_fetch` marks final non-2xx responses as failed while preserving bounded
+  status/body diagnostics, and does not classify a challenge page as successful
+  fetched content.
+- URL-policy fixtures accept ordinary paths and signed/share query parameter
+  names, reject high-confidence credential values at the top level or inside
+  bounded nested URL-valued parameters, cover RFC 6750 Bearer `~+/=` tokens and
+  fail-closed nesting limits, reject non-public targets, and retain every
+  validated public address supplied to direct transport.
 - `web_fetch` image responses produce metadata plus a tool attachment, and
   provider translation preserves text tool-result ordering while exposing the
   image as model-visible image input when supported.

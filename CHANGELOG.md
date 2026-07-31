@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-31
+
+- Hardened Framework and Workbench session activity with a durable, revisioned
+  projection that keeps delayed, out-of-order, browsing, and refresh updates
+  coherent without spinner gaps or false running states.
+- Made Web titles reliable across early Turn failure or stop and first provider
+  progress, while tightening bounded URL credential/token checks without
+  weakening network safety or storing secret-shaped test literals.
+
+## 2026-07-30
+
+- Restored coherent live Workbench activity across queue, terminal, browsing,
+  and refresh transitions, and improved Web title timing around first progress.
+- Made `web_fetch` expose structured HTTP failures with browser-compatible
+  requests and multi-address fallback while preserving bounded URL safety.
+- Temporarily disabled automatic hosted CI and packaging on pushes to `main`,
+  retaining pull-request validation and manual package dispatch.
+
 ## 2026-07-29
 
 - Centralized Turn and Agent lifecycle ownership: terminal and mailbox state

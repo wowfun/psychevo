@@ -840,12 +840,36 @@ transport/server/protocol kind, JSON-RPC numeric code and data, and
 `not_sent`/`unknown` delivery state. Workbench renders those results but does
 not recreate their state machine.
 
-Session rows patch only fields carried authoritatively by acceptance,
-`activityChanged`, `titleChanged`, or `turnCompleted`. A bound Native
-continuation performs no `thread/read`, `thread/browser`, or context read. The
-first detached Turn performs one history browse after acceptance and one
-context read after completion. ACP completion may perform one context read for
-Agent-session controls and capabilities. Fixed settle delays do not exist.
+Session rows patch title and terminal metadata from their authoritative
+lifecycle events. Framework running, active-Turn, and queued-Turn state comes
+only from the complete `activityChanged` projection. Each projection carries
+the Application-owned `frameworkRevision`; a row accepts only a newer revision
+and treats equal or older revisions as replay. `turnQueued.queuePosition` is a
+per-Turn notification and never mutates the aggregate row activity. This keeps
+independent Turn delivery order, duplicate delivery, and delayed browser
+rebasing idempotent without a Workbench queue registry.
+
+`thread/browser` and `thread/list` merge process-local Framework Application
+activity with Gateway-local and durable foreign activity before projecting
+sessions; `thread/browser` also uses the combined running set as a selection
+exception. This authoritative read closes the first-Turn race where
+`turnStarted` can precede the new row's first history browse, and also preserves
+running state across an explicit browser refresh. It reuses the Framework's
+Application-owned activity snapshot rather than introducing a second Web
+activity registry.
+
+The browser Application also rebases every accepted browser response with
+session-summary lifecycle events received after that request began. The
+response activity carries the same `frameworkRevision` barrier as live
+`activityChanged`, including when idle. Replaying events already represented by
+the response is therefore a no-op, a lower revision cannot overwrite a higher
+one, and this ordering applies both to the first page and pagination merges.
+
+A bound Native continuation performs no `thread/read`, `thread/browser`, or
+context read. The first detached Turn performs one history browse after
+acceptance and one context read after completion. ACP completion may perform
+one context read for Agent-session controls and capabilities. Fixed settle
+delays do not exist.
 
 Resource reads follow visible demand. A closed right Workspace reads nothing
 unless the visible Transcript contains an unresolved file link. Workspace Home

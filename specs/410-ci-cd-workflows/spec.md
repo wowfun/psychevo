@@ -144,11 +144,13 @@ development package required to compile Tauri, and runs
 `packageManager` version with a frozen lockfile and runs
 `cargo xtask ci run --profile web`.
 
-Hosted CI runs for pull requests and pushes to `main`.
+Hosted CI currently runs only for pull requests. Its `main` push trigger is
+temporarily commented out in the workflow with restoration guidance.
 
-The separate artifact-only workflow runs Linux on pushes to `main`; explicit
-manual dispatch runs Linux, macOS, and Windows. YAML prepares host dependencies,
-invokes exactly `cargo xtask ci run --profile package --package
+The separate artifact-only workflow currently runs only through explicit manual
+dispatch on Linux, macOS, and Windows. Its `main` push trigger is temporarily
+commented out in the workflow with restoration guidance. YAML prepares host
+dependencies, invokes exactly `cargo xtask ci run --profile package --package
 --artifact-root <root>`, and uploads its plan, results, logs, checksums, Python
 packages, release CLI, and host Desktop bundle. Build intermediates under the
 artifact-owned Cargo target directories are not uploaded. The package profile exclusively

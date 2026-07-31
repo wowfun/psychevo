@@ -19,9 +19,14 @@ They must not discover or consume real user credentials.
 
 - cover `WebSearch(*)` allow, ask, deny, and persistent grants;
 - prove hosted static allow and rejection/fallback for query-specific rules;
-- reject raw/encoded secrets, sensitive query parameters, private DNS/IP,
-  rebinding, unsafe redirects, and the eleventh redirect;
-- prove transport uses the validated address and configured local SearXNG works.
+- accept ordinary paths and signed/share query parameter names, reject
+  high-confidence credential values at the top level and inside bounded nested
+  URL-valued parameters, including RFC 6750 Bearer `~+/=` characters; prove
+  the nested-URL budget fails closed without rejecting ordinary public share
+  URLs; reject private DNS/IP, rebinding, unsafe redirects, and the eleventh
+  redirect;
+- prove direct transport retains every validated public address and configured
+  local SearXNG works.
 
 ## AI And Agent
 

@@ -158,6 +158,29 @@ Session Adapter and projection metadata, but no caller Adapter may supply
 runtime state, native session identity, a second queue, or a preassembled
 `RunOptions`.
 
+Turn registration reserves the FIFO lane in a pending-acceptance phase. That
+reservation owns control, completion, and shutdown cleanup, but is absent from
+public activity until the durable accepted-Turn transaction commits. After
+commit, Application changes the reservation phase and the public activity
+projection under the same runtime lock. An acceptance failure removes a
+reservation that was never visible.
+
+Every visible Framework activity transition receives one monotonically
+increasing Application revision and publishes the complete running,
+active-Turn, and queued-Turn snapshot for that revision. The same revision is
+captured atomically by list/browser snapshots, including idle rows, so it is a
+causal barrier for delayed event replay. The first `TurnEvent::Accepted`
+observation may still carry the Turn's non-zero one-based FIFO
+`queuePosition`, but independent Turn observers may deliver those notification
+positions out of order. Callers never use `queuePosition` to reconstruct the
+aggregate queue; they project only the revisioned Application snapshot and do
+not maintain a second queue.
+
+Application-owned Thread mutations may share the same private serialization
+lane, but they are not Framework Turn activity and do not change the public
+running snapshot or its revision. An accepted Turn remains the head public Turn
+while an internal mutation briefly precedes it in that lane.
+
 Root and same-process delegated-child Agent calls are both Framework Turns.
 They use the same private `ApplicationRuntime`, queue/control ownership,
 interaction rendezvous, terminal commit, and shutdown settlement. Gateway may

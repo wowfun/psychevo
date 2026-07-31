@@ -171,13 +171,31 @@ rejects before generation.
 
 ## URL Policy
 
-`WebUrlPolicy` is shared by model-provided web URLs. After percent-decoding, it
-rejects token-like content and sensitive query parameter names. It accepts only
-HTTP(S) and always rejects localhost, private, link-local, metadata, multicast,
-unspecified, and reserved IP targets, including DNS resolutions to those
-ranges. Redirects are manual, each hop is revalidated, and the limit is ten.
-Transport connects to the validated address so validation cannot be bypassed by
-a second DNS resolution.
+`WebUrlPolicy` is shared by model-provided web URLs. It accepts only HTTP(S),
+rejects URL userinfo and high-confidence credential values, and always rejects
+localhost, private, link-local, metadata, multicast, unspecified, and reserved
+IP targets, including DNS resolutions to those ranges. Ordinary path
+substrings and query parameter names are not credential evidence: signed,
+shared, and session-scoped public URLs remain fetchable unless a query value
+itself matches a recognized credential shape. A query value that is an
+absolute URL is inspected recursively for userinfo and credential-shaped query
+values without resolving or contacting that nested host. This inspection has
+explicit depth and total-URL budgets and fails closed when another URL-valued
+layer remains after either budget is exhausted. Bearer values use their own
+RFC 6750 token-shape check, including `-._~+/` and trailing `=`; provider-key
+prefixes keep their narrower shape checks. Redirects are manual, each hop is
+revalidated, and the limit is ten. All validated public addresses remain
+available to direct transport so ordinary multi-address fallback is not
+discarded, and a direct connection uses only those addresses.
+Credential-shape tests construct synthetic provider tokens at runtime instead
+of storing contiguous provider-token-shaped literals in repository history, so
+the tests do not require secret-scanning exceptions.
+
+When an explicitly configured system proxy handles the request, HTTPS CONNECT
+can leave target-host resolution to that proxy, so direct DNS pinning is not an
+end-to-end guarantee. `web_fetch` preserves proxy reachability rather than
+silently bypassing configured network policy; proxy trust is therefore an
+explicit deployment boundary.
 
 A user-configured SearXNG endpoint is trusted control-plane configuration and
 may intentionally be local; model-provided URLs never receive this exception.

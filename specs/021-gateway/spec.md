@@ -175,11 +175,13 @@ identity, and optional internal native-session identity in an immutable
 binding. Public projections expose only the public thread id and opaque Gateway
 handles; raw Adapter-native ids never cross the product contract.
 
-Each accepted Turn has one public lifecycle. Gateway emits exactly one
-`TurnStarted` after admission and exactly one authoritative `TurnCompleted`
-after terminal persistence and committed-entry projection. Runtime-native
-`run_start`, `agent_start`, `task_started`, and ACP start observations are
-internal Adapter/profiling stages and cannot create additional public starts.
+Each accepted Turn has one public lifecycle. When Application admission reports
+a non-zero queue position, Gateway first emits exactly one `TurnQueued` with
+that position. Gateway then emits exactly one `TurnStarted` after the Turn owns
+the Thread lane and exactly one authoritative `TurnCompleted` after terminal
+persistence and committed-entry projection. Runtime-native `run_start`,
+`agent_start`, `task_started`, and ACP start observations are internal
+Adapter/profiling stages and cannot create additional public starts.
 `TurnStarted` carries the Gateway admission time; selected Skill evidence stays
 in committed Transcript metadata rather than delaying or repeating lifecycle.
 Application lifecycle projection is also the sole public source of permission
@@ -188,6 +190,14 @@ Adapter raw stream, the raw observation may update private projection state but
 must not publish a second `ActionRequested`, `ActionResolved`, or
 `ActionCancelled`. This keeps every interaction id and Channel reply token
 single-use without invalidating a still-visible token.
+
+Framework activity is a revisioned full-state projection, not an aggregate
+derived from lifecycle notifications. Gateway forwards each Application-owned
+activity revision as `activityChanged` and stamps the same
+`frameworkRevision` barrier on every activity returned by `thread/list` and
+`thread/browser`, including idle rows. Pending durable-acceptance reservations
+are absent. Gateway does not reorder independent Turn observers or interpret
+`queuePosition` as a queue snapshot.
 
 The durable Thread snapshot, not a raw Adapter terminal payload, is
 authoritative for the final committed transcript. A first-party Gateway client
@@ -805,23 +815,39 @@ tuple and is valid only for the same filter. Framework, Gateway, App Server,
 and Python preserve this page contract; a convenience iterator may fetch later
 pages, but no layer first materializes all sessions and slices in memory.
 
-After the first successful turn of a newly created human-visible top-level
-session, Gateway/runtime persists a concise `title` when the title is still
-empty. This applies across visible interactive sources such as `run`, `tui`,
-`web`, `automation`, `channel/*`, and top-level `peer_agent` sessions. Internal
-side conversations, child/parent-linked sessions, resumed sessions, and failed
-or aborted turns do not auto-title. Native runtime sessions may use the
-configured auxiliary title-generation model and then fall back to the first user
-prompt; peer-agent sessions prefer the peer-provided title and otherwise use the
-prompt fallback without invoking a local title model. Title generation is
-display metadata only and must not append transcript messages, tool rows, usage
-rows, or evidence. For streaming interactive turns, the main Agent terminal
-releases Thread activity without waiting for auxiliary title generation. Title
-generation continues as detached work and publishes
-`titleChanged` after the new title is persisted; its latency or failure must not
-keep Session activity, the Composer interrupt state, or the per-thread turn
-queue running. Non-streamed `pevo run` may continue to await its title before
-returning.
+When the first user prompt is admitted for a newly created or otherwise empty
+human-visible top-level session, Gateway/runtime starts producing a concise
+`title` while the title is still empty. This applies across visible interactive
+sources such as `run`, `tui`, `web`, `automation`, `channel/*`, and top-level
+`peer_agent` sessions. Internal side conversations, child/parent-linked
+sessions, and resumed non-empty sessions do not auto-title. Native runtime
+sessions may use the configured auxiliary title-generation model and then fall
+back to the first user prompt; peer-agent sessions prefer the peer-provided
+title and otherwise use the prompt fallback without invoking a local title
+model.
+
+For Web streaming turns, native title generation starts independently after
+runtime first observes provider-originated progress (or the terminal) from the
+main generation and before a longer Agent turn settles. The auxiliary request
+therefore cannot preempt dispatch of the main request. It neither waits for a
+successful Agent terminal outcome nor delays, cancels, or changes that outcome.
+Other streaming surfaces may keep the auxiliary request detached after the main
+terminal; non-streamed `pevo run` may continue to await its title before
+returning. The compare-and-set title write preserves a manual title that wins
+the race. Once a generated or fallback title is persisted, runtime publishes
+`titleChanged`, including while a Web main turn is still running. Title
+generation is display metadata only and must not append transcript messages,
+tool rows, usage rows, or evidence. Its latency or failure—including auxiliary
+provider/model resolution or construction failure—must not keep Session
+activity, the Composer interrupt state, or the per-thread turn queue running,
+and must not prevent the main Agent Turn.
+
+If an admitted first Web turn exits before provider-originated progress—whether
+through main-model construction, required MCP or generation-hook failure,
+pre-generation abort, or another setup error—the same one-shot title lifecycle
+persists the prompt fallback and publishes `titleChanged`. Error finalization
+does not start the auxiliary model, delay the Turn error, or overwrite a title
+that won the compare-and-set race.
 
 `thread/browser` is the paged session-browser contract for product surfaces. By
 default it groups sessions by workspace, shows sessions updated within the last

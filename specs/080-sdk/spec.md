@@ -283,6 +283,9 @@ second callback authority. Application lifecycle events are the single source
 for first-party Turn started, completed, interaction, and terminal
 notifications; Adapter terminal observations are projection fences and are not
 published as a second terminal.
+`TurnEvent::ActivityChanged` is a host activity-state projection rather than
+transcript content; Gateway consumes it for session activity, while CLI and ACP
+message/tool renderers explicitly ignore it.
 
 Application admission persists a delivery intent but does not confirm delivery
 before the selected Adapter reaches its own dispatch boundary. The Adapter is
@@ -349,7 +352,18 @@ Starting a turn reserves its Thread queue slot and an Application-owned
 `TurnSlot` before the first accepted-Turn write. One transaction materializes
 the public Thread and Turn identity, delivery intent, and retained
 `clientTurnId` receipt. The slot is registered with control, event, completion,
-and abort ownership before admission can close or the receipt can escape.
+and abort ownership before admission can close or the receipt can escape. The
+slot remains `pendingAcceptance` and is excluded from public Thread activity
+until that transaction commits. Commit changes it to `accepted` under the
+Application runtime lock, increments the Application activity revision, and
+emits the resulting complete activity snapshot. Rejection removes the
+never-visible reservation. Registration also captures a non-zero one-based
+`queuePosition` when the Turn does not own the physical Thread lane. The first
+typed acceptance event carries this optional notification fact before the same
+Turn can emit `Started`; a ready Turn omits it. Positions from independently
+observed Turns are not an ordered aggregate queue snapshot.
+Thread mutations share the private serialization lane but are excluded from
+the public Framework Turn activity snapshot and activity revision.
 Application then returns the acceptance receipt and `TurnHandle`. Accepted work
 is owned by Application supervision:
 
