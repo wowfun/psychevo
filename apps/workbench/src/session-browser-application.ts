@@ -8,8 +8,10 @@ import {
   type ThreadBrowserResult
 } from "@psychevo/protocol";
 import {
+  isSessionSummaryPatchEvent,
   normalizeSessionSummary,
-  patchSessionSummariesFromGatewayEvent
+  patchSessionSummariesFromGatewayEvent,
+  type SessionSummaryPatchEvent
 } from "./session-utils";
 import type { SessionBrowserWorkspaceState } from "./types";
 
@@ -38,6 +40,10 @@ type LoadOlderOptions = {
 type OlderFlight = {
   promise: Promise<void>;
   token: string;
+};
+
+type SessionSummaryEventWindow = {
+  events: SessionSummaryPatchEvent[];
 };
 
 function mergeSessionSummaries(
@@ -76,6 +82,7 @@ export class SessionBrowserApplication {
   private olderFlight: OlderFlight | null = null;
   private readonly flights = new Map<string, Promise<unknown>>();
   private readonly listeners = new Set<() => void>();
+  private readonly sessionSummaryEventWindows = new Set<SessionSummaryEventWindow>();
   private snapshot: SessionBrowserSnapshot;
 
   constructor(pinnedSessionIds: string[] = []) {
@@ -138,6 +145,11 @@ export class SessionBrowserApplication {
   }
 
   patchGatewayEvent(event: GatewayEvent): void {
+    if (isSessionSummaryPatchEvent(event)) {
+      for (const window of this.sessionSummaryEventWindows) {
+        window.events.push(event);
+      }
+    }
     const sessions = patchSessionSummariesFromGatewayEvent(this.snapshot.sessions, event);
     if (sessions !== this.snapshot.sessions) {
       this.update({ sessions });
@@ -186,6 +198,7 @@ export class SessionBrowserApplication {
     const revision = this.recentRevision + 1;
     this.recentRevision = revision;
     const epoch = this.clientEpoch;
+    const eventWindow = this.openSessionSummaryEventWindow();
     const request = client.request("thread/browser", {
       archived: false,
       cursor: null,
@@ -195,7 +208,10 @@ export class SessionBrowserApplication {
       cwd
     }).then((value) => {
       const result = ThreadBrowserResultSchema.parse(value);
-      const sessions = sessionsFromThreadBrowser(result);
+      const sessions = this.rebaseSessionSummaries(
+        sessionsFromThreadBrowser(result),
+        eventWindow
+      );
       if (epoch === this.clientEpoch && revision === this.recentRevision) {
         this.update({
           sessions,
@@ -203,6 +219,8 @@ export class SessionBrowserApplication {
         });
       }
       return sessions;
+    }).finally(() => {
+      this.sessionSummaryEventWindows.delete(eventWindow);
     });
     return this.trackFlight(key, request);
   }
@@ -235,6 +253,7 @@ export class SessionBrowserApplication {
       return;
     }
     this.update({ loadingOlderCwd: options.cwd });
+    const eventWindow = this.openSessionSummaryEventWindow();
     const request = client.request("thread/browser", {
       archived: false,
       cursor,
@@ -244,11 +263,15 @@ export class SessionBrowserApplication {
       cwd: options.cwd
     }).then((value) => {
       const result = ThreadBrowserResultSchema.parse(value);
+      const incomingSessions = this.rebaseSessionSummaries(
+        sessionsFromThreadBrowser(result),
+        eventWindow
+      );
       if (this.olderFlight?.token === token) {
         this.update({
           sessions: mergeSessionSummaries(
             this.snapshot.sessions,
-            sessionsFromThreadBrowser(result)
+            incomingSessions
           ),
           workspaces: mergeBrowserWorkspaces(
             this.snapshot.workspaces,
@@ -257,6 +280,7 @@ export class SessionBrowserApplication {
         });
       }
     }).finally(() => {
+      this.sessionSummaryEventWindows.delete(eventWindow);
       if (this.olderFlight?.token === token) {
         this.olderFlight = null;
         this.update({ loadingOlderCwd: null });
@@ -271,6 +295,19 @@ export class SessionBrowserApplication {
       currentThreadId,
       ...this.snapshot.pinnedSessionIds
     ].filter((id): id is string => Boolean(id))));
+  }
+
+  private openSessionSummaryEventWindow(): SessionSummaryEventWindow {
+    const window = { events: [] };
+    this.sessionSummaryEventWindows.add(window);
+    return window;
+  }
+
+  private rebaseSessionSummaries(
+    sessions: SessionSummary[],
+    window: SessionSummaryEventWindow
+  ): SessionSummary[] {
+    return window.events.reduce(patchSessionSummariesFromGatewayEvent, sessions);
   }
 
   private trackFlight<T>(key: string, request: Promise<T>): Promise<T> {

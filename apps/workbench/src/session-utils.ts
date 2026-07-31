@@ -1,6 +1,28 @@
 import { scopeForCwd } from "@psychevo/client";
 import type { GatewayEvent, GatewayRequestScope, SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
 
+export type SessionSummaryPatchEvent = Extract<
+  GatewayEvent,
+  {
+    type:
+      | "turnStarted"
+      | "turnQueued"
+      | "activityChanged"
+      | "titleChanged"
+      | "turnCompleted";
+  }
+>;
+
+export function isSessionSummaryPatchEvent(
+  event: GatewayEvent
+): event is SessionSummaryPatchEvent {
+  return event.type === "turnStarted"
+    || event.type === "turnQueued"
+    || event.type === "activityChanged"
+    || event.type === "titleChanged"
+    || event.type === "turnCompleted";
+}
+
 export function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[], fallbackCwd: string): GatewayRequestScope {
   if (launchScope.cwd.trim()) {
     return launchScope;
@@ -40,6 +62,9 @@ export function normalizeActivity(activity: Partial<ThreadSnapshot["activity"]> 
   if (Number.isFinite(activity?.updatedAtMs)) {
     normalized.updatedAtMs = Number(activity?.updatedAtMs);
   }
+  if (typeof activity?.frameworkRevision === "string") {
+    normalized.frameworkRevision = activity.frameworkRevision;
+  }
   if (typeof activity?.ownerId === "string") {
     normalized.ownerId = activity.ownerId;
   }
@@ -76,8 +101,13 @@ export function patchSessionSummariesFromGatewayEvent(
   sessions: SessionSummary[],
   event: GatewayEvent
 ): SessionSummary[] {
-  const threadId = event.type === "turnCompleted" ? event.threadId ?? event.turn.threadId : "threadId" in event ? event.threadId : null;
-  if (!threadId || (event.type !== "activityChanged" && event.type !== "titleChanged" && event.type !== "turnCompleted")) {
+  if (!isSessionSummaryPatchEvent(event)) {
+    return sessions;
+  }
+  const threadId = event.type === "turnCompleted"
+    ? event.threadId ?? event.turn.threadId
+    : event.threadId;
+  if (!threadId) {
     return sessions;
   }
   const index = sessions.findIndex((session) => session.id === threadId);
@@ -87,11 +117,56 @@ export function patchSessionSummariesFromGatewayEvent(
   const current = sessions[index]!;
   let next: SessionSummary;
   if (event.type === "activityChanged") {
-    const activity = normalizeActivity(event.activity);
+    const currentRevision = current.activity?.frameworkRevision;
+    const incomingRevision = event.activity.frameworkRevision;
+    if (
+      typeof incomingRevision === "string"
+      && typeof currentRevision === "string"
+      && compareDecimalRevisions(incomingRevision, currentRevision) <= 0
+    ) {
+      return sessions;
+    }
+    const activity = normalizeActivity({
+      ...current.activity,
+      ...event.activity,
+      ...(typeof incomingRevision === "string"
+        ? { frameworkRevision: incomingRevision }
+        : typeof currentRevision === "string"
+          ? { frameworkRevision: currentRevision }
+          : {})
+    });
     next = {
       ...current,
       activity,
       updatedAtMs: activity.updatedAtMs ?? current.updatedAtMs ?? null
+    };
+  } else if (event.type === "turnStarted") {
+    if (typeof current.activity?.frameworkRevision === "string") {
+      return sessions;
+    }
+    const alreadyActive = current.activity?.activeTurnId === event.turnId;
+    next = {
+      ...current,
+      activity: normalizeActivity({
+        ...current.activity,
+        running: true,
+        activeTurnId: event.turnId,
+        queuedTurns: alreadyActive
+          ? current.activity?.queuedTurns ?? 0
+          : Math.max(0, (current.activity?.queuedTurns ?? 0) - 1)
+      })
+    };
+  } else if (event.type === "turnQueued") {
+    if (typeof current.activity?.frameworkRevision === "string") {
+      return sessions;
+    }
+    next = {
+      ...current,
+      activity: normalizeActivity({
+        ...current.activity,
+        running: true,
+        queuedTurns: event.queuePosition
+      })
     };
   } else if (event.type === "titleChanged") {
     next = {
@@ -101,20 +176,48 @@ export function patchSessionSummariesFromGatewayEvent(
     };
   } else {
     const completedAtMs = event.turn.completedAtMs;
-    const activity = normalizeActivity({
-      ...current.activity,
-      running: false,
-      activeTurnId: null,
-      queuedTurns: 0,
-      ...(completedAtMs === undefined ? {} : { updatedAtMs: completedAtMs })
-    });
-    next = {
-      ...current,
-      activity,
-      updatedAtMs: completedAtMs ?? current.updatedAtMs ?? null
-    };
+    const updatedAtMs = typeof completedAtMs === "number"
+      ? Math.max(current.updatedAtMs ?? completedAtMs, completedAtMs)
+      : current.updatedAtMs ?? null;
+    if (
+      typeof current.activity?.frameworkRevision === "string"
+      || current.activity?.activeTurnId !== event.turnId
+    ) {
+      next = {
+        ...current,
+        updatedAtMs
+      };
+    } else {
+      const queuedTurns = Math.max(0, current.activity?.queuedTurns ?? 0);
+      const activity = normalizeActivity({
+        ...current.activity,
+        running: queuedTurns > 0,
+        activeTurnId: null,
+        queuedTurns,
+        ...(typeof completedAtMs === "number" ? { updatedAtMs: completedAtMs } : {})
+      });
+      next = {
+        ...current,
+        activity,
+        updatedAtMs
+      };
+    }
   }
   const patched = sessions.slice();
   patched[index] = next;
   return patched;
+}
+
+function compareDecimalRevisions(left: string, right: string): number {
+  const normalize = (value: string) => {
+    const digits = /^\d+$/.test(value) ? value.replace(/^0+(?=\d)/, "") : value;
+    return digits;
+  };
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  if (/^\d+$/.test(normalizedLeft) && /^\d+$/.test(normalizedRight)) {
+    return normalizedLeft.length - normalizedRight.length
+      || normalizedLeft.localeCompare(normalizedRight);
+  }
+  return normalizedLeft.localeCompare(normalizedRight);
 }
