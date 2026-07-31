@@ -142,12 +142,13 @@ pub(crate) mod tests;
 #[doc(hidden)]
 pub use application::AdapterTurnOptions;
 pub use application::{
-    AgentSessionAdapter, AgentTurnRequest, Application, ApplicationBuilder, Client,
-    CompactThreadRequest, ForkThreadRequest, HistoryPage, HistoryReader, InteractionResponse,
-    ItemStage, PendingInteraction, PendingTerminalFailure, ShutdownAdapterStatus, ShutdownReport,
-    StartThreadRequest, Thread, ThreadExecutionContext, ThreadItem, ThreadListPage,
-    ThreadListQuery, ThreadSnapshot, ThreadSummary, TurnControl, TurnEvent, TurnEventSender,
-    TurnEventStream, TurnHandle, TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
+    AgentSessionAdapter, AgentTurnRequest, Application, ApplicationActivitySnapshot,
+    ApplicationBuilder, Client, CompactThreadRequest, ForkThreadRequest, HistoryPage,
+    HistoryReader, InteractionResponse, ItemStage, PendingInteraction, PendingTerminalFailure,
+    ShutdownAdapterStatus, ShutdownReport, StartThreadRequest, Thread, ThreadActivitySnapshot,
+    ThreadExecutionContext, ThreadItem, ThreadListPage, ThreadListQuery, ThreadSnapshot,
+    ThreadSummary, TurnControl, TurnEvent, TurnEventSender, TurnEventStream, TurnHandle,
+    TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
 };
 pub use compaction::CompactionResult;
 pub use context_usage::ContextSnapshot;

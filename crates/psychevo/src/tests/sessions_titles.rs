@@ -9,6 +9,37 @@ fn title_model(text: &str) -> psychevo_ai::LanguageModel {
         .expect("fake title model")
 }
 
+fn fake_provider(text: &str) -> psychevo_ai::Provider {
+    psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text(text))
+        .expect("fake provider")
+        .provider()
+}
+
+fn scripted_fake_provider(main_text: &str, title_text: &str) -> psychevo_ai::Provider {
+    fn text_script(
+        text: &str,
+    ) -> Vec<psychevo_ai::AdapterResult<psychevo_ai::LanguageAdapterEvent>> {
+        vec![
+            Ok(psychevo_ai::LanguageAdapterEvent::TextStart { content_index: 0 }),
+            Ok(psychevo_ai::LanguageAdapterEvent::TextDelta {
+                content_index: 0,
+                delta: text.to_string(),
+            }),
+            Ok(psychevo_ai::LanguageAdapterEvent::TextEnd { content_index: 0 }),
+            Ok(psychevo_ai::LanguageAdapterEvent::Finish {
+                finish_reason: None,
+            }),
+        ]
+    }
+
+    psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::new([
+        text_script(main_text),
+        text_script(title_text),
+    ]))
+    .expect("scripted fake provider")
+    .provider()
+}
+
 #[tokio::test]
 pub(crate) async fn latest_run_session_filters_source_and_cwd() {
     let temp = tempdir().expect("temp");
@@ -306,50 +337,184 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
 }
 
 #[tokio::test]
-pub(crate) async fn streaming_run_returns_before_new_session_title_generation_finishes() {
+pub(crate) async fn invalid_auxiliary_title_provider_falls_back_without_blocking_streaming_turn() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let cwd = temp.path().join("work");
     fs::create_dir_all(&home).expect("home");
     fs::create_dir_all(&cwd).expect("cwd");
 
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let address = listener.local_addr().expect("address");
-    let (title_started_tx, title_started_rx) = tokio::sync::oneshot::channel();
-    let (release_title_tx, release_title_rx) = std::sync::mpsc::channel();
-    let server = thread::spawn(move || {
-        let (mut main_stream, _) = listener.accept().expect("main request");
-        let _ = read_http_request(&mut main_stream);
-        write_test_sse(&mut main_stream, "Hi from the main turn.");
-
-        let (mut title_stream, _) = listener.accept().expect("title request");
-        let _ = read_http_request(&mut title_stream);
-        title_started_tx.send(()).expect("title started");
-        release_title_rx.recv().expect("release title");
-        write_test_sse(&mut title_stream, "Greeting session");
-    });
     write_config(
         home.join("config.toml"),
-        &format!(
-            r#"
-model = "custom/main"
+        r#"
+model = "invalidprovidermain/main"
 
-[provider.custom]
-api = "http://{address}/v1"
+[provider.invalidprovidermain]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
 
-[provider.custom.models.main]
+[provider.invalidprovidermain.models.main]
 
 [auxiliary.title_generation]
-provider = "custom"
-model = "main"
+provider = "missingtitle"
+model = "title"
 "#,
-        ),
     )
     .expect("config");
 
     let mut options = base_options(&temp).await;
     options.cwd = cwd;
-    options.model = Some("custom/main".to_string());
+    options.model = Some("invalidprovidermain/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let (_control_handle, control) = run_control();
+
+    let run_result = tokio::time::timeout(
+        Duration::from_secs(2),
+        run_live_streaming_controlled_with_provider(
+            options,
+            "web",
+            &["web"],
+            stream,
+            control,
+            fake_provider("Main turn completed."),
+        ),
+    )
+    .await
+    .expect("main run timeout");
+    let result = run_result.expect("invalid auxiliary title provider must not fail the main turn");
+    let title_event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("fallback title event timeout")
+        .expect("fallback title event");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    assert_eq!(result.final_answer, "Main turn completed.");
+    assert_eq!(title_event["session_id"], result.session_id);
+    assert_eq!(title_event["title"], "hello");
+    assert!(result.warnings.iter().any(|warning| {
+        warning.kind == "title_generation_failed"
+            && warning.message.contains("unknown provider: missingtitle")
+    }));
+}
+
+#[tokio::test]
+pub(crate) async fn web_first_turn_failure_before_generation_publishes_fallback_title() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "fixture/main"
+
+[provider.fixture]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[provider.fixture.models.main]
+"#,
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("fixture/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    options.mcp_servers.push(
+        crate::types::McpServerInput::new(
+            "required-disabled",
+            crate::types::McpTransportInput::Unsupported {
+                kind: "fixture".to_string(),
+            },
+        )
+        .with_policy(crate::types::McpServerPolicy {
+            enabled: false,
+            required: true,
+            ..Default::default()
+        }),
+    );
+    let state = options.state.clone();
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let (_control_handle, control) = run_control();
+
+    let error = run_live_streaming_controlled_with_provider(
+        options,
+        "web",
+        &["web"],
+        stream,
+        control,
+        fake_provider("main generation must not start"),
+    )
+    .await
+    .expect_err("required disabled MCP must fail before main generation");
+    assert!(
+        error
+            .to_string()
+            .contains("required MCP server unavailable"),
+        "{error}"
+    );
+
+    let title_event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("fallback title event timeout")
+        .expect("fallback title event");
+    let session_id = title_event["session_id"]
+        .as_str()
+        .expect("title session id");
+    assert_eq!(title_event["title"], "hello");
+    assert_eq!(
+        state
+            .session_summary(session_id)
+            .await
+            .expect("summary")
+            .and_then(|summary| summary.title),
+        Some("hello".to_string())
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn web_first_turn_main_model_construction_failure_publishes_fallback_title() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "fixture/main"
+
+[provider.fixture]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[provider.fixture.models.main]
+"#,
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("fixture/main".to_string());
     options.no_agents = true;
     options.no_skills = true;
     let state = options.state.clone();
@@ -361,38 +526,480 @@ model = "main"
             let _ = title_event_tx.send(value.clone());
         }
     });
-    let mut run =
+    let (_control_handle, control) = run_control();
+    let image_only_provider = psychevo_ai::Provider::builder(psychevo_ai::DeploymentConfig::new(
+        "image-only",
+        "fixture",
+        "fixture://image-only",
+    ))
+    .image_adapter(psychevo_ai::FakeImageAdapter::default())
+    .build()
+    .expect("image-only provider");
+
+    let error = run_live_streaming_controlled_with_provider(
+        options,
+        "web",
+        &["web"],
+        stream,
+        control,
+        image_only_provider,
+    )
+    .await
+    .expect_err("main provider without language capability must fail");
+    assert!(
+        error.to_string().to_ascii_lowercase().contains("language"),
+        "{error}"
+    );
+
+    let title_event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("fallback title event timeout")
+        .expect("fallback title event");
+    let session_id = title_event["session_id"]
+        .as_str()
+        .expect("title session id");
+    assert_eq!(title_event["title"], "hello");
+    assert_eq!(
+        state
+            .session_summary(session_id)
+            .await
+            .expect("summary")
+            .and_then(|summary| summary.title),
+        Some("hello".to_string())
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn web_first_turn_abort_before_generation_publishes_fallback_title() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "fixture/main"
+
+[provider.fixture]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[provider.fixture.models.main]
+"#,
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("fixture/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let (control_handle, control) = run_control();
+    control_handle.abort();
+
+    let result = run_live_streaming_controlled_with_provider(
+        options,
+        "web",
+        &["web"],
+        stream,
+        control,
+        fake_provider("main generation must not start"),
+    )
+    .await
+    .expect("pre-generation abort");
+    assert_eq!(result.outcome, Outcome::Aborted);
+
+    let title_event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("fallback title event timeout")
+        .expect("fallback title event");
+    assert_eq!(title_event["session_id"], result.session_id);
+    assert_eq!(title_event["title"], "hello");
+}
+
+#[tokio::test]
+pub(crate) async fn web_title_generation_does_not_preempt_shared_scripted_main_provider() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "shared/main"
+
+[provider.shared]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[provider.shared.models.main]
+
+[provider.shared.models.title]
+
+[auxiliary.title_generation]
+provider = "shared"
+model = "title"
+"#,
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("shared/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let (_control_handle, control) = run_control();
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        run_live_streaming_controlled_with_provider(
+            options,
+            "web",
+            &["web"],
+            stream,
+            control,
+            scripted_fake_provider("Main turn completed.", "Generated title"),
+        ),
+    )
+    .await
+    .expect("main run timeout")
+    .expect("main run");
+    let title_event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("title event timeout")
+        .expect("title event");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    assert_eq!(result.final_answer, "Main turn completed.");
+    assert_eq!(title_event["session_id"], result.session_id);
+    assert_eq!(title_event["title"], "Generated title");
+}
+
+#[tokio::test]
+pub(crate) async fn invalid_auxiliary_title_model_does_not_fail_non_streaming_turn() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    write_config(
+        home.join("config.toml"),
+        r#"
+model = "invalidmodelmain/main"
+
+[provider.invalidmodelmain]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[provider.invalidmodelmain.models.main]
+
+[provider.invalidtitle]
+api = "http://127.0.0.1:1/v1"
+no_auth = true
+
+[auxiliary.title_generation]
+provider = "invalidtitle"
+model = "bad\nmodel"
+"#,
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("invalidmodelmain/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let state = options.state.clone();
+
+    let run_result = tokio::time::timeout(
+        Duration::from_secs(2),
+        run_live_internal(
+            options,
+            "run",
+            &["run"],
+            None,
+            None,
+            false,
+            Some(fake_provider("Main turn completed.")),
+        ),
+    )
+    .await
+    .expect("main run timeout");
+    let result = run_result.expect("invalid auxiliary title model must not fail the main turn");
+
+    assert_eq!(result.outcome, Outcome::Normal);
+    assert_eq!(result.final_answer, "Main turn completed.");
+    assert!(result.warnings.iter().any(|warning| {
+        warning.kind == "title_generation_failed"
+            && warning
+                .message
+                .contains("model id must be non-empty, trimmed, and contain no control characters")
+    }));
+    assert_eq!(
+        state
+            .session_summary(&result.session_id)
+            .await
+            .expect("summary")
+            .and_then(|summary| summary.title)
+            .as_deref(),
+        Some("hello")
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn streaming_visible_session_title_is_published_before_main_turn_settles() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    let main_listener = TcpListener::bind("127.0.0.1:0").expect("bind main");
+    let main_address = main_listener.local_addr().expect("main address");
+    let title_listener = TcpListener::bind("127.0.0.1:0").expect("bind title");
+    let title_address = title_listener.local_addr().expect("title address");
+    let (main_started_tx, main_started_rx) = tokio::sync::oneshot::channel();
+    let (release_main_progress_tx, release_main_progress_rx) = std::sync::mpsc::channel();
+    let (main_progress_tx, main_progress_rx) = tokio::sync::oneshot::channel();
+    let (title_started_tx, title_started_rx) = tokio::sync::oneshot::channel();
+    let (release_main_tx, release_main_rx) = std::sync::mpsc::channel();
+    let main_server = thread::spawn(move || {
+        let (mut stream, _) = main_listener.accept().expect("main request");
+        let _ = read_http_request(&mut stream);
+        main_started_tx.send(()).expect("main started");
+        release_main_progress_rx
+            .recv()
+            .expect("release main progress");
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "content-type: text/event-stream\r\n",
+            "connection: close\r\n",
+            "\r\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},",
+            "\"finish_reason\":null}]}\n\n"
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write main progress");
+        stream.flush().expect("flush main progress");
+        main_progress_tx.send(()).expect("main progress sent");
+        release_main_rx.recv().expect("release main");
+        let _ = stream.write_all(
+            concat!(
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n"
+            )
+            .as_bytes(),
+        );
+    });
+    let title_server = thread::spawn(move || {
+        let (mut stream, _) = title_listener.accept().expect("title request");
+        let _ = read_http_request(&mut stream);
+        title_started_tx.send(()).expect("title started");
+        write_test_sse(&mut stream, "Greeting session");
+    });
+    write_config(
+        home.join("config.toml"),
+        &format!(
+            r#"
+model = "timingmain/main"
+
+[provider.timingmain]
+api = "http://{main_address}/v1"
+
+[provider.timingmain.models.main]
+
+[provider.timingtitle]
+api = "http://{title_address}/v1"
+
+[provider.timingtitle.models.title]
+
+[auxiliary.title_generation]
+provider = "timingtitle"
+model = "title"
+"#,
+        ),
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("timingmain/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let state = options.state.clone();
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let run =
         tokio::spawn(async move { run_live_streaming(options, "web", &["web"], stream).await });
 
+    tokio::time::timeout(Duration::from_secs(2), main_started_rx)
+        .await
+        .expect("main request timeout")
+        .expect("main request started");
+    let mut title_started_rx = title_started_rx;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut title_started_rx)
+            .await
+            .is_err(),
+        "title request started before the main provider produced progress"
+    );
+    release_main_progress_tx
+        .send(())
+        .expect("release main progress");
+    tokio::time::timeout(Duration::from_secs(2), main_progress_rx)
+        .await
+        .expect("main progress timeout")
+        .expect("main progress sent");
     tokio::time::timeout(Duration::from_secs(2), title_started_rx)
         .await
-        .expect("title request timeout")
+        .expect("title request timeout after main progress")
         .expect("title request started");
-    let returned_before_title = tokio::time::timeout(Duration::from_millis(200), &mut run).await;
-    let returned_before_title_finished = returned_before_title.is_ok();
-    let result = match returned_before_title {
-        Ok(joined) => {
-            let result = joined.expect("run task").expect("streaming run");
-            state
-                .set_session_title(&result.session_id, "Manual title")
-                .await
-                .expect("manual title");
-            release_title_tx.send(()).expect("release title");
-            result
-        }
-        Err(_) => {
-            release_title_tx.send(()).expect("release title");
-            run.await
-                .expect("run task after title")
-                .expect("streaming run after title")
-        }
-    };
-    server.join().expect("server");
+    let event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
+        .await
+        .expect("title event timeout while main turn was blocked")
+        .expect("title event");
+    let main_was_blocked = !run.is_finished();
+    let session_id = event["session_id"]
+        .as_str()
+        .expect("title session id")
+        .to_string();
+    let event_title = event["title"].as_str().expect("title").to_string();
 
+    run.abort();
+    release_main_tx.send(()).expect("release main");
+    let run_error = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("main run timeout")
+        .expect_err("blocked main run should be cancelled after the timing assertion");
+    main_server.join().expect("main server");
+    title_server.join().expect("title server");
+    assert!(run_error.is_cancelled());
     assert!(
-        returned_before_title_finished,
-        "streaming run remained active while display-only title generation was pending"
+        main_was_blocked,
+        "main run settled before the remainder of its provider response was released"
     );
+    assert!(!event_title.is_empty());
+    assert_eq!(
+        state
+            .session_summary(&session_id)
+            .await
+            .expect("summary")
+            .and_then(|summary| summary.title),
+        Some(event_title)
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn non_web_streaming_run_returns_before_post_main_title_generation_finishes() {
+    let temp = tempdir().expect("temp");
+    let home = home_dir(&temp);
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&home).expect("home");
+    fs::create_dir_all(&cwd).expect("cwd");
+
+    let main_listener = TcpListener::bind("127.0.0.1:0").expect("bind main");
+    let main_address = main_listener.local_addr().expect("main address");
+    let title_listener = TcpListener::bind("127.0.0.1:0").expect("bind title");
+    let title_address = title_listener.local_addr().expect("title address");
+    let (title_started_tx, title_started_rx) = tokio::sync::oneshot::channel();
+    let (release_title_tx, release_title_rx) = std::sync::mpsc::channel();
+    let main_server = thread::spawn(move || {
+        let (mut main_stream, _) = main_listener.accept().expect("main request");
+        let _ = read_http_request(&mut main_stream);
+        write_test_sse(&mut main_stream, "Hi from the main turn.");
+    });
+    let title_server = thread::spawn(move || {
+        let (mut title_stream, _) = title_listener.accept().expect("title request");
+        let _ = read_http_request(&mut title_stream);
+        title_started_tx.send(()).expect("title started");
+        release_title_rx.recv().expect("release title");
+        write_test_sse(&mut title_stream, "Greeting session");
+    });
+    write_config(
+        home.join("config.toml"),
+        &format!(
+            r#"
+model = "nonblockingmain/main"
+
+[provider.nonblockingmain]
+api = "http://{main_address}/v1"
+
+[provider.nonblockingmain.models.main]
+
+[provider.nonblockingtitle]
+api = "http://{title_address}/v1"
+
+[provider.nonblockingtitle.models.title]
+
+[auxiliary.title_generation]
+provider = "nonblockingtitle"
+model = "title"
+"#,
+        ),
+    )
+    .expect("config");
+
+    let mut options = base_options(&temp).await;
+    options.cwd = cwd;
+    options.model = Some("nonblockingmain/main".to_string());
+    options.no_agents = true;
+    options.no_skills = true;
+    let state = options.state.clone();
+    let (title_event_tx, mut title_event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        if let Some(value) = event.legacy_value()
+            && value.get("type").and_then(Value::as_str) == Some("session_title_changed")
+        {
+            let _ = title_event_tx.send(value.clone());
+        }
+    });
+    let run =
+        tokio::spawn(async move { run_live_streaming(options, "run", &["run"], stream).await });
+
+    let result = tokio::time::timeout(Duration::from_secs(5), run)
+        .await
+        .expect("streaming run remained active while title generation was blocked")
+        .expect("run task")
+        .expect("streaming run");
+    tokio::time::timeout(Duration::from_secs(5), title_started_rx)
+        .await
+        .expect("detached title request timeout")
+        .expect("title request started");
+    state
+        .set_session_title(&result.session_id, "Manual title")
+        .await
+        .expect("manual title");
+    release_title_tx.send(()).expect("release title");
+    main_server.join().expect("main server");
+    title_server.join().expect("title server");
+
     let event = tokio::time::timeout(Duration::from_secs(2), title_event_rx.recv())
         .await
         .expect("detached title event timeout")
@@ -560,27 +1167,10 @@ pub(crate) async fn first_use_empty_visible_session_does_not_rewrite_existing_or
 }
 
 #[tokio::test]
-pub(crate) async fn first_use_empty_visible_session_extends_new_session_title_gate() {
-    assert!(crate::run::should_title_completed_session(
-        false,
-        true,
-        Outcome::Normal
-    ));
-    assert!(crate::run::should_title_completed_session(
-        true,
-        false,
-        Outcome::Normal
-    ));
-    assert!(!crate::run::should_title_completed_session(
-        false,
-        false,
-        Outcome::Normal
-    ));
-    assert!(!crate::run::should_title_completed_session(
-        false,
-        true,
-        Outcome::Aborted
-    ));
+pub(crate) async fn visible_first_turn_title_gate_accepts_created_or_first_use_empty_session() {
+    assert!(crate::run::should_title_visible_first_turn(false, true));
+    assert!(crate::run::should_title_visible_first_turn(true, false));
+    assert!(!crate::run::should_title_visible_first_turn(false, false));
 }
 
 #[tokio::test]

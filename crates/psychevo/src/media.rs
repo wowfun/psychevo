@@ -289,6 +289,7 @@ async fn resolve_remote_image_source(source: &str) -> Result<ResolvedImageSource
             redirect_limit: 3,
             user_agent: "Psychevo/remote-image",
             accept: "image/png, image/jpeg, image/webp, image/gif, image/bmp, image/avif",
+            accept_language: None,
             operation: "remote image",
         },
         None,

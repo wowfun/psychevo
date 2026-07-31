@@ -161,6 +161,7 @@ impl TurnHandle {
         let events = Arc::new(EventLog::new(DEFAULT_EVENT_CAPACITY));
         events.push(TurnEvent::Accepted {
             receipt: receipt.clone(),
+            queue_position: None,
         });
         events.push(TurnEvent::Completed {
             thread_id: receipt.thread_id.clone(),
@@ -184,6 +185,7 @@ impl TurnHandle {
         let events = Arc::new(EventLog::new(DEFAULT_EVENT_CAPACITY));
         events.push(TurnEvent::Accepted {
             receipt: receipt.clone(),
+            queue_position: None,
         });
         events.push(TurnEvent::Failed {
             thread_id: receipt.thread_id.clone(),

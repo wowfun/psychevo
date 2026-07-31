@@ -91,6 +91,12 @@ impl Client {
         })
     }
 
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
+    pub fn __activity_snapshot(&self) -> ApplicationActivitySnapshot {
+        self.inner.runtime.versioned_thread_activity_snapshot()
+    }
+
     fn summary_from_summary(&self, summary: SessionSummary) -> ThreadSummary {
         let (_, active_turn_id, _) = self.inner.runtime.thread_activity(&summary.id);
         ThreadSummary::from_summary(summary, active_turn_id)
@@ -328,8 +334,11 @@ impl Thread {
 
     #[doc(hidden)]
     #[cfg(feature = "product")]
-    pub fn __activity(&self) -> (bool, Option<String>, usize) {
-        self.client.inner.runtime.thread_activity(&self.id)
+    pub fn __activity(&self) -> ThreadActivitySnapshot {
+        self.client
+            .inner
+            .runtime
+            .versioned_thread_activity(&self.id)
     }
 
     #[doc(hidden)]

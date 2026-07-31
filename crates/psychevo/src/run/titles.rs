@@ -1,5 +1,8 @@
 #[allow(unused_imports)]
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::types::SessionEventPayload;
 
 pub(crate) fn called_agent_names(
     messages: &[Message],
@@ -83,17 +86,7 @@ pub(crate) async fn ensure_new_visible_session_title(
     provider: LanguageModel,
     resolved: &ResolvedRunProvider,
 ) -> Result<()> {
-    let Some(summary) = store.session_summary(session_id).await? else {
-        return Ok(());
-    };
-    if summary.parent_session_id.is_some()
-        || !visible_session_source_allows_auto_title(&summary.source)
-        || summary
-            .title
-            .as_deref()
-            .and_then(normalize_session_title)
-            .is_some()
-    {
+    if !visible_session_needs_auto_title(store, session_id).await? {
         return Ok(());
     }
 
@@ -108,6 +101,181 @@ pub(crate) async fn ensure_new_visible_session_title(
     let title = generated.unwrap_or_else(|| fallback_session_title(prompt, selected_skills));
     let _ = store.set_session_title_if_empty(session_id, &title).await?;
     Ok(())
+}
+
+pub(crate) async fn ensure_new_visible_session_fallback_title(
+    store: &StateRuntime,
+    session_id: &str,
+    prompt: &str,
+    selected_skills: &[SelectedSkill],
+) -> Result<()> {
+    if !visible_session_needs_auto_title(store, session_id).await? {
+        return Ok(());
+    }
+    let title = fallback_session_title(prompt, selected_skills);
+    let _ = store.set_session_title_if_empty(session_id, &title).await?;
+    Ok(())
+}
+
+pub(crate) fn spawn_visible_session_title_task(
+    store: StateRuntime,
+    session_id: String,
+    prompt: String,
+    selected_skills: Vec<SelectedSkill>,
+    skill_catalog: SkillCatalog,
+    title_generation: Option<(LanguageModel, ResolvedRunProvider)>,
+    stream: RunStreamSink,
+) {
+    tokio::spawn(async move {
+        let result = if let Some((title_provider, title_resolved)) = title_generation {
+            ensure_new_visible_session_title(
+                &store,
+                &session_id,
+                &prompt,
+                &selected_skills,
+                &skill_catalog,
+                title_provider,
+                &title_resolved,
+            )
+            .await
+        } else {
+            ensure_new_visible_session_fallback_title(
+                &store,
+                &session_id,
+                &prompt,
+                &selected_skills,
+            )
+            .await
+        };
+        match result {
+            Ok(()) => {
+                if let Ok(Some(summary)) = store.session_summary(&session_id).await {
+                    stream(RunStreamEvent::value(json!({
+                        "type": "session_title_changed",
+                        "session_id": session_id,
+                        "title": summary.title,
+                    })));
+                }
+            }
+            Err(error) => stream(RunStreamEvent::value(json!({
+                "type": "warning",
+                "kind": "title_generation_failed",
+                "message": error.to_string(),
+            }))),
+        }
+    });
+}
+
+pub(crate) struct WebFirstTurnTitleGuard {
+    title_started: Arc<AtomicBool>,
+    store: StateRuntime,
+    session_id: String,
+    prompt: String,
+    selected_skills: Vec<SelectedSkill>,
+    skill_catalog: SkillCatalog,
+    stream: RunStreamSink,
+}
+
+impl WebFirstTurnTitleGuard {
+    pub(crate) fn new(
+        store: StateRuntime,
+        session_id: String,
+        prompt: String,
+        selected_skills: Vec<SelectedSkill>,
+        skill_catalog: SkillCatalog,
+        stream: RunStreamSink,
+    ) -> Self {
+        Self {
+            title_started: Arc::new(AtomicBool::new(false)),
+            store,
+            session_id,
+            prompt,
+            selected_skills,
+            skill_catalog,
+            stream,
+        }
+    }
+
+    pub(crate) fn observe_main_generation(
+        &self,
+        title_generation: Option<(LanguageModel, ResolvedRunProvider)>,
+    ) -> RunStreamSink {
+        let store = self.store.clone();
+        let session_id = self.session_id.clone();
+        let prompt = self.prompt.clone();
+        let selected_skills = self.selected_skills.clone();
+        let skill_catalog = self.skill_catalog.clone();
+        let title_started = Arc::clone(&self.title_started);
+        let stream = Arc::clone(&self.stream);
+        Arc::new(move |event| {
+            let should_start_title = run_stream_event_starts_web_title(&event)
+                && title_started
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok();
+            stream(event);
+            if should_start_title {
+                spawn_visible_session_title_task(
+                    store.clone(),
+                    session_id.clone(),
+                    prompt.clone(),
+                    selected_skills.clone(),
+                    skill_catalog.clone(),
+                    title_generation.clone(),
+                    Arc::clone(&stream),
+                );
+            }
+        })
+    }
+}
+
+impl Drop for WebFirstTurnTitleGuard {
+    fn drop(&mut self) {
+        if self
+            .title_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        spawn_visible_session_title_task(
+            self.store.clone(),
+            self.session_id.clone(),
+            self.prompt.clone(),
+            self.selected_skills.clone(),
+            self.skill_catalog.clone(),
+            None,
+            Arc::clone(&self.stream),
+        );
+    }
+}
+
+fn run_stream_event_starts_web_title(event: &RunStreamEvent) -> bool {
+    match event {
+        RunStreamEvent::AssistantTextDelta { .. } | RunStreamEvent::ReasoningDelta { .. } => true,
+        RunStreamEvent::Event(event) => match &event.payload {
+            SessionEventPayload::MessageUpdated { .. }
+            | SessionEventPayload::ToolCallPending { .. } => true,
+            SessionEventPayload::Diagnostic { kind, .. } => kind == "generation_end",
+            _ => false,
+        },
+        RunStreamEvent::Scoped { event, .. } => run_stream_event_starts_web_title(event),
+        RunStreamEvent::ReasoningEnd
+        | RunStreamEvent::ClarifyRequest(_)
+        | RunStreamEvent::ClarifyResolved(_) => false,
+    }
+}
+
+async fn visible_session_needs_auto_title(store: &StateRuntime, session_id: &str) -> Result<bool> {
+    let Some(summary) = store.session_summary(session_id).await? else {
+        return Ok(false);
+    };
+    Ok(summary.parent_session_id.is_none()
+        && visible_session_source_allows_auto_title(&summary.source)
+        && summary
+            .title
+            .as_deref()
+            .and_then(normalize_session_title)
+            .is_none())
 }
 
 pub(crate) fn visible_session_source_allows_auto_title(source: &str) -> bool {

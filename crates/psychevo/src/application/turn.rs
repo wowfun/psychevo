@@ -58,7 +58,7 @@ impl TurnTaskGuard {
             terminal.last_error = error.to_string();
             terminal
         });
-        self.runtime.settle_turn(
+        let activity = self.runtime.settle_turn(
             &self.receipt.thread_id,
             &self.receipt.turn_id,
             pending_terminal,
@@ -66,10 +66,22 @@ impl TurnTaskGuard {
 
         let completion = match finalization {
             Ok(()) => {
+                if let Some(activity) = activity {
+                    self.events.push(TurnEvent::ActivityChanged {
+                        thread_id: self.receipt.thread_id.clone(),
+                        activity,
+                    });
+                }
                 self.events.push(terminal.terminal_event.clone());
                 terminal.completion.clone()
             }
             Err(error) => {
+                if let Some(activity) = activity {
+                    self.events.push(TurnEvent::ActivityChanged {
+                        thread_id: self.receipt.thread_id.clone(),
+                        activity,
+                    });
+                }
                 let message: Arc<str> = Arc::from(format!(
                     "failed to persist Framework Turn terminal: {error}"
                 ));
@@ -92,8 +104,15 @@ impl TurnTaskGuard {
     fn reject(&mut self, message: Arc<str>) {
         self.interactions.cancel_permissions();
         self.interaction_broker.finish();
-        self.runtime
-            .settle_turn(&self.receipt.thread_id, &self.receipt.turn_id, None);
+        if let Some(activity) =
+            self.runtime
+                .settle_turn(&self.receipt.thread_id, &self.receipt.turn_id, None)
+        {
+            self.events.push(TurnEvent::ActivityChanged {
+                thread_id: self.receipt.thread_id.clone(),
+                activity,
+            });
+        }
         self.events.close();
         self.completion.settle(Err(message));
         self.armed = false;
@@ -117,11 +136,17 @@ impl Drop for TurnTaskGuard {
         });
         self.interactions.cancel_permissions();
         self.interaction_broker.finish();
-        self.runtime.settle_turn(
+        let activity = self.runtime.settle_turn(
             &self.receipt.thread_id,
             &self.receipt.turn_id,
             pending_terminal,
         );
+        if let Some(activity) = activity {
+            self.events.push(TurnEvent::ActivityChanged {
+                thread_id: self.receipt.thread_id.clone(),
+                activity,
+            });
+        }
         self.events.push(TurnEvent::Warning {
             data: serde_json::json!({
                 "kind": "framework_turn_finalization_panic",
@@ -260,10 +285,11 @@ impl Thread {
             control: control_handle,
             interaction_broker: Some(interaction_broker),
         };
-        let lane = client
-            .inner
-            .runtime
-            .register_turn(&thread_id, &turn_id, handle.clone())?;
+        let (lane, queue_position) =
+            client
+                .inner
+                .runtime
+                .register_turn(&thread_id, &turn_id, handle.clone())?;
 
         if let Some(observer) = event_observer {
             let mut stream = handle.events();
@@ -306,9 +332,27 @@ impl Thread {
                     let _ = acceptance_tx.send(Err(error));
                     return;
                 }
+                let activity = match task_client
+                    .inner
+                    .runtime
+                    .mark_turn_accepted(&thread_id, &turn_id)
+                {
+                    Ok(activity) => activity,
+                    Err(error) => {
+                        let message: Arc<str> = Arc::from(error.to_string());
+                        finalizer.reject(message);
+                        let _ = acceptance_tx.send(Err(error));
+                        return;
+                    }
+                };
                 finalizer.mark_accepted();
                 task_events.push(TurnEvent::Accepted {
                     receipt: task_receipt.clone(),
+                    queue_position: (queue_position > 0).then_some(queue_position),
+                });
+                task_events.push(TurnEvent::ActivityChanged {
+                    thread_id: thread_id.clone(),
+                    activity,
                 });
                 let _ = acceptance_tx.send(Ok(()));
                 drop(admission_guard);
@@ -458,6 +502,9 @@ mod tests {
         runtime
             .register_turn(&receipt.thread_id, &receipt.turn_id, handle.clone())
             .expect("register turn");
+        runtime
+            .mark_turn_accepted(&receipt.thread_id, &receipt.turn_id)
+            .expect("accept turn");
         (
             application,
             runtime,
@@ -507,6 +554,18 @@ mod tests {
             .expect_err("panic is a lifecycle failure");
         assert!(waiter.to_string().contains("panicked during finalization"));
         let mut cursor = 0;
+        assert!(matches!(
+            events.next(&mut cursor).await,
+            Some(TurnEvent::ActivityChanged {
+                activity: ThreadActivitySnapshot {
+                    running: false,
+                    active_turn_id: None,
+                    queued_turns: 0,
+                    ..
+                },
+                ..
+            })
+        ));
         assert!(matches!(
             events.next(&mut cursor).await,
             Some(TurnEvent::Warning { data })

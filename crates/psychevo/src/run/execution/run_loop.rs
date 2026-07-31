@@ -243,6 +243,22 @@ pub(crate) async fn run_live_internal(
             true,
         )
     };
+    let should_auto_title =
+        should_title_visible_first_turn(created_session, first_use_empty_visible_session);
+    let web_first_turn_title_guard = if should_auto_title && source == "web" {
+        stream_events.clone().map(|stream| {
+            WebFirstTurnTitleGuard::new(
+                store.clone(),
+                session_id.clone(),
+                options.prompt.clone(),
+                selected_skills.clone(),
+                skill_catalog.clone(),
+                stream,
+            )
+        })
+    } else {
+        None
+    };
     if first_use_empty_visible_session {
         materialize_first_use_empty_session(
             &store,
@@ -401,20 +417,42 @@ pub(crate) async fn run_live_internal(
                 resolved.inference_idle_timeout_secs,
             )?
         };
-    let title_resolved = resolve_title_generation_provider(&resolved_options, &loaded, &resolved)?;
-    let provider_for_title =
-        if let Some(provider) = provider_override.clone() {
-            provider
-        } else {
-            crate::run::generation_provider(
-                title_resolved.base_url.clone(),
-                title_resolved.api_key.clone(),
-                title_resolved.provider.clone(),
-                title_resolved.inference_idle_timeout_secs,
-            )?
+    let (title_generation, mut title_warnings) = if should_auto_title {
+        match resolve_title_generation_provider(&resolved_options, &loaded, &resolved).and_then(
+            |title_resolved| {
+                let title_provider = if let Some(provider) = provider_override.clone() {
+                    provider
+                } else {
+                    crate::run::generation_provider(
+                        title_resolved.base_url.clone(),
+                        title_resolved.api_key.clone(),
+                        title_resolved.provider.clone(),
+                        title_resolved.inference_idle_timeout_secs,
+                    )?
+                };
+                let title_model = title_provider
+                    .language_model(title_resolved.model.clone())
+                    .map_err(|error| Error::Config(error.to_string()))?;
+                Ok((title_model, title_resolved))
+            },
+        ) {
+            Ok(title_generation) => (Some(title_generation), Vec::new()),
+            Err(error) => (
+                None,
+                vec![RunWarning {
+                    kind: "title_generation_failed".to_string(),
+                    message: format!(
+                        "session title generation is unavailable; using prompt fallback: {error}"
+                    ),
+                    source_path: None,
+                    suggestion: None,
+                }],
+            ),
         }
-        .language_model(title_resolved.model.clone())
-        .map_err(|error| Error::Config(error.to_string()))?;
+    } else {
+        (None, Vec::new())
+    };
+    emit_warning_events(&title_warnings, &events, stream_events.as_ref());
     let context_recorder = ContextRecorder::default();
     let reviewer_model = smart_reviewer_model(
         provider_override.as_ref(),
@@ -836,6 +874,11 @@ pub(crate) async fn run_live_internal(
         "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
         "cwd": prefix_metadata.get("cwd").cloned().unwrap_or_default(),
     });
+    let main_stream_events = if let Some(title_guard) = &web_first_turn_title_guard {
+        Some(title_guard.observe_main_generation(title_generation.clone()))
+    } else {
+        stream_events.clone()
+    };
     let sink = Arc::new(PersistenceSink {
         store: store.clone(),
         session_id: session_id.clone(),
@@ -848,7 +891,7 @@ pub(crate) async fn run_live_internal(
         control: SmokeControl::None,
         control_handle: Some(control_handle.clone()),
         events: Some(Arc::clone(&events)),
-        stream_events: stream_events.clone(),
+        stream_events: main_stream_events,
         trace: trace.clone(),
         trace_warning_emitted,
         include_reasoning: options.include_reasoning,
@@ -993,59 +1036,55 @@ pub(crate) async fn run_live_internal(
         .iter()
         .filter(|message| matches!(message, Message::ToolResult { is_error: true, .. }))
         .count();
-    if should_title_completed_session(
-        created_session,
-        first_use_empty_visible_session,
-        completion.outcome,
-    ) {
-        if let Some(title_stream) = stream_events_after.clone() {
-            let title_store = store.clone();
-            let title_session_id = session_id.clone();
-            let title_prompt = options.prompt.clone();
-            let title_selected_skills = selected_skills.clone();
-            let title_skill_catalog = skill_catalog.clone();
-            let title_resolved = title_resolved.clone();
-            tokio::spawn(async move {
-                match ensure_new_visible_session_title(
-                    &title_store,
-                    &title_session_id,
-                    &title_prompt,
-                    &title_selected_skills,
-                    &title_skill_catalog,
-                    provider_for_title,
-                    &title_resolved,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if let Ok(Some(summary)) =
-                            title_store.session_summary(&title_session_id).await
-                        {
-                            title_stream(RunStreamEvent::value(json!({
-                                "type": "session_title_changed",
-                                "session_id": title_session_id,
-                                "title": summary.title,
-                            })));
-                        }
-                    }
-                    Err(error) => title_stream(RunStreamEvent::value(json!({
-                        "type": "warning",
-                        "kind": "title_generation_failed",
-                        "message": error.to_string(),
-                    }))),
-                }
-            });
-        } else {
+    if should_auto_title
+        && source != "web"
+        && let Some(title_stream) = stream_events_after.clone()
+    {
+        spawn_visible_session_title_task(
+            store.clone(),
+            session_id.clone(),
+            options.prompt.clone(),
+            selected_skills.clone(),
+            skill_catalog.clone(),
+            title_generation.clone(),
+            title_stream,
+        );
+    } else if should_auto_title && stream_events_after.is_none() {
+        let title_result = if let Some((title_provider, title_resolved)) = title_generation {
             ensure_new_visible_session_title(
                 &store,
                 &session_id,
                 &options.prompt,
                 &selected_skills,
                 &skill_catalog,
-                provider_for_title,
+                title_provider,
                 &title_resolved,
             )
-            .await?;
+            .await
+        } else {
+            ensure_new_visible_session_fallback_title(
+                &store,
+                &session_id,
+                &options.prompt,
+                &selected_skills,
+            )
+            .await
+        };
+        if let Err(error) = title_result {
+            let warning = RunWarning {
+                kind: "title_generation_failed".to_string(),
+                message: format!(
+                    "session title generation failed after the main turn completed: {error}"
+                ),
+                source_path: None,
+                suggestion: None,
+            };
+            emit_warning_events(
+                std::slice::from_ref(&warning),
+                &events,
+                stream_events_after.as_ref(),
+            );
+            title_warnings.push(warning);
         }
     }
 
@@ -1063,6 +1102,7 @@ pub(crate) async fn run_live_internal(
     warnings.extend(extension_warnings);
     warnings.extend(mcp_warnings);
     warnings.append(&mut tool_surface_warnings);
+    warnings.extend(title_warnings);
     if let Some(runtime) = &hook_runtime_for_lifecycle {
         let _ = runtime.run_session_end(&json!({
             "session_id": session_id,

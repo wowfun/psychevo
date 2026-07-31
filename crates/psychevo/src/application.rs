@@ -389,6 +389,22 @@ pub struct ThreadSummary {
     pub active_turn_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadActivitySnapshot {
+    pub revision: u64,
+    pub running: bool,
+    pub active_turn_id: Option<String>,
+    pub queued_turns: usize,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationActivitySnapshot {
+    pub revision: u64,
+    pub threads: BTreeMap<String, ThreadActivitySnapshot>,
+}
+
 const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
 const MAX_HISTORY_PAGE_SIZE: usize = 200;
 
@@ -472,8 +488,14 @@ pub enum ItemStage {
     rename_all_fields = "camelCase"
 )]
 pub enum TurnEvent {
+    ActivityChanged {
+        thread_id: String,
+        activity: ThreadActivitySnapshot,
+    },
     Accepted {
         receipt: TurnReceipt,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queue_position: Option<usize>,
     },
     Started {
         thread_id: String,
@@ -1680,7 +1702,19 @@ mod tests {
         let mut events = handle.events();
         assert!(matches!(
             events.next().await,
-            Some(TurnEvent::Accepted { receipt }) if receipt.turn_id == handle.receipt().turn_id
+            Some(TurnEvent::Accepted { receipt, .. }) if receipt.turn_id == handle.receipt().turn_id
+        ));
+        assert!(matches!(
+            events.next().await,
+            Some(TurnEvent::ActivityChanged {
+                thread_id,
+                activity: ThreadActivitySnapshot {
+                    running: true,
+                    active_turn_id: Some(turn_id),
+                    queued_turns: 0,
+                    ..
+                },
+            }) if thread_id == thread.id() && turn_id == handle.receipt().turn_id
         ));
         started.notified().await;
         assert!(matches!(
@@ -1699,6 +1733,18 @@ mod tests {
         let result = handle.wait().await.expect("turn result");
         assert_eq!(result.final_answer, "fake answer");
         assert_eq!(completed.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            events.next().await,
+            Some(TurnEvent::ActivityChanged {
+                thread_id,
+                activity: ThreadActivitySnapshot {
+                    running: false,
+                    active_turn_id: None,
+                    queued_turns: 0,
+                    ..
+                },
+            }) if thread_id == thread.id()
+        ));
         assert!(matches!(
             events.next().await,
             Some(TurnEvent::Completed {
@@ -1912,6 +1958,15 @@ mod tests {
         let caller_thread = thread.clone();
         let caller = tokio::spawn(async move { caller_thread.start_turn(request).await });
         entered.notified().await;
+        #[cfg(feature = "product")]
+        assert!(
+            !application
+                .client()
+                .__activity_snapshot()
+                .threads
+                .contains_key(thread.id()),
+            "a reservation awaiting durable acceptance is not public activity"
+        );
         caller.abort();
         assert!(
             caller
@@ -1947,6 +2002,75 @@ mod tests {
         assert_eq!(
             resumed.wait().await.expect("turn result").final_answer,
             "fake answer"
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn failed_durable_acceptance_never_enters_public_thread_activity() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(FailingAgentSessionAdapter))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let turn_id = Uuid::now_v7().to_string();
+        application
+            .inner
+            .state
+            .accept_gateway_turn(
+                GatewayTurnDeliveryInput {
+                    turn_id: &turn_id,
+                    thread_id: thread.id(),
+                    runtime_ref: "native",
+                    input_json: "{}",
+                    input_hash: "existing",
+                },
+                None,
+            )
+            .await
+            .expect("existing durable delivery");
+
+        let entered = Arc::new(Notify::new());
+        let accept = Arc::new(Notify::new());
+        application
+            .inner
+            .state
+            .set_gateway_turn_acceptance_barrier_for_test(entered.clone(), accept.clone());
+        let mut request = TurnRequest::new("duplicate durable delivery");
+        request.requested_turn_id = Some(turn_id);
+        let pending_thread = thread.clone();
+        let pending = tokio::spawn(async move { pending_thread.start_turn(request).await });
+
+        entered.notified().await;
+        assert!(
+            !thread.has_activity(),
+            "pending durable acceptance must be invisible to public activity"
+        );
+        #[cfg(feature = "product")]
+        assert!(
+            !application
+                .client()
+                .__activity_snapshot()
+                .threads
+                .contains_key(thread.id())
+        );
+
+        accept.notify_one();
+        pending
+            .await
+            .expect("acceptance task")
+            .expect_err("duplicate durable delivery must fail");
+        assert!(
+            !thread.has_activity(),
+            "failed durable acceptance must not leave public activity"
         );
         application.shutdown().await.expect("shutdown");
     }
@@ -2005,11 +2129,59 @@ mod tests {
             .start_turn(TurnRequest::new("first"))
             .await
             .expect("first turn");
+        let first_turn_id = first.receipt().turn_id.clone();
+        let mut first_events = first.events();
+        assert!(matches!(
+            first_events.next().await,
+            Some(TurnEvent::Accepted { .. })
+        ));
+        let first_activity_revision = match first_events.next().await {
+            Some(TurnEvent::ActivityChanged { activity, .. }) => activity.revision,
+            event => panic!("expected first activity snapshot, got {event:?}"),
+        };
         first_started.notified().await;
         let second = thread
             .start_turn(TurnRequest::new("second"))
             .await
             .expect("second turn");
+        let mut second_events = second.events();
+        let accepted = second_events.next().await.expect("second acceptance");
+        assert!(matches!(
+            accepted,
+            TurnEvent::Accepted {
+                queue_position: Some(1),
+                ..
+            }
+        ));
+        let queued_activity = second_events.next().await.expect("queued activity");
+        let queued_activity_revision = match queued_activity {
+            TurnEvent::ActivityChanged {
+                activity:
+                    ThreadActivitySnapshot {
+                        revision,
+                        running: true,
+                        active_turn_id: Some(ref active_turn_id),
+                        queued_turns: 1,
+                    },
+                ..
+            } if active_turn_id == &first_turn_id => revision,
+            event => panic!("expected queued activity snapshot, got {event:?}"),
+        };
+        assert!(queued_activity_revision > first_activity_revision);
+        #[cfg(feature = "product")]
+        assert!(matches!(
+            application
+                .client()
+                .__activity_snapshot()
+                .threads
+                .get(thread.id()),
+            Some(ThreadActivitySnapshot {
+                running: true,
+                active_turn_id: Some(active_turn_id),
+                queued_turns: 1,
+                ..
+            }) if active_turn_id == &first_turn_id
+        ));
 
         application
             .inner
@@ -2035,6 +2207,33 @@ mod tests {
     #[tokio::test]
     async fn turn_and_thread_mutation_reservations_share_one_fifo_and_evict_when_idle() {
         let runtime = Arc::new(ApplicationRuntime::new());
+        let mutation_only_thread = "mutation-only";
+        let initial_revision = runtime
+            .versioned_thread_activity(mutation_only_thread)
+            .revision;
+        let mutation_only = runtime
+            .reserve_mutation(mutation_only_thread)
+            .expect("mutation-only reservation");
+        assert!(
+            !runtime
+                .thread_activity_snapshot()
+                .contains_key(mutation_only_thread),
+            "Thread mutations are not public Framework Turn activity"
+        );
+        assert_eq!(
+            runtime
+                .versioned_thread_activity(mutation_only_thread)
+                .revision,
+            initial_revision
+        );
+        drop(mutation_only);
+        assert_eq!(
+            runtime
+                .versioned_thread_activity(mutation_only_thread)
+                .revision,
+            initial_revision
+        );
+
         let thread_id = "thread-operation-fifo";
         let first = runtime
             .reserve_turn_for_test(thread_id, "turn-1")
@@ -2047,6 +2246,10 @@ mod tests {
             .reserve_turn_for_test(thread_id, "turn-2")
             .expect("second reservation");
 
+        assert_eq!(
+            runtime.thread_activity_snapshot().get(thread_id),
+            Some(&(true, Some("turn-1".to_string()), 1))
+        );
         assert!(matches!(
             mutation
                 .ready
@@ -2061,6 +2264,10 @@ mod tests {
         ));
 
         runtime.settle_turn(thread_id, "turn-1", None);
+        assert_eq!(
+            runtime.thread_activity_snapshot().get(thread_id),
+            Some(&(true, Some("turn-2".to_string()), 0))
+        );
         mutation
             .ready
             .take()
@@ -2072,9 +2279,21 @@ mod tests {
             Err(tokio::sync::oneshot::error::TryRecvError::Empty)
         ));
 
+        let revision_before_mutation_release =
+            runtime.versioned_thread_activity(thread_id).revision;
         drop(mutation);
         second.await.expect("second Turn follows mutation");
+        assert_eq!(
+            runtime.versioned_thread_activity(thread_id).revision,
+            revision_before_mutation_release,
+            "an internal mutation release does not create a public activity transition"
+        );
+        assert_eq!(
+            runtime.thread_activity_snapshot().get(thread_id),
+            Some(&(true, Some("turn-2".to_string()), 0))
+        );
         runtime.settle_turn(thread_id, "turn-2", None);
+        assert!(!runtime.thread_activity_snapshot().contains_key(thread_id));
         assert!(
             !runtime
                 .state

@@ -18,8 +18,8 @@ pub(crate) use crate::agents::{
     agent_catalog_for_selected_policy, agent_mailbox_event_message,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_tool_policy,
     apply_runtime_hooks, discover_agents, effective_run_mode, effective_tool_names,
-    main_agent_metadata, narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
-    session_agent_input_from_metadata, skill_catalog_visible_for_tools,
+    main_agent_metadata, narrow_permission_mode_for_agent, resolve_agent_definition,
+    resolve_agents_home, session_agent_input_from_metadata, skill_catalog_visible_for_tools,
     spawn_child_agent_background,
 };
 pub(crate) use crate::compaction::{
@@ -65,9 +65,9 @@ pub(crate) use crate::tool_surface::{
 pub(crate) use crate::tools::{detach_exec_sessions_for_task, interrupt_exec_sessions_for_task};
 pub(crate) use crate::types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalsReviewer, ModelMetadata,
-    PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig,
-    ReloadContextOptions, ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, RunWarning, RuntimeTool, SelectedAgent, SmokeControl,
+    PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig, ReloadContextOptions,
+    ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
+    RunWarning, RuntimeTool, SelectedAgent, SmokeControl,
 };
 
 #[allow(unused_imports)]
@@ -89,17 +89,18 @@ mod execution;
 pub(crate) use execution::{
     main_agent_input_from_sources, materialize_first_use_empty_session,
     maybe_preflight_compact_session, run_live_internal, selected_agent_for_result,
-    selected_skills_for_run, session_model_metadata, should_title_completed_session,
+    selected_skills_for_run, session_model_metadata, should_title_visible_first_turn,
 };
 #[path = "run/titles.rs"]
 mod titles;
 pub use titles::fallback_visible_session_title;
 #[allow(unused_imports)]
 pub(crate) use titles::{
-    called_agent_names, clean_generated_session_title, emit_warning_events,
-    ensure_new_visible_session_title, fallback_session_title, generate_session_title,
-    normalize_session_title, prompt_without_selected_skill_markers, remove_think_blocks,
-    selected_skill_title_lines, selected_skills_fallback_title, session_title_request,
+    WebFirstTurnTitleGuard, called_agent_names, clean_generated_session_title, emit_warning_events,
+    ensure_new_visible_session_fallback_title, ensure_new_visible_session_title,
+    fallback_session_title, generate_session_title, normalize_session_title,
+    prompt_without_selected_skill_markers, remove_think_blocks, selected_skill_title_lines,
+    selected_skills_fallback_title, session_title_request, spawn_visible_session_title_task,
     strip_wrapping_title_quotes, truncate_chars, visible_session_source_allows_auto_title,
     warning_event,
 };

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,7 +9,9 @@ use futures::FutureExt;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock, oneshot};
 use tokio_util::task::TaskTracker;
 
-use super::{Error, PendingTerminal, Result, TurnHandle};
+use super::{
+    ApplicationActivitySnapshot, Error, PendingTerminal, Result, ThreadActivitySnapshot, TurnHandle,
+};
 
 pub(super) const MAX_APPLICATION_OPERATIONS: usize = 64;
 pub(super) const MAX_THREAD_OPERATIONS: usize = 32;
@@ -27,6 +31,7 @@ pub(super) struct ApplicationRuntime {
 pub(super) struct ApplicationRuntimeState {
     open: bool,
     accepted_operations: usize,
+    activity_revision: u64,
     application_operations: ThreadCell,
     pub(super) threads: HashMap<String, ThreadCell>,
     pub(super) turns: HashMap<String, TurnSlot>,
@@ -40,6 +45,7 @@ pub(super) struct ThreadCell {
 pub(super) struct ThreadOperation {
     pub(super) kind: ThreadOperationKind,
     pub(super) ready: Option<oneshot::Sender<()>>,
+    pub(super) durable_accepted: bool,
 }
 
 pub(super) enum ThreadOperationKind {
@@ -56,6 +62,7 @@ pub(super) struct TurnSlot {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum TurnPhase {
+    PendingAcceptance,
     Active,
     PendingTerminal,
 }
@@ -67,6 +74,7 @@ impl ApplicationRuntime {
             state: Mutex::new(ApplicationRuntimeState {
                 open: true,
                 accepted_operations: 0,
+                activity_revision: 0,
                 application_operations: ThreadCell::default(),
                 threads: HashMap::new(),
                 turns: HashMap::new(),
@@ -175,8 +183,17 @@ impl ApplicationRuntime {
     ) -> Result<oneshot::Receiver<()>> {
         let mut state = self.lock_state();
         Self::admit_thread_operation(&state, thread_id)?;
-        let cell = state.threads.entry(thread_id.to_string()).or_default();
-        let ready = cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()));
+        let before = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
+        let (ready, after) = {
+            let cell = state.threads.entry(thread_id.to_string()).or_default();
+            let ready = cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()), true);
+            (ready, thread_cell_activity(cell))
+        };
+        Self::record_activity_transition(&mut state, before, after);
         state.accepted_operations += 1;
         Ok(ready)
     }
@@ -186,7 +203,7 @@ impl ApplicationRuntime {
         thread_id: &str,
         turn_id: &str,
         handle: TurnHandle,
-    ) -> Result<oneshot::Receiver<()>> {
+    ) -> Result<(oneshot::Receiver<()>, usize)> {
         let mut state = self.lock_state();
         Self::admit_thread_operation(&state, thread_id)?;
         if state.turns.contains_key(turn_id) {
@@ -198,18 +215,81 @@ impl ApplicationRuntime {
             .threads
             .entry(thread_id.to_string())
             .or_default()
-            .reserve(ThreadOperationKind::Turn(turn_id.to_string()));
+            .reserve(ThreadOperationKind::Turn(turn_id.to_string()), false);
+        let queue_position = state
+            .threads
+            .get(thread_id)
+            .map(thread_turn_queue_position)
+            .unwrap_or_default();
         state.accepted_operations += 1;
         state.turns.insert(
             turn_id.to_string(),
             TurnSlot {
                 handle,
                 abort: None,
-                phase: TurnPhase::Active,
+                phase: TurnPhase::PendingAcceptance,
                 pending_terminal: None,
             },
         );
-        Ok(lane)
+        Ok((lane, queue_position))
+    }
+
+    pub(super) fn mark_turn_accepted(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<ThreadActivitySnapshot> {
+        let mut state = self.lock_state();
+        let phase = state
+            .turns
+            .get(turn_id)
+            .map(|slot| slot.phase)
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "Turn slot disappeared before durable acceptance: {turn_id}"
+                ))
+            })?;
+        if phase != TurnPhase::PendingAcceptance {
+            return Err(Error::Message(format!(
+                "Turn is not pending durable acceptance: {turn_id}"
+            )));
+        }
+        let before = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
+        let operation = state
+            .threads
+            .get_mut(thread_id)
+            .and_then(|cell| {
+                cell.operations.iter_mut().find(|operation| {
+                    matches!(
+                        &operation.kind,
+                        ThreadOperationKind::Turn(candidate) if candidate == turn_id
+                    )
+                })
+            })
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "Turn reservation disappeared before durable acceptance: {turn_id}"
+                ))
+            })?;
+        operation.durable_accepted = true;
+        state
+            .turns
+            .get_mut(turn_id)
+            .expect("Turn slot was validated while holding the runtime lock")
+            .phase = TurnPhase::Active;
+        let after = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
+        Ok(
+            Self::record_activity_transition(&mut state, before, after.clone())
+                .unwrap_or_else(|| thread_activity_snapshot(state.activity_revision, after)),
+        )
     }
 
     pub(super) fn set_turn_abort(&self, turn_id: &str, abort: tokio::task::AbortHandle) {
@@ -223,8 +303,13 @@ impl ApplicationRuntime {
         thread_id: &str,
         turn_id: &str,
         pending_terminal: Option<PendingTerminal>,
-    ) {
+    ) -> Option<ThreadActivitySnapshot> {
         let mut state = self.lock_state();
+        let before = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
         Self::remove_thread_turn(&mut state, thread_id, turn_id);
         if let Some(pending_terminal) = pending_terminal {
             if let Some(slot) = state.turns.get_mut(turn_id) {
@@ -235,6 +320,12 @@ impl ApplicationRuntime {
         } else {
             state.turns.remove(turn_id);
         }
+        let after = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
+        Self::record_activity_transition(&mut state, before, after)
     }
 
     fn remove_thread_turn(state: &mut ApplicationRuntimeState, thread_id: &str, turn_id: &str) {
@@ -274,24 +365,53 @@ impl ApplicationRuntime {
         self.lock_state()
             .threads
             .get(thread_id)
-            .map(|cell| {
-                let active_turn_id = cell
-                    .operations
-                    .front()
-                    .and_then(|operation| match &operation.kind {
-                        ThreadOperationKind::Turn(turn_id) => Some(turn_id.clone()),
-                        ThreadOperationKind::Mutation(_) => None,
-                    });
-                let running = !cell.operations.is_empty();
-                let queued = cell
-                    .operations
-                    .iter()
-                    .filter(|operation| matches!(&operation.kind, ThreadOperationKind::Turn(_)))
-                    .count()
-                    .saturating_sub(usize::from(active_turn_id.is_some()));
-                (running, active_turn_id, queued)
-            })
+            .map(thread_cell_activity)
             .unwrap_or((false, None, 0))
+    }
+
+    #[cfg(test)]
+    pub(super) fn thread_activity_snapshot(
+        &self,
+    ) -> BTreeMap<String, (bool, Option<String>, usize)> {
+        self.lock_state()
+            .threads
+            .iter()
+            .filter_map(|(thread_id, cell)| {
+                let activity = thread_cell_activity(cell);
+                activity.0.then(|| (thread_id.clone(), activity))
+            })
+            .collect()
+    }
+
+    pub(super) fn versioned_thread_activity(&self, thread_id: &str) -> ThreadActivitySnapshot {
+        let state = self.lock_state();
+        let activity = state
+            .threads
+            .get(thread_id)
+            .map(thread_cell_activity)
+            .unwrap_or((false, None, 0));
+        thread_activity_snapshot(state.activity_revision, activity)
+    }
+
+    pub(super) fn versioned_thread_activity_snapshot(&self) -> ApplicationActivitySnapshot {
+        let state = self.lock_state();
+        let threads = state
+            .threads
+            .iter()
+            .filter_map(|(thread_id, cell)| {
+                let activity = thread_cell_activity(cell);
+                activity.0.then(|| {
+                    (
+                        thread_id.clone(),
+                        thread_activity_snapshot(state.activity_revision, activity),
+                    )
+                })
+            })
+            .collect();
+        ApplicationActivitySnapshot {
+            revision: state.activity_revision,
+            threads,
+        }
     }
 
     pub(super) fn thread_turn_handles(&self, thread_id: &str) -> Vec<TurnHandle> {
@@ -326,7 +446,7 @@ impl ApplicationRuntime {
         Self::admit_application_operation(&state)?;
         let ready = state
             .application_operations
-            .reserve(ThreadOperationKind::Mutation(operation_id));
+            .reserve(ThreadOperationKind::Mutation(operation_id), true);
         state.accepted_operations += 1;
         Ok(ApplicationOperationReservation {
             runtime: Arc::clone(self),
@@ -342,8 +462,11 @@ impl ApplicationRuntime {
         let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
         let mut state = self.lock_state();
         Self::admit_thread_operation(&state, thread_id)?;
-        let cell = state.threads.entry(thread_id.to_string()).or_default();
-        let ready = cell.reserve(ThreadOperationKind::Mutation(operation_id));
+        let ready = state
+            .threads
+            .entry(thread_id.to_string())
+            .or_default()
+            .reserve(ThreadOperationKind::Mutation(operation_id), true);
         state.accepted_operations += 1;
         Ok(ThreadMutationReservation {
             runtime: Arc::clone(self),
@@ -404,6 +527,18 @@ impl ApplicationRuntime {
         Ok(())
     }
 
+    fn record_activity_transition(
+        state: &mut ApplicationRuntimeState,
+        before: (bool, Option<String>, usize),
+        after: (bool, Option<String>, usize),
+    ) -> Option<ThreadActivitySnapshot> {
+        if before == after {
+            return None;
+        }
+        state.activity_revision = state.activity_revision.saturating_add(1);
+        Some(thread_activity_snapshot(state.activity_revision, after))
+    }
+
     pub(super) fn take_turn_slots(&self) -> Vec<TurnSlot> {
         let mut state = self.lock_state();
         let slots = state
@@ -442,11 +577,16 @@ fn application_overloaded(scope: &str, limit: usize) -> Error {
 }
 
 impl ThreadCell {
-    fn reserve(&mut self, kind: ThreadOperationKind) -> oneshot::Receiver<()> {
+    fn reserve(
+        &mut self,
+        kind: ThreadOperationKind,
+        durable_accepted: bool,
+    ) -> oneshot::Receiver<()> {
         let (ready_tx, ready_rx) = oneshot::channel();
         self.operations.push_back(ThreadOperation {
             kind,
             ready: Some(ready_tx),
+            durable_accepted,
         });
         if self.operations.len() == 1 {
             Self::release_front_waiter(&mut self.operations);
@@ -533,6 +673,56 @@ impl ApplicationOperationReservation {
                 Error::Message("Application operation reservation was cancelled".to_string())
             })?;
         Ok(self)
+    }
+}
+
+fn thread_cell_activity(cell: &ThreadCell) -> (bool, Option<String>, usize) {
+    let mut pending_turn_precedes_head = false;
+    let mut active_turn_id = None;
+    let mut accepted_turns = 0_usize;
+    for operation in &cell.operations {
+        let ThreadOperationKind::Turn(turn_id) = &operation.kind else {
+            continue;
+        };
+        if !operation.durable_accepted {
+            if active_turn_id.is_none() {
+                pending_turn_precedes_head = true;
+            }
+            continue;
+        }
+        accepted_turns += 1;
+        if active_turn_id.is_none() && !pending_turn_precedes_head {
+            active_turn_id = Some(turn_id.clone());
+        }
+    }
+    (
+        accepted_turns > 0,
+        active_turn_id.clone(),
+        accepted_turns.saturating_sub(usize::from(active_turn_id.is_some())),
+    )
+}
+
+fn thread_turn_queue_position(cell: &ThreadCell) -> usize {
+    let active_turn = cell
+        .operations
+        .front()
+        .is_some_and(|operation| matches!(&operation.kind, ThreadOperationKind::Turn(_)));
+    cell.operations
+        .iter()
+        .filter(|operation| matches!(&operation.kind, ThreadOperationKind::Turn(_)))
+        .count()
+        .saturating_sub(usize::from(active_turn))
+}
+
+fn thread_activity_snapshot(
+    revision: u64,
+    (running, active_turn_id, queued_turns): (bool, Option<String>, usize),
+) -> ThreadActivitySnapshot {
+    ThreadActivitySnapshot {
+        revision,
+        running,
+        active_turn_id,
+        queued_turns,
     }
 }
 

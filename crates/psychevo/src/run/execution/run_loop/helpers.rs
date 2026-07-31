@@ -26,12 +26,11 @@ pub(crate) async fn materialize_first_use_empty_session(
     Ok(true)
 }
 
-pub(crate) fn should_title_completed_session(
+pub(crate) fn should_title_visible_first_turn(
     created_session: bool,
     first_use_empty_visible_session: bool,
-    outcome: Outcome,
 ) -> bool {
-    (created_session || first_use_empty_visible_session) && outcome == Outcome::Normal
+    created_session || first_use_empty_visible_session
 }
 
 pub(crate) fn selected_skills_for_run(

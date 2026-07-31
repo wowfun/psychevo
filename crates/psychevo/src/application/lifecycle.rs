@@ -258,6 +258,14 @@ impl Application {
         deadline: Option<tokio::time::Instant>,
     ) {
         for slot in self.inner.runtime.take_turn_slots() {
+            if slot.phase == TurnPhase::PendingAcceptance {
+                slot.handle.completion.settle(Err(Arc::from(
+                    "Framework Turn ended before durable acceptance",
+                )));
+                slot.handle.control.abort();
+                slot.handle.events.close();
+                continue;
+            }
             let terminal = slot
                 .pending_terminal
                 .unwrap_or_else(|| PendingTerminal::interrupted(slot.handle.receipt.clone()));
