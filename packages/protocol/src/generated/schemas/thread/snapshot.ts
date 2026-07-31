@@ -43,6 +43,12 @@ export const threadSnapshotSchemas = {
           },
           "type": "array"
         },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leaseExpiresAtMs": {
           "anyOf": [
             {

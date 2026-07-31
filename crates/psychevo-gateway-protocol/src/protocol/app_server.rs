@@ -489,6 +489,11 @@ pub enum AppItemStage {
 pub enum AppTurnEvent {
     Accepted {
         receipt: AppTurnReceipt,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "queuePosition")]
+        #[ts(type = "number | null")]
+        #[ts(optional)]
+        queue_position: Option<usize>,
     },
     Started {
         #[serde(rename = "threadId")]
@@ -619,6 +624,18 @@ mod app_server_contract_tests {
 
     #[test]
     fn app_turn_event_schema_uses_the_serialized_camel_case_keys() {
+        assert_serialized_variant_matches_schema(
+            "type",
+            AppTurnEvent::Accepted {
+                receipt: AppTurnReceipt {
+                    accepted: true,
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-2".to_string(),
+                    client_turn_id: Some("client-turn-2".to_string()),
+                },
+                queue_position: Some(1),
+            },
+        );
         assert_serialized_variant_matches_schema(
             "type",
             AppTurnEvent::Started {

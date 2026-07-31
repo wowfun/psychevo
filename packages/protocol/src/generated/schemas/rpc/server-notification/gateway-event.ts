@@ -103,6 +103,12 @@ export const serverNotificationGatewayEventSchema = {
           },
           "type": "array"
         },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leaseExpiresAtMs": {
           "anyOf": [
             {

@@ -1725,6 +1725,14 @@ export const appServerSchemas = {
   "oneOf": [
     {
       "properties": {
+        "queuePosition": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "receipt": {
           "$ref": "#/definitions/AppTurnReceipt"
         },
@@ -2014,6 +2022,14 @@ export const appServerSchemas = {
       "oneOf": [
         {
           "properties": {
+            "queuePosition": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "receipt": {
               "$ref": "#/definitions/AppTurnReceipt"
             },

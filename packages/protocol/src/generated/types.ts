@@ -76,7 +76,7 @@ export type AppTurnResult = { threadId: string, outcome: AppTurnOutcome, finalAn
 
 export type AppItemStage = "started" | "updated" | "completed";
 
-export type AppTurnEvent = { "type": "accepted", receipt: AppTurnReceipt, } | { "type": "started", threadId: string, turnId: string, } | { "type": "message", stage: AppItemStage, message: unknown, usage?: unknown | null, metadata?: unknown | null, accounting?: unknown | null, } | { "type": "message_delta", text: string, } | { "type": "reasoning_delta", text: string, } | { "type": "reasoning_completed", text: string | null, } | { "type": "tool", stage: AppItemStage, data: unknown, } | { "type": "interaction_requested", interactionId: string, kind: string, payload: unknown, } | { "type": "interaction_resolved", interactionId: string, reason: string, } | { "type": "warning", data: unknown, } | { "type": "completed", threadId: string, turnId: string, outcome: AppTurnOutcome, } | { "type": "failed", threadId: string, turnId: string, message: string, } | { "type": "resync_required", missed: number, };
+export type AppTurnEvent = { "type": "accepted", receipt: AppTurnReceipt, queuePosition?: number | null, } | { "type": "started", threadId: string, turnId: string, } | { "type": "message", stage: AppItemStage, message: unknown, usage?: unknown | null, metadata?: unknown | null, accounting?: unknown | null, } | { "type": "message_delta", text: string, } | { "type": "reasoning_delta", text: string, } | { "type": "reasoning_completed", text: string | null, } | { "type": "tool", stage: AppItemStage, data: unknown, } | { "type": "interaction_requested", interactionId: string, kind: string, payload: unknown, } | { "type": "interaction_resolved", interactionId: string, reason: string, } | { "type": "warning", data: unknown, } | { "type": "completed", threadId: string, turnId: string, outcome: AppTurnOutcome, } | { "type": "failed", threadId: string, turnId: string, message: string, } | { "type": "resync_required", missed: number, };
 
 export type AppTurnEventNotification = { threadId: string, turnId: string, event: AppTurnEvent, };
 
@@ -138,7 +138,7 @@ export type TranscriptBlock = { id: string, kind: TranscriptBlockKind, status: T
 
 export type TranscriptEntry = { id: string, threadId: string, turnId?: string | null, messageSeq?: number | null, role: TranscriptEntryRole, status: TranscriptBlockStatus, source: string, blocks: Array<TranscriptBlock>, metadata?: unknown | null, usage?: unknown | null, accounting?: unknown | null, createdAtMs: number, updatedAtMs: number, };
 
-export type GatewayActivityView = { activities?: Array<ThreadActivityView>, running: boolean, activeTurnId?: string | null, queuedTurns: number, startedAtMs?: number | null, updatedAtMs?: number | null, ownerId?: string, ownerSurface?: string, leaseExpiresAtMs?: number | null, takeoverState?: string, };
+export type GatewayActivityView = { activities?: Array<ThreadActivityView>, frameworkRevision?: string, running: boolean, activeTurnId?: string | null, queuedTurns: number, startedAtMs?: number | null, updatedAtMs?: number | null, ownerId?: string, ownerSurface?: string, leaseExpiresAtMs?: number | null, takeoverState?: string, };
 
 export type ThreadActivityView = { "owner": "framework_turn", activityId: string, turnId: string, kind: FrameworkTurnKind, queuedTurns: number, } | { "owner": "gateway_local", operation: GatewayLocalOperationView, activityId: string, } | { "owner": "foreign", ownerId: string, activityId: string, ownerSurface?: string, };
 

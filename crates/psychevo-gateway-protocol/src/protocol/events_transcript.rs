@@ -299,6 +299,9 @@ pub struct TranscriptEntry {
 pub struct GatewayActivityView {
     #[serde(default)]
     pub activities: Vec<ThreadActivityView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub framework_revision: Option<String>,
     pub running: bool,
     #[serde(default)]
     pub active_turn_id: Option<String>,

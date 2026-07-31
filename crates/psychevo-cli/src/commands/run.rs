@@ -402,7 +402,8 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             "turnId": receipt.turn_id,
             "missed": missed,
         })),
-        TurnEvent::Accepted { .. }
+        TurnEvent::ActivityChanged { .. }
+        | TurnEvent::Accepted { .. }
         | TurnEvent::Started { .. }
         | TurnEvent::Completed { .. }
         | TurnEvent::Failed { .. } => None,

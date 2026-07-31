@@ -127,6 +127,12 @@ export const threadSessionSchemas = {
       },
       "type": "array"
     },
+    "frameworkRevision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "leaseExpiresAtMs": {
       "anyOf": [
         {
@@ -252,6 +258,12 @@ export const threadSessionSchemas = {
             "$ref": "#/definitions/ThreadActivityView"
           },
           "type": "array"
+        },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "leaseExpiresAtMs": {
           "anyOf": [

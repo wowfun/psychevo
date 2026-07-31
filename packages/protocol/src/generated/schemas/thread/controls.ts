@@ -2850,6 +2850,12 @@ export const threadControlSchemas = {
           },
           "type": "array"
         },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leaseExpiresAtMs": {
           "anyOf": [
             {
@@ -5096,6 +5102,12 @@ export const threadControlSchemas = {
           },
           "type": "array"
         },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leaseExpiresAtMs": {
           "anyOf": [
             {
@@ -7125,6 +7137,12 @@ export const threadControlSchemas = {
             "$ref": "#/definitions/ThreadActivityView"
           },
           "type": "array"
+        },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "leaseExpiresAtMs": {
           "anyOf": [

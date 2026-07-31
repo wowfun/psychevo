@@ -120,6 +120,12 @@ export const gatewayEventSchemas = {
           },
           "type": "array"
         },
+        "frameworkRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "leaseExpiresAtMs": {
           "anyOf": [
             {

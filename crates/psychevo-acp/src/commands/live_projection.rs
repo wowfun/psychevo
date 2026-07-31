@@ -223,7 +223,8 @@ pub(crate) fn send_turn_event_update(
         }
         TurnEvent::Message { .. } => {}
         TurnEvent::ResyncRequired { .. } => projection.mark_resync_required(),
-        TurnEvent::Accepted { .. }
+        TurnEvent::ActivityChanged { .. }
+        | TurnEvent::Accepted { .. }
         | TurnEvent::Started { .. }
         | TurnEvent::ReasoningDelta { .. }
         | TurnEvent::ReasoningCompleted { .. }
