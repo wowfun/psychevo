@@ -34,11 +34,7 @@ fn write_fake_pevo(home: &Path) {
 }
 
 #[cfg(unix)]
-fn write_fake_web_install_prerequisites(
-    bin_dir: &Path,
-    home: &Path,
-    pnpm_body: &str,
-) {
+fn write_fake_web_install_prerequisites(bin_dir: &Path, home: &Path, pnpm_body: &str) {
     write_fake_pevo(home);
     write_fake_command(bin_dir, "cargo", "exit 0");
     write_fake_command(bin_dir, "rustc", "printf 'rustc 1.97.0\\n'");

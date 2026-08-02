@@ -147,6 +147,12 @@ development package required to compile Tauri, and runs
 Hosted CI currently runs only for pull requests. Its `main` push trigger is
 temporarily commented out in the workflow with restoration guidance.
 
+Hosted workflows install the workspace minimum Rust toolchain through a
+full-commit-pinned `dtolnay/rust-toolchain` action revision whose baked-in
+toolchain matches `workspace.package.rust-version`. They must not pass an
+unsupported `toolchain` action input that leaves the revision's older baked-in
+toolchain active.
+
 The separate artifact-only workflow currently runs only through explicit manual
 dispatch on Linux, macOS, and Windows. Its `main` push trigger is temporarily
 commented out in the workflow with restoration guidance. YAML prepares host
