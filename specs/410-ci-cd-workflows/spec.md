@@ -138,10 +138,10 @@ Initial profiles:
 ## Hosted CI
 
 The pull-request workflow runs two Linux jobs. `rust` installs the root
-`packageManager` version and Node.js before running
-`cargo xtask ci run --profile rust-broad` so the mixed Rust/TypeScript Gateway
-protocol check can execute, installs the Linux WebKit development package
-required to compile Tauri, and runs
+`packageManager` version, Node.js, and frozen workspace dependencies before
+running `cargo xtask ci run --profile rust-broad` so the mixed Rust/TypeScript
+Gateway protocol check can execute, installs the Linux WebKit development
+package required to compile Tauri, and runs
 `cargo xtask ci run --profile desktop-rust`. `web` installs the root
 `packageManager` version with a frozen lockfile and runs
 `cargo xtask ci run --profile web`.
