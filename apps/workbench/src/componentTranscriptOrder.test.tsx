@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 describe("transcript ordering", () => {
-  it("renders older live overlays before newer durable messages", () => {
+  it("renders an optimistic user message before a newer durable assistant message", () => {
     const html = renderToStaticMarkup(
       <TranscriptPanel
         entries={[
@@ -19,29 +19,31 @@ describe("transcript ordering", () => {
               transcriptBlock({
                 id: "message:15:text",
                 kind: "text",
-                body: "newer durable answer",
+                body: "newer durable assistant message",
                 createdAtMs: 1500,
                 updatedAtMs: 1500
               })
             ]
-          }),
+          })
+        ]}
+        liveEntries={[
           transcriptEntry({
-            id: "live:turn-1:assistant:13",
+            id: "optimistic:turn-1:user",
             messageSeq: null,
-            source: "runtime.stream",
+            role: "user",
+            source: "client.optimistic",
             createdAtMs: 1300,
             updatedAtMs: 1300,
             metadata: {
-              projection: "assistant_segment",
-              liveOrder: 0,
-              streamSeq: 13
+              projection: "optimistic_prompt",
+              liveOrder: -1
             },
             blocks: [
               transcriptBlock({
-                id: "live:turn-1:assistant:13:text",
+                id: "optimistic:turn-1:user:text",
                 kind: "text",
-                source: "runtime.stream",
-                body: "older live answer",
+                source: "client.optimistic",
+                body: "older optimistic user message",
                 createdAtMs: 1300,
                 updatedAtMs: 1300
               })
@@ -51,8 +53,8 @@ describe("transcript ordering", () => {
       />
     );
 
-    expect(html.indexOf("older live answer")).toBeLessThan(
-      html.indexOf("newer durable answer")
+    expect(html.indexOf("older optimistic user message")).toBeLessThan(
+      html.indexOf("newer durable assistant message")
     );
   });
 });

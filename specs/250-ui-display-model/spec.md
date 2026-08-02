@@ -281,7 +281,10 @@ assistant/tool streaming from the same non-empty turn, but it must not move a
 later turn ahead of visible entries retained from an earlier turn. Across turn
 identities, or while either entry is not yet turn-bound, clients use the
 timeline before stable identity fallback. Committed `messageSeq` remains the
-authoritative cross-turn ordering signal.
+authoritative cross-turn ordering signal. Committed and live storage partitions
+are not presentation-order boundaries: renderers merge both ordered partitions
+with these same rules before virtualization and must not append every live row
+after every committed row.
 
 Agent-authoritative transcript blocks may carry a positive `phaseOrdinal`.
 Phase/item identity, not rendered text, owns replacement and order. The UI

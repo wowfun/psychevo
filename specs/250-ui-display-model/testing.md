@@ -76,6 +76,9 @@ validation.
   live overlay text.
 - Reconnect or resume replaces optimistic prompt rows with the committed user
   message for the turn.
+- A retained optimistic user row in the live partition renders before a newer
+  committed assistant row; the committed/live storage split cannot reverse
+  their shared timeline order.
 - Empty reasoning-completion observations close existing reasoning blocks
   without creating empty Thinking rows.
 - Ordinary assistant prose that says a tool will be used does not create a tool

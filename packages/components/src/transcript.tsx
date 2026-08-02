@@ -72,41 +72,67 @@ export function TranscriptPanel({ activity, entries, history, liveEntries = EMPT
   const scrollIdleTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const scrollMemoryRef = useRef<Map<string, TranscriptScrollMemory>>(new Map());
   const activeThreadKeyRef = useRef<string | null>(null);
-  const committedProjection = useMemo(
-    () => visibleTranscriptEntries(orderTranscriptEntries(entries)),
+  const orderedCommittedEntries = useMemo(
+    () => orderTranscriptEntries(entries),
     [entries]
   );
-  const liveProjection = useMemo(
+  const orderedLiveEntries = useMemo(
+    () => orderTranscriptEntries(liveEntries),
+    [liveEntries]
+  );
+  const committedProjection = useMemo(
+    () => visibleTranscriptEntries(orderedCommittedEntries),
+    [orderedCommittedEntries]
+  );
+  const appendedLiveProjection = useMemo(
     () => visibleTranscriptEntries(
-      orderTranscriptEntries(liveEntries),
+      orderedLiveEntries,
       committedProjection.lastGeneratedImage
     ),
-    [committedProjection, liveEntries]
+    [committedProjection, orderedLiveEntries]
+  );
+  const orderedEntries = useMemo(
+    () => new MergedTranscriptEntries(orderedCommittedEntries, orderedLiveEntries),
+    [orderedCommittedEntries, orderedLiveEntries]
+  );
+  const visibleSegments = useMemo(
+    () => orderedEntries.committedBeforeLive
+      ? {
+          committed: committedProjection.entries,
+          live: appendedLiveProjection.entries
+        }
+      : visibleTranscriptSegments(
+          orderedEntries,
+          committedProjection.entries,
+          appendedLiveProjection.entries
+        ),
+    [appendedLiveProjection.entries, committedProjection.entries, orderedEntries]
   );
   const visibleEntries = useMemo(
-    () => new JoinedTranscriptEntries(
-      committedProjection.entries,
-      liveProjection.entries
+    () => new MergedTranscriptEntries(
+      visibleSegments.committed,
+      visibleSegments.live
     ),
-    [committedProjection.entries, liveProjection.entries]
+    [visibleSegments.committed, visibleSegments.live]
   );
   const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
   const virtualTranscript = useVirtualTranscript(
-    committedProjection.entries,
-    liveProjection.entries,
+    visibleEntries,
+    visibleSegments.committed,
+    visibleSegments.live,
     scrollRef
   );
   const committedHasRunningActivityBlock = useMemo(
-    () => committedProjection.entries.some(
+    () => visibleSegments.committed.some(
       (entry) => visibleBlocks(entry).some(isRunningActivityBlock)
     ),
-    [committedProjection.entries]
+    [visibleSegments.committed]
   );
   const liveHasRunningActivityBlock = useMemo(
-    () => liveProjection.entries.some(
+    () => visibleSegments.live.some(
       (entry) => visibleBlocks(entry).some(isRunningActivityBlock)
     ),
-    [liveProjection.entries]
+    [visibleSegments.live]
   );
   const hasRunningActivityBlock =
     committedHasRunningActivityBlock || liveHasRunningActivityBlock;
@@ -250,6 +276,7 @@ type VirtualTranscriptWindow = {
 };
 
 function useVirtualTranscript(
+  entries: MergedTranscriptEntries,
   committedEntries: TranscriptEntry[],
   liveEntries: TranscriptEntry[],
   scrollRef: RefObject<HTMLDivElement | null>
@@ -271,8 +298,8 @@ function useVirtualTranscript(
     [liveEntries, liveHeightRevision]
   );
   const layout = useMemo(
-    () => new VirtualTranscriptLayout(committedLayout, liveLayout),
-    [committedLayout, liveLayout]
+    () => new VirtualTranscriptLayout(entries.runs, committedLayout, liveLayout),
+    [committedLayout, entries, liveLayout]
   );
 
   const syncViewport = useMemo(() => (scroller: HTMLElement) => {
@@ -399,59 +426,104 @@ function virtualTranscriptSegment(
   };
 }
 
+type TranscriptSegmentKind = "committed" | "live";
+
+type TranscriptEntryRun = {
+  end: number;
+  globalStart: number;
+  segment: TranscriptSegmentKind;
+  start: number;
+};
+
+type VirtualTranscriptRun = TranscriptEntryRun & {
+  height: number;
+  offsetStart: number;
+};
+
 class VirtualTranscriptLayout {
   readonly length: number;
   readonly totalHeight: number;
+  private readonly layoutRuns: VirtualTranscriptRun[];
 
   constructor(
+    runs: readonly TranscriptEntryRun[],
     private readonly committed: VirtualTranscriptSegment,
     private readonly live: VirtualTranscriptSegment
   ) {
-    this.length = committed.entryIds.length + live.entryIds.length;
-    this.totalHeight = committed.totalHeight + live.totalHeight;
+    let offsetStart = 0;
+    this.layoutRuns = runs.map((run) => {
+      const segment = this.segment(run.segment);
+      const height = (segment.offsets[run.end] ?? segment.totalHeight)
+        - (segment.offsets[run.start] ?? 0);
+      const layoutRun = { ...run, height, offsetStart };
+      offsetStart += height;
+      return layoutRun;
+    });
+    const lastRun = runs.at(-1);
+    this.length = lastRun ? lastRun.globalStart + lastRun.end - lastRun.start : 0;
+    this.totalHeight = offsetStart;
   }
 
   entryIdAt(index: number): string | undefined {
-    return index < this.committed.entryIds.length
-      ? this.committed.entryIds[index]
-      : this.live.entryIds[index - this.committed.entryIds.length];
+    const run = this.runAtIndex(index);
+    return run
+      ? this.segment(run.segment).entryIds[run.start + index - run.globalStart]
+      : undefined;
   }
 
   indexOf(entryId: string): number {
-    const committedIndex = this.committed.indexById.get(entryId);
-    if (committedIndex !== undefined) return committedIndex;
-    const liveIndex = this.live.indexById.get(entryId);
-    return liveIndex === undefined ? -1 : this.committed.entryIds.length + liveIndex;
+    for (const segmentKind of ["committed", "live"] as const) {
+      const segmentIndex = this.segment(segmentKind).indexById.get(entryId);
+      if (segmentIndex === undefined) continue;
+      const run = this.layoutRuns.find((candidate) => (
+        candidate.segment === segmentKind
+        && segmentIndex >= candidate.start
+        && segmentIndex < candidate.end
+      ));
+      if (run) return run.globalStart + segmentIndex - run.start;
+    }
+    return -1;
   }
 
   offsetAt(index: number): number {
-    if (index <= this.committed.entryIds.length) {
-      return this.committed.offsets[index] ?? this.committed.totalHeight;
-    }
-    const liveIndex = Math.min(
-      this.live.entryIds.length,
-      index - this.committed.entryIds.length
-    );
-    return this.committed.totalHeight
-      + (this.live.offsets[liveIndex] ?? this.live.totalHeight);
+    if (index <= 0) return 0;
+    if (index >= this.length) return this.totalHeight;
+    const run = this.runAtIndex(index);
+    if (!run) return this.totalHeight;
+    const segment = this.segment(run.segment);
+    const segmentStartOffset = segment.offsets[run.start] ?? 0;
+    const segmentIndex = run.start + index - run.globalStart;
+    return run.offsetStart
+      + (segment.offsets[segmentIndex] ?? segment.totalHeight)
+      - segmentStartOffset;
   }
 
   indexAtOffset(target: number): number {
     if (this.length === 0) return 0;
-    if (
-      this.committed.entryIds.length > 0
-      && (target < this.committed.totalHeight || this.live.entryIds.length === 0)
-    ) {
-      return virtualSegmentIndexAtOffset(this.committed.offsets, target);
-    }
-    if (this.live.entryIds.length === 0) {
-      return this.committed.entryIds.length - 1;
-    }
-    return this.committed.entryIds.length
-      + virtualSegmentIndexAtOffset(
-        this.live.offsets,
-        Math.max(0, target - this.committed.totalHeight)
-      );
+    if (target <= 0) return 0;
+    if (target >= this.totalHeight) return this.length - 1;
+    const run = this.layoutRuns.find((candidate) => (
+      target < candidate.offsetStart + candidate.height
+    )) ?? this.layoutRuns.at(-1)!;
+    const segment = this.segment(run.segment);
+    const segmentTarget = (segment.offsets[run.start] ?? 0)
+      + Math.max(0, target - run.offsetStart);
+    const segmentIndex = Math.min(
+      run.end - 1,
+      Math.max(run.start, virtualSegmentIndexAtOffset(segment.offsets, segmentTarget))
+    );
+    return run.globalStart + segmentIndex - run.start;
+  }
+
+  private runAtIndex(index: number): VirtualTranscriptRun | undefined {
+    return this.layoutRuns.find((run) => (
+      index >= run.globalStart
+      && index < run.globalStart + run.end - run.start
+    ));
+  }
+
+  private segment(kind: TranscriptSegmentKind): VirtualTranscriptSegment {
+    return kind === "committed" ? this.committed : this.live;
   }
 }
 
@@ -608,38 +680,40 @@ function rememberCurrentTranscriptScroll(
 }
 
 function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
-  return [...entries].sort((left, right) => {
-    const leftMessageSeq = left.messageSeq ?? null;
-    const rightMessageSeq = right.messageSeq ?? null;
-    if (leftMessageSeq !== null && rightMessageSeq !== null && leftMessageSeq !== rightMessageSeq) {
-      return leftMessageSeq - rightMessageSeq;
+  return [...entries].sort(compareTranscriptEntries);
+}
+
+function compareTranscriptEntries(left: TranscriptEntry, right: TranscriptEntry): number {
+  const leftMessageSeq = left.messageSeq ?? null;
+  const rightMessageSeq = right.messageSeq ?? null;
+  if (leftMessageSeq !== null && rightMessageSeq !== null && leftMessageSeq !== rightMessageSeq) {
+    return leftMessageSeq - rightMessageSeq;
+  }
+  if (leftMessageSeq !== rightMessageSeq) {
+    const timelineComparison = compareTimelineMs(left, right);
+    if (timelineComparison !== 0) {
+      return timelineComparison;
     }
-    if (leftMessageSeq !== rightMessageSeq) {
-      const timelineComparison = compareTimelineMs(left, right);
-      if (timelineComparison !== 0) {
-        return timelineComparison;
-      }
-      return leftMessageSeq !== null ? -1 : 1;
+    return leftMessageSeq !== null ? -1 : 1;
+  }
+  const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
+  if (sameTurn) {
+    const leftLiveOrder = liveOrder(left);
+    const rightLiveOrder = liveOrder(right);
+    if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
+      return leftLiveOrder - rightLiveOrder;
     }
-    const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
-    if (sameTurn) {
-      const leftLiveOrder = liveOrder(left);
-      const rightLiveOrder = liveOrder(right);
-      if (leftLiveOrder !== null && rightLiveOrder !== null && leftLiveOrder !== rightLiveOrder) {
-        return leftLiveOrder - rightLiveOrder;
-      }
-      if (leftLiveOrder !== null && rightLiveOrder === null) {
-        return -1;
-      }
-      if (leftLiveOrder === null && rightLiveOrder !== null) {
-        return 1;
-      }
+    if (leftLiveOrder !== null && rightLiveOrder === null) {
+      return -1;
     }
-    if (left.createdAtMs !== right.createdAtMs) {
-      return left.createdAtMs - right.createdAtMs;
+    if (leftLiveOrder === null && rightLiveOrder !== null) {
+      return 1;
     }
-    return left.id.localeCompare(right.id);
-  });
+  }
+  if (left.createdAtMs !== right.createdAtMs) {
+    return left.createdAtMs - right.createdAtMs;
+  }
+  return left.id.localeCompare(right.id);
 }
 
 function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
@@ -671,23 +745,9 @@ function visibleTranscriptEntries(
   const visibleEntries: TranscriptEntry[] = [];
   let previousGeneratedImage = initialGeneratedImage;
   for (const entry of entries) {
-    const blocks = visibleBlocks(entry);
-    const nextBlocks: TranscriptBlock[] = [];
-    for (const block of blocks) {
-      if (isDuplicateGeneratedImageProse(block, previousGeneratedImage)) {
-        continue;
-      }
-      nextBlocks.push(block);
-      const generatedImage = generatedImageArtifact(block);
-      if (generatedImage) {
-        previousGeneratedImage = generatedImage;
-      } else if (transcriptBlockText(block).trim()) {
-        previousGeneratedImage = null;
-      }
-    }
-    if (nextBlocks.length > 0) {
-      visibleEntries.push(nextBlocks.length === entry.blocks.length ? entry : { ...entry, blocks: nextBlocks });
-    }
+    const projected = visibleTranscriptEntry(entry, previousGeneratedImage);
+    previousGeneratedImage = projected.lastGeneratedImage;
+    if (projected.entry) visibleEntries.push(projected.entry);
   }
   return {
     entries: visibleEntries,
@@ -695,37 +755,177 @@ function visibleTranscriptEntries(
   };
 }
 
-class JoinedTranscriptEntries implements Iterable<TranscriptEntry> {
+function visibleTranscriptEntry(
+  entry: TranscriptEntry,
+  initialGeneratedImage: GeneratedImageArtifact | null
+): { entry: TranscriptEntry | null; lastGeneratedImage: GeneratedImageArtifact | null } {
+  const blocks = visibleBlocks(entry);
+  const nextBlocks: TranscriptBlock[] = [];
+  let lastGeneratedImage = initialGeneratedImage;
+  for (const block of blocks) {
+    if (isDuplicateGeneratedImageProse(block, lastGeneratedImage)) {
+      continue;
+    }
+    nextBlocks.push(block);
+    const generatedImage = generatedImageArtifact(block);
+    if (generatedImage) {
+      lastGeneratedImage = generatedImage;
+    } else if (transcriptBlockText(block).trim()) {
+      lastGeneratedImage = null;
+    }
+  }
+  return {
+    entry: nextBlocks.length === 0
+      ? null
+      : nextBlocks.length === entry.blocks.length
+        ? entry
+        : { ...entry, blocks: nextBlocks },
+    lastGeneratedImage
+  };
+}
+
+function visibleTranscriptSegments(
+  entries: MergedTranscriptEntries,
+  committedCandidate: TranscriptEntry[],
+  liveCandidate: TranscriptEntry[]
+): { committed: TranscriptEntry[]; live: TranscriptEntry[] } {
+  const committed: TranscriptEntry[] = [];
+  const live: TranscriptEntry[] = [];
+  let lastGeneratedImage: GeneratedImageArtifact | null = null;
+  for (const located of entries.locatedEntries()) {
+    const projected = visibleTranscriptEntry(located.entry, lastGeneratedImage);
+    lastGeneratedImage = projected.lastGeneratedImage;
+    if (projected.entry) {
+      (located.segment === "committed" ? committed : live).push(projected.entry);
+    }
+  }
+  return {
+    committed: sameTranscriptEntries(committed, committedCandidate) ? committedCandidate : committed,
+    live: sameTranscriptEntries(live, liveCandidate) ? liveCandidate : live
+  };
+}
+
+function sameTranscriptEntries(left: TranscriptEntry[], right: TranscriptEntry[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
+class MergedTranscriptEntries implements Iterable<TranscriptEntry> {
   readonly length: number;
+  readonly runs: readonly TranscriptEntryRun[];
+  readonly committedBeforeLive: boolean;
 
   constructor(
     private readonly committed: TranscriptEntry[],
     private readonly live: TranscriptEntry[]
   ) {
+    this.runs = mergedTranscriptRuns(committed, live);
     this.length = committed.length + live.length;
+    let liveSeen = false;
+    this.committedBeforeLive = this.runs.every((run) => {
+      if (run.segment === "live") {
+        liveSeen = true;
+        return true;
+      }
+      return !liveSeen;
+    });
   }
 
   *[Symbol.iterator](): Iterator<TranscriptEntry> {
-    yield* this.committed;
-    yield* this.live;
+    for (const located of this.locatedEntries()) yield located.entry;
+  }
+
+  *locatedEntries(): IterableIterator<{
+    entry: TranscriptEntry;
+    segment: TranscriptSegmentKind;
+  }> {
+    for (const run of this.runs) {
+      const entries = this.segment(run.segment);
+      for (let index = run.start; index < run.end; index += 1) {
+        yield { entry: entries[index]!, segment: run.segment };
+      }
+    }
   }
 
   slice(start: number, end: number): TranscriptEntry[] {
-    if (end <= this.committed.length) {
-      return this.committed.slice(start, end);
+    const result: TranscriptEntry[] = [];
+    const boundedStart = Math.max(0, start);
+    const boundedEnd = Math.min(this.length, end);
+    for (const run of this.runs) {
+      const runEnd = run.globalStart + run.end - run.start;
+      if (runEnd <= boundedStart) continue;
+      if (run.globalStart >= boundedEnd) break;
+      const from = run.start + Math.max(0, boundedStart - run.globalStart);
+      const to = run.start + Math.min(run.end - run.start, boundedEnd - run.globalStart);
+      result.push(...this.segment(run.segment).slice(from, to));
     }
-    if (start >= this.committed.length) {
-      return this.live.slice(start - this.committed.length, end - this.committed.length);
-    }
-    return [
-      ...this.committed.slice(start),
-      ...this.live.slice(0, end - this.committed.length)
-    ];
+    return result;
   }
 
   some(predicate: (entry: TranscriptEntry) => boolean): boolean {
     return this.committed.some(predicate) || this.live.some(predicate);
   }
+
+  private segment(kind: TranscriptSegmentKind): TranscriptEntry[] {
+    return kind === "committed" ? this.committed : this.live;
+  }
+}
+
+function mergedTranscriptRuns(
+  committed: TranscriptEntry[],
+  live: TranscriptEntry[]
+): TranscriptEntryRun[] {
+  const runs: TranscriptEntryRun[] = [];
+  let committedStart = 0;
+  for (let liveIndex = 0; liveIndex < live.length; liveIndex += 1) {
+    const committedEnd = upperBoundTranscriptEntry(
+      committed,
+      live[liveIndex]!,
+      committedStart
+    );
+    appendTranscriptRun(runs, "committed", committedStart, committedEnd);
+    appendTranscriptRun(runs, "live", liveIndex, liveIndex + 1);
+    committedStart = committedEnd;
+  }
+  appendTranscriptRun(runs, "committed", committedStart, committed.length);
+  return runs;
+}
+
+function upperBoundTranscriptEntry(
+  entries: TranscriptEntry[],
+  target: TranscriptEntry,
+  start: number
+): number {
+  let low = start;
+  let high = entries.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (compareTranscriptEntries(entries[middle]!, target) <= 0) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function appendTranscriptRun(
+  runs: TranscriptEntryRun[],
+  segment: TranscriptSegmentKind,
+  start: number,
+  end: number
+): void {
+  if (start >= end) return;
+  const previous = runs.at(-1);
+  if (previous?.segment === segment && previous.end === start) {
+    previous.end = end;
+    return;
+  }
+  runs.push({
+    end,
+    globalStart: previous ? previous.globalStart + previous.end - previous.start : 0,
+    segment,
+    start
+  });
 }
 
 function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock): boolean {

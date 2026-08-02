@@ -1178,6 +1178,59 @@ describe("TranscriptPanel session scroll behavior", () => {
     });
   });
 
+  it("keeps committed and live timeline order inside a virtualized transcript", async () => {
+    const entries = Array.from({ length: 60 }, (_, index) => {
+      const sequence = index + 1;
+      const value = scrollEntry("thread-a", `committed-${sequence}`);
+      return {
+        ...value,
+        messageSeq: sequence,
+        createdAtMs: sequence * 100,
+        updatedAtMs: sequence * 100,
+        blocks: value.blocks.map((block) => ({
+          ...block,
+          body: `committed message ${sequence}`,
+          createdAtMs: sequence * 100,
+          updatedAtMs: sequence * 100
+        }))
+      };
+    });
+    const optimistic = scrollEntry("thread-a", "optimistic-user");
+    const { container } = render(
+      <TranscriptPanel
+        entries={entries}
+        liveEntries={[{
+          ...optimistic,
+          messageSeq: null,
+          role: "user",
+          source: "client.optimistic",
+          createdAtMs: 950,
+          updatedAtMs: 950,
+          metadata: { projection: "optimistic_prompt", liveOrder: -1 },
+          blocks: optimistic.blocks.map((block) => ({
+            ...block,
+            body: "optimistic user message",
+            source: "client.optimistic",
+            createdAtMs: 950,
+            updatedAtMs: 950
+          }))
+        }]}
+        threadId="thread-a"
+      />
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".pevo-virtualTranscript")?.getAttribute("data-virtualized"))
+        .toBe("true");
+    });
+    const user = container.querySelector<HTMLElement>("[data-transcript-entry-id='optimistic-user']");
+    const assistant = container.querySelector<HTMLElement>("[data-transcript-entry-id='committed-10']");
+    expect(user).toBeTruthy();
+    expect(assistant).toBeTruthy();
+    expect(user!.compareDocumentPosition(assistant!) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
   it("reuses committed virtual layout when only the live overlay changes", async () => {
     let committedIdReads = 0;
     const entries = Array.from({ length: 500 }, (_, index) => {
