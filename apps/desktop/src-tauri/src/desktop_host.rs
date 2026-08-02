@@ -236,37 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn fake_region_capture_uses_data_url_when_supplied() {
-        // SAFETY: the test serially sets and removes a process environment
-        // variable before any thread observes this helper.
-        unsafe {
-            env::set_var(
-                "PSYCHEVO_FLOATING_REGION_DATA_URL",
-                "data:image/png;base64,AA==",
-            );
-        }
-        let capture = capture_region(Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 123.0,
-            height: 45.0,
-        });
-        unsafe {
-            env::remove_var("PSYCHEVO_FLOATING_REGION_DATA_URL");
-        }
-        assert_eq!(
-            serde_json::to_value(capture).expect("json"),
-            json!({
-                "ok": true,
-                "value": {
-                    "dataUrl": "data:image/png;base64,AA==",
-                    "name": "floating-region-123x45.png"
-                }
-            })
-        );
-    }
-
-    #[test]
     fn desktop_fallback_cwd_prefers_explicit_env_value() {
         assert_eq!(
             desktop_fallback_cwd_from_env(

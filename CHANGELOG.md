@@ -2,6 +2,8 @@
 
 ## 2026-08-02
 
+- Made deterministic Desktop region capture work on headless hosts and removed
+  process-global display and capture environment mutation from its tests.
 - Aligned the pinned hosted CI and package Rust toolchain action with the
   workspace's Rust 1.97.0 minimum instead of relying on an unsupported action
   input that silently left Rust 1.95.0 active, and provisioned Node.js, pnpm,
