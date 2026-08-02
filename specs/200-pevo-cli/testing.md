@@ -218,11 +218,17 @@ come from the focused command and smoke tests below.
 - Normal install preflight coverage verifies stderr progress breadcrumbs before
   Cargo/Rust, native build-tool, Node.js, and pnpm checks so a hang can be
   localized from the last printed stage.
+- Pnpm subprocess coverage verifies the installer defaults fetch timeout to
+  300000 milliseconds, preserves an explicit caller value, leaves fetch retry
+  and network-concurrency policy unset, and reports the effective values
+  without reaching a real package registry.
+- Workbench install coverage distinguishes the dependency-install breadcrumb
+  from the subsequent asset-build breadcrumb.
 - `--check` coverage verifies dependency and version diagnostics without
   installing `pevo` or mutating global Psychevo state, and reports mismatched
   `pnpm` as a warning rather than a failure. It reports `pnpm --version`
   failures as unusable tool failures.
-- Cargo and pnpm failure coverage verifies enterprise-network diagnostics are
+- Cargo and pnpm failure coverage verifies network diagnostics are
   printed without modifying proxy, registry, mirror, or CA configuration.
   Cargo install coverage verifies subprocess-scoped timeout/retry defaults,
   user overrides for those values, Windows Git Bash revocation-check defaults,

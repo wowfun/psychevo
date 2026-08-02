@@ -99,6 +99,7 @@ async fn non_blocking_hook_failures_are_diagnostics() {
 async fn concurrent_events_share_the_runtime_wide_eight_handler_limit() {
     let temp = tempdir().expect("temp");
     let counter = temp.path().join("counter.txt");
+    let release = temp.path().join("release");
     fs::write(&counter, "0 0").expect("counter");
     let script = temp.path().join("counter.py");
     fs::write(
@@ -109,6 +110,7 @@ import sys
 import time
 
 path = pathlib.Path(sys.argv[1])
+release = pathlib.Path(sys.argv[2])
 with path.open("r+") as state:
     fcntl.flock(state, fcntl.LOCK_EX)
     active, maximum = map(int, state.read().split())
@@ -119,7 +121,11 @@ with path.open("r+") as state:
     state.write(f"{active} {maximum}")
     state.flush()
     fcntl.flock(state, fcntl.LOCK_UN)
-time.sleep(0.15)
+deadline = time.monotonic() + 15
+while not release.exists():
+    if time.monotonic() >= deadline:
+        raise SystemExit("test did not release saturated hook handlers")
+    time.sleep(0.01)
 with path.open("r+") as state:
     fcntl.flock(state, fcntl.LOCK_EX)
     active, maximum = map(int, state.read().split())
@@ -131,12 +137,13 @@ with path.open("r+") as state:
     )
     .expect("counter script");
     let command = format!(
-        "python3 {} {}",
+        "python3 {} {} {}",
         script.display(),
-        counter.display()
+        counter.display(),
+        release.display()
     );
     let handlers = (0..8)
-        .map(|_| json!({"type": "command", "command": command, "timeout": 5}))
+        .map(|_| json!({"type": "command", "command": command, "timeout": 20}))
         .collect::<Vec<_>>();
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),
@@ -151,20 +158,53 @@ with path.open("r+") as state:
 
     let first_payload = json!({"tool": "read"});
     let second_payload = json!({"tool": "write"});
-    let (first, second) = tokio::join!(
+    let read_counter = || {
+        let state = fs::read_to_string(&counter).ok()?;
+        let mut values = state.split_whitespace();
+        Some((
+            values.next()?.parse::<usize>().ok()?,
+            values.next()?.parse::<usize>().ok()?,
+        ))
+    };
+    let release_when_saturated = async {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some((active, maximum)) = read_counter() {
+                assert!(
+                    maximum <= 8,
+                    "one HookRuntime admitted {maximum} concurrent handlers"
+                );
+                if active == 8 {
+                    fs::write(&release, "ready").expect("release handlers");
+                    break;
+                }
+            }
+            if Instant::now() >= deadline {
+                fs::write(&release, "timeout").expect("release timed-out handlers");
+                panic!("HookRuntime did not admit eight concurrent handlers before timeout");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    let (first, second, ()) = tokio::join!(
         runtime.run_event("PostToolUse", &first_payload),
         runtime.run_event("PostToolUse", &second_payload),
+        release_when_saturated,
     );
     assert_eq!(first.summaries.len(), 8);
     assert_eq!(second.summaries.len(), 8);
-    let counter_result = fs::read_to_string(counter).expect("counter result");
-    let (_, maximum) = counter_result
-        .split_once(' ')
-        .expect("counter shape");
+    assert!(
+        first
+            .summaries
+            .iter()
+            .chain(&second.summaries)
+            .all(|summary| summary.status == HookRunStatus::Completed)
+    );
+    let (active, maximum) = read_counter().expect("counter result");
+    assert_eq!(active, 0, "all hook handlers released their permits");
     assert_eq!(
-        maximum.trim().parse::<usize>().expect("maximum"),
-        8,
-        "one HookRuntime admitted more than eight concurrent handlers"
+        maximum, 8,
+        "one HookRuntime did not preserve its eight-handler limit"
     );
 }
 
@@ -421,17 +461,53 @@ async fn hook_output_drains_large_stdout_and_stderr_with_explicit_diagnostics() 
 async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("marker");
+    let slow_ready = temp.path().join("slow-ready");
+    let fast_ready = temp.path().join("fast-ready");
+    let barrier = temp.path().join("barrier.py");
+    fs::write(
+        &barrier,
+        r#"import pathlib
+import sys
+import time
+
+ready = pathlib.Path(sys.argv[1])
+peer = pathlib.Path(sys.argv[2])
+marker = pathlib.Path(sys.argv[3])
+ready.touch()
+deadline = time.monotonic() + 5
+while not peer.exists():
+    if time.monotonic() >= deadline:
+        raise SystemExit("peer hook did not start")
+    time.sleep(0.01)
+with marker.open("a") as output:
+    output.write(f"{sys.argv[4]}\n")
+"#,
+    )
+    .expect("barrier script");
+    let slow_command = format!(
+        "python3 {} {} {} {} slow",
+        barrier.display(),
+        slow_ready.display(),
+        fast_ready.display(),
+        marker.display()
+    );
+    let fast_command = format!(
+        "python3 {} {} {} {} fast",
+        barrier.display(),
+        fast_ready.display(),
+        slow_ready.display(),
+        marker.display()
+    );
     let hooks = json!({
         "PreToolUse": [
             {"matcher": "Bash", "hooks": [
-                {"type": "command", "command": format!("sleep 0.2; echo slow >> {}", marker.display())}
+                {"type": "command", "command": slow_command, "timeout": 10}
             ]},
             {"matcher": "Bash", "hooks": [
-                {"type": "command", "command": format!("echo fast >> {}", marker.display())}
+                {"type": "command", "command": fast_command, "timeout": 10}
             ]}
         ]
     });
-    let started = Instant::now();
     let result = run_hook_sources(
         &[source("agent", hooks)],
         "PreToolUse",
@@ -439,8 +515,9 @@ async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declarati
         &json!({"tool": "exec_command"}),
     )
     .await;
-    assert!(started.elapsed() < Duration::from_millis(350));
     assert_eq!(result.summaries.len(), 2);
+    assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
+    assert_eq!(result.summaries[1].status, HookRunStatus::Completed);
     assert_eq!(result.summaries[0].display_order, 0);
     assert_eq!(result.summaries[1].display_order, 1);
     let marker = fs::read_to_string(marker).expect("marker");

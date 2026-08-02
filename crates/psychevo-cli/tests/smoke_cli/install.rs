@@ -34,6 +34,16 @@ fn write_fake_pevo(home: &Path) {
 }
 
 #[cfg(unix)]
+fn write_fake_web_install_prerequisites(bin_dir: &Path, home: &Path, pnpm_body: &str) {
+    write_fake_pevo(home);
+    write_fake_command(bin_dir, "cargo", "exit 0");
+    write_fake_command(bin_dir, "rustc", "printf 'rustc 1.97.0\\n'");
+    write_fake_command(bin_dir, "cc", "exit 0");
+    write_fake_command(bin_dir, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(bin_dir, "pnpm", pnpm_body);
+}
+
+#[cfg(unix)]
 fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
     let mut command = Command::new("/bin/sh");
     command
@@ -354,7 +364,7 @@ pub(crate) async fn install_preflight_prints_progress_breadcrumbs() {
     assert!(stderr.contains("pevo install: checking pnpm"), "{stderr}");
     assert!(stderr.contains("pevo install: installing pevo"), "{stderr}");
     assert!(
-        stderr.contains("pevo install: collecting enterprise diagnostics"),
+        stderr.contains("pevo install: collecting network diagnostics"),
         "{stderr}"
     );
 }
@@ -387,7 +397,7 @@ pub(crate) async fn install_preflight_warns_for_mismatched_pnpm_and_continues() 
     );
     assert!(stderr.contains("fake pnpm reached"), "{stderr}");
     assert!(
-        stderr.contains("Enterprise network diagnostics (pnpm install failed)"),
+        stderr.contains("Network diagnostics (pnpm install failed)"),
         "{stderr}"
     );
 }
@@ -432,6 +442,113 @@ pub(crate) async fn install_preflight_bypasses_corepack_project_spec_for_pnpm() 
         !stderr.contains("This project is configured to use 11.8.0 of pnpm"),
         "{stderr}"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn install_pnpm_defaults_fetch_timeout_without_changing_retry_policy() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    write_fake_web_install_prerequisites(
+        &bin,
+        &home,
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'pnpm timeout=%s retries=%s retry-max=%s concurrency=%s\\n' \"${pnpm_config_fetch_timeout-unset}\" \"${pnpm_config_fetch_retries-unset}\" \"${pnpm_config_fetch_retry_maxtimeout-unset}\" \"${pnpm_config_network_concurrency-unset}\" >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &home)
+        .output()
+        .expect("install pnpm");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("pnpm timeout=300000 retries=unset retry-max=unset concurrency=unset"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "pnpm_config_fetch_timeout: 300000 (installer default for pnpm subprocesses)"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pnpm_config_fetch_retries: (unset)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pnpm_config_fetch_retry_maxtimeout: (unset)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pnpm_config_network_concurrency: (unset)"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn install_pnpm_preserves_explicit_fetch_timeout() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    write_fake_web_install_prerequisites(
+        &bin,
+        &home,
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'pnpm timeout=%s\\n' \"${pnpm_config_fetch_timeout-unset}\" >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &home)
+        .env("pnpm_config_fetch_timeout", "90000")
+        .output()
+        .expect("install pnpm");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("pnpm timeout=90000"), "{stderr}");
+    assert!(
+        stderr.contains("pnpm_config_fetch_timeout: 90000"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("pnpm_config_fetch_timeout: 300000"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn install_distinguishes_dependency_install_and_asset_build_steps() {
+    let temp = tempdir().expect("temp");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    write_fake_web_install_prerequisites(
+        &bin,
+        &home,
+        "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  install) printf 'fake pnpm install reached\\n' >&2; exit 0 ;;\n  --filter) printf 'fake pnpm build reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let output = install_preflight_command(&bin, &home)
+        .output()
+        .expect("install pnpm");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let dependency_step = stderr
+        .find("pevo install: installing Workbench dependencies")
+        .expect("dependency install breadcrumb");
+    let dependency_command = stderr
+        .find("fake pnpm install reached")
+        .expect("pnpm install invocation");
+    let build_step = stderr
+        .find("pevo install: building Workbench assets")
+        .expect("asset build breadcrumb");
+    let build_command = stderr
+        .find("fake pnpm build reached")
+        .expect("pnpm build invocation");
+    assert!(dependency_step < dependency_command, "{stderr}");
+    assert!(dependency_command < build_step, "{stderr}");
+    assert!(build_step < build_command, "{stderr}");
 }
 
 #[cfg(unix)]
@@ -625,7 +742,7 @@ pub(crate) async fn install_windows_locked_pevo_exe_failure_gets_targeted_guidan
         "{stderr}"
     );
     assert!(
-        !stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        !stderr.contains("Network diagnostics (cargo install failed)"),
         "{stderr}"
     );
     assert!(!stderr.contains("native C/C++ build tools"), "{stderr}");
@@ -672,7 +789,7 @@ pub(crate) async fn install_windows_preflight_stops_existing_managed_gateway() {
         "{stderr}"
     );
     assert!(
-        stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        stderr.contains("Network diagnostics (cargo install failed)"),
         "{stderr}"
     );
     let stop_log = std::fs::read_to_string(home.join("gateway-stop.log")).expect("stop log");
@@ -764,7 +881,7 @@ pub(crate) async fn install_cargo_install_preserves_explicit_timeout_and_retry()
 
 #[cfg(unix)]
 #[tokio::test]
-pub(crate) async fn install_cargo_failure_prints_enterprise_diagnostics() {
+pub(crate) async fn install_cargo_failure_prints_network_diagnostics() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -789,7 +906,7 @@ pub(crate) async fn install_cargo_failure_prints_enterprise_diagnostics() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("fake cargo failed"), "{stderr}");
     assert!(
-        stderr.contains("Enterprise network diagnostics (cargo install failed)"),
+        stderr.contains("Network diagnostics (cargo install failed)"),
         "{stderr}"
     );
     assert!(

@@ -222,9 +222,13 @@ Explicit `PSYCHEVO_GATEWAY_BASE_URL` and `PSYCHEVO_GATEWAY_TOKEN` overrides are
 treated as caller-owned and must fail closed instead of starting a different
 Gateway.
 
-Desktop may use deterministic fallback capture in development and tests. Real
-macOS, Windows, and Linux selection, bounds, screen capture, and source-app
-filtering are adapters behind the Desktop host interface.
+Desktop may use deterministic fallback capture in development and tests. When
+configured, a deterministic region fallback resolves at the capture facade
+before platform backend selection so it also works without an X11 or Wayland
+session. Tests inject fallback capture values explicitly and do not mutate
+process-global display or capture environment. Real macOS, Windows, and Linux
+selection, bounds, screen capture, and source-app filtering are adapters behind
+the Desktop host interface.
 
 ## CLI Launcher
 

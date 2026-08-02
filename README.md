@@ -41,7 +41,7 @@ sh scripts/install.sh
 
 The installer builds the local `pevo` binary and Workbench Web UI assets. See
 the [Installation Guide](docs/install.md) for prerequisites, diagnostics,
-Windows Git Bash notes, enterprise network guidance, and development commands.
+Windows Git Bash notes, network troubleshooting, and development commands.
 
 For a CLI-only install, use the underlying Cargo command:
 

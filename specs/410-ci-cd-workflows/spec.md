@@ -97,6 +97,10 @@ Initial profiles:
   bindings, compiles `psychevo --no-default-features --all-targets` as an
   independent consumer without workspace feature unification, and checks the
   CLI no-default-features core graph before format, clippy, and tests.
+  JavaScript CLIs invoked directly by this profile or its code-generation
+  helpers are explicit root workspace development dependencies. The Gateway
+  validator generator therefore owns a direct `tsx` dependency rather than
+  relying on a binary exposed incidentally by Vite or WebDriverIO.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
@@ -137,15 +141,23 @@ Initial profiles:
 
 ## Hosted CI
 
-The pull-request workflow runs two Linux jobs. `rust` runs
-`cargo xtask ci run --profile rust-broad`, installs the Linux WebKit
-development package required to compile Tauri, and runs
+The pull-request workflow runs two Linux jobs. `rust` installs the root
+`packageManager` version, Node.js, and frozen workspace dependencies before
+running `cargo xtask ci run --profile rust-broad` so the mixed Rust/TypeScript
+Gateway protocol check can execute, installs the Linux WebKit development
+package required to compile Tauri, and runs
 `cargo xtask ci run --profile desktop-rust`. `web` installs the root
 `packageManager` version with a frozen lockfile and runs
 `cargo xtask ci run --profile web`.
 
 Hosted CI currently runs only for pull requests. Its `main` push trigger is
 temporarily commented out in the workflow with restoration guidance.
+
+Hosted workflows install the workspace minimum Rust toolchain through a
+full-commit-pinned `dtolnay/rust-toolchain` action revision whose baked-in
+toolchain matches `workspace.package.rust-version`. They must not pass an
+unsupported `toolchain` action input that leaves the revision's older baked-in
+toolchain active.
 
 The separate artifact-only workflow currently runs only through explicit manual
 dispatch on Linux, macOS, and Windows. Its `main` push trigger is temporarily

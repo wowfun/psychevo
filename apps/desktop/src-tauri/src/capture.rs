@@ -211,6 +211,18 @@ impl DesktopCaptureFacade {
     }
 
     pub(crate) fn capture_region(&self, bounds: Rect) -> CapabilityResult<RegionCapture> {
+        let fallback = env::var("PSYCHEVO_FLOATING_REGION_DATA_URL").ok();
+        self.capture_region_with_fallback(bounds, fallback.as_deref())
+    }
+
+    fn capture_region_with_fallback(
+        &self,
+        bounds: Rect,
+        data_url: Option<&str>,
+    ) -> CapabilityResult<RegionCapture> {
+        if let Some(capture) = capture_region_from_data_url(bounds, data_url) {
+            return capture;
+        }
         self.backend.capture_region(bounds)
     }
 
@@ -506,9 +518,6 @@ impl DesktopCaptureBackend for X11CaptureBackend {
     }
 
     fn capture_region(&self, bounds: Rect) -> CapabilityResult<RegionCapture> {
-        if let Some(capture) = capture_region_from_data_url(bounds) {
-            return capture;
-        }
         match self.region_screenshot_data_url(bounds) {
             Ok(data_url) => capability_success(RegionCapture {
                 data_url,
@@ -817,9 +826,6 @@ impl DesktopCaptureBackend for WaylandCaptureBackend {
     }
 
     fn capture_region(&self, bounds: Rect) -> CapabilityResult<RegionCapture> {
-        if let Some(capture) = capture_region_from_data_url(bounds) {
-            return capture;
-        }
         match self.portal_area_screenshot_data_url() {
             Ok(data_url) => capability_success(RegionCapture {
                 data_url,
@@ -1101,11 +1107,14 @@ fn failure_snapshot(
     }
 }
 
-fn capture_region_from_data_url(bounds: Rect) -> Option<CapabilityResult<RegionCapture>> {
-    let data_url = env::var("PSYCHEVO_FLOATING_REGION_DATA_URL").ok()?;
+fn capture_region_from_data_url(
+    bounds: Rect,
+    data_url: Option<&str>,
+) -> Option<CapabilityResult<RegionCapture>> {
+    let data_url = data_url?;
     data_url.starts_with("data:image/").then(|| {
         capability_success(RegionCapture {
-            data_url,
+            data_url: data_url.to_string(),
             name: format!(
                 "floating-region-{}x{}.png",
                 bounds.width.round(),
@@ -1256,6 +1265,31 @@ mod tests {
                 "message": "Screen capture permission was denied.",
                 "ok": false,
                 "reason": "permissionDenied"
+            })
+        );
+    }
+
+    #[test]
+    fn deterministic_region_fallback_precedes_headless_backend() {
+        let facade = DesktopCaptureFacade::from_env(None, None, None);
+        let capture = facade.capture_region_with_fallback(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 123.0,
+                height: 45.0,
+            },
+            Some("data:image/png;base64,AA=="),
+        );
+
+        assert_eq!(
+            serde_json::to_value(capture).expect("json"),
+            serde_json::json!({
+                "ok": true,
+                "value": {
+                    "dataUrl": "data:image/png;base64,AA==",
+                    "name": "floating-region-123x45.png"
+                }
             })
         );
     }
