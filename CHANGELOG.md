@@ -2,6 +2,9 @@
 
 ## 2026-07-31
 
+- Preserved Workbench transcript order across durable/live entries and
+  virtualization, and hid branch controls outside Git workspaces while
+  retaining them for unborn and detached repositories.
 - Hardened Framework and Workbench session activity with a durable, revisioned
   projection that keeps delayed, out-of-order, browsing, and refresh updates
   coherent without spinner gaps or false running states.
