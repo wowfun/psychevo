@@ -4,7 +4,8 @@
 
 - Aligned the pinned hosted CI and package Rust toolchain action with the
   workspace's Rust 1.97.0 minimum instead of relying on an unsupported action
-  input that silently left Rust 1.95.0 active.
+  input that silently left Rust 1.95.0 active, and provisioned Node.js/pnpm for
+  the Rust job's mixed-language Gateway protocol check.
 - Made source installs tolerate slow cold-cache pnpm downloads with a
   subprocess-scoped five-minute fetch timeout, clearer Workbench stages, and
   actionable pnpm network diagnostics while preserving caller overrides.
