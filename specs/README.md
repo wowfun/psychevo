@@ -15,9 +15,3 @@ In `spec.md`, same-directory `.md` supplements belong under `## Attachments`. Sa
 Specs that directly drive implementation should include functional requirements and acceptance criteria when behavior is non-trivial.
 
 When a topic grows beyond a maintainable single file, split supplementary files by durable topic responsibility.
-
-## Source of Truth
-
-- Each stable rule should have exactly one best-fit `spec.md` as its source of truth.
-- Other specs should link to that source or quote only the minimum needed context.
-- Updates should prioritize modifying that source rather than editing multiple downstream topics separately.
