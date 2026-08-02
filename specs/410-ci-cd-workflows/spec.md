@@ -97,6 +97,10 @@ Initial profiles:
   bindings, compiles `psychevo --no-default-features --all-targets` as an
   independent consumer without workspace feature unification, and checks the
   CLI no-default-features core graph before format, clippy, and tests.
+  JavaScript CLIs invoked directly by this profile or its code-generation
+  helpers are explicit root workspace development dependencies. The Gateway
+  validator generator therefore owns a direct `tsx` dependency rather than
+  relying on a binary exposed incidentally by Vite or WebDriverIO.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
