@@ -595,6 +595,10 @@ async fn conformance_rejects_unsupported_control_and_structured_input(
         "{control_error}"
     );
     assert!(harness.observed_prompts().is_empty());
+    wait_for_agent_conformance_condition("rejected control terminal event", || {
+        !completion_turn_ids(&events).is_empty()
+    })
+    .await;
     assert_eq!(completion_turn_ids(&events).len(), 1);
 
     let mut resource_request = harness.request(
@@ -624,6 +628,10 @@ async fn conformance_rejects_unsupported_control_and_structured_input(
         "{resource_error}"
     );
     assert!(harness.observed_prompts().is_empty());
+    wait_for_agent_conformance_condition("rejected resource terminal event", || {
+        completion_turn_ids(&events).len() >= 2
+    })
+    .await;
     assert_eq!(completion_turn_ids(&events).len(), 2);
 
     harness

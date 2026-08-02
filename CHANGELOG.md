@@ -11,7 +11,8 @@
   protocol check while declaring its `tsx` runner directly instead of relying
   on a transitively exposed binary, and made hook concurrency coverage observe
   actual handler overlap for both per-event launch and the runtime-wide limit
-  instead of relying on load-sensitive wall-clock thresholds.
+  instead of relying on load-sensitive wall-clock thresholds, while making
+  Agent conformance rejection coverage await observable terminal delivery.
 - Made source installs tolerate slow cold-cache pnpm downloads with a
   subprocess-scoped five-minute fetch timeout, clearer Workbench stages, and
   actionable pnpm network diagnostics while preserving caller overrides.
