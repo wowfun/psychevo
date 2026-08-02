@@ -253,6 +253,8 @@ ordering, one-shot permission decisions, plugin hook gating, worker adapter
 diagnostics, prompt/agent effect scoping, session/user-prompt context
 injection, compact interruption, stop-hook continuation and reentrancy,
 provider-output preservation, and notification redaction.
+Concurrent-launch coverage must synchronize on observable handler overlap; it
+must not infer concurrency from an absolute wall-clock completion threshold.
 
 Live hook validation must use realistic local hook scripts in an isolated
 profile/cwd: prompt secret scanning, tool input rewriting, permission

@@ -421,17 +421,53 @@ async fn hook_output_drains_large_stdout_and_stderr_with_explicit_diagnostics() 
 async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("marker");
+    let slow_ready = temp.path().join("slow-ready");
+    let fast_ready = temp.path().join("fast-ready");
+    let barrier = temp.path().join("barrier.py");
+    fs::write(
+        &barrier,
+        r#"import pathlib
+import sys
+import time
+
+ready = pathlib.Path(sys.argv[1])
+peer = pathlib.Path(sys.argv[2])
+marker = pathlib.Path(sys.argv[3])
+ready.touch()
+deadline = time.monotonic() + 5
+while not peer.exists():
+    if time.monotonic() >= deadline:
+        raise SystemExit("peer hook did not start")
+    time.sleep(0.01)
+with marker.open("a") as output:
+    output.write(f"{sys.argv[4]}\n")
+"#,
+    )
+    .expect("barrier script");
+    let slow_command = format!(
+        "python3 {} {} {} {} slow",
+        barrier.display(),
+        slow_ready.display(),
+        fast_ready.display(),
+        marker.display()
+    );
+    let fast_command = format!(
+        "python3 {} {} {} {} fast",
+        barrier.display(),
+        fast_ready.display(),
+        slow_ready.display(),
+        marker.display()
+    );
     let hooks = json!({
         "PreToolUse": [
             {"matcher": "Bash", "hooks": [
-                {"type": "command", "command": format!("sleep 0.2; echo slow >> {}", marker.display())}
+                {"type": "command", "command": slow_command, "timeout": 10}
             ]},
             {"matcher": "Bash", "hooks": [
-                {"type": "command", "command": format!("echo fast >> {}", marker.display())}
+                {"type": "command", "command": fast_command, "timeout": 10}
             ]}
         ]
     });
-    let started = Instant::now();
     let result = run_hook_sources(
         &[source("agent", hooks)],
         "PreToolUse",
@@ -439,8 +475,9 @@ async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declarati
         &json!({"tool": "exec_command"}),
     )
     .await;
-    assert!(started.elapsed() < Duration::from_millis(350));
     assert_eq!(result.summaries.len(), 2);
+    assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
+    assert_eq!(result.summaries[1].status, HookRunStatus::Completed);
     assert_eq!(result.summaries[0].display_order, 0);
     assert_eq!(result.summaries[1].display_order, 1);
     let marker = fs::read_to_string(marker).expect("marker");
