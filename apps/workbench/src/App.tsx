@@ -169,11 +169,15 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     workspaces: sessionBrowserWorkspaces
   } = sessionBrowserView;
   const {
-    branch: workspaceBranch,
+    branch: workspaceBranchState,
     changes: workspaceChanges,
     diff: workspaceDiff,
     files: workspaceFiles
   } = workspaceView;
+  const workspaceBranch = workspaceBranchState === undefined
+    ? undefined
+    : workspaceBranchState?.current?.trim() || null;
+  const workspaceIsGitRepo = workspaceBranchState?.isGitRepo;
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [startupStable, setStartupStable] = useState(false);
   const [host, setHost] = useState<PsychevoHost | null>(null);
@@ -1507,6 +1511,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         terminalEvents,
         traceState,
         workspaceBranch,
+        workspaceIsGitRepo,
         workspaceChanges,
         workspaceDiff,
         workspaceFiles

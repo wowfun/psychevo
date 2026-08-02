@@ -441,6 +441,7 @@ pub struct WorkspaceGitCheckoutParams {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct WorkspaceGitBranchesResult {
+    pub is_git_repo: bool,
     #[serde(default)]
     pub current: Option<String>,
     pub branches: Vec<String>,

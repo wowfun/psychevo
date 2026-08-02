@@ -904,7 +904,7 @@ export type WorkspaceGitBranchesParams = { scope: GatewayRequestScope, };
 
 export type WorkspaceGitCheckoutParams = { scope: GatewayRequestScope, branch: string, create?: boolean, };
 
-export type WorkspaceGitBranchesResult = { current?: string | null, branches: Array<string>, };
+export type WorkspaceGitBranchesResult = { isGitRepo: boolean, current?: string | null, branches: Array<string>, };
 
 export type WorkspaceFileKind = "file" | "directory";
 

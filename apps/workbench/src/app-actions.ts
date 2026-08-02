@@ -210,7 +210,7 @@ export function createAppActions(params: AppActionsParams) {
       .then(() => params.workspaceApplication.getSnapshot().branch ?? null)
       .catch(() => null);
     let opened;
-    let workspaceBranch: string | null;
+    let workspaceBranch: WorkspaceGitBranchesResult | null;
     try {
       [opened, workspaceBranch] = await Promise.all([draftOpenRequest, branchRequest]);
     } catch (error) {
@@ -301,7 +301,7 @@ export function createAppActions(params: AppActionsParams) {
     if (params.viewEpochRef.current !== epoch) {
       return result;
     }
-    params.workspaceApplication.setBranch(result.current?.trim() || null);
+    params.workspaceApplication.setBranch(result);
     params.setSettings((current) => current
       ? {
           ...current,

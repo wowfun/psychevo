@@ -2509,6 +2509,7 @@ vi.mock("@psychevo/client", async () => {
         gatewayMock.projectBranch = record.branch ?? gatewayMock.projectBranch;
         gatewayMock.workspaceGitBranchesResult = {
           current: gatewayMock.projectBranch,
+          isGitRepo: true,
           branches: Array.from(new Set([
             ...((gatewayMock.workspaceGitBranchesResult.branches as string[] | undefined) ?? []),
             ...(gatewayMock.projectBranch ? [gatewayMock.projectBranch] : [])

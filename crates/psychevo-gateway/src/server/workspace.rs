@@ -5,9 +5,12 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use psychevo::{
-    __product::configuration::resolve_workspace_root, __product::platform::canonicalize_cwd,
-    __product::platform::normalized_native_path, __product::runtime::WorkspaceMutation,
-    __product::sessions::WorkspaceDiffFileStatus, __product::sessions::collect_workspace_diff,
+    __product::configuration::resolve_workspace_root,
+    __product::platform::canonicalize_cwd,
+    __product::platform::normalized_native_path,
+    __product::runtime::WorkspaceMutation,
+    __product::sessions::WorkspaceDiffFileStatus,
+    __product::sessions::{collect_workspace_diff, is_inside_git_work_tree},
     Error,
 };
 use psychevo_gateway_protocol as wire;
@@ -436,6 +439,13 @@ pub(super) fn workspace_git_checkout_value(
 fn workspace_git_branches(
     scope: &ResolvedScope,
 ) -> psychevo::Result<wire::WorkspaceGitBranchesResult> {
+    if !is_inside_git_work_tree(&scope.cwd)? {
+        return Ok(wire::WorkspaceGitBranchesResult {
+            is_git_repo: false,
+            current: None,
+            branches: Vec::new(),
+        });
+    }
     let branches = run_git(
         &scope.cwd,
         &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
@@ -455,7 +465,11 @@ fn workspace_git_branches(
             .trim()
             .to_string()
     });
-    Ok(wire::WorkspaceGitBranchesResult { current, branches })
+    Ok(wire::WorkspaceGitBranchesResult {
+        is_git_repo: true,
+        current,
+        branches,
+    })
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> psychevo::Result<String> {

@@ -435,10 +435,14 @@ export const workspaceFileSchemas = {
         "string",
         "null"
       ]
+    },
+    "isGitRepo": {
+      "type": "boolean"
     }
   },
   "required": [
-    "branches"
+    "branches",
+    "isGitRepo"
   ],
   "title": "WorkspaceGitBranchesResult",
   "type": "object"

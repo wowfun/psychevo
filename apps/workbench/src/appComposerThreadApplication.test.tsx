@@ -66,6 +66,37 @@ describe("Workbench public Thread Application interactions", () => {
     });
   });
 
+  it("omits the branch control when the workspace is not a Git repository", async () => {
+    gatewayMock.workspaceGitBranchesResult = {
+      current: null,
+      branches: [],
+      isGitRepo: false
+    };
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Agent target" }).textContent)
+        .toContain("Psychevo");
+      expect(screen.queryByRole("button", { name: "Git branch" })).toBeNull();
+    });
+  });
+
+  it("keeps the branch control for a Git repository without a current branch", async () => {
+    gatewayMock.workspaceGitBranchesResult = {
+      current: null,
+      branches: [],
+      isGitRepo: true
+    };
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Git branch" }).textContent)
+        .toContain("Git branch");
+    });
+  });
+
   it("queues one first-turn click while draft open is pending and clears only after acceptance", async () => {
     const draftOpen = deferred<Record<string, unknown>>();
     const turnStart = deferred<Record<string, unknown>>();

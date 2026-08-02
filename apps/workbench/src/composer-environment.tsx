@@ -18,6 +18,7 @@ export function ComposerEnvironment({
   cwd,
   disabled,
   draft,
+  isGitRepo,
   path,
   preparing = false,
   profile,
@@ -37,6 +38,7 @@ export function ComposerEnvironment({
   cwd: string;
   disabled: boolean;
   draft: boolean;
+  isGitRepo: boolean | undefined;
   path: string;
   preparing?: boolean;
   profile: InitializeResult["profile"] | null;
@@ -207,7 +209,7 @@ export function ComposerEnvironment({
             </EnvironmentMenu>
           ) : null}
         </div>
-        {(!preparing && draft) || visibleBranch ? (
+        {isGitRepo !== false && ((!preparing && draft) || visibleBranch) ? (
           <div className="composerEnvironmentControl is-branch" ref={branchRootRef}>
             <button
               aria-expanded={branchMenuOpen}

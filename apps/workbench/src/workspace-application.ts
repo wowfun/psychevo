@@ -13,7 +13,7 @@ import {
 export type WorkspaceFacet = "branch" | "changes" | "diff" | "files";
 
 export type WorkspaceSnapshot = {
-  branch: string | null | undefined;
+  branch: WorkspaceGitBranchesResult | null | undefined;
   changes: WorkspaceChangesResult | null;
   diff: WorkspaceDiffResult | null;
   files: WorkspaceFilesResult | null;
@@ -81,7 +81,7 @@ export class WorkspaceApplication {
     });
   }
 
-  setBranch = (update: ValueUpdate<string | null | undefined>): void => {
+  setBranch = (update: ValueUpdate<WorkspaceGitBranchesResult | null | undefined>): void => {
     this.replaceFacet("branch", resolveUpdate(this.snapshot.branch, update));
   };
 
@@ -216,7 +216,7 @@ export class WorkspaceApplication {
       epoch === this.snapshot.scopeEpoch
       && revision === this.revisions.branch
     ) {
-      this.commitFacet("branch", result.current?.trim() || null);
+      this.commitFacet("branch", result);
       return result;
     }
     return null;
@@ -241,8 +241,7 @@ export class WorkspaceApplication {
           await client.request("workspace/changes", { scope })
         );
       case "branch": {
-        const result = await client.request("workspace/git/branches", { scope });
-        return result.current?.trim() || null;
+        return client.request("workspace/git/branches", { scope });
       }
     }
   }

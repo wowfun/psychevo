@@ -415,6 +415,12 @@ while non-visible model/settings metadata loads only when its owning popover
 opens. Workbench applies the draft context and current branch in one Composer
 environment commit so Agent, Mode, Model, Reasoning, Permission, Workspace, and
 branch do not visibly pop in as separate startup generations.
+`workspace/git/branches` reports whether the active workspace is a Git
+repository as part of its normal result. A non-repository workspace returns an
+empty branch list instead of surfacing Git stderr as an RPC error, and Workbench
+omits the Composer branch control. A Git repository without a committed branch
+(an unborn repository), or without a current symbolic branch (a detached
+HEAD), retains the branch control so the user can create or select a branch.
 Completion performs a local active-token check and calls `completion/list`
 only for `/`, `$`, or `@` tokens.
 

@@ -215,6 +215,7 @@ afterEach(() => {
   gatewayMock.workspaceCreate = null;
   gatewayMock.workspaceGitBranchesResult = {
     current: "main",
+    isGitRepo: true,
     branches: ["feature/composer", "main"]
   };
   gatewayMock.snapshot.historyEditing = null;

@@ -100,6 +100,7 @@ const gatewayMock = vi.hoisted(() => {
     projectBranch: "main" as string | null,
     workspaceGitBranchesResult: {
       current: "main",
+      isGitRepo: true,
       branches: ["feature/composer", "main"]
     } as Record<string, unknown>,
     workspaceGitBranches: null as null | ((params: unknown) => unknown | Promise<unknown>),

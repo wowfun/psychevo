@@ -226,6 +226,9 @@ required. They must not print tokens or secrets.
   selectors, exact message-input-width alignment for completion, truncated
   labels with full titles, and right-aligned switches. Runtime Mode and
   Permission tests explicitly reject native `select` elements.
+- Git capability tests prove a non-repository branch read succeeds with an
+  explicit negative capability and no branches, while unborn and detached Git
+  repositories retain the Composer branch control.
 - Composer visual tests prove Mic and Send/Interrupt retain the same circular
   footprint, including the shared minimum hit target under coarse-pointer
   mobile emulation.

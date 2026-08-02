@@ -387,6 +387,52 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
 }
 
 #[tokio::test]
+async fn workspace_git_branches_reports_a_non_repository_without_an_rpc_error() {
+    let (_temp, state) = web_state().await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let listed = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("non-repository")),
+            method: "workspace/git/branches".to_string(),
+            params: Some(json!({ "scope": scope.clone() })),
+        },
+    )
+    .await
+    .expect("workspace/git/branches outside a Git repository");
+
+    assert_eq!(listed["isGitRepo"], false);
+    assert_eq!(listed["current"], Value::Null);
+    assert_eq!(listed["branches"], json!([]));
+
+    git(&state.inner.cwd, ["init", "-b", "main"]);
+    let unborn = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("unborn-repository")),
+            method: "workspace/git/branches".to_string(),
+            params: Some(json!({ "scope": scope })),
+        },
+    )
+    .await
+    .expect("workspace/git/branches in an unborn Git repository");
+
+    assert_eq!(unborn["isGitRepo"], true);
+    assert_eq!(unborn["current"], "main");
+    assert_eq!(unborn["branches"], json!([]));
+}
+
+#[tokio::test]
 async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
     let (_temp, state) = web_state().await;
     git(&state.inner.cwd, ["init", "-b", "main"]);
@@ -417,6 +463,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
     )
     .await
     .expect("workspace/git/branches");
+    assert_eq!(listed["isGitRepo"], true);
     assert_eq!(listed["current"].as_str(), Some("main"));
     assert_eq!(
         listed["branches"].as_array().expect("branches"),

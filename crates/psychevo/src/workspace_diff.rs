@@ -120,7 +120,7 @@ pub fn collect_workspace_diff_with_caps(
     })
 }
 
-fn is_inside_git_work_tree(cwd: &Path) -> Result<bool> {
+pub fn is_inside_git_work_tree(cwd: &Path) -> Result<bool> {
     let output = Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(cwd)

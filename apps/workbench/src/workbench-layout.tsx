@@ -230,6 +230,7 @@ export type WorkspaceViewModel = {
   terminalEvents: TerminalNotificationEvent[];
   traceState: TraceState;
   workspaceBranch: string | null | undefined;
+  workspaceIsGitRepo: boolean | undefined;
   workspaceChanges: WorkspaceChangesResult | null;
   workspaceDiff: WorkspaceDiffResult | null;
   workspaceFiles: WorkspaceFilesResult | null;
@@ -415,6 +416,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     saveFileFromEditor,
     selectedTargetId,
     workspaceBranch,
+    workspaceIsGitRepo,
     contextMatchesTarget,
     sessionBrowserWorkspaces,
     sessionUsage,
@@ -1018,6 +1020,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 ? workspaceBranch
                 : settings?.project?.branch ?? null}
               branchDisabled={running}
+              isGitRepo={workspaceIsGitRepo}
               controlValues={runtimeControlDrafts}
               controls={activeRuntimeControls}
               cwd={activeWorkbenchCwd}
