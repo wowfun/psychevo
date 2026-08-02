@@ -149,17 +149,27 @@ environment values. The installer must not default
 `CARGO_HTTP_MULTIPLEXING=false`; users may set that manually when a corporate
 proxy mishandles HTTP/2 multiplexing.
 
+The installer gives its pnpm subprocesses a five-minute request timeout by
+default through `pnpm_config_fetch_timeout=300000`. This default is scoped to
+the installer subprocesses, is not written to npm or pnpm configuration, and
+must not override a user-set `pnpm_config_fetch_timeout` environment value. The
+installer must not default pnpm fetch retries, retry backoff, or network
+concurrency, and it must not add an outer retry around the full
+`pnpm install --frozen-lockfile` command.
+
 When Cargo install or pnpm install/build steps fail, the script prints a compact
-enterprise-network diagnostics block, except for the Windows locked-binary
+network diagnostics block, except for the Windows locked-binary
 replacement case described above. The block reports relevant npm/pnpm
 registry, Cargo registry/source configuration presence, proxy variables, and
 CA-related environment variables, including effective Cargo install network
 values for `CARGO_HTTP_TIMEOUT`, `CARGO_NET_RETRY`,
 `CARGO_HTTP_LOW_SPEED_LIMIT`, `CARGO_HTTP_MULTIPLEXING`, and
-`CARGO_HTTP_CHECK_REVOKE`. It must not modify Git, npm, pnpm, Cargo, proxy,
-registry, mirror, or CA configuration.
+`CARGO_HTTP_CHECK_REVOKE`. It also reports the effective pnpm fetch timeout and
+whether fetch retries, maximum retry delay, or network concurrency were set
+explicitly for the installer process. It must not modify Git, npm, pnpm, Cargo,
+proxy, registry, mirror, or CA configuration.
 
-Enterprise diagnostics collection itself is a named install stage so users can
+Network diagnostics collection itself is a named install stage so users can
 distinguish a failing build step from a hang while reading proxy, registry, or
 CA configuration.
 

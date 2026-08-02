@@ -101,9 +101,9 @@ pnpm install --frozen-lockfile
 pnpm --filter @psychevo/workbench build
 ```
 
-For offline or enterprise installs, configure Cargo, npm, pnpm, proxy, registry,
-and CA settings outside the installer, then run the same checkout-local install
-path.
+For offline installs or networks that require custom access settings, configure
+Cargo, npm, pnpm, proxy, registry, and CA settings outside the installer, then
+run the same checkout-local install path.
 
 ## Diagnostics
 
@@ -116,8 +116,8 @@ sh scripts/install.sh --check
 Normal installs print `pevo install:` progress lines to stderr before each
 host-dependent stage. If a company Windows machine appears to hang, the last
 printed line usually identifies the area to inspect: Cargo/Rust, native build
-tools, Node.js, pnpm, Cargo install, Workbench build, asset copy, or profile
-initialization.
+tools, Node.js, pnpm, Cargo install, Workbench dependency installation,
+Workbench build, asset copy, or profile initialization.
 
 The installer asks Corepack to use the system pnpm for its subprocesses instead
 of downloading the repository's recommended pnpm version, and it treats pnpm
@@ -131,6 +131,21 @@ corepack prepare pnpm@11.8.0 --activate
 ```
 
 or install/activate pnpm from an internal npm registry managed by your company.
+
+For a cold pnpm store or a slow registry connection, the installer gives only
+its pnpm subprocesses a five-minute request timeout through
+`pnpm_config_fetch_timeout=300000`. It preserves an existing value and does not
+change pnpm's fetch retries, retry backoff, or network concurrency. Nothing is
+written to npm or pnpm configuration. To allow ten minutes for each request on
+a particularly slow connection, run:
+
+```bash
+pnpm_config_fetch_timeout=600000 sh scripts/install.sh
+```
+
+If pnpm requests still time out after partial download progress, configure the
+approved proxy, corporate CA, or internal npm registry/mirror outside the
+installer and rerun the same command.
 
 On Windows Git Bash/MSYS/MINGW, the installer defaults its `cargo install`
 subprocess to `CARGO_HTTP_CHECK_REVOKE=false` when you have not already set that
@@ -189,9 +204,9 @@ For a shell trace, use:
 sh -x scripts/install.sh 2>&1 | tee pevo-install.log
 ```
 
-When Cargo or pnpm steps fail, the installer prints an enterprise network
-diagnostics block. It reports npm/pnpm registry, Cargo config presence, proxy
-variables, and CA-related variables. It does not edit any of those settings.
+When Cargo or pnpm steps fail, the installer prints a network diagnostics block.
+It reports npm/pnpm registry, Cargo config presence, proxy variables, and
+CA-related variables. It does not edit any of those settings.
 
 If Cargo's bin directory is missing from `PATH`, the installer prints an
 `export PATH=...` command. Add it to your shell profile if you want `pevo`
@@ -225,8 +240,8 @@ Windows build tools such as Visual Studio Build Tools, MinGW, `gcc`, `clang`,
 `cc`, `cl`, `link`, or `vswhere`. If none are found, it fails with guidance. It
 never installs those build tools or edits shell profiles.
 
-For enterprise networks, configure Cargo, npm, pnpm, proxies, registries, and CA
-settings outside the installer.
+When network access requires custom settings, configure Cargo, npm, pnpm,
+proxies, registries, and CA settings outside the installer.
 
 ## Development Without Installing
 

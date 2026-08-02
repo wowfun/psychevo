@@ -504,7 +504,10 @@ default and support `--json`. JSON errors use:
 
 `scripts/install.sh` owns checkout-local source installation and source
 reinstallation of the `pevo` binary. It verifies the installed binary, builds
-and installs Workbench assets, and initializes the global Psychevo home.
+and installs Workbench assets, and initializes the global Psychevo home. The
+[pevo install](install.md) attachment is the sole detailed contract for its
+dependency checks, subprocess-scoped network defaults, and network-neutral
+failure diagnostics.
 
 ## Attachments
 

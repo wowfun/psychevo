@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-02
+
+- Made source installs tolerate slow cold-cache pnpm downloads with a
+  subprocess-scoped five-minute fetch timeout, clearer Workbench stages, and
+  actionable pnpm network diagnostics while preserving caller overrides.
+
 ## 2026-07-31
 
 - Preserved Workbench transcript order across durable/live entries and
@@ -420,7 +426,7 @@
   pseudo-running regressions before visual review.
 - Added a dedicated installation guide and simplified `scripts/install.sh` to a
   checkout-local install surface with sharper diagnostics for Windows Git Bash,
-  enterprise networks, pnpm/Corepack, and Cargo fetch failures.
+  restricted networks, pnpm/Corepack, and Cargo fetch failures.
 - Fixed native Windows source installs and release builds by keeping Linux-only
   Landlock and Unix-only helper code out of Windows builds.
 - Unified the workspace `reqwest` dependency on `0.13.3` across Runtime,
@@ -465,7 +471,7 @@
 
 ## 2026-06-29
 
-- Hardened `scripts/install.sh` for Windows Git Bash and enterprise networks
+- Hardened `scripts/install.sh` for Windows Git Bash and restricted networks
   with check/offline/web-dist modes, version and build-tool preflights, repair
   prompts, and proxy/registry/CA diagnostics.
 - Documented Windows compatibility lessons from Codex, Hermes Agent, and

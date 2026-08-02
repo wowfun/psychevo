@@ -306,11 +306,25 @@ command_version() {
   clean_version "${1:-}"
 }
 
+pnpm_fetch_timeout_default() {
+  printf '300000\n'
+}
+
+pnpm_fetch_timeout_value() {
+  if [ -n "${pnpm_config_fetch_timeout+x}" ]; then
+    printf '%s\n' "$pnpm_config_fetch_timeout"
+  else
+    pnpm_fetch_timeout_default
+  fi
+}
+
 run_pnpm() {
+  pnpm_fetch_timeout=$(pnpm_fetch_timeout_value)
   COREPACK_ENABLE_PROJECT_SPEC=0 \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     COREPACK_ENABLE_STRICT=0 \
     pnpm_config_pm_on_fail=warn \
+    pnpm_config_fetch_timeout="$pnpm_fetch_timeout" \
     pnpm "$@"
 }
 
@@ -472,10 +486,10 @@ print_effective_cargo_revoke_value() {
   fi
 }
 
-print_enterprise_diagnostics() {
+print_network_diagnostics() {
   reason=$1
-  step "collecting enterprise diagnostics"
-  printf '\nEnterprise network diagnostics (%s):\n' "$reason" >&2
+  step "collecting network diagnostics"
+  printf '\nNetwork diagnostics (%s):\n' "$reason" >&2
   if have_cmd npm; then
     npm_registry=$(npm config get registry 2>/dev/null || true)
     [ -n "$npm_registry" ] || npm_registry="(unset)"
@@ -512,6 +526,10 @@ print_enterprise_diagnostics() {
   print_env_value SSL_CERT_FILE
   print_env_value GIT_SSL_CAINFO
   print_env_value NODE_EXTRA_CA_CERTS
+  print_effective_env_value pnpm_config_fetch_timeout "$(pnpm_fetch_timeout_default)" "installer default for pnpm subprocesses"
+  print_env_value pnpm_config_fetch_retries
+  print_env_value pnpm_config_fetch_retry_maxtimeout
+  print_env_value pnpm_config_network_concurrency
   print_env_value CARGO_HTTP_CAINFO
   print_env_value CARGO_HTTP_PROXY
   print_effective_env_value CARGO_HTTP_TIMEOUT "$(cargo_install_http_timeout_default)" "installer default for cargo install"
@@ -607,7 +625,7 @@ print_check_report() {
     check_line "pnpm" "missing" "requires $required_pnpm. $(pnpm_repair_hint "$required_pnpm")"
   fi
 
-  print_enterprise_diagnostics "check"
+  print_network_diagnostics "check"
   return "$check_status"
 }
 
@@ -769,7 +787,7 @@ if [ "$cargo_status" -ne 0 ]; then
   if windows_pevo_replace_access_denied "$cargo_install_output"; then
     die "cargo install failed: the installed pevo.exe could not be replaced because Windows denied access. Close running pevo, TUI, Web, Gateway, or serve processes, then rerun scripts/install.sh. If the failure persists after all pevo processes are closed, check endpoint protection or permission policy for Cargo's bin directory."
   fi
-  print_enterprise_diagnostics "cargo install failed"
+  print_network_diagnostics "cargo install failed"
   if is_windows_shell; then
     die "cargo install failed. On Windows Git Bash/MSYS/MINGW, install Rust and native C/C++ build tools such as Visual Studio Build Tools or a compatible MinGW setup. If registry fetches time out after partial progress, try CARGO_HTTP_MULTIPLEXING=false or configure Cargo proxy, CA, or registry mirror settings."
   fi
@@ -781,13 +799,14 @@ pevo_bin=$(resolve_pevo_bin) || die "pevo was installed, but the binary could no
 step "verifying pevo"
 "$pevo_bin" --help >/dev/null
 
-step "building Workbench assets"
+step "installing Workbench dependencies"
 if ! (CDPATH= cd "$source_dir" && run_pnpm install --frozen-lockfile); then
-  print_enterprise_diagnostics "pnpm install failed"
-  die "pnpm install failed."
+  print_network_diagnostics "pnpm install failed"
+  die "pnpm install failed. If registry requests still time out, retry with a larger pnpm_config_fetch_timeout or configure pnpm proxy, CA, or registry mirror settings."
 fi
+step "building Workbench assets"
 if ! (CDPATH= cd "$source_dir" && run_pnpm --filter @psychevo/workbench build); then
-  print_enterprise_diagnostics "pnpm build failed"
+  print_network_diagnostics "pnpm build failed"
   die "pnpm build failed."
 fi
 
