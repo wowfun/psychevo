@@ -19,6 +19,8 @@ pub use config::{
     hook_runtime_config_with_plugin_sources_from_options, set_hook_enabled_in_profile,
     trust_hook_in_profile,
 };
+#[cfg(test)]
+pub(crate) use config::config_hook_sources_for_path;
 pub use runtime::HookRuntime;
 pub use types::*;
 

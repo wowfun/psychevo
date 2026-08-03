@@ -11,6 +11,7 @@ pub(crate) mod lsp_tests {
         ])
     }
 
+    #[cfg(unix)]
     fn env_for_with_system_path(home: &Path, path: &Path) -> BTreeMap<String, String> {
         let mut paths = vec![path.to_path_buf()];
         if let Some(current) = std::env::var_os("PATH") {

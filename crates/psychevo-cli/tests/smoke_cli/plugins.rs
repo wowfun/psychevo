@@ -22,7 +22,11 @@ pub(crate) fn write_cli_plugin(root: &Path) {
     .expect("manifest");
     std::fs::write(
         root.join("psychevo.plugin.json"),
-        r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#,
+        if cfg!(windows) {
+            r#"{"runtime":{"worker":{"command":"./worker.cmd"}}}"#
+        } else {
+            r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#
+        },
     )
     .expect("overlay");
     std::fs::write(
@@ -30,6 +34,23 @@ pub(crate) fn write_cli_plugin(root: &Path) {
         "---\nname: cleanup\ndescription: \"Clean temporary files\"\n---\n\nUse cleanup_status before cleanup.\n",
     )
     .expect("skill");
+    #[cfg(windows)]
+    {
+        std::fs::write(
+            root.join("worker.js"),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/cli_plugin_worker.js"
+            )),
+        )
+        .expect("worker");
+        std::fs::write(
+            root.join("worker.cmd"),
+            "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
+        )
+        .expect("worker command");
+    }
+    #[cfg(unix)]
     std::fs::write(
         root.join("worker.py"),
         include_str!(concat!(

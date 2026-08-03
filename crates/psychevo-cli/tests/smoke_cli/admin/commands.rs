@@ -529,7 +529,7 @@ pub(crate) async fn cli_session_commands_manage_active_and_archived_sessions() {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = cwd.canonicalize().expect("canonical");
+    let canonical = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "older", &canonical, "run", 1_000, 1_000);
@@ -587,7 +587,7 @@ pub(crate) async fn cli_session_export_and_share_emit_local_artifacts() {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = cwd.canonicalize().expect("canonical");
+    let canonical = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "exported-session", &canonical, "tui", 1_000, 2_000);

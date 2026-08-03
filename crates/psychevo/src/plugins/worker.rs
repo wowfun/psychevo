@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
+#[cfg(windows)]
+use std::ffi::OsString;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::Duration;
@@ -12,7 +14,9 @@ use psychevo_ai::AbortSignal;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+#[cfg(not(windows))]
+use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -23,7 +27,7 @@ use super::types::{LoadedPluginManifest, PluginInstallRecord, PluginWorkerSpec};
 #[cfg(not(test))]
 const WORKER_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
-const WORKER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
+const WORKER_RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const WORKER_FRAME_LIMIT: usize = 16 * 1024 * 1024;
 const WORKER_STDERR_LIMIT: usize = 64 * 1024;
 
@@ -224,9 +228,24 @@ impl PluginWorkerSession {
         spec: &PluginWorkerSpec,
         env: &BTreeMap<String, String>,
     ) -> std::result::Result<Arc<Self>, String> {
-        let mut command = Command::new(&spec.command);
+        #[cfg(windows)]
+        let mut command = {
+            let args = spec.args.iter().map(OsString::from).collect::<Vec<_>>();
+            crate::process_env::tokio_host_process_command(
+                &spec.command,
+                &args,
+                crate::host_paths::HostPlatform::current(),
+                env,
+            )
+            .map_err(|err| err.to_string())?
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new(&spec.command);
+            command.args(&spec.args);
+            command
+        };
         command
-            .args(&spec.args)
             .current_dir(&record.package_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

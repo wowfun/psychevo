@@ -116,7 +116,7 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     assert!(
         read["manifest"]["interface"]["composerIcon"]
             .as_str()
-            .is_some_and(|path| path.contains("assets/icon.png"))
+            .is_some_and(|path| Path::new(path).ends_with(Path::new("assets").join("icon.png")))
     );
 
     let doctor = handle_rpc(
@@ -632,7 +632,10 @@ async fn capability_skill_write_rejects_configured_external_skill() {
     );
     std::fs::write(
         state.inner.home.join("config.toml"),
-        format!("[skills]\npaths = [\"{}\"]\n", external.display()),
+        format!(
+            "[skills]\npaths = [{}]\n",
+            crate::test_support::toml_path(&external)
+        ),
     )
     .expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)

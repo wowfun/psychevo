@@ -408,7 +408,7 @@ async fn bounded_hook_output_truncates_on_utf8_boundary() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"hooks": [{
         "type": "command",
-        "command": "python3 -c 'import sys; sys.stdout.buffer.write(b\"a\" + bytes([0xc3, 0xa9]) * 4096)'"
+        "command": "printf a; i=0; while [ \"$i\" -lt 4096 ]; do printf '\\303\\251'; i=$((i + 1)); done"
     }]}]});
     let result = run_hook_sources(
         &[source("agent", hooks)],
@@ -428,7 +428,7 @@ async fn hook_output_drains_large_stdout_and_stderr_with_explicit_diagnostics() 
     let temp = tempdir().expect("temp");
     let hooks = json!({"PostToolUse": [{"hooks": [{
         "type": "command",
-        "command": "python3 -c 'import sys; sys.stdout.write(\"o\" * 1048576); sys.stderr.write(\"e\" * 1048576)'"
+        "command": "dd if=/dev/zero bs=1048576 count=1 2>/dev/null | tr '\\000' o; dd if=/dev/zero bs=1048576 count=1 2>/dev/null | tr '\\000' e >&2"
     }]}]});
     let result = run_hook_sources(
         &[source("agent", hooks)],
@@ -461,43 +461,13 @@ async fn hook_output_drains_large_stdout_and_stderr_with_explicit_diagnostics() 
 async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("marker");
-    let slow_ready = temp.path().join("slow-ready");
-    let fast_ready = temp.path().join("fast-ready");
-    let barrier = temp.path().join("barrier.py");
-    fs::write(
-        &barrier,
-        r#"import pathlib
-import sys
-import time
-
-ready = pathlib.Path(sys.argv[1])
-peer = pathlib.Path(sys.argv[2])
-marker = pathlib.Path(sys.argv[3])
-ready.touch()
-deadline = time.monotonic() + 5
-while not peer.exists():
-    if time.monotonic() >= deadline:
-        raise SystemExit("peer hook did not start")
-    time.sleep(0.01)
-with marker.open("a") as output:
-    output.write(f"{sys.argv[4]}\n")
-"#,
-    )
-    .expect("barrier script");
-    let slow_command = format!(
-        "python3 {} {} {} {} slow",
-        barrier.display(),
-        slow_ready.display(),
-        fast_ready.display(),
-        marker.display()
-    );
-    let fast_command = format!(
-        "python3 {} {} {} {} fast",
-        barrier.display(),
-        fast_ready.display(),
-        slow_ready.display(),
-        marker.display()
-    );
+    let barrier_command = |ready: &str, peer: &str, label: &str| {
+        format!(
+            "touch {ready}; i=0; while [ ! -e {peer} ] && [ \"$i\" -lt 500 ]; do sleep 0.01; i=$((i + 1)); done; [ -e {peer} ] || exit 1; echo {label} >> marker"
+        )
+    };
+    let slow_command = barrier_command("slow-ready", "fast-ready", "slow");
+    let fast_command = barrier_command("fast-ready", "slow-ready", "fast");
     let hooks = json!({
         "PreToolUse": [
             {"matcher": "Bash", "hooks": [
@@ -945,15 +915,26 @@ async fn worker_handler_calls_hooks_call_adapter() {
         r#"{"name":"hook-plugin","version":"1.0.0","description":"hooks"}"#,
     )
     .expect("plugin manifest");
-    let worker = plugin.join("worker.py");
+    let worker = plugin.join(if cfg!(windows) {
+        "worker.js"
+    } else {
+        "worker.py"
+    });
     fs::write(
         &worker,
-        format!(
-            "#!/usr/bin/env python3\n{}",
+        if cfg!(windows) {
+            include_str!("../../tests/fixtures/hook_worker_call_adapter.js")
+        } else {
             include_str!("../../tests/fixtures/hook_worker_call_adapter.py")
-        ),
+        },
     )
     .expect("worker");
+    #[cfg(windows)]
+    fs::write(
+        plugin.join("worker.cmd"),
+        "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
+    )
+    .expect("worker command");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -966,7 +947,7 @@ async fn worker_handler_calls_hooks_call_adapter() {
         serde_json::to_vec(&json!({
             "runtime": {
                 "worker": {
-                    "command": "./worker.py"
+                    "command": if cfg!(windows) { "./worker.cmd" } else { "./worker.py" }
                 }
             }
         }))

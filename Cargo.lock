@@ -3216,6 +3216,7 @@ dependencies = [
  "tungstenite 0.28.0",
  "unicode-width",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

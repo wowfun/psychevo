@@ -27,9 +27,10 @@ impl WorkspaceExternalLauncher for FakeLauncher {
 }
 
 fn test_scope(root: &Path) -> ResolvedScope {
+    let root = psychevo::__product::platform::normalized_native_path(root);
     ResolvedScope {
-        cwd: root.to_path_buf(),
-        source: super::super::cwd_source(root),
+        cwd: root.clone(),
+        source: super::super::cwd_source(&root),
     }
 }
 
@@ -273,6 +274,7 @@ async fn launcher_failures_surface_without_falling_back_to_another_action() {
     assert_eq!(fake.requests.lock().expect("requests").len(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn linux_file_uri_percent_encodes_non_uri_path_bytes() {
     assert_eq!(

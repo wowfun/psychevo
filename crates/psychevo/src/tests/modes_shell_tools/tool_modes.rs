@@ -1012,6 +1012,7 @@ pub(crate) async fn exec_command_yields_long_running_session() {
     assert!(result["exit_code"].is_null(), "{result}");
 }
 
+#[cfg(unix)]
 pub(crate) fn run_stream_event_value(event: &crate::types::RunStreamEvent) -> Option<&Value> {
     match event {
         crate::types::RunStreamEvent::Event(value) => Some(value.as_value()),
@@ -1020,6 +1021,7 @@ pub(crate) fn run_stream_event_value(event: &crate::types::RunStreamEvent) -> Op
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn latest_event_type(
     events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>,
     event_type: &str,
@@ -1033,6 +1035,7 @@ pub(crate) fn latest_event_type(
         .cloned()
 }
 
+#[cfg(unix)]
 pub(crate) fn assert_event_type(
     events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>,
     event_type: &str,
@@ -1044,6 +1047,7 @@ pub(crate) fn assert_event_type(
     );
 }
 
+#[cfg(unix)]
 pub(crate) async fn wait_for_event_type(
     events: &Arc<Mutex<Vec<crate::types::RunStreamEvent>>>,
     event_type: &str,

@@ -3,14 +3,15 @@ async fn acp_peer_rejects_non_v1_protocol_without_fallback() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_wrong_version.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_wrong_version",
+        "fake_acp_wrong_version",
+    );
+    let script = fixture.script;
     let log = harness._temp.path().join("wrong-version.jsonl");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-        &script,
-        include_str!("../../../tests/fixtures/fake_acp_wrong_version.py"),
-    )
-    .expect("fake ACP script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -18,12 +19,12 @@ async fn acp_peer_rejects_non_v1_protocol_without_fallback() {
 kind = "acp"
 description = "Wrong-version ACP agent."
 command = {}
-args = ["{}", "{}"]
+args = [{}, {}]
 entrypoints = ["peer"]
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            log.display()
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script),
+            crate::test_support::toml_path(&log)
         ),
     )
     .expect("config");
@@ -90,7 +91,13 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_v1_contract.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_v1_contract",
+        "fake_acp_v1_contract",
+    );
+    let script = fixture.script;
     let log = harness._temp.path().join("v1-contract.jsonl");
     let image = harness.cwd.join("pixel.png");
     std::fs::create_dir_all(&home).expect("home");
@@ -102,24 +109,19 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     )
     .expect("image");
     std::fs::write(
-        &script,
-        include_str!("../../../tests/fixtures/fake_acp_v1_contract.py"),
-    )
-    .expect("fake ACP script");
-    std::fs::write(
         home.join("config.toml"),
         format!(
             r#"[agents.backends.fake]
 kind = "acp"
 description = "Stable ACP v1 contract agent."
 command = {}
-args = ["{}", "{}"]
+args = [{}, {}]
 entrypoints = ["peer"]
 client_capabilities = ["fs.read"]
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            log.display()
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script),
+            crate::test_support::toml_path(&log)
         ),
     )
     .expect("config");
@@ -280,14 +282,15 @@ async fn acp_peer_abort_sends_session_cancel_before_process_cleanup() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_cancel.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_cancel",
+        "fake_acp_cancel",
+    );
+    let script = fixture.script;
     let log = harness._temp.path().join("cancel.jsonl");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-        &script,
-        include_str!("../../../tests/fixtures/fake_acp_cancel.py"),
-    )
-    .expect("fake ACP script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -295,12 +298,12 @@ async fn acp_peer_abort_sends_session_cancel_before_process_cleanup() {
 kind = "acp"
 description = "Cancellable ACP agent."
 command = {}
-args = ["{}", "{}"]
+args = [{}, {}]
 entrypoints = ["peer"]
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            log.display()
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script),
+            crate::test_support::toml_path(&log)
         ),
     )
     .expect("config");
@@ -376,15 +379,16 @@ async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_reconcile.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_reconcile",
+        "fake_acp_reconcile",
+    );
+    let script = fixture.script;
     let log = harness._temp.path().join("reconcile.jsonl");
     let state_path = harness._temp.path().join("reconcile-state.json");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-        &script,
-        include_str!("../../../tests/fixtures/fake_acp_reconcile.py"),
-    )
-    .expect("fake ACP reconciliation script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -392,13 +396,13 @@ async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
 kind = "acp"
 description = "Unknown-delivery reconciliation ACP agent."
 command = {}
-args = ["{}", "{}", "{}"]
+args = [{}, {}, {}]
 entrypoints = ["peer"]
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            log.display(),
-            state_path.display(),
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script),
+            crate::test_support::toml_path(&log),
+            crate::test_support::toml_path(&state_path),
         ),
     )
     .expect("config");

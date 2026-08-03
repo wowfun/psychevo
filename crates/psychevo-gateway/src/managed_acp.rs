@@ -892,6 +892,7 @@ mod tests {
         write_managed_tree_seal(paths).expect("tree seal");
     }
 
+    #[cfg(unix)]
     fn assert_no_transaction_directories(home: &Path) {
         let parent = home.join("runtime-adapters/codex-acp");
         let leftovers = std::fs::read_dir(parent)
@@ -904,6 +905,7 @@ mod tests {
         assert!(leftovers.is_empty(), "transaction leftovers: {leftovers:?}");
     }
 
+    #[cfg(unix)]
     fn test_install_env() -> BTreeMap<String, String> {
         let mut env = std::env::var("PATH")
             .ok()

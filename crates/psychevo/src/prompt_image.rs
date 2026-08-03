@@ -322,13 +322,16 @@ pub(crate) fn parse_quoted_token(prompt: &str, start: usize, quote: char) -> Opt
     let mut value = String::new();
     let mut escaped = false;
     let rest = &prompt[start + quote.len_utf8()..];
+    let preserve_backslashes = rest
+        .char_indices()
+        .any(|(index, _)| index_starts_windows_absolute_path(rest, index));
     for (offset, ch) in rest.char_indices() {
         if escaped {
             value.push(ch);
             escaped = false;
             continue;
         }
-        if ch == '\\' {
+        if ch == '\\' && !preserve_backslashes {
             escaped = true;
             continue;
         }
@@ -348,13 +351,16 @@ pub(crate) fn parse_unquoted_token(prompt: &str, start: usize) -> Option<PromptT
     let rest = &prompt[start..];
     let mut value = String::new();
     let mut escaped = false;
+    let preserve_backslashes = rest
+        .char_indices()
+        .any(|(index, _)| index_starts_windows_absolute_path(rest, index));
     for (offset, ch) in rest.char_indices() {
         if escaped {
             value.push(ch);
             escaped = false;
             continue;
         }
-        if ch == '\\' {
+        if ch == '\\' && !preserve_backslashes {
             escaped = true;
             continue;
         }
@@ -402,6 +408,7 @@ pub(crate) fn image_source_spans(prompt: &str, cwd: &Path) -> Result<Vec<ImageSo
         } else if prompt[index..].starts_with("file://")
             || prompt[index..].starts_with("data:image/")
             || prompt[index..].starts_with("~/")
+            || index_starts_windows_absolute_path(prompt, index)
             || (ch == '/' && !index_is_inside_http_url_token(prompt, index))
         {
             parse_unquoted_token(prompt, index)
@@ -428,6 +435,26 @@ pub(crate) fn image_source_spans(prompt: &str, cwd: &Path) -> Result<Vec<ImageSo
     Ok(spans)
 }
 
+pub(crate) fn starts_with_windows_absolute_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/'))
+        || value.starts_with(r"\\")
+}
+
+pub(crate) fn index_starts_windows_absolute_path(value: &str, index: usize) -> bool {
+    if !starts_with_windows_absolute_path(&value[index..]) {
+        return false;
+    }
+    index == 0
+        || value[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
+}
+
 pub(crate) fn index_is_inside_http_url_token(prompt: &str, index: usize) -> bool {
     let token_start = prompt[..index]
         .char_indices()
@@ -440,6 +467,9 @@ pub(crate) fn index_is_inside_http_url_token(prompt: &str, index: usize) -> bool
 
 pub(crate) fn looks_like_prose_prefixed_path(source: &str) -> bool {
     source.find(":/").is_some_and(|index| index > 1)
+        || source.char_indices().any(|(index, _)| {
+            index > 0 && index_starts_windows_absolute_path(source, index)
+        })
         || source.find("：/").is_some_and(|index| index > 0)
 }
 

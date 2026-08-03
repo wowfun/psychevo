@@ -525,13 +525,14 @@ pub(crate) async fn cli_web_start_failure_surfaces_current_managed_log_output() 
         String::from_utf8_lossy(&output.stdout)
     );
     let stderr = String::from_utf8(output.stderr).expect("stderr");
+    let gateway_log = std::fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
         stderr.contains("managed gateway did not become ready"),
         "{stderr}"
     );
     assert!(
         stderr.contains("state database schema version 99 is not supported"),
-        "{stderr}"
+        "{stderr}\nserver log:\n{gateway_log}"
     );
     assert!(stderr.contains(&log_path.display().to_string()), "{stderr}");
     assert!(!stderr.contains("old launch sentinel"), "{stderr}");

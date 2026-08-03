@@ -257,7 +257,7 @@ fn write_skill_file_inner(
     let skill = find_skill(catalog, name)?;
     ensure_mutable_skill(skill, home, cwd)?;
     let target = resolve_skill_write_path(skill, file_path)?;
-    let canonical_base = skill.base_dir.canonicalize()?;
+    let canonical_base = crate::host_paths::normalized_native_path(&skill.base_dir.canonicalize()?);
     let approved_identity = crate::filesystem_identity::canonicalize_deepest_existing(&target)?;
     if !crate::filesystem_identity::is_within(&canonical_base, &approved_identity) {
         return Err(Error::Message(
@@ -286,7 +286,7 @@ fn write_skill_file_inner(
     Ok(json!({"success": true, "name": skill.name, "path": target}))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn write_skill_file_after_validation(
     catalog: &SkillCatalog,
     home: &Path,

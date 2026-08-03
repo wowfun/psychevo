@@ -573,18 +573,29 @@
         application
     }
 
-    fn test_python_command_toml(cwd: &std::path::Path) -> String {
-        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo::__product::platform::resolve_executable_path(
-            "python3",
-            cwd,
-            &psychevo::__product::platform::ExecutableResolveOptions {
-                platform: psychevo::__product::platform::HostPlatform::current(),
-                env: &host_env,
-            },
-        )
-        .expect("resolve ACP test fixture python");
-        serde_json::to_string(&python.to_string_lossy()).expect("quote ACP fixture python")
+    fn test_acp_command_toml(cwd: &std::path::Path) -> String {
+        let fixture = crate::test_support::acp_fixture(cwd, "fake_acp_lifecycle");
+        crate::test_support::toml_path(&fixture.program)
+    }
+
+    fn copied_acp_fixture(
+        cwd: &std::path::Path,
+        directory: &std::path::Path,
+        name: &str,
+        target_stem: &str,
+    ) -> crate::test_support::AcpFixture {
+        let fixture = crate::test_support::acp_fixture(cwd, name);
+        let target = directory.join(target_stem).with_extension(
+            fixture
+                .script
+                .extension()
+                .expect("ACP fixture extension"),
+        );
+        std::fs::copy(&fixture.script, &target).expect("copy ACP test fixture");
+        crate::test_support::AcpFixture {
+            program: fixture.program,
+            script: target,
+        }
     }
 
     fn run_options(harness: &Harness, prompt: &str) -> RunOptions {
@@ -662,7 +673,7 @@ command = {}
 args = ["fake_acp.py"]
 entrypoints = ["subagent"]
 "#,
-                test_python_command_toml(&harness.cwd),
+                test_acp_command_toml(&harness.cwd),
             ),
         )
         .expect("config");

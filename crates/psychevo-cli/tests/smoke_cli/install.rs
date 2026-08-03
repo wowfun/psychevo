@@ -2,21 +2,22 @@
 pub(crate) use super::*;
 
 pub(crate) fn install_workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
-        .expect("workspace root")
+        .expect("workspace root");
+    psychevo::__product::platform::normalized_native_path(&root)
 }
 
 pub(crate) fn install_script_path() -> PathBuf {
     install_workspace_root().join("scripts/install.sh")
 }
 
-#[cfg(unix)]
 fn write_fake_command(bin_dir: &Path, name: &str, body: &str) {
     std::fs::create_dir_all(bin_dir).expect("fake bin");
     let path = bin_dir.join(name);
     std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("fake command");
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
@@ -28,12 +29,14 @@ fn write_fake_command(bin_dir: &Path, name: &str, body: &str) {
     }
 }
 
-#[cfg(unix)]
-fn write_fake_pevo(home: &Path) {
-    write_fake_command(&home.join(".cargo/bin"), "pevo", "exit 0");
+fn pevo_executable_name() -> &'static str {
+    if cfg!(windows) { "pevo.exe" } else { "pevo" }
 }
 
-#[cfg(unix)]
+fn write_fake_pevo(home: &Path) {
+    write_fake_command(&home.join(".cargo/bin"), pevo_executable_name(), "exit 0");
+}
+
 fn write_fake_web_install_prerequisites(bin_dir: &Path, home: &Path, pnpm_body: &str) {
     write_fake_pevo(home);
     write_fake_command(bin_dir, "cargo", "exit 0");
@@ -44,14 +47,62 @@ fn write_fake_web_install_prerequisites(bin_dir: &Path, home: &Path, pnpm_body: 
 }
 
 #[cfg(unix)]
-fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
-    let mut command = Command::new("/bin/sh");
+fn install_shell() -> PathBuf {
+    PathBuf::from("/bin/sh")
+}
+
+#[cfg(windows)]
+fn install_shell() -> PathBuf {
+    let runtime = psychevo::__product::platform::GitBashRuntime::discover(
+        &std::env::vars().collect::<std::collections::BTreeMap<_, _>>(),
+    )
+    .unwrap_or_else(|error| panic!("native Windows install tests require Git Bash: {error}"));
+    let shell = runtime.cygpath.with_file_name("sh.exe");
+    assert!(
+        shell.is_file(),
+        "native Windows install tests require Git Bash sh.exe at {}",
+        shell.display()
+    );
+    shell
+}
+
+#[cfg(unix)]
+fn shell_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+#[cfg(windows)]
+fn shell_path(path: &Path) -> String {
+    psychevo::__product::platform::display_path_for_native_path(path)
+}
+
+#[cfg(unix)]
+fn write_native_platform_commands(_bin_dir: &Path) {}
+
+#[cfg(windows)]
+fn write_native_platform_commands(bin_dir: &Path) {
+    write_fake_command(bin_dir, "uname", "exec /usr/bin/uname \"$@\"");
+}
+
+fn install_command() -> Command {
+    let mut command = Command::new(install_shell());
+    command.arg(shell_path(&install_script_path()));
     command
-        .arg(install_script_path())
+}
+
+fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
+    write_native_platform_commands(bin_dir);
+    let runtime_tmp = home.join("tmp");
+    std::fs::create_dir_all(&runtime_tmp).expect("runtime temp");
+    let mut command = install_command();
+    command
         .current_dir(install_workspace_root())
         .env_clear()
-        .env("HOME", home)
-        .env("PATH", bin_dir);
+        .env("HOME", shell_path(home))
+        .env("TEMP", shell_path(&runtime_tmp))
+        .env("TMP", shell_path(&runtime_tmp))
+        .env("TMPDIR", shell_path(&runtime_tmp))
+        .env("PATH", shell_path(bin_dir));
     command
 }
 
@@ -67,8 +118,7 @@ pub(crate) async fn install_rejects_removed_options() {
         "--web-dist",
         "--dry-run",
     ] {
-        let output = Command::new("sh")
-            .arg(install_script_path())
+        let output = install_command()
             .arg(flag)
             .output()
             .expect("install option");
@@ -85,9 +135,10 @@ pub(crate) async fn install_rejects_removed_options() {
 #[tokio::test]
 pub(crate) async fn install_requires_checkout_cwd() {
     let temp = tempdir().expect("temp");
-    let output = Command::new("sh")
-        .arg(install_script_path())
-        .current_dir(temp.path())
+    let output = install_command()
+        .current_dir(psychevo::__product::platform::normalized_native_path(
+            temp.path(),
+        ))
         .output()
         .expect("install");
 
@@ -104,19 +155,13 @@ pub(crate) async fn install_requires_checkout_cwd() {
     assert!(!stderr.contains("checking Cargo"), "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_check_reports_missing_tools_without_mutation() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     std::fs::create_dir_all(&bin).expect("bin");
-    let output = Command::new("/bin/sh")
-        .arg(install_script_path())
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
         .arg("--check")
-        .current_dir(install_workspace_root())
-        .env_clear()
-        .env("HOME", temp.path().join("home"))
-        .env("PATH", &bin)
         .output()
         .expect("install check");
 
@@ -127,10 +172,12 @@ pub(crate) async fn install_check_reports_missing_tools_without_mutation() {
     assert!(stdout.contains("node: missing"), "{stdout}");
     assert!(stdout.contains("pnpm: missing"), "{stdout}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("CARGO_HTTP_CHECK_REVOKE: (unset)"),
-        "{stderr}"
-    );
+    let expected_revoke = if cfg!(windows) {
+        "CARGO_HTTP_CHECK_REVOKE: false (installer default for cargo install)"
+    } else {
+        "CARGO_HTTP_CHECK_REVOKE: (unset)"
+    };
+    assert!(stderr.contains(expected_revoke), "{stderr}");
     assert!(
         stderr.contains("CARGO_HTTP_TIMEOUT: 120 (installer default for cargo install)"),
         "{stderr}"
@@ -148,12 +195,15 @@ pub(crate) async fn install_check_reports_missing_tools_without_mutation() {
         "{stderr}"
     );
     assert!(
-        !temp.path().join("home/.cargo/bin/pevo").exists(),
+        !temp
+            .path()
+            .join("home/.cargo/bin")
+            .join(pevo_executable_name())
+            .exists(),
         "check mode must not install pevo"
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_check_reports_mismatched_pnpm_as_warning() {
     let temp = tempdir().expect("temp");
@@ -167,13 +217,8 @@ pub(crate) async fn install_check_reports_mismatched_pnpm_as_warning() {
         "pnpm",
         "if [ \"${pnpm_config_pm_on_fail:-}\" != warn ]; then printf '[ERROR] This project is configured to use 11.8.0 of pnpm. Your current pnpm is v11.10.0\\nCorepack invoked pnpm with this version, and pnpm does not switch versions when running under corepack.\\n' >&2; exit 42; fi\ncase \"$1\" in\n  --version) printf '11.10.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
     );
-    let output = Command::new("/bin/sh")
-        .arg(install_script_path())
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
         .arg("--check")
-        .current_dir(install_workspace_root())
-        .env_clear()
-        .env("HOME", temp.path().join("home"))
-        .env("PATH", &bin)
         .output()
         .expect("install check");
 
@@ -189,7 +234,6 @@ pub(crate) async fn install_check_reports_mismatched_pnpm_as_warning() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_check_enforces_rust_1_97_0_boundary() {
     for (version, accepted) in [
@@ -235,7 +279,7 @@ pub(crate) async fn install_check_enforces_rust_1_97_0_boundary() {
 
 #[cfg(unix)]
 #[tokio::test]
-pub(crate) async fn install_preflight_reports_missing_native_compiler() {
+pub(crate) async fn install_unix_preflight_reports_missing_native_compiler() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
@@ -260,7 +304,6 @@ pub(crate) async fn install_preflight_reports_missing_native_compiler() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_reports_missing_node_for_full_install() {
     let temp = tempdir().expect("temp");
@@ -285,7 +328,6 @@ pub(crate) async fn install_preflight_reports_missing_node_for_full_install() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_reports_missing_pnpm_for_full_install() {
     let temp = tempdir().expect("temp");
@@ -311,7 +353,6 @@ pub(crate) async fn install_preflight_reports_missing_pnpm_for_full_install() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_prints_progress_breadcrumbs() {
     let temp = tempdir().expect("temp");
@@ -340,8 +381,18 @@ pub(crate) async fn install_preflight_prints_progress_breadcrumbs() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let platform_breadcrumbs: &[&str] = if cfg!(windows) {
+        &["pevo install: using windows-git-bash source checkout at"]
+    } else {
+        &[
+            "pevo install: using unix source checkout at",
+            "pevo install: using wsl source checkout at",
+        ]
+    };
     assert!(
-        stderr.contains("pevo install: using unix source checkout at"),
+        platform_breadcrumbs
+            .iter()
+            .any(|breadcrumb| stderr.contains(breadcrumb)),
         "{stderr}"
     );
     assert!(
@@ -369,7 +420,6 @@ pub(crate) async fn install_preflight_prints_progress_breadcrumbs() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
     let temp = tempdir().expect("temp");
@@ -402,7 +452,6 @@ pub(crate) async fn install_preflight_warns_for_mismatched_pnpm_and_continues() 
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
     let temp = tempdir().expect("temp");
@@ -444,7 +493,6 @@ pub(crate) async fn install_preflight_bypasses_corepack_project_spec_for_pnpm() 
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_pnpm_defaults_fetch_timeout_without_changing_retry_policy() {
     let temp = tempdir().expect("temp");
@@ -486,7 +534,6 @@ pub(crate) async fn install_pnpm_defaults_fetch_timeout_without_changing_retry_p
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_pnpm_preserves_explicit_fetch_timeout() {
     let temp = tempdir().expect("temp");
@@ -516,7 +563,6 @@ pub(crate) async fn install_pnpm_preserves_explicit_fetch_timeout() {
     );
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_distinguishes_dependency_install_and_asset_build_steps() {
     let temp = tempdir().expect("temp");
@@ -551,7 +597,6 @@ pub(crate) async fn install_distinguishes_dependency_install_and_asset_build_ste
     assert!(build_step < build_command, "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
     let temp = tempdir().expect("temp");
@@ -585,7 +630,6 @@ pub(crate) async fn install_preflight_rejects_unusable_pnpm_before_cargo_install
     assert!(!stderr.contains("fake cargo reached"), "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_check_reports_unusable_pnpm_as_failure() {
     let temp = tempdir().expect("temp");
@@ -599,13 +643,8 @@ pub(crate) async fn install_check_reports_unusable_pnpm_as_failure() {
         "pnpm",
         "case \"$1\" in\n  --version) printf 'corepack certificate failure\\n' >&2; exit 42 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 42 ;;\nesac",
     );
-    let output = Command::new("/bin/sh")
-        .arg(install_script_path())
+    let output = install_preflight_command(&bin, &temp.path().join("home"))
         .arg("--check")
-        .current_dir(install_workspace_root())
-        .env_clear()
-        .env("HOME", temp.path().join("home"))
-        .env("PATH", &bin)
         .output()
         .expect("install check");
 
@@ -619,12 +658,11 @@ pub(crate) async fn install_check_reports_unusable_pnpm_as_failure() {
     assert!(stderr.contains("corepack certificate failure"), "{stderr}");
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[tokio::test]
 pub(crate) async fn install_windows_preflight_reports_missing_build_tools_before_cargo() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
     write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     let output = install_preflight_command(&bin, &temp.path().join("home"))
@@ -640,12 +678,11 @@ pub(crate) async fn install_windows_preflight_reports_missing_build_tools_before
     assert!(!stderr.contains("fake cargo reached"), "{stderr}");
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[tokio::test]
 pub(crate) async fn install_windows_cargo_install_defaults_revocation_check_off() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(
         &bin,
         "tee",
@@ -677,12 +714,11 @@ pub(crate) async fn install_windows_cargo_install_defaults_revocation_check_off(
     );
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[tokio::test]
 pub(crate) async fn install_windows_cargo_install_preserves_explicit_revocation_setting() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(
         &bin,
         "cargo",
@@ -706,12 +742,11 @@ pub(crate) async fn install_windows_cargo_install_preserves_explicit_revocation_
     assert!(stderr.contains("cargo revoke=true"), "{stderr}");
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[tokio::test]
 pub(crate) async fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(
         &bin,
         "cargo",
@@ -752,13 +787,12 @@ pub(crate) async fn install_windows_locked_pevo_exe_failure_gets_targeted_guidan
     );
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[tokio::test]
 pub(crate) async fn install_windows_preflight_stops_existing_managed_gateway() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     let home = temp.path().join("home");
-    write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(
         &home.join(".cargo/bin"),
         "pevo.exe",
@@ -823,7 +857,6 @@ pub(crate) async fn install_unix_cargo_install_does_not_force_revocation_setting
     assert!(stderr.contains("cargo revoke=unset"), "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_cargo_install_defaults_timeout_and_retry() {
     let temp = tempdir().expect("temp");
@@ -850,7 +883,6 @@ pub(crate) async fn install_cargo_install_defaults_timeout_and_retry() {
     assert!(stderr.contains("cargo timeout=120 retry=10"), "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_cargo_install_preserves_explicit_timeout_and_retry() {
     let temp = tempdir().expect("temp");
@@ -879,7 +911,6 @@ pub(crate) async fn install_cargo_install_preserves_explicit_timeout_and_retry()
     assert!(stderr.contains("cargo timeout=45 retry=2"), "{stderr}");
 }
 
-#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn install_cargo_failure_prints_network_diagnostics() {
     let temp = tempdir().expect("temp");

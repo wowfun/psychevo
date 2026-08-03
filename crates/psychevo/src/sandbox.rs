@@ -674,12 +674,12 @@ fn path_from_config(raw: &str, cwd: &Path) -> PathBuf {
 }
 
 fn canonicalize_existing(path: &Path) -> Result<PathBuf> {
-    Ok(path.canonicalize()?)
+    Ok(crate::host_paths::normalized_native_path(&path.canonicalize()?))
 }
 
 fn push_existing_unique(roots: &mut Vec<PathBuf>, path: PathBuf) -> Result<()> {
     if path.exists() {
-        let path = path.canonicalize()?;
+        let path = canonicalize_existing(&path)?;
         push_unique(roots, path);
     }
     Ok(())

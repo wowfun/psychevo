@@ -66,8 +66,7 @@ async fn delegated_acp_child_owns_activity_turn_identity_and_terminal_order() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
+    let fixture = crate::test_support::acp_fixture(&harness.cwd, "fake_acp_lifecycle");
     let log = harness.cwd.join("delegated-child-activity.jsonl");
     let release = harness.cwd.join("delegated-child.release");
     std::fs::create_dir_all(&home).expect("home");
@@ -85,8 +84,8 @@ ACP_LIFECYCLE_LOG = {}
 ACP_LIFECYCLE_MODE = "blocking-prompt"
 ACP_LIFECYCLE_RELEASE = {}
 "#,
-            test_python_command_toml(&harness.cwd),
-            serde_json::to_string(&fixture.to_string_lossy()).expect("fixture path"),
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&fixture.script),
             serde_json::to_string(&log.to_string_lossy()).expect("log path"),
             serde_json::to_string(&release.to_string_lossy()).expect("release path"),
         ),
@@ -302,11 +301,14 @@ async fn acp_peer_agent_turn_routes_to_backend_and_persists_native_session() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend.clone()).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp.py");
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fake_acp_session_persistence.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_session_persistence",
+        "fake_acp",
+    );
+    let script = fixture.script;
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::copy(fixture, &script).expect("fake acp script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -314,16 +316,16 @@ async fn acp_peer_agent_turn_routes_to_backend_and_persists_native_session() {
 kind = "acp"
 description = "Fake ACP agent."
 command = {}
-args = ["{}"]
+args = [{}]
 entrypoints = ["peer"]
 client_capabilities = ["fs.read"]
 
 [agents.backends.fake.env]
-PSYCHEVO_BINDING_DB = "{}"
+PSYCHEVO_BINDING_DB = {}
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            harness.state.db_path().display(),
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script),
+            crate::test_support::toml_path(harness.state.db_path()),
         ),
     )
     .expect("config");
@@ -441,8 +443,10 @@ Peer instructions.
             .final_answer
             .contains("old answer from loaded history")
     );
+    let mut process_counter_path = script.as_os_str().to_os_string();
+    process_counter_path.push(".processes");
     assert_eq!(
-        std::fs::read_to_string(script.with_extension("py.processes"))
+        std::fs::read_to_string(PathBuf::from(process_counter_path))
             .expect("ACP process counter"),
         "1",
         "two turns on one thread must reuse one resident ACP process"
@@ -539,11 +543,14 @@ async fn acp_peer_agent_streams_standard_session_updates_to_gateway_events() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend.clone()).await;
     let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_stream.py");
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fake_acp_stream_updates.py");
+    let fixture = copied_acp_fixture(
+        &harness.cwd,
+        harness._temp.path(),
+        "fake_acp_stream_updates",
+        "fake_acp_stream",
+    );
+    let script = fixture.script;
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::copy(fixture, &script).expect("fake acp stream script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -551,12 +558,12 @@ async fn acp_peer_agent_streams_standard_session_updates_to_gateway_events() {
 kind = "acp"
 description = "Fake ACP agent."
 command = {}
-args = ["{}"]
+args = [{}]
 entrypoints = ["peer"]
 client_capabilities = ["fs.read"]
 "#,
-            test_python_command_toml(&harness.cwd),
-            script.display()
+            test_acp_command_toml(&harness.cwd),
+            crate::test_support::toml_path(&script)
         ),
     )
     .expect("config");

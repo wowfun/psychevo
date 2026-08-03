@@ -181,6 +181,24 @@ impl ToolBinding for WriteStdinTool {
 }
 
 #[cfg(test)]
+pub(crate) fn test_exec_env() -> BTreeMap<String, String> {
+    #[cfg(windows)]
+    {
+        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
+        let git_bash = crate::host_paths::GitBashRuntime::discover(&host_env)
+            .expect("Git Bash is required for native Windows exec_command tests");
+        BTreeMap::from([(
+            crate::host_paths::PSYCHEVO_GIT_BASH_PATH.to_string(),
+            git_bash.bash.display().to_string(),
+        )])
+    }
+    #[cfg(not(windows))]
+    {
+        BTreeMap::new()
+    }
+}
+
+#[cfg(test)]
 pub(crate) async fn exec_command_tool_impl(
     accepted_cwd: PathBuf,
     allow_login_shell: bool,
@@ -195,7 +213,7 @@ pub(crate) async fn exec_command_tool_impl(
             lsp_manager: default_lsp_manager(),
             allow_login_shell,
             stream_events: None,
-            env: BTreeMap::new(),
+            env: test_exec_env(),
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),
             sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),

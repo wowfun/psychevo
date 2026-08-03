@@ -598,11 +598,17 @@ mod tests {
 
         assert_eq!(
             contributions.skill_inputs,
-            vec![root.join("skills").canonicalize().expect("skills")]
+            vec![crate::host_paths::normalized_native_path(
+                &root.join("skills").canonicalize().expect("skills")
+            )]
         );
         assert_eq!(
             contributions.agent_inputs,
-            vec![root.join("agents/reviewer.md").display().to_string()]
+            vec![root
+                .join("agents")
+                .join("reviewer.md")
+                .display()
+                .to_string()]
         );
         assert_eq!(contributions.hook_sources.len(), 1);
         assert!(contributions.hook_sources[0].worker.is_none());
@@ -657,7 +663,9 @@ mod tests {
 
         assert_eq!(
             assembly.skill_inputs,
-            vec![root.join("skills").canonicalize().expect("skills")]
+            vec![crate::host_paths::normalized_native_path(
+                &root.join("skills").canonicalize().expect("skills")
+            )]
         );
         assert_eq!(
             assembly

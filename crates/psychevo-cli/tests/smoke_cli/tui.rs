@@ -227,6 +227,7 @@ pub(crate) async fn cli_tui_help_prints_commands_from_registry() {
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
+    std::fs::create_dir_all(cwd.join(".git")).expect("workspace boundary");
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)

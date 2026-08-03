@@ -244,12 +244,14 @@ root = "~/workspaces"
     )
     .await
     .expect("workspace/create");
-    let cwd = temp
-        .path()
-        .join("workspaces")
-        .join("Notes")
-        .canonicalize()
-        .expect("created cwd");
+    let cwd = normalized_native_path(
+        &temp
+            .path()
+            .join("workspaces")
+            .join("Notes")
+            .canonicalize()
+            .expect("created cwd"),
+    );
     let cwd_string = cwd.display().to_string();
 
     assert_eq!(created["cwd"], cwd_string);
@@ -268,9 +270,11 @@ root = "~/workspaces"
 
     let unrestricted_parent = temp.path().join("outside-configured-root");
     std::fs::create_dir_all(&unrestricted_parent).expect("unrestricted parent");
-    let unrestricted_parent = unrestricted_parent
-        .canonicalize()
-        .expect("canonical unrestricted parent");
+    let unrestricted_parent = normalized_native_path(
+        &unrestricted_parent
+            .canonicalize()
+            .expect("canonical unrestricted parent"),
+    );
     let outside_created = handle_rpc(
         state.clone(),
         auth.clone(),
@@ -287,10 +291,12 @@ root = "~/workspaces"
     )
     .await
     .expect("workspace/create beneath an explicit unrestricted parent");
-    let outside_cwd = unrestricted_parent
-        .join("Existing-parent-child")
-        .canonicalize()
-        .expect("created outside cwd");
+    let outside_cwd = normalized_native_path(
+        &unrestricted_parent
+            .join("Existing-parent-child")
+            .canonicalize()
+            .expect("created outside cwd"),
+    );
     assert_eq!(outside_created["cwd"].as_str(), Some(outside_cwd.to_string_lossy().as_ref()));
 
     let missing_parent = temp.path().join("missing-parent");

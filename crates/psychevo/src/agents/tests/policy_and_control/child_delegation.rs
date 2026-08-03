@@ -19,6 +19,16 @@ fn exec_command_script(call_id: &str, cmd: &str) -> Vec<RawStreamEvent> {
     ]
 }
 
+fn child_runtime_env(tmp: &TempDir, home: &Path) -> BTreeMap<String, String> {
+    let mut env = crate::tools::test_exec_env();
+    env.insert("HOME".to_string(), tmp.path().display().to_string());
+    env.insert(
+        "PSYCHEVO_HOME".to_string(),
+        home.display().to_string(),
+    );
+    env
+}
+
 fn write_trusted_hook_config(
     home: &Path,
     cwd: &Path,
@@ -542,7 +552,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
                 "matcher": "Bash",
                 "hooks": [{
                     "type": "command",
-                    "command": "printf '{\"updatedInput\":{\"cmd\":\"printf project-hook\\\\n\"}}'"
+                    "command": "printf '{\"updatedInput\":{\"cmd\":\"printf project-hook\"}}'"
                 }]
             }]
         }
@@ -552,17 +562,12 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
         serde_json::to_string(&project_hooks).expect("project hooks"),
     )
     .expect("write project hooks");
-    let project_source = crate::hooks::HookSourceDescriptor::new(
-        format!(
-            "project:{}#hooks.json",
-            cwd.join(".psychevo/hooks.json").display()
-        ),
+    let project_sources = crate::hooks::config_hook_sources_for_path(
+        &cwd.join(".psychevo/config.toml"),
         "project",
-        Some("project hooks.json".to_string()),
-        Some(cwd.join(".psychevo/hooks.json")),
-        project_hooks["hooks"].clone(),
-    );
-    write_trusted_hook_config(&home, &cwd, &[project_source]);
+    )
+    .expect("project hook sources");
+    write_trusted_hook_config(&home, &cwd, &project_sources);
 
     let marker = cwd.join("child-agent-post-hook");
     let mut agent = built_in_agent("worker", "Worker", "Work.", None);
@@ -571,7 +576,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
             "matcher": "Bash",
             "hooks": [{
                 "type": "command",
-                "command": format!("printf child-agent-hook > {}", marker.display())
+                "command": "printf child-agent-hook > child-agent-post-hook"
             }]
         }]
     }));
@@ -597,10 +602,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
         catalog,
     );
     context.cwd = cwd.clone();
-    context.env = BTreeMap::from([
-        ("HOME".to_string(), tmp.path().display().to_string()),
-        ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
-    ]);
+    context.env = child_runtime_env(&tmp, &home);
     let output = spawn_subagent(
         context,
         SpawnAgentArgs {
@@ -669,17 +671,12 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
         serde_json::to_string(&project_hooks).expect("project hooks"),
     )
     .expect("write project hooks");
-    let project_source = crate::hooks::HookSourceDescriptor::new(
-        format!(
-            "project:{}#hooks.json",
-            cwd.join(".psychevo/hooks.json").display()
-        ),
+    let project_sources = crate::hooks::config_hook_sources_for_path(
+        &cwd.join(".psychevo/config.toml"),
         "project",
-        Some("project hooks.json".to_string()),
-        Some(cwd.join(".psychevo/hooks.json")),
-        project_hooks["hooks"].clone(),
-    );
-    write_trusted_hook_config(&home, &cwd, &[project_source]);
+    )
+    .expect("project hook sources");
+    write_trusted_hook_config(&home, &cwd, &project_sources);
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -705,10 +702,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
         catalog,
     );
     context.cwd = cwd.clone();
-    context.env = BTreeMap::from([
-        ("HOME".to_string(), tmp.path().display().to_string()),
-        ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
-    ]);
+    context.env = child_runtime_env(&tmp, &home);
     let output = spawn_subagent(
         context,
         SpawnAgentArgs {
@@ -779,14 +773,35 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     .expect("plugin manifest");
     fs::write(
         plugin_source_root.join("psychevo.plugin.json"),
-        r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#,
+        serde_json::to_vec(&json!({
+            "runtime": {
+                "worker": {
+                    "command": if cfg!(windows) { "./worker.cmd" } else { "./worker.py" }
+                }
+            }
+        }))
+        .expect("plugin runtime overlay"),
     )
     .expect("plugin runtime overlay");
     fs::write(
-        plugin_source_root.join("worker.py"),
-        include_str!("fixtures/child_hook_plugin_worker.py"),
+        plugin_source_root.join(if cfg!(windows) {
+            "worker.js"
+        } else {
+            "worker.py"
+        }),
+        if cfg!(windows) {
+            include_str!("fixtures/child_hook_plugin_worker.js")
+        } else {
+            include_str!("fixtures/child_hook_plugin_worker.py")
+        },
     )
     .expect("plugin worker");
+    #[cfg(windows)]
+    fs::write(
+        plugin_source_root.join("worker.cmd"),
+        "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
+    )
+    .expect("worker command");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -872,10 +887,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
         catalog,
     );
     context.cwd = cwd;
-    context.env = BTreeMap::from([
-        ("HOME".to_string(), tmp.path().display().to_string()),
-        ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
-    ]);
+    context.env = child_runtime_env(&tmp, &home);
     context.extension_inputs.hook_sources.push(plugin_source);
     let _output = spawn_subagent(
         context,

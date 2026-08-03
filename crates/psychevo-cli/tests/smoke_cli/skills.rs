@@ -35,6 +35,7 @@ pub(crate) async fn cli_skill_list_view_config_and_json() {
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(cwd.join(".git")).expect("workspace boundary");
     init_skill_home(temp.path(), &psychevo_home);
     write_cli_skill(
         &psychevo_home.join("skills"),

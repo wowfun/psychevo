@@ -50,20 +50,16 @@ pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut Fulls
 }
 
 pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
+    let temp_root = psychevo::__product::platform::normalized_native_path(temp.path());
+    let home = temp_root.join("home");
+    let cwd = temp_root.join("work");
     std::fs::create_dir_all(&home).expect("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let cwd = cwd.canonicalize().expect("canonical");
+    std::fs::write(home.join("config.toml"), "\n").expect("config");
+    let cwd = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
     let mut env_map = BTreeMap::new();
-    env_map.insert(
-        "HOME".to_string(),
-        temp.path()
-            .canonicalize()
-            .expect("temp canonical")
-            .display()
-            .to_string(),
-    );
+    env_map.insert("HOME".to_string(), temp_root.display().to_string());
+    env_map.insert("PSYCHEVO_HOME".to_string(), home.display().to_string());
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let db_path = home.join("state.db");
     let state_runtime = StateRuntime::open(&db_path).await.expect("state");
@@ -514,12 +510,13 @@ pub(crate) fn long_tool_output() -> String {
 pub(crate) fn push_rich_markdown_turn(ui: &mut FullscreenUi<'_>, cwd: &Path) {
     ui.push_user("Render a markdown answer.".to_string());
     let path = cwd.join("crates/psychevo-cli/src/tui/render/transcript.rs");
+    let link = path.to_string_lossy().replace('\\', "/");
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Answer,
         "",
         format!(
             "# Rendering pass\n\n- Keep **ledger** rhythm\n- Style `inline code`\n\n```rust\nfn render() {{}}\n```\n\nSee [transcript]({}:42).",
-            path.display()
+            link
         ),
     ));
 }

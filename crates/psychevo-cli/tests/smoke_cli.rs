@@ -15,8 +15,29 @@ pub(crate) fn pevo() -> &'static str {
 }
 
 pub(crate) fn pevo_cmd(home: &Path) -> Command {
+    let home = psychevo::__product::platform::normalized_native_path(home);
+    let runtime_tmp = home.join("tmp");
+    std::fs::create_dir_all(&runtime_tmp).expect("runtime temp");
     let mut command = Command::new(pevo());
-    command.env_clear().env("HOME", home);
+    command
+        .env_clear()
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("TEMP", &runtime_tmp)
+        .env("TMP", &runtime_tmp)
+        .env("TMPDIR", &runtime_tmp);
+    for key in [
+        "PATH",
+        "PATHEXT",
+        "COMSPEC",
+        "SystemRoot",
+        "WINDIR",
+        "PSYCHEVO_GIT_BASH_PATH",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
     command
 }
 

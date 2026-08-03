@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{
+    GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation,
+};
+
 use anyhow::{Context, Result, anyhow};
 use psychevo::__product::platform::{
     ManagedProcess, ProcessIdentityError, atomic_replace_private, instance_lease_is_held,
@@ -15,6 +22,54 @@ use psychevo::__product::platform::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+#[cfg(windows)]
+struct ParentStdioInheritanceGuard {
+    handles: Vec<HANDLE>,
+}
+
+#[cfg(windows)]
+impl ParentStdioInheritanceGuard {
+    fn disable() -> Result<Self> {
+        let handles = [
+            std::io::stdin().as_raw_handle() as HANDLE,
+            std::io::stdout().as_raw_handle() as HANDLE,
+            std::io::stderr().as_raw_handle() as HANDLE,
+        ];
+        let mut changed = Vec::new();
+        for handle in handles {
+            let mut flags = 0;
+            // SAFETY: the handles come from the current process's standard streams and
+            // `flags` is a valid out pointer for the duration of this call.
+            if unsafe { GetHandleInformation(handle, &mut flags) } == 0
+                || flags & HANDLE_FLAG_INHERIT == 0
+                || changed.contains(&handle)
+            {
+                continue;
+            }
+            // SAFETY: `handle` was validated above and remains owned by the current
+            // process. Only its inheritance bit is changed temporarily.
+            if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("disable inherited parent stdio for managed gateway");
+            }
+            changed.push(handle);
+        }
+        Ok(Self { handles: changed })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ParentStdioInheritanceGuard {
+    fn drop(&mut self) {
+        for handle in &self.handles {
+            // SAFETY: each handle is still owned by the current process. Restoration
+            // is best effort because Drop cannot report an error.
+            let _ =
+                unsafe { SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+        }
+    }
+}
 
 use super::context::GatewayContext;
 
@@ -278,6 +333,8 @@ fn spawn_serve(
     {
         command.process_group(0);
     }
+    #[cfg(windows)]
+    let _parent_stdio_guard = ParentStdioInheritanceGuard::disable()?;
     let child = command.spawn().context("spawn pevo serve")?;
     Ok(ManagedLaunch {
         child,

@@ -1,23 +1,10 @@
 #[tokio::test]
 async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-lifecycle.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -32,8 +19,8 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
             "target": "project",
             "enabled": true,
             "label": "Lifecycle fixture",
-            "command": python,
-            "args": [fixture],
+            "command": fixture_program,
+            "args": [fixture_script],
             "env": {
                 "ACP_LIFECYCLE_LOG": log,
                 "ACP_LIFECYCLE_MODE": "all"
@@ -307,24 +294,11 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
 
 #[tokio::test]
 async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_reloads_once() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-history-review.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -339,8 +313,8 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
             "target": "project",
             "enabled": true,
             "label": "History review fixture",
-            "command": python,
-            "args": [fixture],
+            "command": fixture_program,
+            "args": [fixture_script],
             "env": {
                 "ACP_LIFECYCLE_LOG": log,
                 "ACP_LIFECYCLE_MODE": "history-replay-review"
@@ -552,24 +526,11 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
 
 #[tokio::test]
 async fn agent_session_import_rejects_resume_only_history_without_publishing_a_thread() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-resume-only.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -584,8 +545,8 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
             "target": "project",
             "enabled": true,
             "label": "Resume-only fixture",
-            "command": python,
-            "args": [fixture],
+            "command": fixture_program,
+            "args": [fixture_script],
             "env": {
                 "ACP_LIFECYCLE_LOG": log,
                 "ACP_LIFECYCLE_MODE": "resume-only"
@@ -711,24 +672,11 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
         ("no-delete", false, "does not support deleting"),
         ("delete-fails", true, "fixture remote delete failed"),
     ] {
-        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
         let host_cwd = std::env::current_dir().expect("host cwd");
-        let python = ["python3", "python"]
-            .into_iter()
-            .find_map(|command| {
-                resolve_executable_path(
-                    command,
-                    &host_cwd,
-                    &ExecutableResolveOptions {
-                        platform: HostPlatform::current(),
-                        env: &host_env,
-                    },
-                )
-            })
-            .expect("Python is required by the ACP fixture");
+        let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+        let fixture_program = fixture.program;
+        let fixture_script = fixture.script;
         let (_temp, state) = web_state().await;
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/fake_acp_lifecycle.py");
         let log = state.inner.cwd.join(format!("agent-session-delete-{mode}.jsonl"));
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let wire_scope = scope.to_wire_scope();
@@ -743,8 +691,8 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
                 "target": "project",
                 "enabled": true,
                 "label": "Lifecycle fixture",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {"ACP_LIFECYCLE_LOG": log, "ACP_LIFECYCLE_MODE": mode},
                 "entrypoints": ["peer", "subagent"]
             }),

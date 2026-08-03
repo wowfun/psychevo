@@ -31,7 +31,8 @@ pub(crate) fn canonicalize_deepest_existing(path: &Path) -> Result<PathBuf> {
     loop {
         match std::fs::symlink_metadata(&current) {
             Ok(_) => {
-                let mut resolved = current.canonicalize()?;
+                let mut resolved =
+                    crate::host_paths::normalized_native_path(&current.canonicalize()?);
                 if !tail.as_os_str().is_empty() {
                     resolved.push(tail);
                 }
@@ -65,7 +66,7 @@ pub(crate) fn is_within(root: &Path, target: &Path) -> bool {
     target == root || target.starts_with(root)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

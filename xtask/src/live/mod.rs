@@ -2,7 +2,6 @@ mod environment;
 mod registry;
 mod verifier;
 
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -18,6 +17,7 @@ use crate::ci::process::{
     write_mirrored_line,
 };
 use crate::ci::retention::warn_if_ci_retention_cleanup_fails;
+use crate::host_command;
 
 use self::registry::{
     DEFAULT_SUITE, LIVE_CHECKS, LIVE_SUITES, LiveCheck, LiveCheckAction, LiveProvider,
@@ -610,9 +610,8 @@ fn run_deterministic_playwright_check(
     fs::write(&context_path, serde_json::to_vec_pretty(&context)?)
         .with_context(|| format!("write {}", context_path.display()))?;
 
-    let mut build = ProcessCommand::new("pnpm");
+    let mut build = host_command::pnpm(["--filter", "@psychevo/workbench", "build"])?;
     build
-        .args(["--filter", "@psychevo/workbench", "build"])
         .current_dir(root)
         .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path);
     let build_outcome = run_logged_process(
@@ -630,8 +629,7 @@ fn run_deterministic_playwright_check(
     }
     had_suppressed_output |= build_outcome.had_suppressed_output;
 
-    let mut test = ProcessCommand::new("pnpm");
-    test.args([
+    let mut test = host_command::pnpm([
         "exec",
         "playwright",
         "test",
@@ -640,12 +638,12 @@ fn run_deterministic_playwright_check(
         grep,
         "--project",
         "chromium-desktop",
-    ])
-    .current_dir(root)
-    .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path)
-    .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
-    .env("PSYCHEVO_RUNTIME_LIVE_FAKE", "1")
-    .env_remove("NO_COLOR");
+    ])?;
+    test.current_dir(root)
+        .env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path)
+        .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
+        .env("PSYCHEVO_RUNTIME_LIVE_FAKE", "1")
+        .env_remove("NO_COLOR");
     let outcome = run_logged_process(check.id, &mut test, log)?;
     Ok(check_result_from_outcome(
         outcome,
@@ -725,10 +723,8 @@ fn run_desktop_native_smoke_check(
     let provider_token = provider.map(|_| desktop_provider_live_sentinel());
     let floating_text = desktop_floating_live_text(provider_token.as_deref());
 
-    let mut build = ProcessCommand::new("pnpm");
-    build
-        .args(["--filter", "@psychevo/desktop", "tauri:wdio-build"])
-        .current_dir(root);
+    let mut build = host_command::pnpm(["--filter", "@psychevo/desktop", "tauri:wdio-build"])?;
+    build.current_dir(root);
     configure_desktop_wdio_command(
         &mut build,
         &wdio_artifact_root,
@@ -749,9 +745,8 @@ fn run_desktop_native_smoke_check(
     }
     had_suppressed_output |= outcome.had_suppressed_output;
 
-    let mut wdio = ProcessCommand::new("pnpm");
-    wdio.args(["--filter", "@psychevo/desktop", "wdio"])
-        .current_dir(root);
+    let mut wdio = host_command::pnpm(["--filter", "@psychevo/desktop", "wdio"])?;
+    wdio.current_dir(root);
     configure_desktop_wdio_command(
         &mut wdio,
         &wdio_artifact_root,
@@ -1211,38 +1206,7 @@ fn write_codex_broker_live_profile(config: &Path, binary: &Path) -> Result<()> {
 }
 
 fn resolve_live_command_path(command: &str) -> Option<PathBuf> {
-    let path = Path::new(command);
-    if path.components().count() > 1 {
-        return path.is_file().then(|| absolute_command_path(path));
-    }
-    let paths = env::var_os("PATH")?;
-    let extensions = if cfg!(windows) {
-        env::var_os("PATHEXT")
-            .map(|value| {
-                value
-                    .to_string_lossy()
-                    .split(';')
-                    .filter(|extension| !extension.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .filter(|extensions| !extensions.is_empty())
-            .unwrap_or_else(|| vec![".EXE".to_string()])
-    } else {
-        vec![String::new()]
-    };
-    env::split_paths(&paths).find_map(|directory| {
-        extensions.iter().find_map(|extension| {
-            let candidate = directory.join(format!("{command}{extension}"));
-            candidate
-                .is_file()
-                .then(|| absolute_command_path(&candidate))
-        })
-    })
-}
-
-fn absolute_command_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    crate::host_command::resolve(command)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1348,10 +1312,8 @@ fn run_playwright_live_check(
     fs::write(&context_path, serde_json::to_vec_pretty(&context)?)
         .with_context(|| format!("write {}", context_path.display()))?;
 
-    let mut build = ProcessCommand::new("pnpm");
-    build
-        .args(["--filter", "@psychevo/workbench", "build"])
-        .current_dir(root);
+    let mut build = host_command::pnpm(["--filter", "@psychevo/workbench", "build"])?;
+    build.current_dir(root);
     live_env.apply_to_command(&mut build, Some(provider));
     build.env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path);
     let build_outcome = run_logged_process("workbench live build", &mut build, Arc::clone(&log))?;
@@ -1365,8 +1327,7 @@ fn run_playwright_live_check(
     }
     had_suppressed_output |= build_outcome.had_suppressed_output;
 
-    let mut test = ProcessCommand::new("pnpm");
-    test.args([
+    let mut test = host_command::pnpm([
         "exec",
         "playwright",
         "test",
@@ -1375,8 +1336,8 @@ fn run_playwright_live_check(
         grep,
         "--project",
         "chromium-desktop",
-    ])
-    .current_dir(root);
+    ])?;
+    test.current_dir(root);
     live_env.apply_to_command(&mut test, Some(provider));
     test.env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
@@ -2087,7 +2048,7 @@ mod tests {
         let live_env = prerequisites
             .resolve(LiveEnvMode::Shared, &check_dir)
             .expect("live env");
-        let mut command = ProcessCommand::new("pnpm");
+        let mut command = ProcessCommand::new("unused-test-command");
         configure_desktop_wdio_command(
             &mut command,
             Path::new("/tmp/wdio-artifacts"),

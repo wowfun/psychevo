@@ -1,10 +1,9 @@
 mod ci;
 mod doctor;
+mod host_command;
 mod init;
 mod live;
 mod paths;
-
-use std::process::Command as ProcessCommand;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -54,17 +53,18 @@ fn main() -> Result<()> {
 
 fn generate_gateway_protocol(root: &std::path::Path, check: bool) -> Result<()> {
     psychevo_gateway_protocol::generate_typescript_and_schema(root, check)?;
-    let mut command = ProcessCommand::new("pnpm");
-    command.current_dir(root).args([
+    let mut args = vec![
         "--dir",
         "packages/protocol",
         "exec",
         "tsx",
         "scripts/generate-validators.ts",
-    ]);
+    ];
     if check {
-        command.arg("--check");
+        args.push("--check");
     }
+    let mut command = host_command::pnpm(args)?;
+    command.current_dir(root);
     let status = command
         .status()
         .context("run Gateway standalone validator generation")?;

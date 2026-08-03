@@ -916,7 +916,9 @@ mod state_runtime_tests {
 
         assert_eq!(
             grants.scoped_roots(),
-            vec![session_root.canonicalize().unwrap()]
+            vec![crate::host_paths::normalized_native_path(
+                &session_root.canonicalize().unwrap()
+            )]
         );
         state.clear_session_filesystem_grants("session-1");
         assert!(grants.scoped_roots().is_empty());

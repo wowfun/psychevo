@@ -22,7 +22,7 @@ static EXEC_SESSION_REAPER: LazyLock<ExecSessionReaper> = LazyLock::new(|| {
     ExecSessionReaper { sender }
 });
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 static EXEC_SESSION_REAPER_STARTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
@@ -218,7 +218,7 @@ pub(crate) fn detach_exec_sessions_for_task(task_id: String) -> bool {
 }
 
 fn run_exec_session_reaper(receiver: std::sync::mpsc::Receiver<ExecSessionReapRequest>) {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     EXEC_SESSION_REAPER_STARTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut pending = Vec::<ExecSessionReapRequest>::new();
     loop {
@@ -269,7 +269,7 @@ fn reap_exec_sessions_for_task(task_id: &str) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn exec_session_reaper_start_count() -> usize {
     EXEC_SESSION_REAPER_STARTS.load(std::sync::atomic::Ordering::SeqCst)
 }

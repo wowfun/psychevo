@@ -658,6 +658,11 @@ pub(crate) mod permission_rule_tests {
 
     #[test]
     fn parses_new_permission_schema() {
+        let host_git_path = if cfg!(windows) {
+            r"C:\Program Files\Git\cmd\git.exe"
+        } else {
+            "/usr/bin/git"
+        };
         let config = parse_run_config(json!({
             "approval_policy": "granular",
             "approvals_reviewer": "smart",
@@ -707,7 +712,7 @@ pub(crate) mod permission_rule_tests {
                 "host_executables": [
                     {
                         "name": "git",
-                        "paths": ["/usr/bin/git"],
+                        "paths": [host_git_path],
                     },
                 ],
             },
@@ -725,7 +730,7 @@ pub(crate) mod permission_rule_tests {
         assert_eq!(config.permissions.exec_policy.rules.len(), 1);
         assert_eq!(
             config.permissions.exec_policy.host_executables[0].paths,
-            vec!["/usr/bin/git".to_string()]
+            vec![host_git_path.to_string()]
         );
         let local = config.permissions.profiles.get("local").expect("local");
         assert_eq!(
