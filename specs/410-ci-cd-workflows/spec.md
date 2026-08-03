@@ -76,6 +76,10 @@ without adding per-test platform wrappers.
 All commands accept `--json` for machine-readable output. JSON output must
 include profile ids, profile descriptions, step ids, command arrays, live
 flags, artifact roots when available, and per-step status for executed runs.
+Executed results also record integer millisecond durations for the whole run
+and for every attempted step, including failed or internally errored steps.
+Human progress reports each step's final status and elapsed duration without
+making wall-clock thresholds part of validation.
 
 The live registry exposes:
 
@@ -115,6 +119,11 @@ Initial profiles:
   Xtask resolves those host commands through the active `PATH` and, on
   Windows, `PATHEXT`; `.cmd` and `.bat` shims run through the captured command
   processor instead of being passed directly to `CreateProcess`.
+- `rust-checks` and `rust-tests`: hosted shards of `rust-broad` for parallel
+  pull-request execution. `rust-checks` owns every broad step through Clippy;
+  `rust-tests` owns the workspace all-target test step. `rust-broad` remains
+  the canonical local Rust gate and is exactly the ordered concatenation of
+  these shards, with all three profiles sharing the same step definitions.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
@@ -129,7 +138,9 @@ Initial profiles:
   tests execute with bounded workspace concurrency so packages that own process
   state or browser-like globals do not race. This profile owns the Browser and
   native Gateway Adapter contract together so reconnect behavior cannot pass
-  on only one surface. Package test scripts must fail when their configured
+  on only one surface. Its pnpm steps use the same host-command resolver as
+  protocol generation and visual workflows, including Windows `PATHEXT` and
+  command-script handling. Package test scripts must fail when their configured
   suite discovers no tests instead of using `--passWithNoTests`.
 - `visual`: deterministic visual diagnostics using fake/local providers; v1
   owns the TUI/VHS capture workflow and Workbench deterministic Playwright
@@ -155,17 +166,46 @@ Initial profiles:
 
 ## Hosted CI
 
-The pull-request workflow runs two Linux jobs. `rust` installs the root
-`packageManager` version, Node.js, and frozen workspace dependencies before
-running `cargo xtask ci run --profile rust-broad` so the mixed Rust/TypeScript
-Gateway protocol check can execute, installs the Linux WebKit development
-package required to compile Tauri, and runs
-`cargo xtask ci run --profile desktop-rust`. `web` installs the root
-`packageManager` version with a frozen lockfile and runs
-`cargo xtask ci run --profile web`.
+The pull-request workflow has a `Scope` job, four independent Linux execution
+jobs (`Rust checks`, `Rust tests`, `Desktop Rust`, and `Web`), and an always-run
+`CI Gate`. The execution jobs start in parallel after successful scope
+classification. `CI Gate` requires each selected job to succeed, each
+unselected job to be skipped, and the scope job itself to succeed; failure,
+cancellation, or an unexpected selection result fails the aggregate check.
 
-Hosted CI currently runs only for pull requests. Its `main` push trigger is
-temporarily commented out in the workflow with restoration guidance.
+Draft pull requests select execution jobs from the complete pull-request diff:
+
+- CI workflow changes, root Cargo configuration or lockfiles, `.cargo/**`, and
+  `xtask/**` are common infrastructure and select all four jobs.
+- `crates/**`, `scripts/**`, Rust-consumed assets, root pnpm configuration, and
+  `packages/protocol/**` select both Rust shards. Protocol and pnpm changes also
+  select Web.
+- `apps/**`, `packages/**`, assets, and root JavaScript or TypeScript workspace
+  configuration select Web.
+- `apps/desktop/src-tauri/**` selects Desktop Rust and also matches the Web
+  surface so native and renderer integration remain covered together.
+
+A ready-for-review pull request ignores path selection and runs all four jobs
+for every head update. The workflow handles `ready_for_review` and
+`converted_to_draft` transitions explicitly. Workflow-level concurrency is
+keyed by workflow and pull request, and a newer run cancels an older run for the
+same pull request. Hosted CI still runs only for pull requests; its `main` push
+trigger remains commented with restoration guidance.
+
+Path classification uses full-commit-pinned `dorny/paths-filter` v4.0.2 with
+only `contents: read` and `pull-requests: read` permissions. Every job that
+compiles root or Desktop Rust uses full-commit-pinned `Swatinem/rust-cache`
+v2.9.1 with failed-run cache saving enabled. Root Rust shards and Web keep
+job-specific root workspace caches; Desktop Rust caches the independent
+`apps/desktop/src-tauri` target. Rust tests install Node.js for JavaScript
+fixtures but do not install pnpm dependencies; Desktop Rust installs no Node or
+pnpm toolchain; Rust checks retains the frozen workspace install required by
+generated Gateway protocol verification.
+
+The canonical local full regression remains three explicit commands:
+`cargo xtask ci run --profile rust-broad`, `cargo xtask ci run --profile
+desktop-rust`, and `cargo xtask ci run --profile web`. There is no aggregate
+`full` profile.
 
 Hosted workflows install the workspace minimum Rust toolchain through a
 full-commit-pinned `dtolnay/rust-toolchain` action revision whose baked-in
@@ -204,11 +244,12 @@ metadata from that isolated verification must not enter the workspace lockfile
 or make a later `--locked` delivery step fail.
 
 After execution begins, `results.json` records every completed step through the
-first failed or internally errored step as well as a fully successful run. A
-step failure must not leave only logs and a plan without the structured result
-needed by local review and artifact upload. The hosted upload step runs after a
-failed package profile as well as after success so those diagnostics remain
-reviewable.
+first failed or internally errored step as well as a fully successful run. It
+includes monotonic integer millisecond duration fields for the run and every
+attempted step. A step failure must not leave only logs and a plan without the
+structured result needed by local review and artifact upload. The hosted upload
+step runs after a failed package profile as well as after success so those
+diagnostics remain reviewable.
 
 Hosted workflows have no aggregate release job, live provider work, nightly,
 fuzz, or soak work. Full visual and live profiles remain manual, artifact-owned

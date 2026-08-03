@@ -1216,6 +1216,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn facade_selects_linux_backend_family_from_environment() {
         let x11 = DesktopCaptureFacade::from_env(Some("x11"), Some("wayland-0"), Some(":0"));
         assert!(matches!(x11.backend, DesktopCaptureBackendKind::X11(_)));

@@ -386,6 +386,9 @@ Default validation is deterministic and local:
 - target-filtered Desktop Cargo dependency validation proves that Windows and
   macOS `native-runtime` graphs exclude Linux capture implementation crates
   while the Linux graph retains them
+- capture backend selection tests run only on the native host that owns the
+  backend family; Linux X11 or Wayland identity must not be simulated when the
+  Desktop test binary is compiled for Windows or macOS
 - deterministic Desktop/Floating visual smoke with screenshot artifacts
 - native Desktop/Floating WebdriverIO smoke uses the embedded Tauri driver
   under the test-only `wdio-test` Cargo feature; production Desktop builds must

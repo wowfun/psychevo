@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-04
+
+- Split hosted pull-request CI into independently cached Rust checks, Rust
+  tests, Desktop Rust, and Web jobs: drafts select gates by change domain,
+  ready pull requests run the full set in parallel, superseded runs cancel,
+  and an always-run aggregate gate verifies selection and results.
+- Kept `rust-broad` as the canonical local Rust gate by composing the two
+  hosted Rust shards from shared step definitions, and added monotonic
+  millisecond durations to structured and human-readable run results.
+- Kept Linux capture-backend selection coverage out of native Windows and
+  macOS Desktop test binaries instead of simulating a Linux host from display
+  environment inputs.
+- Made the shared Web profile reuse xtask's Windows pnpm shim resolution and
+  kept English composer token abbreviations stable across native host locales.
+
 ## 2026-08-02
 
 - Made install-script smoke tests run shared behavior on Unix and native

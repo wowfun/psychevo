@@ -2,17 +2,74 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
   # To restore CI for main updates, uncomment the push block below.
   # push:
   #   branches:
   #     - main
 
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
-  rust:
-    name: Rust
+  scope:
+    name: Scope
+    runs-on: ubuntu-24.04
+    outputs:
+      common: ${{ steps.changes.outputs.common }}
+      rust: ${{ steps.changes.outputs.rust }}
+      desktop: ${{ steps.changes.outputs.desktop }}
+      web: ${{ steps.changes.outputs.web }}
+    steps:
+      - name: Classify pull request changes
+        id: changes
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: |
+            common:
+              - '.github/workflows/ci.yml'
+              - '.cargo/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'xtask/**'
+            rust:
+              - 'crates/**'
+              - 'scripts/**'
+              - 'assets/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'packages/protocol/**'
+            desktop:
+              - 'apps/desktop/src-tauri/**'
+            web:
+              - 'apps/**'
+              - 'packages/**'
+              - 'assets/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'playwright.config.ts'
+              - 'tsconfig.base.json'
+
+  rust_checks:
+    name: Rust checks
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        (
+          github.event.pull_request.draft == false ||
+          needs.scope.outputs.common == 'true' ||
+          needs.scope.outputs.rust == 'true'
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -25,6 +82,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
+
       - name: Install pnpm
         uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -39,8 +101,75 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run broad Rust gate
-        run: cargo xtask ci run --profile rust-broad
+      - name: Run Rust checks
+        run: cargo xtask ci run --profile rust-checks
+
+  rust_tests:
+    name: Rust tests
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        (
+          github.event.pull_request.draft == false ||
+          needs.scope.outputs.common == 'true' ||
+          needs.scope.outputs.rust == 'true'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0 action revision
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Install Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+
+      - name: Run Rust tests
+        run: cargo xtask ci run --profile rust-tests
+
+  desktop_rust:
+    name: Desktop Rust
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        (
+          github.event.pull_request.draft == false ||
+          needs.scope.outputs.common == 'true' ||
+          needs.scope.outputs.desktop == 'true'
+        )
+      }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0 action revision
+        with:
+          components: rustfmt, clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
+          workspaces: apps/desktop/src-tauri -> target
 
       - name: Install Desktop Linux build dependencies
         run: |
@@ -52,6 +181,17 @@ jobs:
 
   web:
     name: Web
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        (
+          github.event.pull_request.draft == false ||
+          needs.scope.outputs.common == 'true' ||
+          needs.scope.outputs.web == 'true'
+        )
+      }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -61,6 +201,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0 action revision
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
 
       - name: Install pnpm
         uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
@@ -76,5 +221,59 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run Workbench gate
+      - name: Run Web gate
         run: cargo xtask ci run --profile web
+
+  ci_gate:
+    name: CI Gate
+    needs: [scope, rust_checks, rust_tests, desktop_rust, web]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify selected jobs
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          COMMON_SELECTED: ${{ needs.scope.outputs.common }}
+          RUST_SELECTED: ${{ needs.scope.outputs.rust }}
+          DESKTOP_SELECTED: ${{ needs.scope.outputs.desktop }}
+          WEB_SELECTED: ${{ needs.scope.outputs.web }}
+          READY: ${{ github.event.pull_request.draft == false }}
+          RUST_CHECKS_RESULT: ${{ needs.rust_checks.result }}
+          RUST_TESTS_RESULT: ${{ needs.rust_tests.result }}
+          DESKTOP_RESULT: ${{ needs.desktop_rust.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: |
+          set -euo pipefail
+
+          expect_job() {
+            local name="$1"
+            local actual="$2"
+            local expected="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error title=Unexpected CI job result::$name was $actual; expected $expected"
+              return 1
+            fi
+          }
+
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error title=Scope failed::Scope finished with $SCOPE_RESULT"
+            exit 1
+          fi
+
+          rust_expected=skipped
+          desktop_expected=skipped
+          web_expected=skipped
+          if [[ "$READY" == "true" || "$COMMON_SELECTED" == "true" || "$RUST_SELECTED" == "true" ]]; then
+            rust_expected=success
+          fi
+          if [[ "$READY" == "true" || "$COMMON_SELECTED" == "true" || "$DESKTOP_SELECTED" == "true" ]]; then
+            desktop_expected=success
+          fi
+          if [[ "$READY" == "true" || "$COMMON_SELECTED" == "true" || "$WEB_SELECTED" == "true" ]]; then
+            web_expected=success
+          fi
+
+          expect_job "Rust checks" "$RUST_CHECKS_RESULT" "$rust_expected"
+          expect_job "Rust tests" "$RUST_TESTS_RESULT" "$rust_expected"
+          expect_job "Desktop Rust" "$DESKTOP_RESULT" "$desktop_expected"
+          expect_job "Web" "$WEB_RESULT" "$web_expected"
