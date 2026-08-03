@@ -50,8 +50,7 @@ impl AgentConformanceHarness {
         }
 
         if runtime == AgentConformanceRuntime::Acp {
-            let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/fake_agent_conformance.py");
+            let fixture = crate::test_support::acp_fixture(&inner.cwd, "fake_agent_conformance");
             std::fs::write(
                 home.join("config.toml"),
                 format!(
@@ -59,14 +58,14 @@ impl AgentConformanceHarness {
     kind = "acp"
     description = "Deterministic ACP Agent conformance fixture."
     command = {}
-    args = ["{}", "{}", "{}", "{}"]
+    args = [{}, {}, {}, {}]
     entrypoints = ["peer"]
     "#,
-                    test_python_command_toml(&inner.cwd),
-                    fixture.display(),
-                    log.display(),
-                    inner.state.db_path().display(),
-                    release_dir.display(),
+                    test_acp_command_toml(&inner.cwd),
+                    crate::test_support::toml_path(&fixture.script),
+                    crate::test_support::toml_path(&log),
+                    crate::test_support::toml_path(inner.state.db_path()),
+                    crate::test_support::toml_path(&release_dir),
                 ),
             )
             .expect("ACP conformance config");

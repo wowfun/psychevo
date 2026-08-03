@@ -31,7 +31,11 @@ pub(crate) async fn run_hook_command(
     let started = Instant::now();
     let timeout = Duration::from_secs(timeout_secs.max(1));
     let deadline = tokio::time::Instant::now() + timeout;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
+    let shell = match crate::tools::default_shell_for_env(&inherited_env) {
+        Ok(shell) => shell,
+        Err(err) => return failed_execution(started, err.to_string()),
+    };
     let mut process = tokio::process::Command::new(shell);
     process
         .arg("-lc")
@@ -41,7 +45,6 @@ pub(crate) async fn run_hook_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     ProcessTreeGuard::configure_tokio(&mut process);
-    let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
     if let Err(err) = crate::process_env::apply_tokio_process_env(
         &mut process,
         &inherited_env,

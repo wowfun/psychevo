@@ -17,6 +17,8 @@ full fork, point fork, empty-prefix fork, durable evidence remapping, source
 immutability, title and scalar lineage projection, root-history visibility, and
 bounded rejection for running, staged, child, side, channel, automation, and ACP
 point-fork requests.
+Compound Gateway contract tests inherit the repository-owned host-neutral Rust
+test stack defined by [410 CI/CD Workflows](../410-ci-cd-workflows/spec.md).
 
 Workbench tests must cover inline editor state, exact and best-effort drafts,
 Text/Image changes, unchanged no-op, staged admission failure, Restore, point

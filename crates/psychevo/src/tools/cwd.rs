@@ -98,8 +98,10 @@ impl CwdTool {
     pub(crate) fn relative(&self, path: &Path) -> String {
         let cwd = crate::filesystem_identity::canonicalize_deepest_existing(&self.cwd)
             .unwrap_or_else(|_| self.cwd.clone());
+        let path = crate::filesystem_identity::canonicalize_deepest_existing(path)
+            .unwrap_or_else(|_| path.to_path_buf());
         path.strip_prefix(&cwd)
-            .unwrap_or(path)
+            .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/")
     }

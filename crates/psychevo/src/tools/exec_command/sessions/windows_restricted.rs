@@ -83,7 +83,7 @@ pub(super) fn spawn_read_only(
     argv.push(invocation.shell.clone());
     argv.extend(args);
     let application = wide_null(&invocation.shell);
-    let mut command_line = wide_null(&argv_to_command_line(&argv));
+    let mut command_line = wide_null(argv_to_command_line(&argv));
     let cwd = wide_null(invocation.cwd.as_os_str());
     let mut desktop = wide_null("winsta0\\default");
 

@@ -407,24 +407,11 @@ command = "cursor-agent"
 
 #[tokio::test]
 async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("bound-hidden-profile.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -437,8 +424,8 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
         json!({
                 "id": "opencode",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "all"
@@ -540,8 +527,8 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
         json!({
                 "id": "opencode",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "all"
@@ -2283,6 +2270,7 @@ command = "codex-acp"
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn backend_doctor_resolves_windows_pathext_command_shim() {
     let temp = tempfile::tempdir().expect("temp");
@@ -2325,31 +2313,18 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
     assert!(command.ok);
     assert_eq!(command.message, "command resolved");
     assert_eq!(
-        command.path.as_deref(),
-        Some(shim.to_string_lossy().as_ref())
+        command.path.as_deref().map(str::to_ascii_lowercase),
+        Some(shim.to_string_lossy().to_ascii_lowercase())
     );
 }
 
 #[tokio::test]
 async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt_probe() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("backend-doctor-auth.jsonl");
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -2364,8 +2339,8 @@ async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt
             params: Some(json!({
                 "id": "auth-doctor-fixture",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "all"
@@ -2434,24 +2409,11 @@ async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt
 
 #[tokio::test]
 async fn backend_doctor_reports_protocol_incompatibility_without_auth_or_session_probe() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("backend-doctor-protocol.jsonl");
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -2466,8 +2428,8 @@ async fn backend_doctor_reports_protocol_incompatibility_without_auth_or_session
             params: Some(json!({
                 "id": "protocol-doctor-fixture",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "protocol-v2"
@@ -2581,21 +2543,10 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
 
 #[tokio::test]
 async fn thread_draft_prepare_preserves_explicit_values_for_opaque_acp_control_ids() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
@@ -2605,8 +2556,6 @@ name = "Configured default"
 "#,
     )
     .expect("configured model labels");
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("draft-prepare.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -2624,8 +2573,8 @@ name = "Configured default"
             params: Some(json!({
                 "id": "opencode",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "custom-control-ids"
@@ -2894,24 +2843,11 @@ name = "Configured default"
 
 #[tokio::test]
 async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("draft-prepare-failure.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -2929,8 +2865,8 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
             params: Some(json!({
                 "id": "opencode",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "session-new-error"
@@ -3014,21 +2950,10 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
 
 #[tokio::test]
 async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
-    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
-    let python = ["python3", "python"]
-        .into_iter()
-        .find_map(|command| {
-            resolve_executable_path(
-                command,
-                &host_cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &host_env,
-                },
-            )
-        })
-        .expect("Python is required by the ACP fixture");
+    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
+    let fixture_program = fixture.program;
+    let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
@@ -3038,8 +2963,6 @@ name = "Configured default"
 "#,
     )
     .expect("configured model labels");
-    let fixture =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("legacy-model-draft.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -3057,8 +2980,8 @@ name = "Configured default"
             params: Some(json!({
                 "id": "legacy-hermes",
                 "target": "project",
-                "command": python,
-                "args": [fixture],
+                "command": fixture_program,
+                "args": [fixture_script],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
                     "ACP_LIFECYCLE_MODE": "legacy-models"

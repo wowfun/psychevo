@@ -83,13 +83,15 @@ mod tests {
         fs::create_dir_all(&cwd).expect("cwd");
         let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
+        let mut env = test_exec_env();
+        env.insert(
+            "PSYCHEVO_EXEC_ENV_TEST".to_string(),
+            "from-runtime-env".to_string(),
+        );
         let value = exec_command_tool_impl_with_context(
             cwd,
             ToolRuntimeContext {
-                env: BTreeMap::from([(
-                    "PSYCHEVO_EXEC_ENV_TEST".to_string(),
-                    "from-runtime-env".to_string(),
-                )]),
+                env,
                 ..ToolRuntimeContext::default()
             },
             "exec_command".to_string(),
@@ -115,6 +117,7 @@ mod tests {
         exec_command_tool_impl_with_context(
             cwd,
             ToolRuntimeContext {
+                env: test_exec_env(),
                 workspace_mutations: Some(WorkspaceMutationSink::new(move |mutation| {
                     observed.lock().expect("mutations poisoned").push(mutation);
                 })),
@@ -219,6 +222,7 @@ mod tests {
         let err = exec_command_tool_impl_with_context(
             temp.path().canonicalize().expect("cwd"),
             ToolRuntimeContext {
+                env: test_exec_env(),
                 sandbox_policy: policy,
                 ..ToolRuntimeContext::default()
             },

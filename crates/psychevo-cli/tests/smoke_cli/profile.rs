@@ -34,13 +34,18 @@ pub(crate) async fn cli_profile_create_use_and_select_home() {
     assert!(coder_home.join("profile.toml").is_file());
     let config = std::fs::read_to_string(coder_home.join("config.toml")).expect("config");
     assert_starter_config_template(&config);
-    let alias = temp.path().join(".local/bin/coder");
+    let alias = temp.path().join(if cfg!(windows) {
+        ".local/bin/coder.cmd"
+    } else {
+        ".local/bin/coder"
+    });
     assert!(alias.is_file());
-    assert!(
-        std::fs::read_to_string(alias)
-            .expect("alias")
-            .contains("exec pevo -p coder")
-    );
+    let alias = std::fs::read_to_string(alias).expect("alias");
+    if cfg!(windows) {
+        assert!(alias.contains("pevo -p coder %*"));
+    } else {
+        assert!(alias.contains("exec pevo -p coder"));
+    }
 
     let use_profile = pevo_cmd(temp.path())
         .args(["profile", "use", "coder"])

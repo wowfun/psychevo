@@ -129,6 +129,10 @@ lifecycle command.
 The managed child creates that Job Object, enables
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and assigns itself before binding. Failure
 to create or join the Job is a startup failure, never a fallback to `taskkill`.
+The child keeps its owning Job Object handle open until process exit, including
+when startup fails before the server binds, so the failure can be written to
+`server.log`, propagated to stderr, and reported with a non-zero exit status
+before Windows closes the ownership domain and terminates any descendants.
 On Unix, ownership combines the lease, pid/process group, and executable
 identity, and forced shutdown targets only the verified process group.
 

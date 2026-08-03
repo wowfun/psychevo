@@ -220,6 +220,11 @@ metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
 
+TUI session history listing, replay, undo, and redo must not depend on the
+host's default main-thread stack limit. Native Windows runs the async CLI entry
+on an explicitly sized stack so the same history operations remain available as
+on Unix hosts.
+
 Every CLI command that owns an Application shutdown treats a non-clean
 `ShutdownReport` as command failure. Adapter shutdown errors, task panic or
 abort, and terminal-persistence failure retain their report details in the
@@ -508,6 +513,12 @@ and installs Workbench assets, and initializes the global Psychevo home. The
 [pevo install](install.md) attachment is the sole detailed contract for its
 dependency checks, subprocess-scoped network defaults, and network-neutral
 failure diagnostics.
+
+Install-script acceptance tests run platform-neutral behavior on every
+supported host shell. Windows-only behavior runs under Git Bash on a native
+Windows target, while POSIX-only behavior runs on Unix targets. Tests must not
+simulate one platform's installer behavior by overriding `uname` on another
+host platform.
 
 ## Attachments
 

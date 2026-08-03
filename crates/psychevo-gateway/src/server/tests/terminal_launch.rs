@@ -1,3 +1,21 @@
+fn terminal_test_env() -> BTreeMap<String, String> {
+    #[cfg(unix)]
+    let env = BTreeMap::from([("SHELL".to_string(), "/bin/sh".to_string())]);
+    #[cfg(windows)]
+    let env = {
+        let mut env = BTreeMap::from([("SHELL".to_string(), "sh".to_string())]);
+        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
+        let runtime = psychevo::__product::platform::GitBashRuntime::discover(&host_env)
+            .expect("Git Bash is required by native Windows terminal tests");
+        env.insert(
+            psychevo::__product::platform::PSYCHEVO_GIT_BASH_PATH.to_string(),
+            runtime.bash.display().to_string(),
+        );
+        env
+    };
+    env
+}
+
 #[tokio::test]
 async fn terminal_start_rejects_cwd_outside_workspace() {
     let (temp, state) = web_state().await;
@@ -32,9 +50,7 @@ async fn terminal_start_rejects_cwd_outside_workspace() {
 
 #[tokio::test]
 async fn terminal_rpc_streams_output_and_exit_notifications() {
-    let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
-    let (_temp, state) =
-        web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())])).await;
+    let (_temp, state) = web_state_with_env(terminal_test_env()).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -83,7 +99,11 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
     .expect("terminal/resize");
     assert_eq!(resize["accepted"], true);
 
-    let command = "printf pevo-terminal-ok\\n\nexit\n";
+    let command = if cfg!(windows) {
+        "\u{1b}[1;1Rprintf 'pevo-terminal-ok\\n'\rexit\r"
+    } else {
+        "printf 'pevo-terminal-ok\\n'\nexit\n"
+    };
     let write = handle_rpc(
         state,
         AuthContext::Bearer,
@@ -104,7 +124,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
 
     let mut output = String::new();
     let mut saw_exit = false;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    let notifications = tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(message) = rx.recv().await {
             let notification: Value = serde_json::from_str(&message).expect("notification");
             match notification["method"].as_str() {
@@ -125,8 +145,11 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
             }
         }
     })
-    .await
-    .expect("terminal notifications");
+    .await;
+    assert!(
+        notifications.is_ok(),
+        "terminal notifications timed out; output={output:?}, saw_exit={saw_exit}"
+    );
 
     assert!(output.contains("pevo-terminal-ok"), "{output:?}");
     assert!(saw_exit);
@@ -134,9 +157,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
 
 #[tokio::test]
 async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() {
-    let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
-    let (_temp, state) =
-        web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())])).await;
+    let (_temp, state) = web_state_with_env(terminal_test_env()).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();

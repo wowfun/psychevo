@@ -230,10 +230,7 @@ fn parse_plain_command(cmd: Node<'_>, src: &str) -> Option<Vec<String>> {
         match child.kind() {
             "command_name" => {
                 let word = child.named_child(0)?;
-                if word.kind() != "word" {
-                    return None;
-                }
-                words.push(word.utf8_text(src.as_bytes()).ok()?.to_string());
+                words.push(parse_literal_shell_text(word, src)?);
             }
             "word" | "number" => {
                 words.push(child.utf8_text(src.as_bytes()).ok()?.to_string());

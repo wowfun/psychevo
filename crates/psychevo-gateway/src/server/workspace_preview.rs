@@ -37,14 +37,14 @@ const MAX_PREVIEW_LEASES: usize = 4_096;
 const PREVIEW_STREAM_CHUNK_BYTES: usize = 64 * 1_024;
 
 type PreviewClock = Arc<dyn Fn() -> i64 + Send + Sync>;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 type PreviewBeforeOpenHook = Box<dyn FnOnce() + Send>;
 
 #[derive(Clone)]
 pub(super) struct WorkspacePreviewLeaseStore {
     inner: Arc<Mutex<HashMap<String, WorkspacePreviewLease>>>,
     clock: Arc<Mutex<PreviewClock>>,
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     before_open: Arc<Mutex<Option<PreviewBeforeOpenHook>>>,
 }
 
@@ -113,7 +113,7 @@ impl WorkspacePreviewLeaseStore {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
             clock: Arc::new(Mutex::new(Arc::new(system_now_ms))),
-            #[cfg(test)]
+            #[cfg(all(test, unix))]
             before_open: Arc::new(Mutex::new(None)),
         }
     }
@@ -133,7 +133,7 @@ impl WorkspacePreviewLeaseStore {
             Arc::new(move || now_ms.load(std::sync::atomic::Ordering::SeqCst));
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn set_before_open_for_tests(&self, hook: impl FnOnce() + Send + 'static) {
         *self
             .before_open
@@ -178,7 +178,7 @@ impl WorkspacePreviewLeaseStore {
 
     fn open(&self, resource_id: &str) -> Result<(WorkspacePreviewLease, File), PreviewLeaseError> {
         let lease = self.lookup(resource_id)?;
-        #[cfg(test)]
+        #[cfg(all(test, unix))]
         if let Some(hook) = self
             .before_open
             .lock()

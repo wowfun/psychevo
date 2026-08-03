@@ -793,6 +793,16 @@ fn common_git_bash_candidates() -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    fn assert_windows_path_eq(actual: &Path, expected: &Path) {
+        assert_eq!(
+            actual.to_string_lossy().replace('/', "\\").to_ascii_lowercase(),
+            expected
+                .to_string_lossy()
+                .replace('/', "\\")
+                .to_ascii_lowercase()
+        );
+    }
+
     fn windows_options<'a>(cygpath: Option<CygpathResolver<'a>>) -> PathResolveOptions<'a> {
         PathResolveOptions {
             platform: HostPlatform::Windows,
@@ -922,7 +932,7 @@ mod tests {
         )
         .expect("resolved");
 
-        assert_eq!(resolved, shim);
+        assert_windows_path_eq(&resolved, &shim);
     }
 
     #[test]
@@ -945,7 +955,7 @@ mod tests {
         )
         .expect("resolved");
 
-        assert_eq!(resolved, exe);
+        assert_windows_path_eq(&resolved, &exe);
     }
 
     #[test]
@@ -967,7 +977,7 @@ mod tests {
         )
         .expect("resolved");
 
-        assert_eq!(resolved, shim);
+        assert_windows_path_eq(&resolved, &shim);
     }
 
     #[test]
@@ -1015,6 +1025,7 @@ mod tests {
         assert_eq!(path.uri, "file:///C:/repo/src/lib.rs");
     }
 
+    #[cfg(unix)]
     #[test]
     fn preserves_posix_relative_path_whitespace() {
         let path = resolve_host_path(
@@ -1028,6 +1039,7 @@ mod tests {
         assert_eq!(path.display, "/repo/  spaced  ");
     }
 
+    #[cfg(unix)]
     #[test]
     fn preserves_posix_absolute_path_whitespace() {
         let path = resolve_host_path(

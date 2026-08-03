@@ -641,19 +641,6 @@ mod tests {
         }
     }
 
-    fn test_python_path(cwd: &Path) -> PathBuf {
-        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        resolve_executable_path(
-            "python3",
-            cwd,
-            &ExecutableResolveOptions {
-                platform: HostPlatform::current(),
-                env: &host_env,
-            },
-        )
-        .expect("resolve ACP fixture python")
-    }
-
     #[test]
     fn managed_codex_default_auth_selects_env_key_without_copying_secret() {
         let mut env = BTreeMap::from([(
@@ -699,6 +686,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn acp_peer_launch_resolves_windows_command_shim() {
         let temp = tempfile::tempdir().expect("temp");
@@ -728,7 +716,10 @@ mod tests {
             resolve_acp_backend_launch_for_platform(&peer, temp.path(), HostPlatform::Windows)
                 .expect("launch");
 
-        assert_eq!(launch.program, shim);
+        assert_eq!(
+            launch.program.to_string_lossy().to_ascii_lowercase(),
+            shim.to_string_lossy().to_ascii_lowercase()
+        );
         assert_eq!(launch.cwd, temp.path());
         assert_eq!(launch.env.get("PATH"), Some(&bin.display().to_string()));
         let command = acp_backend_command_from_launch(&peer, &launch).expect("host command");
@@ -1081,13 +1072,9 @@ mod tests {
     #[tokio::test]
     async fn acp_inspect_snapshot_reduces_load_replay_through_response_barrier() {
         let temp = tempfile::tempdir().expect("temp");
-        let script = temp.path().join("projection_barrier_fixture.py");
-        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/fake_acp_projection_barrier.py");
-        std::fs::copy(fixture, &script).expect("fixture script");
-        let python = test_python_path(temp.path());
-        let mut peer = test_peer(&python.display().to_string(), BTreeMap::new());
-        peer.backend.args = vec![script.display().to_string()];
+        let fixture = crate::test_support::acp_fixture(temp.path(), "fake_acp_projection_barrier");
+        let mut peer = test_peer(&fixture.program.display().to_string(), BTreeMap::new());
+        peer.backend.args = vec![fixture.script.display().to_string()];
         let pool = AcpProcessPool::new(Duration::from_secs(30));
 
         let snapshot = tokio::time::timeout(
@@ -1231,18 +1218,16 @@ mod tests {
     }
 
     fn lifecycle_fixture_peer(temp: &tempfile::TempDir, mode: &str) -> (ResolvedPeerTurn, PathBuf) {
-        let fixture =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
+        let fixture = crate::test_support::acp_fixture(temp.path(), "fake_acp_lifecycle");
         let log = temp.path().join(format!("lifecycle-{mode}.jsonl"));
-        let python = test_python_path(temp.path());
         let mut peer = test_peer(
-            &python.display().to_string(),
+            &fixture.program.display().to_string(),
             BTreeMap::from([
                 ("ACP_LIFECYCLE_LOG".to_string(), log.display().to_string()),
                 ("ACP_LIFECYCLE_MODE".to_string(), mode.to_string()),
             ]),
         );
-        peer.backend.args = vec![fixture.display().to_string()];
+        peer.backend.args = vec![fixture.script.display().to_string()];
         (peer, log)
     }
 

@@ -291,6 +291,7 @@ mod tests {
     include!("server/tests/session_lifecycle.rs");
     include!("server/tests/history_editing.rs");
     include!("server/tests/managed_lifecycle.rs");
+    #[cfg(unix)]
     include!("server/tests/first_token_performance.rs");
     include!("server/tests/draft_open.rs");
     include!("server/tests/helpers.rs");

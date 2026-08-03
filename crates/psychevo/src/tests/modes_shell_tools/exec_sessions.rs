@@ -377,6 +377,7 @@ pub(crate) async fn exec_command_token_truncates_output() {
     assert!(result["output"].as_str().unwrap_or_default().len() < 64);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
     let temp = tempdir().expect("temp");
@@ -396,7 +397,9 @@ pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
     )
     .await
     .expect("exec result");
-    let session_id = start["session_id"].as_u64().expect("session_id");
+    let session_id = start["session_id"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("interactive exec did not yield a session: {start}"));
 
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
     let result = crate::tools::write_stdin_tool_impl(
@@ -414,7 +417,8 @@ pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
         result["output"]
             .as_str()
             .unwrap_or_default()
-            .contains("got:hello")
+            .contains("got:hello"),
+        "{result}"
     );
 }
 

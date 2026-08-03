@@ -62,6 +62,17 @@ warning and error fixture lines remain assertable by the test but must not leak
 into the parent Cargo test stderr or a successful profile summary. A passing
 profile therefore shows only diagnostics emitted by its real child steps.
 
+Deterministic Rust tests use native host paths, executable formats, and shell
+runtimes for platform-neutral behavior. POSIX-only filesystem or process
+semantics compile only on Unix, while Windows-only semantics compile only on
+Windows. Tests must not pass POSIX fixtures through native Windows path or
+process APIs, and cross-platform command fixtures must select an executable
+harness for the current host.
+Repository Cargo configuration gives Rust test worker threads a host-neutral
+8 MiB minimum stack while preserving an explicit caller override. This keeps
+large async Gateway contract tests independent of the native Windows default
+without adding per-test platform wrappers.
+
 All commands accept `--json` for machine-readable output. JSON output must
 include profile ids, profile descriptions, step ids, command arrays, live
 flags, artifact roots when available, and per-step status for executed runs.
@@ -101,6 +112,9 @@ Initial profiles:
   helpers are explicit root workspace development dependencies. The Gateway
   validator generator therefore owns a direct `tsx` dependency rather than
   relying on a binary exposed incidentally by Vite or WebDriverIO.
+  Xtask resolves those host commands through the active `PATH` and, on
+  Windows, `PATHEXT`; `.cmd` and `.bat` shims run through the captured command
+  processor instead of being passed directly to `CreateProcess`.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It

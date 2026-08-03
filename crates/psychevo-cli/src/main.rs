@@ -37,8 +37,31 @@ use commands::skills::run_skills_command;
 use commands::stats::run_stats_command;
 use commands::tool::run_tool_command;
 
+#[cfg(windows)]
+pub(crate) fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .name("pevo-main".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(runtime_main)
+    {
+        Ok(thread) => match thread.join() {
+            Ok(code) => code,
+            Err(panic) => std::panic::resume_unwind(panic),
+        },
+        Err(err) => {
+            eprintln!("error: failed to start pevo runtime: {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn main() -> ExitCode {
+    runtime_main()
+}
+
 #[tokio::main]
-pub(crate) async fn main() -> ExitCode {
+async fn runtime_main() -> ExitCode {
     match run().await {
         Ok(code) => code,
         Err(err) => {

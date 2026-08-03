@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use serde_json::Value;
 
+use crate::host_command;
+
 use super::process::{
     ProcessOutcome, command_exists, run_logged_process, write_log_line, write_mirrored_line,
 };
@@ -71,8 +73,7 @@ pub(crate) fn run_surface_profile(
         &format!("surface profile artifacts: {}", output.display()),
     )?;
 
-    let mut version = ProcessCommand::new("pnpm");
-    version.args(["exec", "playwright", "--version"]);
+    let mut version = host_command::pnpm(["exec", "playwright", "--version"])?;
     apply_env(&mut version, root, artifact_root, &output, &pevo);
     let version_outcome = run_logged_process("playwright version", &mut version, Arc::clone(&log))?;
     if !version_outcome.passed {
@@ -85,10 +86,14 @@ pub(crate) fn run_surface_profile(
         });
     }
 
-    let mut profile = ProcessCommand::new("pnpm");
-    profile
-        .args(["exec", "playwright", "test", SPEC])
-        .args(["--project", "chromium-desktop"]);
+    let mut profile = host_command::pnpm([
+        "exec",
+        "playwright",
+        "test",
+        SPEC,
+        "--project",
+        "chromium-desktop",
+    ])?;
     apply_env(&mut profile, root, artifact_root, &output, &pevo);
     profile.env_remove("NO_COLOR");
     let outcome = run_logged_process(

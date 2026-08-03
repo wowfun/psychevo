@@ -236,14 +236,7 @@ fn print_report(report: &DepsReport) {
 }
 
 fn command_exists(command: &str) -> bool {
-    let path = Path::new(command);
-    if path.components().count() > 1 {
-        return path.is_file();
-    }
-    let Some(paths) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
+    crate::host_command::exists(command)
 }
 
 #[cfg(test)]

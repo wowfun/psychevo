@@ -272,7 +272,8 @@ pub(crate) async fn sessions_panel_lists_global_sessions_and_opening_switches_cw
     app.config_path = Some(config_path);
     let other_cwd = temp.path().join("other-work");
     fs::create_dir_all(&other_cwd).expect("other cwd");
-    let other_cwd = other_cwd.canonicalize().expect("other canonical");
+    let other_cwd =
+        psychevo::__product::platform::canonicalize_cwd(&other_cwd).expect("other canonical");
     let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&other_cwd, "web", "mock-model", "mock", None)

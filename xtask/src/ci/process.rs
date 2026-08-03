@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -186,14 +185,7 @@ fn write_line(writer: &mut dyn Write, line: &str) -> Result<()> {
 }
 
 pub(crate) fn command_exists(command: &str) -> bool {
-    let path = Path::new(command);
-    if path.components().count() > 1 {
-        return path.is_file();
-    }
-    let Some(paths) = env::var_os("PATH") else {
-        return false;
-    };
-    env::split_paths(&paths).any(|dir| dir.join(command).is_file())
+    crate::host_command::exists(command)
 }
 
 pub(crate) struct LoggedChild {

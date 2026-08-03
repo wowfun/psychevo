@@ -2,6 +2,21 @@
 
 ## 2026-08-02
 
+- Made install-script smoke tests run shared behavior on Unix and native
+  Windows Git Bash while keeping Windows-only and POSIX-only coverage on their
+  real host platforms instead of simulating Windows through `uname` overrides.
+- Made xtask resolve host commands through `PATH` and Windows `PATHEXT`, and
+  launch pnpm `.cmd`/`.bat` shims through the active command processor.
+- Aligned Unix-only Rust test helpers and reaper instrumentation with their
+  native test targets, and removed a redundant Windows command-line borrow to
+  eliminate cross-target clippy warnings.
+- Made the Rust broad test suite honor native host path, shell, sandbox, and
+  process semantics; added Windows-safe Hook, plugin worker, Gateway ACP, and
+  terminal harnesses; isolated POSIX-only coverage from native Windows builds;
+  and gave Rust test workers a repository-owned host-neutral minimum stack.
+- Hardened native Windows CLI execution with an explicitly sized async runtime
+  stack and process-lifetime managed Gateway ownership, so captured background
+  launches terminate cleanly and early startup failures reach logs and stderr.
 - Made deterministic Desktop region capture work on headless hosts and removed
   process-global display and capture environment mutation from its tests.
 - Aligned the pinned hosted CI and package Rust toolchain action with the

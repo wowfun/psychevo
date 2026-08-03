@@ -281,9 +281,10 @@ async fn workspace_external_actions_reject_directories_and_symlink_escapes() {
         .to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
 
-    let mut paths = vec!["folder"];
     #[cfg(unix)]
-    paths.push("escape.txt");
+    let paths = ["folder", "escape.txt"];
+    #[cfg(not(unix))]
+    let paths = ["folder"];
     for path in paths {
         let error = handle_rpc(
             state.clone(),
@@ -340,7 +341,10 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         root_result["parent"].as_str(),
         Some(temp.path().to_string_lossy().as_ref())
     );
-    assert_eq!(root_result["roots"][0]["path"], json!("/"));
+    assert_eq!(
+        root_result["roots"][0]["path"],
+        json!(root.ancestors().last().expect("filesystem root"))
+    );
     let root_folders = root_result["folders"].as_array().expect("folder array");
     assert!(root_folders.iter().any(|folder| folder["name"] == ".local"));
     assert!(root_folders.iter().any(|folder| folder["name"] == "alpha"));
@@ -517,7 +521,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
 
 #[tokio::test]
 async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
-    let (_temp, state) = web_state().await;
+    let (temp, state) = web_state().await;
     let src = state.inner.cwd.join("src");
     std::fs::create_dir_all(&src).expect("src");
     std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
@@ -615,7 +619,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
             method: "workspace/file/read".to_string(),
             params: Some(json!({
                 "scope": scope,
-                "path": "/etc/passwd"
+                "path": temp.path().join("outside.txt")
             })),
         },
     )

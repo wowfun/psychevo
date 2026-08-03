@@ -450,6 +450,17 @@ pub struct ManagedProcessTreeGuard {
     _job: OwnedHandle,
 }
 
+impl ManagedProcessTreeGuard {
+    /// Keep the ownership domain alive until the operating system tears down
+    /// the current process and closes its handles.
+    pub fn keep_until_process_exit(self) {
+        #[cfg(windows)]
+        std::mem::forget(self);
+        #[cfg(unix)]
+        let _ = self;
+    }
+}
+
 pub fn enter_managed_process_tree(instance_id: &str) -> io::Result<ManagedProcessTreeGuard> {
     enter_managed_process_tree_impl(instance_id)
 }

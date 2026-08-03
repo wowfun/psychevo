@@ -23,7 +23,8 @@ use crate::types::RunMode;
 use super::*;
 
 fn write_plugin(root: &Path, manifest: &str) {
-    let mut document: Value = serde_json::from_str(manifest).expect("manifest json");
+    let manifest = manifest.replace("./worker.py", test_worker_command());
+    let mut document: Value = serde_json::from_str(&manifest).expect("manifest json");
     let overlay = document
         .as_object_mut()
         .and_then(|object| object.remove("psychevo"));
@@ -42,16 +43,68 @@ fn write_plugin(root: &Path, manifest: &str) {
     }
 }
 
+fn test_worker_command() -> &'static str {
+    if cfg!(windows) {
+        "./worker.cmd"
+    } else {
+        "./worker.py"
+    }
+}
+
+fn test_worker_fixture<'a>(unix: &'a str, windows: &'a str) -> &'a str {
+    if cfg!(windows) { windows } else { unix }
+}
+
 fn write_worker(root: &Path, script: &str) -> PathBuf {
-    let worker = root.join("worker.py");
+    let worker = root.join(if cfg!(windows) {
+        "worker.js"
+    } else {
+        "worker.py"
+    });
     fs::write(&worker, script).expect("worker");
+    #[cfg(windows)]
+    fs::write(
+        root.join("worker.cmd"),
+        "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
+    )
+    .expect("worker command");
     #[cfg(unix)]
     {
-    let mut perms = fs::metadata(&worker).expect("metadata").permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&worker, perms).expect("chmod");
+        let mut perms = fs::metadata(&worker).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&worker, perms).expect("chmod");
     }
     worker
+}
+
+fn native_npm_available() -> bool {
+    let env = std::env::vars().collect::<BTreeMap<_, _>>();
+    let cwd = std::env::current_dir().expect("current dir");
+    let Some(npm) = crate::host_paths::resolve_executable_path(
+        "npm",
+        &cwd,
+        &crate::host_paths::ExecutableResolveOptions {
+            platform: crate::host_paths::HostPlatform::current(),
+            env: &env,
+        },
+    ) else {
+        return false;
+    };
+    #[cfg(not(unix))]
+    let _ = &npm;
+    #[cfg(unix)]
+    if npm
+        .parent()
+        .is_some_and(|parent| parent.join("node.exe").is_file())
+    {
+        return false;
+    }
+    Command::new("npm")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[test]
@@ -504,13 +557,7 @@ fn inspect_opencode_rejects_entrypoint_outside_package_root() {
 
 #[test]
 fn install_npm_source_uses_local_pack_fixture() {
-    if Command::new("npm")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_err()
-    {
+    if !native_npm_available() {
         return;
     }
     let temp = tempdir().expect("temp");
@@ -1183,7 +1230,10 @@ async fn static_plugin_discovery_defers_worker_until_default_tool_materializatio
     );
     write_worker(
         &source,
-        include_str!("../../tests/fixtures/plugin_worker_tool_discovery.py"),
+        test_worker_fixture(
+            include_str!("../../tests/fixtures/plugin_worker_tool_discovery.py"),
+            include_str!("../../tests/fixtures/plugin_worker_tool_discovery.js"),
+        ),
     );
     install_plugin(
         &home,
@@ -1282,10 +1332,8 @@ async fn plugin_assembly_owns_graceful_worker_shutdown() {
               "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
             }"#,
     );
-    write_worker(
-        &source,
-        &format!(
-            r#"#!/usr/bin/env python3
+    let unix_worker = format!(
+        r#"#!/usr/bin/env python3
 import json, pathlib, sys
 for line in sys.stdin:
     request = json.loads(line)
@@ -1300,8 +1348,28 @@ for line in sys.stdin:
         pathlib.Path({marker}).write_text("shutdown")
         break
 "#,
+        marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
+    );
+    let windows_worker = format!(
+            r#"#!/usr/bin/env node
+const fs = require("fs");
+const readline = require("readline");
+const input = readline.createInterface({{ input: process.stdin, crlfDelay: Infinity }});
+input.on("line", (line) => {{
+  const request = JSON.parse(line);
+  const result = request.method === "contributions/list" ? {{ tools: [] }} : {{ ok: true }};
+  process.stdout.write(`${{JSON.stringify({{ jsonrpc: "2.0", id: request.id, result }})}}\n`);
+  if (request.method === "shutdown") {{
+    fs.writeFileSync({marker}, "shutdown");
+    input.close();
+  }}
+}});
+"#,
             marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
-        ),
+        );
+    write_worker(
+        &source,
+        test_worker_fixture(&unix_worker, &windows_worker),
     );
     install_plugin(
         &home,
@@ -1418,7 +1486,10 @@ async fn worker_tool_executes_through_binding() {
     );
     write_worker(
         &source,
-        include_str!("../../tests/fixtures/plugin_worker_tool_call.py"),
+        test_worker_fixture(
+            include_str!("../../tests/fixtures/plugin_worker_tool_call.py"),
+            include_str!("../../tests/fixtures/plugin_worker_tool_call.js"),
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1472,7 +1543,8 @@ async fn one_worker_session_serves_discovery_tools_and_hooks() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
+        test_worker_fixture(
+            r#"#!/usr/bin/env python3
 import json, os, sys
 initialize_count = 0
 for line in sys.stdin:
@@ -1501,6 +1573,25 @@ for line in sys.stdin:
         "result": result
     }), flush=True)
 "#,
+            r#"#!/usr/bin/env node
+const readline = require("readline");
+let initializeCount = 0;
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  let result = { ok: true };
+  if (request.method === "initialize") {
+    initializeCount += 1;
+  } else if (request.method === "contributions/list") {
+    result = {
+      tools: [{ name: "session_probe", description: "probe", parameters: { type: "object", properties: {} } }],
+    };
+  } else if (request.method === "tools/call" || request.method === "hooks/call") {
+    result = { pid: process.pid, initialize_count: initializeCount, method: request.method };
+  }
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
+});
+"#,
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1561,7 +1652,8 @@ async fn worker_notifications_do_not_consume_correlated_responses() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
+        test_worker_fixture(
+            r#"#!/usr/bin/env python3
 import json, sys
 for line in sys.stdin:
     request = json.loads(line)
@@ -1583,6 +1675,22 @@ for line in sys.stdin:
         "result": result
     }), flush=True)
 "#,
+            r#"#!/usr/bin/env node
+const readline = require("readline");
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  process.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "worker/status",
+    params: { method: request.method },
+  })}\n`);
+  const result = request.method === "contributions/list"
+    ? { tools: [{ name: "notification_probe", description: "probe", parameters: { type: "object", properties: {} } }] }
+    : { ok: true };
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
+});
+"#,
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1631,7 +1739,8 @@ async fn worker_mismatched_response_id_is_a_terminal_protocol_error() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
+        test_worker_fixture(
+            r#"#!/usr/bin/env python3
 import json, sys
 for line in sys.stdin:
     request = json.loads(line)
@@ -1646,6 +1755,15 @@ for line in sys.stdin:
         "result": {"ok": True}
     }), flush=True)
 "#,
+            r#"#!/usr/bin/env node
+const readline = require("readline");
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const request = JSON.parse(line);
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id + 1, result: { wrong: true } })}\n`);
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true } })}\n`);
+});
+"#,
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1689,7 +1807,10 @@ async fn worker_contribution_discovery_receives_effective_env() {
     );
     write_worker(
         &source,
-        include_str!("../../tests/fixtures/plugin_worker_effective_env.py"),
+        test_worker_fixture(
+            include_str!("../../tests/fixtures/plugin_worker_effective_env.py"),
+            include_str!("../../tests/fixtures/plugin_worker_effective_env.js"),
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1735,7 +1856,10 @@ async fn worker_contribution_discovery_times_out() {
     );
     write_worker(
         &source,
-        include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.py"),
+        test_worker_fixture(
+            include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.py"),
+            include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.js"),
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1779,7 +1903,10 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     );
     write_worker(
         &source,
-        include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.py"),
+        test_worker_fixture(
+            include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.py"),
+            include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.js"),
+        ),
     );
     let record = install_plugin(
         &home,
@@ -1886,15 +2013,19 @@ fn install_from_local_git_source_materializes_record() {
             .success()
     );
 
-    let credential_source = format!(
+    let repo_uri = crate::host_paths::path_ref_for_native_path(&repo).uri;
+    #[cfg(unix)]
+    let git_source = format!(
         "file://private-user:private-secret@localhost{}",
-        repo.display()
+        repo_uri.strip_prefix("file://").expect("file URI")
     );
+    #[cfg(windows)]
+    let git_source = repo_uri;
     let record = install_plugin(
         &home,
         &cwd,
         PluginInstallOptions {
-            source: credential_source,
+            source: git_source,
             source_kind: None,
             scope: PluginScope::Global,
             git_ref: None,
@@ -1906,7 +2037,7 @@ fn install_from_local_git_source_materializes_record() {
     .expect("install git");
 
     assert_eq!(record.name, "git-plugin");
-    assert!(record.source_id.starts_with("git:file://localhost"));
+    assert!(record.source_id.starts_with("git:file://"));
     assert!(!record.package_root.join(".git").exists());
     assert!(
         record

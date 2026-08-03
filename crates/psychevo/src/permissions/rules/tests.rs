@@ -8,10 +8,19 @@ pub(crate) mod tests {
         ApprovalHandler, ExecPolicyConfig, ExecPolicyRule, PermissionApprovalDecision,
     };
 
+    fn test_repo_path() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(r"C:\repo")
+        } else {
+            PathBuf::from("/repo")
+        }
+    }
+
     fn runtime(config: PermissionConfig, mode: PermissionMode) -> PermissionRuntime {
+        let cwd = test_repo_path();
         PermissionRuntime::new(
-            PathBuf::from("/repo"),
-            PathBuf::from("/repo/.psychevo"),
+            cwd.clone(),
+            cwd.join(".psychevo"),
             config,
             mode,
             None,
@@ -351,6 +360,19 @@ print(len(data))""#;
 
     #[test]
     fn exec_policy_host_executable_path_controls_basename_fallback() {
+        let (configured_git, configured_command, other_command) = if cfg!(windows) {
+            (
+                r"C:\Program Files\Git\cmd\git.exe",
+                r#""C:\Program Files\Git\cmd\git.exe" status"#,
+                r#"C:\tools\git.exe status"#,
+            )
+        } else {
+            (
+                "/usr/bin/git",
+                "/usr/bin/git status",
+                "/tmp/git status",
+            )
+        };
         let rule = exec_rule(&["git", "status"], ExecPolicyDecision::Deny);
         let runtime = runtime(
             PermissionConfig {
@@ -358,17 +380,17 @@ print(len(data))""#;
                     rules: vec![rule],
                     host_executables: vec![crate::types::ExecPolicyHostExecutable {
                         name: "git".to_string(),
-                        paths: vec!["/usr/bin/git".to_string()],
+                        paths: vec![configured_git.to_string()],
                     }],
                 },
                 ..Default::default()
             },
             PermissionMode::Default,
         );
-        let decision = runtime.evaluate("exec_command", &json!({"cmd": "/usr/bin/git status"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": configured_command}));
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
 
-        let decision = runtime.evaluate("exec_command", &json!({"cmd": "/tmp/git status"}));
+        let decision = runtime.evaluate("exec_command", &json!({"cmd": other_command}));
         assert!(!matches!(decision, PermissionDecision::Deny { .. }));
     }
 
@@ -609,8 +631,8 @@ print(len(data))""#;
     #[tokio::test]
     async fn authorization_prompt_wakes_when_abort_signal_trips() {
         let runtime = PermissionRuntime::new(
-            PathBuf::from("/repo"),
-            PathBuf::from("/repo/.psychevo"),
+            test_repo_path(),
+            test_repo_path().join(".psychevo"),
             PermissionConfig::default(),
             PermissionMode::Default,
             Some(Arc::new(PendingApprovalHandler)),
@@ -691,7 +713,7 @@ print(len(data))""#;
         let grants = crate::sandbox::SandboxWriteGrants::default();
         grants
             .grant_scope(&FilesystemApprovalScope {
-                directory: "/repo".to_string(),
+                directory: test_repo_path().display().to_string(),
                 lifetime: FilesystemApprovalLifetime::Session,
             })
             .expect("filesystem scope");

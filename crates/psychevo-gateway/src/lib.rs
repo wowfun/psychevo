@@ -8,6 +8,8 @@ mod acp_peer;
 mod journey_profile;
 mod managed_acp;
 mod projection;
+#[cfg(test)]
+mod test_support;
 mod transcript;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};

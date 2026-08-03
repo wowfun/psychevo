@@ -1550,10 +1550,12 @@ fn resolve_manifest_path(root: &Path, raw: &str) -> std::result::Result<PathBuf,
     let candidate = root.join(path);
     let root_canonical = root
         .canonicalize()
+        .map(crate::paths::normalize_canonical_cwd)
         .map_err(|err| format!("plugin root cannot be canonicalized: {err}"))?;
     if candidate.exists() {
         let canonical = candidate
             .canonicalize()
+            .map(crate::paths::normalize_canonical_cwd)
             .map_err(|err| format!("path cannot be canonicalized: {err}"))?;
         if !canonical.starts_with(&root_canonical) {
             return Err("resolved path escapes plugin root".to_string());
@@ -1566,6 +1568,7 @@ fn resolve_manifest_path(root: &Path, raw: &str) -> std::result::Result<PathBuf,
         if parent.exists() {
             let parent = parent
                 .canonicalize()
+                .map(crate::paths::normalize_canonical_cwd)
                 .map_err(|err| format!("path parent cannot be canonicalized: {err}"))?;
             if !parent.starts_with(&root_canonical) {
                 return Err("resolved path escapes plugin root".to_string());
@@ -1588,10 +1591,12 @@ fn resolve_manifest_cwd(root: &Path, raw: &str) -> std::result::Result<PathBuf, 
     let candidate = root.join(path);
     let root_canonical = root
         .canonicalize()
+        .map(crate::paths::normalize_canonical_cwd)
         .map_err(|err| format!("plugin root cannot be canonicalized: {err}"))?;
     if candidate.exists() {
         let canonical = candidate
             .canonicalize()
+            .map(crate::paths::normalize_canonical_cwd)
             .map_err(|err| format!("cwd cannot be canonicalized: {err}"))?;
         if !canonical.starts_with(&root_canonical) {
             return Err("resolved cwd escapes plugin root".to_string());
@@ -1604,6 +1609,7 @@ fn resolve_manifest_cwd(root: &Path, raw: &str) -> std::result::Result<PathBuf, 
         if parent.exists() {
             let parent = parent
                 .canonicalize()
+                .map(crate::paths::normalize_canonical_cwd)
                 .map_err(|err| format!("cwd parent cannot be canonicalized: {err}"))?;
             if !parent.starts_with(&root_canonical) {
                 return Err("resolved cwd escapes plugin root".to_string());

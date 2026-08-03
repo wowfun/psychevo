@@ -336,6 +336,7 @@ pub(crate) async fn fullscreen_status_uses_single_multiline_command_row() {
 pub(crate) async fn fullscreen_help_command_opens_bottom_help_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
+    fs::create_dir_all(app.cwd.join(".git")).expect("workspace boundary");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Help)

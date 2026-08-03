@@ -90,6 +90,7 @@ fn skill_runtime_keeps_one_snapshot_until_explicit_refresh() {
     let home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(cwd.join(".git")).expect("git marker");
     write_package_skill(&home.join("skills"), "first", "first skill", "first body");
     let runtime = SkillRuntime::new(skill_options(&temp, &home, &cwd));
 
@@ -778,7 +779,10 @@ pub(crate) async fn view_skill_reports_hermes_metadata_and_setup_readiness() {
     fs::create_dir_all(skill_dir.join("references")).expect("refs");
     fs::write(
         skill_dir.join("SKILL.md"),
-        "---\nname: metadata\ndescription: metadata skill\ntags: [review, rust]\nrelated: [audit]\nplatforms: [linux]\nrequired_environment_variables:\n  - name: PSYCHEVO_TEST_TOKEN_DO_NOT_SET\n    prompt: Token\nrequired_credential_files: [secrets/token.json]\nsetup: Run setup.\nallowed-tools: [read]\ncompatibility: hermes\nlicense: MIT\n---\n\nUse ${PSYCHEVO_SKILL_DIR}.\n",
+        format!(
+            "---\nname: metadata\ndescription: metadata skill\ntags: [review, rust]\nrelated: [audit]\nplatforms: [{}]\nrequired_environment_variables:\n  - name: PSYCHEVO_TEST_TOKEN_DO_NOT_SET\n    prompt: Token\nrequired_credential_files: [secrets/token.json]\nsetup: Run setup.\nallowed-tools: [read]\ncompatibility: hermes\nlicense: MIT\n---\n\nUse ${{PSYCHEVO_SKILL_DIR}}.\n",
+            std::env::consts::OS
+        ),
     )
     .expect("skill");
     fs::write(skill_dir.join("references").join("guide.md"), "guide\n").expect("guide");
