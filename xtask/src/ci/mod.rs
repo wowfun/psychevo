@@ -114,9 +114,12 @@ fn print_plan(plan: &PlanOutput) {
 }
 
 fn print_run_summary(run: &RunOutput) {
-    println!("artifacts: {}", run.artifact_root);
+    println!("artifacts: {} ({} ms)", run.artifact_root, run.duration_ms);
     for step in &run.steps {
-        println!("{}\t{:?}\t{}", step.id, step.status, step.log_path);
+        println!(
+            "{}\t{:?}\t{} ms\t{}",
+            step.id, step.status, step.duration_ms, step.log_path
+        );
     }
 }
 

@@ -71,6 +71,13 @@ cargo xtask ci run --profile rust-broad
   `cargo check -p psychevo-cli --no-default-features`; every Cargo command in
   the plan suppresses normal output, while runner-owned checks are not Cargo
   commands.
+- Profile identifiers are unique, `rust-checks` contains the broad Rust steps
+  through Clippy, `rust-tests` contains the workspace all-target test step, and
+  `rust-broad` is their exact ordered combination without a second step
+  inventory.
+- Successful, command-failed, and internally errored attempted steps produce
+  structured integer `duration_ms` fields for both the step and the complete
+  run; tests assert field presence rather than exact wall-clock values.
 - `ci plan --profile web --json` includes client tests/typecheck, Workbench
   build/tests/typecheck, and Desktop renderer tests/typecheck.
 - `ci plan --profile changed --json` emits a parseable plan without executing
@@ -99,12 +106,16 @@ cargo xtask ci run --profile rust-broad
   planning does not require opt-in.
 - No legacy shell entrypoint exists for Rust broad validation; the
   `rust-broad` profile is selected through `cargo xtask ci` directly.
-- Hosted pull-request checks invoke the existing `rust-broad`, `desktop-rust`,
-  and `web` profiles rather than defining a second test inventory. Generated
-  Gateway protocol verification belongs to `rust-broad` rather than a duplicate
-  hosted-only step. The Linux Rust job installs `libwebkit2gtk-4.1-dev` before
-  the Desktop profile so it validates the same Tauri feature used by production
-  builds.
+- Hosted pull-request checks invoke the shared `rust-checks`, `rust-tests`,
+  `desktop-rust`, and `web` profiles rather than defining a second test
+  inventory. Draft pull requests select those jobs by change domain; ready pull
+  requests run all four in parallel. The always-run `CI Gate` verifies that
+  selected jobs succeeded and unselected jobs were skipped.
+- Scope selection covers common CI infrastructure plus Rust, Web, and Desktop
+  domains. Desktop native changes also select Web; protocol and root pnpm
+  changes select both Rust shards and Web. Ready-for-review and
+  converted-to-draft transitions recalculate selection, while a newer run for
+  the same pull request cancels the older one.
 - Hosted `main` push triggers remain commented with explicit restoration
   guidance. Pull-request CI and explicit manual package dispatch remain active.
 - Default CI artifact retention keeps the 10 newest numeric run directories

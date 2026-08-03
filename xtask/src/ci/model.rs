@@ -105,6 +105,7 @@ pub(crate) struct RunOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) environment: Option<CiEnvironmentOutput>,
     pub(crate) artifact_root: String,
+    pub(crate) duration_ms: u64,
     pub(crate) steps: Vec<StepRunOutput>,
 }
 
@@ -117,6 +118,7 @@ pub(crate) struct StepRunOutput {
     pub(crate) status: StepStatus,
     pub(crate) exit_code: Option<i32>,
     pub(crate) log_path: String,
+    pub(crate) duration_ms: u64,
 }
 
 #[derive(Debug, Serialize)]

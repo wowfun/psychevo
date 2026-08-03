@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -18,6 +19,7 @@ use super::sdk_architecture::check_sdk_architecture;
 use super::surface_profile::run_surface_profile;
 use super::tui_capture::run_tui_vhs_demo;
 use super::workbench_visual::run_workbench_visual;
+use crate::host_command;
 use crate::live::{LiveEnvMode, run_ci_single_provider_live};
 
 const FAILURE_TAIL_LINES: usize = 80;
@@ -64,6 +66,7 @@ pub(crate) fn execute_profile(
     )
     .with_context(|| format!("write {}", artifact_root.join("plan.json").display()))?;
 
+    let run_started = Instant::now();
     let mut steps = Vec::new();
     for (index, step) in profile.steps.iter().enumerate() {
         if step.live && !opt_ins.live {
@@ -73,27 +76,38 @@ pub(crate) fn execute_profile(
         let log_path = artifact_root
             .join("logs")
             .join(format!("{:02}-{}.log", index + 1, step.id));
-        let execution = match run_step(root, &artifact_root, profile, step, live_env, &log_path) {
+        let step_started = Instant::now();
+        let mut execution = match run_step(root, &artifact_root, profile, step, live_env, &log_path)
+        {
             Ok(execution) => execution,
             Err(error) => {
-                steps.push(
-                    step_execution(
-                        step,
-                        &log_path,
-                        step.action.command_for_plan(),
-                        false,
-                        None,
-                        false,
-                    )
-                    .output,
-                );
-                write_run_output(profile, live_env, &artifact_root, steps)?;
+                let mut output = step_execution(
+                    step,
+                    &log_path,
+                    step.action.command_for_plan(),
+                    false,
+                    None,
+                    false,
+                )
+                .output;
+                output.duration_ms = elapsed_ms(step_started.elapsed());
+                print_step_completion(profile.id, &output);
+                steps.push(output);
+                write_run_output(
+                    profile,
+                    live_env,
+                    &artifact_root,
+                    elapsed_ms(run_started.elapsed()),
+                    steps,
+                )?;
                 if use_default_artifact_root {
                     warn_if_ci_retention_cleanup_fails(root, &artifact_root);
                 }
                 return Err(error);
             }
         };
+        execution.output.duration_ms = elapsed_ms(step_started.elapsed());
+        print_step_completion(profile.id, &execution.output);
         let failed = matches!(execution.output.status, StepStatus::Failed);
         if failed {
             let summary = failure_summary(profile.id, &execution.output);
@@ -101,7 +115,13 @@ pub(crate) fn execute_profile(
                 eprintln!("last log output from {}:\n{}", log_path.display(), tail);
             }
             steps.push(execution.output);
-            write_run_output(profile, live_env, &artifact_root, steps)?;
+            write_run_output(
+                profile,
+                live_env,
+                &artifact_root,
+                elapsed_ms(run_started.elapsed()),
+                steps,
+            )?;
             if use_default_artifact_root {
                 warn_if_ci_retention_cleanup_fails(root, &artifact_root);
             }
@@ -110,7 +130,13 @@ pub(crate) fn execute_profile(
         steps.push(execution.output);
     }
 
-    let run = write_run_output(profile, live_env, &artifact_root, steps)?;
+    let run = write_run_output(
+        profile,
+        live_env,
+        &artifact_root,
+        elapsed_ms(run_started.elapsed()),
+        steps,
+    )?;
     if use_default_artifact_root {
         warn_if_ci_retention_cleanup_fails(root, &artifact_root);
     }
@@ -121,6 +147,7 @@ fn write_run_output(
     profile: &WorkflowProfile,
     live_env: LiveEnvMode,
     artifact_root: &Path,
+    duration_ms: u64,
     steps: Vec<StepRunOutput>,
 ) -> Result<RunOutput> {
     let run = RunOutput {
@@ -129,6 +156,7 @@ fn write_run_output(
             .live
             .then_some(CiEnvironmentOutput { mode: live_env }),
         artifact_root: display_path(artifact_root),
+        duration_ms,
         steps,
     };
     fs::write(
@@ -137,6 +165,21 @@ fn write_run_output(
     )
     .with_context(|| format!("write {}", artifact_root.join("results.json").display()))?;
     Ok(run)
+}
+
+fn elapsed_ms(duration: Duration) -> u64 {
+    duration.as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn print_step_completion(profile_id: &str, output: &StepRunOutput) {
+    let status = match output.status {
+        StepStatus::Passed => "passed",
+        StepStatus::Failed => "failed",
+    };
+    println!(
+        "ci {}: {} {} ({} ms)",
+        profile_id, output.id, status, output.duration_ms
+    );
 }
 
 fn resolve_ci_artifact_root(
@@ -167,7 +210,6 @@ fn run_step(
         WorkflowStepAction::DesktopManifestParity => {
             create_step_log(log_path)?;
             check_desktop_manifest_parity(root)?;
-            println!("ci step {}: ok", step.id);
             Ok(step_execution(
                 step,
                 log_path,
@@ -184,7 +226,6 @@ fn run_step(
         WorkflowStepAction::SdkArchitecture => {
             create_step_log(log_path)?;
             check_sdk_architecture(root)?;
-            println!("ci step {}: ok", step.id);
             Ok(step_execution(
                 step,
                 log_path,
@@ -227,9 +268,8 @@ fn run_artifact_command_step(
     let target_dir = artifact_root.join("package").join(target_dir);
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("create Desktop target root {}", target_dir.display()))?;
-    let mut process = ProcessCommand::new(program);
+    let mut process = step_process(program, args)?;
     process
-        .args(args)
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
         .env("CARGO_TARGET_DIR", target_dir);
@@ -237,11 +277,6 @@ fn run_artifact_command_step(
         process.env("APPIMAGE_EXTRACT_AND_RUN", "1");
     }
     let outcome = run_logged_process(step.id, &mut process, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -260,11 +295,6 @@ fn run_surface_profile_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_surface_profile(root, artifact_root, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -286,18 +316,12 @@ fn run_command_step(
         .split_first()
         .ok_or_else(|| anyhow!("step '{}' has an empty command", step.id))?;
     let log = create_step_log(log_path)?;
-    let mut process = ProcessCommand::new(program);
+    let mut process = step_process(program, args)?;
     process
-        .args(args)
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
     let outcome = run_logged_process(step.id, &mut process, log)?;
 
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -308,6 +332,16 @@ fn run_command_step(
     ))
 }
 
+fn step_process(program: &str, args: &[&str]) -> Result<ProcessCommand> {
+    if program == "pnpm" {
+        host_command::pnpm(args)
+    } else {
+        let mut process = ProcessCommand::new(program);
+        process.args(args);
+        Ok(process)
+    }
+}
+
 fn run_tui_vhs_demo_step(
     root: &Path,
     artifact_root: &Path,
@@ -316,11 +350,6 @@ fn run_tui_vhs_demo_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_tui_vhs_demo(root, artifact_root, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -339,11 +368,6 @@ fn run_desktop_visual_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_desktop_visual(root, artifact_root, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -362,11 +386,6 @@ fn run_workbench_visual_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_workbench_visual(root, artifact_root, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -387,11 +406,6 @@ fn run_single_provider_live_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_ci_single_provider_live(root, artifact_root, live_env, log)?;
-    println!(
-        "ci step {}: {}",
-        step.id,
-        if outcome.passed { "ok" } else { "failed" }
-    );
     Ok(step_execution(
         step,
         log_path,
@@ -423,6 +437,7 @@ fn step_execution(
             },
             exit_code,
             log_path: display_path(log_path),
+            duration_ms: 0,
         },
         had_suppressed_output,
     }
@@ -538,6 +553,7 @@ mod tests {
             status: StepStatus::Failed,
             exit_code: Some(1),
             log_path: "/tmp/demo.log".to_string(),
+            duration_ms: 0,
         };
         assert_eq!(
             failure_summary("changed", &output),
@@ -547,27 +563,67 @@ mod tests {
     }
 
     #[test]
-    fn failed_step_is_preserved_in_results_json() {
-        let artifact_root = test_log_path("failed-result").with_extension("");
-        fs::create_dir_all(&artifact_root).expect("artifact root");
+    fn successful_and_failed_results_include_durations() {
         let profile = find_profile("changed").expect("profile");
-        let output = StepRunOutput {
-            id: "demo",
-            description: "Demo",
-            command: vec!["false".to_string()],
-            live: false,
-            status: StepStatus::Failed,
-            exit_code: Some(1),
-            log_path: "/tmp/demo.log".to_string(),
-        };
 
-        write_run_output(profile, LiveEnvMode::Isolated, &artifact_root, vec![output])
-            .expect("write failed result");
+        for (label, status) in [
+            ("passed", StepStatus::Passed),
+            ("failed", StepStatus::Failed),
+        ] {
+            let artifact_root = test_log_path(label).with_extension("");
+            fs::create_dir_all(&artifact_root).expect("artifact root");
+            let output = StepRunOutput {
+                id: "demo",
+                description: "Demo",
+                command: vec![label.to_string()],
+                live: false,
+                status,
+                exit_code: Some(if label == "passed" { 0 } else { 1 }),
+                log_path: "/tmp/demo.log".to_string(),
+                duration_ms: 0,
+            };
+
+            write_run_output(
+                profile,
+                LiveEnvMode::Isolated,
+                &artifact_root,
+                0,
+                vec![output],
+            )
+            .expect("write result");
+            let result: serde_json::Value = serde_json::from_slice(
+                &fs::read(artifact_root.join("results.json")).expect("read result"),
+            )
+            .expect("decode result");
+            assert_eq!(result["steps"][0]["status"], label);
+            assert!(result["duration_ms"].is_u64());
+            assert!(result["steps"][0]["duration_ms"].is_u64());
+            fs::remove_dir_all(artifact_root).expect("remove artifact root");
+        }
+    }
+
+    #[test]
+    fn internal_step_errors_are_preserved_with_durations() {
+        let artifact_root = test_log_path("internal-error-result").with_extension("");
+        let missing_root = artifact_root.with_extension("missing-root");
+        assert!(!missing_root.exists());
+
+        execute_profile(
+            &missing_root,
+            "changed",
+            RunOptIns::default(),
+            None,
+            Some(artifact_root.clone()),
+        )
+        .expect_err("missing execution root should fail the step internally");
+
         let result: serde_json::Value = serde_json::from_slice(
             &fs::read(artifact_root.join("results.json")).expect("read result"),
         )
         .expect("decode result");
         assert_eq!(result["steps"][0]["status"], "failed");
+        assert!(result["duration_ms"].is_u64());
+        assert!(result["steps"][0]["duration_ms"].is_u64());
         fs::remove_dir_all(artifact_root).expect("remove artifact root");
     }
 

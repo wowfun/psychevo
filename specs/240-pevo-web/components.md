@@ -208,8 +208,10 @@ surrounding location strip has a transparent background.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
-prompt/category detail breakdowns and opening it must not reveal, focus, or
-change the open state of the right Status inspector. Full breakdowns belong in
+prompt/category detail breakdowns. Its English token counts use locale-stable
+`en-US` grouping and compact suffixes so the same shared UI behavior does not
+change with the native host locale. Opening the popover must not reveal, focus,
+or change the open state of the right Status inspector. Full breakdowns belong in
 the right Status inspector: they summarize the session usage facts first, then
 show prompt/context token categories in the same category order and labels as
 TUI `/context` where possible. The right Status view uses a stacked prompt-token

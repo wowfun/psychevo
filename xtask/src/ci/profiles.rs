@@ -24,86 +24,111 @@ const CHANGED_STEPS: &[WorkflowStep] = &[
     },
 ];
 
+const SDK_ARCHITECTURE_STEP: WorkflowStep = WorkflowStep {
+    id: "sdk-architecture",
+    description: "Check SDK dependency direction, publication boundary, and product facade use",
+    action: WorkflowStepAction::SdkArchitecture,
+    live: false,
+};
+
+const RUST_SDK_DEFAULT_SURFACE_STEP: WorkflowStep = WorkflowStep {
+    id: "rust-sdk-default-surface",
+    description: "Compile the published Framework with its empty default feature set",
+    action: WorkflowStepAction::Command(&[
+        "cargo",
+        "check",
+        "-p",
+        "psychevo",
+        "--no-default-features",
+        "--all-targets",
+        "--quiet",
+    ]),
+    live: false,
+};
+
+const GATEWAY_PROTOCOL_CHECK_STEP: WorkflowStep = WorkflowStep {
+    id: "gateway-protocol-check",
+    description: "Check generated Gateway protocol bindings",
+    action: WorkflowStepAction::Command(&[
+        "cargo",
+        "--quiet",
+        "xtask",
+        "gateway-protocol",
+        "generate",
+        "--check",
+    ]),
+    live: false,
+};
+
+const RUST_CORE_CHECK_STEP: WorkflowStep = WorkflowStep {
+    id: "rust-core-check",
+    description: "Check the CLI core graph without default features",
+    action: WorkflowStepAction::Command(&[
+        "cargo",
+        "check",
+        "-p",
+        "psychevo-cli",
+        "--no-default-features",
+        "--quiet",
+    ]),
+    live: false,
+};
+
+const RUST_FORMAT_STEP: WorkflowStep = WorkflowStep {
+    id: "rust-format",
+    description: "Check Rust formatting",
+    action: WorkflowStepAction::Command(&["cargo", "fmt", "--all", "--check", "--quiet"]),
+    live: false,
+};
+
+const RUST_CLIPPY_STEP: WorkflowStep = WorkflowStep {
+    id: "rust-clippy",
+    description: "Run Rust clippy for all workspace targets",
+    action: WorkflowStepAction::Command(&[
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--quiet",
+        "--",
+        "-D",
+        "warnings",
+    ]),
+    live: false,
+};
+
+const RUST_TEST_STEP: WorkflowStep = WorkflowStep {
+    id: "rust-tests",
+    description: "Run Rust tests for all workspace targets",
+    action: WorkflowStepAction::Command(&[
+        "cargo",
+        "test",
+        "--workspace",
+        "--all-targets",
+        "--quiet",
+    ]),
+    live: false,
+};
+
+const RUST_CHECKS_STEPS: &[WorkflowStep] = &[
+    SDK_ARCHITECTURE_STEP,
+    RUST_SDK_DEFAULT_SURFACE_STEP,
+    GATEWAY_PROTOCOL_CHECK_STEP,
+    RUST_CORE_CHECK_STEP,
+    RUST_FORMAT_STEP,
+    RUST_CLIPPY_STEP,
+];
+
+const RUST_TEST_STEPS: &[WorkflowStep] = &[RUST_TEST_STEP];
+
 const RUST_BROAD_STEPS: &[WorkflowStep] = &[
-    WorkflowStep {
-        id: "sdk-architecture",
-        description: "Check SDK dependency direction, publication boundary, and product facade use",
-        action: WorkflowStepAction::SdkArchitecture,
-        live: false,
-    },
-    WorkflowStep {
-        id: "rust-sdk-default-surface",
-        description: "Compile the published Framework with its empty default feature set",
-        action: WorkflowStepAction::Command(&[
-            "cargo",
-            "check",
-            "-p",
-            "psychevo",
-            "--no-default-features",
-            "--all-targets",
-            "--quiet",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "gateway-protocol-check",
-        description: "Check generated Gateway protocol bindings",
-        action: WorkflowStepAction::Command(&[
-            "cargo",
-            "--quiet",
-            "xtask",
-            "gateway-protocol",
-            "generate",
-            "--check",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "rust-core-check",
-        description: "Check the CLI core graph without default features",
-        action: WorkflowStepAction::Command(&[
-            "cargo",
-            "check",
-            "-p",
-            "psychevo-cli",
-            "--no-default-features",
-            "--quiet",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "rust-format",
-        description: "Check Rust formatting",
-        action: WorkflowStepAction::Command(&["cargo", "fmt", "--all", "--check", "--quiet"]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "rust-clippy",
-        description: "Run Rust clippy for all workspace targets",
-        action: WorkflowStepAction::Command(&[
-            "cargo",
-            "clippy",
-            "--workspace",
-            "--all-targets",
-            "--quiet",
-            "--",
-            "-D",
-            "warnings",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "rust-tests",
-        description: "Run Rust tests for all workspace targets",
-        action: WorkflowStepAction::Command(&[
-            "cargo",
-            "test",
-            "--workspace",
-            "--all-targets",
-            "--quiet",
-        ]),
-        live: false,
-    },
+    SDK_ARCHITECTURE_STEP,
+    RUST_SDK_DEFAULT_SURFACE_STEP,
+    GATEWAY_PROTOCOL_CHECK_STEP,
+    RUST_CORE_CHECK_STEP,
+    RUST_FORMAT_STEP,
+    RUST_CLIPPY_STEP,
+    RUST_TEST_STEP,
 ];
 
 const DESKTOP_RUST_STEPS: &[WorkflowStep] = &[
@@ -354,6 +379,22 @@ const PROFILES: &[WorkflowProfile] = &[
         steps: RUST_BROAD_STEPS,
     },
     WorkflowProfile {
+        id: "rust-checks",
+        description: "Rust workspace checks shard",
+        kind: ProfileKind::Ci,
+        live: false,
+        artifact_only: false,
+        steps: RUST_CHECKS_STEPS,
+    },
+    WorkflowProfile {
+        id: "rust-tests",
+        description: "Rust workspace tests shard",
+        kind: ProfileKind::Ci,
+        live: false,
+        artifact_only: false,
+        steps: RUST_TEST_STEPS,
+    },
+    WorkflowProfile {
         id: "desktop-rust",
         description: "Desktop native-runtime Rust gate",
         kind: ProfileKind::Ci,
@@ -453,27 +494,34 @@ fn step_plan(step: &WorkflowStep) -> StepPlanOutput {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
-    fn lists_initial_profiles() {
-        let ids: Vec<_> = profile_summaries()
-            .into_iter()
+    fn profile_ids_are_unique() {
+        let profiles = profile_summaries();
+        let unique_ids = profiles
+            .iter()
             .map(|profile| profile.id)
-            .collect();
-        assert_eq!(
-            ids,
-            vec![
-                "changed",
-                "rust-broad",
-                "desktop-rust",
-                "web",
-                "visual",
-                "surface-profile",
-                "live",
-                "package"
-            ]
-        );
+            .collect::<HashSet<_>>();
+        assert_eq!(unique_ids.len(), profiles.len());
+    }
+
+    #[test]
+    fn rust_broad_is_the_ordered_combination_of_hosted_shards() {
+        let step_ids = |profile_id| {
+            plan_profile(profile_id, None)
+                .expect("profile")
+                .steps
+                .into_iter()
+                .map(|step| step.id)
+                .collect::<Vec<_>>()
+        };
+        let mut shard_ids = step_ids("rust-checks");
+        shard_ids.extend(step_ids("rust-tests"));
+
+        assert_eq!(step_ids("rust-broad"), shard_ids);
     }
 
     #[test]
