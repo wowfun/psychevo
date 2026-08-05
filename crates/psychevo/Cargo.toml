@@ -60,7 +60,7 @@ rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { workspace = true, features = ["sync-secret-service", "crypto-rust"], optional = true }
+keyring = { workspace = true, features = ["sync-secret-service", "crypto-rust", "vendored"], optional = true }
 landlock.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

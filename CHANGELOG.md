@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-06
+
+- Made Linux native-keyring builds self-contained by statically building the
+  DBus client dependency, so Rust and installed-artifact CI no longer require
+  runner-specific DBus development packages.
+
 ## 2026-08-05
 
 - Made Thread, Turn, Shell, history, fork, and external-Agent import operations

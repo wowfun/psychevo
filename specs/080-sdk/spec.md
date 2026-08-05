@@ -145,6 +145,10 @@ returns an error naming the missing feature. Psychevo's first-party Gateway,
 ACP, and CLI compositions enable `native-keyring` explicitly so shipped MCP
 OAuth behavior is unchanged. The feature does not expose additional Framework
 implementation modules or alter the semantic interface.
+On Linux, this feature statically builds its DBus client dependency while still
+using the host Secret Service at runtime. Building the CLI, Gateway, ACP, or
+their installable artifacts therefore does not require distribution-specific
+DBus development headers or a mutable system package installation step.
 
 The repository SDK architecture gate derives the workspace dependency graph
 instead of locking an exact crate or edge inventory. It preserves cycle, layer,
