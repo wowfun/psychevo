@@ -1,7 +1,47 @@
 # Changelog
 
+## 2026-08-05
+
+- Made Thread, Turn, Shell, history, fork, and external-Agent import operations
+  atomic at their owning boundaries, retaining durable control, terminal, and
+  session-switch correctness across retries and reconnections.
+- Completed the Framework/Gateway ownership split: products use named
+  configuration, durability, history, Agent, Shell, and lifecycle operations
+  without raw-state facades or parallel execution paths.
+- Strengthened protocol and platform boundaries with exhaustive App Server
+  event projection, relocated wire fixtures, native MCP OAuth key stores, and
+  source-draft ACP promotion without a duplicate session creation.
+- Made shutdown, Shell control and leases, projection recovery, and Gateway
+  write previews bounded and independently observable, including no idle Shell
+  database polling.
+- Improved release and validation evidence: provider plans run per selected
+  provider, artifacts and external commands use clean timeout-bound ownership,
+  packages exercise launchable release binaries, and Linux now has a complete
+  non-functional baseline.
+- Simplified production module assembly and validation around explicit owners,
+  deterministic boundary matrices, and complete visual evidence; release
+  artifacts use ThinLTO without losing bounded panic diagnostics.
+- Restored ACP cursor round trips and main-push path classification, and made
+  Side chat, branch controls, and narrow Floating actions reliable and
+  accessible.
+
 ## 2026-08-04
 
+- Made Framework the typed owner of Turn admission, execution, controls,
+  events, interactions, terminal settlement, Agent import, and Thread lifecycle
+  operations; Gateway now projects and invokes those operations without a
+  parallel Native path or raw state facade.
+- Added a single `GatewayApplication` composition owner and explicit operation,
+  SQLite, and retained-live ingress limits with bounded overload diagnostics,
+  idempotent durable replay, and correct drain/fence behavior.
+- Routed TUI, CLI, Gateway, and Workbench through public Framework Turn and
+  Configuration capabilities, preserving durable cross-process control routing
+  and preventing stale pending admission from replacing a newly selected session.
+- Replaced production root preludes, textual assembly, broad exports, and lint
+  suppressions across Framework, Gateway, AI, Agent Core, and tools with
+  explicit module owners; architecture checks enforce that boundary.
+- Added deterministic weekly Linux extended validation with separate artifacts,
+  while preserving the existing PR and local Rust validation contracts.
 - Split hosted pull-request CI into independently cached Rust checks, Rust
   tests, Desktop Rust, and Web jobs: drafts select gates by change domain,
   ready pull requests run the full set in parallel, superseded runs cancel,
@@ -14,6 +54,9 @@
   environment inputs.
 - Made the shared Web profile reuse xtask's Windows pnpm shim resolution and
   kept English composer token abbreviations stable across native host locales.
+- Made Side chat independent of its parent Turn queue, clarified Thread
+  restoration, and aligned navigation, branch controls, narrow Floating action
+  names, and cross-surface profiling with the public Framework boundary.
 
 ## 2026-08-02
 
