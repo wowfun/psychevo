@@ -795,10 +795,10 @@ describe("Workbench command routing", () => {
 
     render(<App />);
 
-    const sidebarToggle = await screen.findByRole("button", { name: "Session sidebar" });
+    const sidebarToggle = await screen.findByRole("button", { name: "Collapse left sidebar" });
     expect(sidebarToggle.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(sidebarToggle);
-    expect(sidebarToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Expand left sidebar" }).getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Sessions")).toBeNull();
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");

@@ -54,8 +54,8 @@ const CORE_METRICS = [
 const GATEWAY_METRICS = [
   "turnStartReceivedToAdmittedMs",
   "turnAdmittedToAcceptedMs",
-  "turnAcceptedToAdapterMs",
-  "adapterToUserEntryProjectedMs",
+  "turnAcceptedToExecutionStartedMs",
+  "executionStartedToUserEntryProjectedMs",
   "userEntryProjectedToFirstAssistantMs",
   "firstAssistantToTurnCompletedMs"
 ] as const;
@@ -209,7 +209,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
     artifacts: {
       providerEvents: relativeArtifact(artifactRoot, artifacts.providerEvents),
       report: relativeArtifact(artifactRoot, artifacts.report),
-      tuiGatewayTrace: relativeArtifact(artifactRoot, artifacts.tuiGatewayTrace),
       tuiTrace: relativeArtifact(artifactRoot, artifacts.tuiTrace),
       workbenchBrowserMarks: relativeArtifact(artifactRoot, artifacts.workbenchBrowserMarks),
       workbenchGatewayTrace: relativeArtifact(artifactRoot, artifacts.workbenchGatewayTrace),
@@ -245,7 +244,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
 
     const tuiRuntime = prepareTuiRuntime({
       fixture,
-      gatewayTrace: artifacts.tuiGatewayTrace,
       scratch,
       trace: artifacts.tuiTrace,
       workspace
@@ -661,7 +659,6 @@ async function runWorkbenchSample(options: {
 
 function prepareTuiRuntime(options: {
   fixture: DeterministicNativeModelFixture;
-  gatewayTrace: string;
   scratch: string;
   trace: string;
   workspace: string;
@@ -697,7 +694,6 @@ function prepareTuiRuntime(options: {
       ...baseEnv,
       PSYCHEVO_CONFIG: config,
       PSYCHEVO_DB: db,
-      PSYCHEVO_GATEWAY_PROFILE_PATH: options.gatewayTrace,
       PSYCHEVO_TUI_PROFILE_PATH: options.trace
     },
     model: MODEL,
@@ -820,7 +816,6 @@ function gatewayTurnBreakdown(
   }
   const turn = records.filter((record) => record.turnId === admitted.turnId);
   const accepted = requireGatewayMark(turn, "turn_start_accepted");
-  const adapter = requireGatewayMark(turn, "native_adapter_submitted");
   const turnStarted = turn.filter((record) => (
     record.event === "gateway_event_emitted" && record.eventType === "turnStarted"
   ));
@@ -853,7 +848,6 @@ function gatewayTurnBreakdown(
     admitted,
     accepted,
     turnStarted[0]!,
-    adapter,
     promptProjected,
     firstAssistant,
     completed
@@ -864,11 +858,14 @@ function gatewayTurnBreakdown(
       turnStarted: turnStarted.length
     },
     spans: {
-      adapterToUserEntryProjectedMs: gatewayDuration(adapter, promptProjected),
+      executionStartedToUserEntryProjectedMs: gatewayDuration(
+        turnStarted[0]!,
+        promptProjected
+      ),
       firstAssistantToTurnCompletedMs: gatewayDuration(firstAssistant, completed),
       turnStartReceivedToAdmittedMs: gatewayDuration(received, admitted),
       turnAdmittedToAcceptedMs: gatewayDuration(admitted, accepted),
-      turnAcceptedToAdapterMs: gatewayDuration(accepted, adapter),
+      turnAcceptedToExecutionStartedMs: gatewayDuration(accepted, turnStarted[0]!),
       userEntryProjectedToFirstAssistantMs: gatewayDuration(promptProjected, firstAssistant),
     },
     turnId: admitted.turnId
@@ -1411,7 +1408,6 @@ function comparisonArtifactPaths(root: string) {
     providerEvents: path.join(providerDir, "events.jsonl"),
     report: path.join(root, "report.md"),
     tuiDir,
-    tuiGatewayTrace: path.join(tuiDir, "gateway-marks.jsonl"),
     tuiTrace: path.join(tuiDir, "marks.jsonl"),
     workbenchBrowserMarks: path.join(workbenchDir, "browser-marks.jsonl"),
     workbenchDir,

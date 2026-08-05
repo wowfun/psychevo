@@ -42,6 +42,7 @@
     "@wdio/mocha-framework": "9.29.1",
     "@wdio/spec-reporter": "9.29.1",
     "@wdio/tauri-service": "1.2.0",
+    "@wdio/types": "9.29.1",
     "undici": "7.28.0",
     "vite": "^8.0.16",
     "webdriverio": "9.29.1"

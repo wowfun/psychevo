@@ -254,7 +254,7 @@
   left: auto;
   width: max-content;
   min-width: 150px;
-  max-width: min(42ch, calc(100vw - 24px));
+  max-width: min(32ch, calc(100vw - 24px));
 }
 
 .composerEnvironmentMenu > button {

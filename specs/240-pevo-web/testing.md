@@ -315,13 +315,15 @@ required. They must not print tokens or secrets.
 - Comparison manifest v3 reports send-to-feedback-commit, send-to-provider,
   provider-to-first-surface-commit, first-commit-to-settled-commit, and
   send-to-settled-commit. Diagnostic spans distinguish Workbench `turn/start`
-  admission, first non-empty assistant receipt, controller batch application,
+  admission, the public Framework `turnStarted` execution boundary observed by
+  Gateway, first non-empty assistant receipt, controller batch application,
   DOM commit, and optional post-frame observation from TUI event drain and
   terminal draw commit. It emits raw samples, p50/p95, GUI-minus-TUI deltas,
   ratios, Long Task and cross-sample RPC-overlap diagnostics, a content-free TUI
-  JSONL trace, a content-free TUI-process Gateway JSONL trace containing Native
-  Adapter dispatch/return boundaries, and a Playwright trace. Comparison v1 and
-  v2 inputs are rejected.
+  JSONL trace, a Workbench-only Gateway JSONL trace containing public Framework
+  lifecycle boundaries, and a Playwright trace. The direct-Framework TUI must
+  not claim or manufacture a Gateway trace. Comparison v1 and v2 inputs are
+  rejected.
 - Every sample associates exactly one ordered main provider request. Every
   Workbench sample additionally associates exactly one managed `turn/start`
   transaction and accepted Framework Turn.

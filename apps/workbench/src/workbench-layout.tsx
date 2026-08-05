@@ -648,7 +648,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 aria-expanded={!leftCollapsed}
                 className={`sidebarToggle ${leftCollapsed ? "is-logoToggle" : ""}`}
                 icon={leftCollapsed ? <img alt="" aria-hidden className="sidebarToggleLogo" src={logoUrl} /> : <PanelLeft size={16} />}
-                label="Session sidebar"
+                label={leftCollapsed ? "Expand left sidebar" : "Collapse left sidebar"}
                 onClick={() => setLeftCollapsed((value: boolean) => !value)}
                 size="compact"
               />

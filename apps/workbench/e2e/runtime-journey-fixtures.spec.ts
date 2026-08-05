@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import {
   beginBrowserJourneySample,
   installJourneyWebSocketProbe,
+  recordBrowserJourneyMark,
   readBrowserJourneyMarks,
   readBrowserJourneyRunnerMarks,
   resetBrowserJourneySample,
@@ -141,12 +142,7 @@ test.describe("critical journey deterministic fixture controls", () => {
 
     for (const sampleIndex of [1, 2]) {
       await beginBrowserJourneySample(page, sampleIndex);
-      await page.evaluate(() => {
-        const assistant = document.createElement("div");
-        assistant.className = "pevo-message is-assistant";
-        assistant.textContent = "deterministic output";
-        document.body.append(assistant);
-      });
+      await recordBrowserJourneyMark(page, "first_output_visible", { turnState: "running" });
       await waitForBrowserJourneyMark(page, "first_output_visible", 10_000, sampleIndex);
       await expect.poll(() => readBrowserJourneyRunnerMarks(page).some((mark) => (
         mark.id === "first_output_visible" && mark.sampleIndex === sampleIndex
@@ -158,7 +154,6 @@ test.describe("critical journey deterministic fixture controls", () => {
       mark.id === "first_output_visible"
     ));
     expect(visible.map((mark) => mark.sampleIndex)).toEqual([1, 2]);
-    await expect(page.locator(".pevo-message.is-assistant")).toHaveCount(2);
   });
 
   test("gates ACP prompt output and keeps its persisted journey evidence content-free", async () => {

@@ -244,7 +244,9 @@ navigation-surface background so switching surfaces does not introduce a gray
 or temperature shift. The left sidebar collapse
 control sits in the
 same brand row as the logo/name and is icon-only; it must align to the right
-edge of the session column. While the sidebar is expanded, `New Session`
+edge of the session column. Its accessible name states the next action:
+`Collapse left sidebar` while expanded and `Expand left sidebar` while
+collapsed. While the sidebar is expanded, `New Session`
 aligns its icon and label to the same columns as `Search` instead of centering
 the command across the rail. When the left sidebar is collapsed, the same
 control becomes the expand affordance and uses a scaled Psychevo logo mark

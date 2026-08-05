@@ -61,6 +61,10 @@ is an ephemeral fork defined by [030 Thread Lineage](../030-state-and-data-model
 It starts from a snapshot of the parent conversation plus hidden boundary
 instructions marking inherited history as reference-only. Later parent output is
 not merged into the side context.
+Creating that snapshot must not wait behind an active parent turn. The atomic
+child-creation transaction captures the parent facts committed when the user
+opens the side chat; it is an application-level child creation, not a mutation
+of the parent Thread's turn FIFO.
 
 The side chat inherits the parent surface's current controls at creation
 time, including model, reasoning effort, mode, permission mode, selected agent,

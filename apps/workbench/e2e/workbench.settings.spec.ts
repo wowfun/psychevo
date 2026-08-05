@@ -16,11 +16,14 @@ test.describe("pevo Web Workbench", () => {
   test("shows Settings as an app-level configuration center", async ({ page, isMobile }, testInfo) => {
     const server = await startPevoWeb({ live: false });
     try {
-          await page.goto(server.url);
-          await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
-        await page.getByRole("button", { name: "Agent Definition", exact: true }).click();
-        await expect(page.getByRole("dialog", { name: "Agent Definition and Runtime Profile" }).getByRole("radiogroup", { name: "Main agent" }).getByRole("radio", { name: "translate" })).toBeVisible();
-        await page.getByRole("button", { name: "Agent Definition", exact: true }).click();
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const agentTarget = page.getByRole("button", { name: "Agent target", exact: true });
+      await agentTarget.click();
+      await expect(page.getByRole("dialog", { name: "Agent target" })
+        .getByRole("radiogroup", { name: "Agent target" })
+        .getByRole("radio", { name: /translate/i })).toBeVisible();
+      await agentTarget.click();
         if (isMobile) {
           await openPanel(page, isMobile, "History");
         }
@@ -109,7 +112,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(defaultPicker.getByText("Explicit reasoning effort")).toHaveCount(0);
       await expect(defaultPicker.locator(".modelReasoningProviderHeading", { hasText: "LM Studio" })).toBeVisible();
       await expect(defaultPicker.getByRole("radio", { name: /noop/ })).toHaveAttribute("data-model-value", "lmstudio/noop");
-      await expect(defaultPicker.getByRole("radio", { name: /noop/ })).not.toHaveAttribute("title", /.+/);
+      await expect(defaultPicker.getByRole("radio", { name: /noop/ })).toHaveAttribute("title", "noop");
       await expectModelRowsFillPopover(defaultPicker);
       await captureWorkbench(page, testInfo, `settings-models-picker-${isMobile ? "mobile" : "desktop"}`);
       await page.keyboard.press("Escape");
@@ -258,7 +261,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(channels.getByText("WeChat · wechat · polling")).toBeVisible();
       await expect(channels.getByText("ready")).toBeVisible();
       await expect(channels.getByLabel("wechat status").getByText("Runner stopped")).toBeVisible();
-      await expect(channels.getByRole("switch", { name: "Disable wechat" })).toBeVisible();
+      await expect(channels.getByRole("switch", { name: "wechat enabled" })).toBeVisible();
       await expect(channels.getByRole("button", { name: "All" })).toHaveCount(0);
       await assertNoHorizontalOverflow(page, settings);
       await expectControlsFitHorizontally(settings);

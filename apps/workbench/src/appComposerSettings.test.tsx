@@ -22,10 +22,10 @@ describe("Workbench settings and backend controls", () => {
   it("unmounts hidden left sidebar sections when collapsed", async () => {
     render(<App />);
 
-    const sessionSidebar = await screen.findByRole("button", { name: "Session sidebar" });
+    const sessionSidebar = await screen.findByRole("button", { name: "Collapse left sidebar" });
     expect(sessionSidebar.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(sessionSidebar);
-    expect(sessionSidebar.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Expand left sidebar" }).getAttribute("aria-expanded")).toBe("false");
 
     expect(screen.getByRole("button", { name: "New Session" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();

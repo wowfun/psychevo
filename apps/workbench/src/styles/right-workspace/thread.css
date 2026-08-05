@@ -130,6 +130,8 @@
 }
 
 .threadPanelComposerDock .pevo-composer {
+  align-content: start;
+  min-height: 128px;
   margin-top: 0;
 }
 

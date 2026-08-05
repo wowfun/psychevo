@@ -405,10 +405,14 @@ Default validation is deterministic and local:
 - native Desktop startup evidence records ordered `process_start`,
   `window_ready`, `managed_gateway_ready`, `bridge_connected`, `gui_ready`, and
   `draft_context_ready` milestones in a versioned manifest with bounded logs
-  and screenshots. Rust-side milestones are emitted only under `wdio-test`;
-  production builds expose no test recorder or managed token. Each milestone
-  declares its own clock source, and cross-process timestamps are not directly
-  subtracted. A failed readiness checkpoint also captures one screenshot and a
+  and screenshots. The production native host contains the same content-free
+  Rust startup diagnostic, but it activates only when the caller supplies an
+  explicit `PSYCHEVO_DESKTOP_STARTUP_TRACE_ROOT`; ordinary starts perform no
+  trace writes. The trace contains one process id, ordering/timing fields, and
+  milestone ids only, never a managed endpoint, token, credential, Session, or
+  transcript. It is an opt-in diagnostic rather than a WebDriver or product
+  control API. Each milestone declares its own clock source, and cross-process
+  timestamps are not directly subtracted. A failed readiness checkpoint also captures one screenshot and a
   bounded structural renderer-state artifact (shell datasets and form-control
   state, never storage, credentials, transcript content, or full DOM) so the
   native failure can be traced across process, bridge, and renderer boundaries.

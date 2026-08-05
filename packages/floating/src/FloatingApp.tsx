@@ -391,12 +391,14 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
         <div className="pevo-floating-actionRail" aria-label="Floating actions" role="toolbar">
           {ACTIONS.map(({ action, icon: Icon, label }) => (
             <ActionButton
+              aria-label={label}
               className="pevo-floating-actionButton"
               disabled={!bridgeReady || state.running}
               icon={<Icon size={15} />}
               key={action}
               onClick={() => void submit(action)}
               size="compact"
+              title={label}
               type="button"
               variant="ghost"
             >

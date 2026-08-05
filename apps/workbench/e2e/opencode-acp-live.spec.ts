@@ -10,8 +10,7 @@ let screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-
 
 test.describe("Workbench OpenCode ACP live visual validation", () => {
   test("creates and uses OpenCode ACP from the GUI @live", async ({ page, isMobile }, testInfo) => {
-    const context = liveContextFor("opencode-acp-gui-live")
-      ?? liveContextFor("opencode-acp-session-lifecycle-live");
+    const context = liveContextFor("opencode-acp-gui-lifecycle-live");
     if (!context) {
       test.skip(true, "run through cargo xtask live");
       return;
@@ -112,6 +111,9 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
         20_000
       );
       await expect(assistantMessage).toContainText(semanticResponse, { timeout: 240_000 });
+      await expect(page.locator('.appShell[data-turn-state="idle"]')).toBeVisible({
+        timeout: 240_000
+      });
 
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
@@ -410,10 +412,19 @@ async function expectDelegatePersistence(dbPath: string) {
       "-json",
       dbPath,
       `SELECT
-      e.status AS edge_status,
+      CASE WHEN EXISTS(
+        SELECT 1 FROM agent_edges edge
+        WHERE edge.parent_session_id = parent.id
+      ) AND NOT EXISTS(
+        SELECT 1 FROM agent_edges edge
+        WHERE edge.parent_session_id = parent.id
+          AND edge.status <> 'closed'
+      ) THEN 'closed' ELSE 'not_closed' END AS edge_status,
       EXISTS(
         SELECT 1 FROM messages child_message
-        WHERE child_message.session_id = child.id
+        JOIN agent_edges child_edge
+          ON child_edge.child_session_id = child_message.session_id
+        WHERE child_edge.parent_session_id = parent.id
           AND child_message.role IN ('assistant', 'tool_result')
           AND instr(child_message.content_text, 'OPENCODE_ACP_DELEGATE_LIVE_OK') > 0
       ) AS child_marker,
@@ -440,9 +451,10 @@ async function expectDelegatePersistence(dbPath: string) {
         ORDER BY terminal.completed_at_ms DESC LIMIT 1
       ) AS parent_terminal_outcome
     FROM sessions parent
-    JOIN agent_edges e ON e.parent_session_id = parent.id
-    JOIN sessions child ON child.id = e.child_session_id
     WHERE EXISTS(
+      SELECT 1 FROM agent_edges parent_edge
+      WHERE parent_edge.parent_session_id = parent.id
+    ) AND EXISTS(
       SELECT 1 FROM messages request
       WHERE request.session_id = parent.id
         AND request.role = 'user'

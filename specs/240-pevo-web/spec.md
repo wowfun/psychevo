@@ -674,8 +674,11 @@ assistant receipt, controller application, surface commit, completion
 receipt/application, and settled surface commit. Workbench samples additionally
 correlate exactly one accepted managed Turn and derive a Workbench-only
 Gateway/runtime sub-waterfall covering `turn/start` receipt, Application
-admission, response acceptance, Native Adapter submission, prompt projection,
-first visible assistant event, and authoritative completion. These
+admission, response acceptance, the single public Framework `turnStarted`
+execution boundary observed by Gateway, prompt projection, first visible
+assistant event, and authoritative completion. The profile must not add an
+Adapter callback or expose a Framework-internal submission mark solely for
+measurement. These
 sub-waterfalls use only their owning Gateway or surface clock and are summarized
 independently from runner-observed cross-process spans. The report must not
 calculate a Gateway-minus-Framework delta from non-equivalent internal stages.

@@ -236,8 +236,9 @@ Enter browses that location; opening the folder resolves a changed path first.
 In a bound Thread, Workspace continues to open Files.
 Git branch opens a local-branch switcher with `New branch...` as its final
 action; checkout and creation use structured Gateway operations and are
-disabled while a turn is running. Path and branch remain in the quieter status
-line. The default send control is
+disabled while a turn is running. The branch switcher uses a narrower `32ch`
+maximum than the workspace switcher and ellipsizes longer branch names. Path
+and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
 active turn, the same slot becomes an interrupt control with a Codex-like filled
 square stop glyph inside the same circular button. The prompt textarea grows with

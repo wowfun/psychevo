@@ -866,9 +866,10 @@ async function reopenOnlyPersistedSession(page: Page, isMobile: boolean) {
     .locator(".pevo-sessionRow:not(.is-draft) .pevo-sessionMain");
   await expect(session).toHaveCount(1, { timeout: 30_000 });
   await session.click();
-  if (isMobile) {
-    await page.getByRole("button", { name: "Transcript", exact: true }).click();
+  if (!isMobile) {
+    await expect(session.locator("xpath=ancestor::article[contains(@class, 'pevo-sessionRow')]")).toHaveClass(/is-active/);
   }
+  await expect(page.getByPlaceholder("Ask Psychevo...")).toBeVisible({ timeout: 30_000 });
 }
 
 type FixtureTraceEvent = {

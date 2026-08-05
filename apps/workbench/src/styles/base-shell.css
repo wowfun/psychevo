@@ -423,21 +423,26 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   border-radius: 0;
 }
 
-.leftActions .newSessionAction {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 7px;
-  padding: 0 8px 0 23px;
+.leftActions :is(.newSessionAction, .pevo-navItem) {
+  align-items: center;
+  gap: var(--left-nav-gap, 7px);
+  padding: 0 var(--left-nav-x, 6px);
+  font-size: var(--left-nav-font-size, var(--pevo-font-size-chrome));
+  font-weight: 600;
   text-align: left;
 }
 
-.leftActions .newSessionAction .pevo-actionButtonIcon {
-  grid-column: 1;
-  justify-self: center;
+.leftActions .newSessionAction {
+  display: grid;
+  grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr);
 }
 
-.leftActions .newSessionAction .pevo-actionButtonLabel {
-  grid-column: 2;
+.leftActions .pevo-navItem {
+  grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr) auto;
+}
+
+.leftActions .newSessionAction .pevo-actionButtonIcon {
+  justify-self: center;
 }
 
 .leftUtilityRail button {

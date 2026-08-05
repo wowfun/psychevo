@@ -128,6 +128,10 @@ may open it as a child tab, split view, or entered view, but it must not add a
 command transcript row to the parent. If an inline prompt is supplied, the
 surface opens the side thread before submitting the prompt through the ordinary
 thread composer/reconciliation path.
+Framework creates that side Thread from the parent snapshot and owns the hidden
+inherited-message and boundary markers. Cleanup is restricted to the known TUI
+or Web side-chat source within one canonical workspace; surfaces do not receive
+raw persistence or metadata keys to implement either operation.
 
 ## Permission, Clarify, And Interrupt
 

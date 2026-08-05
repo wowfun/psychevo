@@ -35,6 +35,7 @@ interface DesktopStartupMark {
   epochMs: number;
   id: DesktopStartupId;
   monotonicOffsetMs: number;
+  pid?: number;
   sequence: number;
   sourceClock: "desktop-rust-monotonic" | "workbench-browser-performance";
 }
@@ -364,6 +365,7 @@ function readRustStartupMarks(required: boolean): DesktopStartupMark[] {
       parsed.sourceClock !== "desktop-rust-monotonic"
       || typeof parsed.epochMs !== "number"
       || typeof parsed.monotonicOffsetMs !== "number"
+      || typeof parsed.pid !== "number"
       || typeof parsed.sequence !== "number"
     ) {
       throw new Error(`Desktop Rust startup trace mark ${parsed.id} is incomplete`);
@@ -546,7 +548,7 @@ async function assertFloatingProviderLive(): Promise<void> {
     });
 
     await browser.waitUntil(async () => {
-      const error = await floatingErrorText();
+      const error = await floatingFailureText();
       if (error) {
         timings.error = error;
         throw new Error(`Floating provider live failed: ${error}`);
@@ -683,13 +685,20 @@ function isTransparentColor(color: string): boolean {
   return color === "" || color === "transparent" || color === "rgba(0, 0, 0, 0)";
 }
 
-async function floatingErrorText(): Promise<string | null> {
+async function floatingFailureText(): Promise<string | null> {
   const error = await browser.$(".pevo-floating-errorRow");
-  if (!(await error.isExisting())) {
+  if (await error.isExisting()) {
+    const text = (await error.getText()).trim();
+    return text || "Floating rendered an empty error row";
+  }
+  const terminal = await browser.$(
+    '.pevo-transcript .pevo-evidence.is-failed[data-block-kind="status"][data-source="gateway.turn"]'
+  );
+  if (!(await terminal.isExisting())) {
     return null;
   }
-  const text = (await error.getText()).trim();
-  return text || "Floating rendered an empty error row";
+  const text = (await terminal.getText()).trim();
+  return text || "Floating rendered an empty failed-Turn diagnostic";
 }
 
 async function assertNoPageVerticalOverflow(): Promise<void> {

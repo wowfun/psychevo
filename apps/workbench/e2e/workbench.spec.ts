@@ -54,7 +54,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(page.locator(".pevo-sessionRow.is-draft")).toHaveCount(0);
 
       await openPanel(page, isMobile, "Transcript");
-      await expect(page.getByText("No messages yet")).toBeVisible();
+      await expect(page.getByText("No messages yet")).toBeHidden();
 
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await composer.fill("/");
