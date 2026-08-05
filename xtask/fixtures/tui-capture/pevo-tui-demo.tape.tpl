@@ -185,16 +185,20 @@ Enter
 Wait+Screen /Translate the VHS sentence to Chinese/
 Sleep 300 ms
 Screenshot "11-agent-session-running.png"
-Sleep 5600 ms
 Alt+P
+Type "/agents"
+Enter
+Wait+Screen /Live child agents/
+Wait+Screen /translate_to_chinese/
+Sleep 300 ms
+Screenshot "12-agents-running.png"
+Escape
 Wait+Screen /Translation complete/
 Sleep 300 ms
 Screenshot "12-agent-parent-completed.png"
 Type "/agents"
 Enter
 Wait+Screen /No running subagents/
-Sleep 300 ms
-Screenshot "12-agents-running.png"
 Tab
 Wait+Screen /Shadowed duplicates/
 Sleep 300 ms

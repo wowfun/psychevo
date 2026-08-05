@@ -18,7 +18,7 @@ use super::retention::warn_if_ci_retention_cleanup_fails;
 use super::sdk_architecture::check_sdk_architecture;
 use super::surface_profile::run_surface_profile;
 use super::tui_capture::run_tui_vhs_demo;
-use super::workbench_visual::run_workbench_visual;
+use super::workbench_visual::{run_workbench_critical_journey, run_workbench_visual};
 use crate::host_command;
 use crate::live::{LiveEnvMode, run_ci_single_provider_live};
 
@@ -52,6 +52,7 @@ pub(crate) fn execute_profile(
     let use_default_artifact_root = artifact_root.is_none();
     let invocation_cwd = std::env::current_dir().context("read xtask invocation directory")?;
     let artifact_root = resolve_ci_artifact_root(root, &invocation_cwd, artifact_root);
+    prepare_profile_artifacts(profile, &artifact_root)?;
     fs::create_dir_all(artifact_root.join("logs"))
         .with_context(|| format!("create artifact root {}", artifact_root.display()))?;
 
@@ -141,6 +142,18 @@ pub(crate) fn execute_profile(
         warn_if_ci_retention_cleanup_fails(root, &artifact_root);
     }
     Ok(run)
+}
+
+fn prepare_profile_artifacts(profile: &WorkflowProfile, artifact_root: &Path) -> Result<()> {
+    if profile.id != "visual" {
+        return Ok(());
+    }
+    let visual_root = artifact_root.join("visual");
+    if visual_root.exists() {
+        fs::remove_dir_all(&visual_root)
+            .with_context(|| format!("remove stale visual root {}", visual_root.display()))?;
+    }
+    Ok(())
 }
 
 fn write_run_output(
@@ -238,6 +251,9 @@ fn run_step(
         WorkflowStepAction::SingleProviderLive => {
             run_single_provider_live_step(root, artifact_root, profile, step, live_env, log_path)
         }
+        WorkflowStepAction::WorkbenchCriticalJourney => {
+            run_workbench_critical_journey_step(root, artifact_root, step, log_path)
+        }
         WorkflowStepAction::DesktopVisual => {
             run_desktop_visual_step(root, artifact_root, step, log_path)
         }
@@ -273,7 +289,7 @@ fn run_artifact_command_step(
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
         .env("CARGO_TARGET_DIR", target_dir);
-    if cfg!(target_os = "linux") && step.id == "build-desktop-bundle" {
+    if cfg!(target_os = "linux") && is_desktop_bundle_command(command) {
         process.env("APPIMAGE_EXTRACT_AND_RUN", "1");
     }
     let outcome = run_logged_process(step.id, &mut process, log)?;
@@ -285,6 +301,12 @@ fn run_artifact_command_step(
         outcome.exit_code,
         outcome.had_suppressed_output,
     ))
+}
+
+fn is_desktop_bundle_command(command: &[&str]) -> bool {
+    command
+        .windows(2)
+        .any(|arguments| arguments == ["@psychevo/desktop", "tauri:build"])
 }
 
 fn run_surface_profile_step(
@@ -386,6 +408,24 @@ fn run_workbench_visual_step(
 ) -> Result<StepExecution> {
     let log = create_step_log(log_path)?;
     let outcome = run_workbench_visual(root, artifact_root, log)?;
+    Ok(step_execution(
+        step,
+        log_path,
+        step.action.command_for_plan(),
+        outcome.passed,
+        outcome.exit_code,
+        outcome.had_suppressed_output,
+    ))
+}
+
+fn run_workbench_critical_journey_step(
+    root: &Path,
+    artifact_root: &Path,
+    step: &WorkflowStep,
+    log_path: &Path,
+) -> Result<StepExecution> {
+    let log = create_step_log(log_path)?;
+    let outcome = run_workbench_critical_journey(root, artifact_root, log)?;
     Ok(step_execution(
         step,
         log_path,
@@ -511,6 +551,23 @@ mod tests {
     }
 
     #[test]
+    fn appimage_extraction_follows_the_desktop_bundle_command_not_a_step_id() {
+        assert!(is_desktop_bundle_command(&[
+            "pnpm",
+            "--filter",
+            "@psychevo/desktop",
+            "tauri:build",
+        ]));
+        assert!(!is_desktop_bundle_command(&[
+            "cargo",
+            "build",
+            "--release",
+            "--bin",
+            "pevo",
+        ]));
+    }
+
+    #[test]
     fn package_profile_requires_explicit_opt_in_before_creating_artifacts() {
         let temp = test_log_path("package-opt-in").with_extension("");
         assert!(!temp.exists());
@@ -527,6 +584,27 @@ mod tests {
                 .contains("requires explicit --package opt-in")
         );
         assert!(!temp.exists());
+    }
+
+    #[test]
+    fn visual_profile_cleans_its_complete_subtree_before_the_first_step() {
+        let artifact_root = test_log_path("visual-clean-root").with_extension("");
+        let stale = artifact_root.join("visual/desktop-native/stale.png");
+        let retained = artifact_root.join("logs/previous.log");
+        fs::create_dir_all(stale.parent().expect("stale parent")).expect("visual root");
+        fs::create_dir_all(retained.parent().expect("log parent")).expect("log root");
+        fs::write(&stale, b"stale").expect("stale visual evidence");
+        fs::write(&retained, b"log").expect("retained log");
+
+        prepare_profile_artifacts(
+            find_profile("visual").expect("visual profile"),
+            &artifact_root,
+        )
+        .expect("clean visual artifacts");
+
+        assert!(!artifact_root.join("visual").exists());
+        assert!(retained.is_file());
+        fs::remove_dir_all(artifact_root).expect("cleanup");
     }
 
     #[test]

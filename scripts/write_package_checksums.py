@@ -27,6 +27,12 @@ def main() -> None:
     suffix = ".exe" if os.name == "nt" else ""
     groups = {
         "CLI": [package_root / "cli-target" / "release" / f"pevo{suffix}"],
+        "Desktop executable": [
+            package_root
+            / "desktop-target"
+            / "release"
+            / f"psychevo-desktop{suffix}"
+        ],
         "Python wheels": list((package_root / "python").glob("wheels/*.whl")),
         "Python sdists": list((package_root / "python").glob("sdists/*")),
         "Desktop bundles": [

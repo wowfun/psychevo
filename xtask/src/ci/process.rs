@@ -4,6 +4,10 @@ use std::path::Path;
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 use anyhow::{Context, Result, anyhow};
 
@@ -46,6 +50,27 @@ pub(crate) fn run_logged_process(
     command: &mut ProcessCommand,
     log: Arc<Mutex<fs::File>>,
 ) -> Result<ProcessOutcome> {
+    run_logged_process_inner(label, command, log, None)
+}
+
+pub(crate) fn run_logged_process_with_timeout(
+    label: &str,
+    command: &mut ProcessCommand,
+    log: Arc<Mutex<fs::File>>,
+    timeout: Duration,
+) -> Result<ProcessOutcome> {
+    run_logged_process_inner(label, command, log, Some(timeout))
+}
+
+fn run_logged_process_inner(
+    label: &str,
+    command: &mut ProcessCommand,
+    log: Arc<Mutex<fs::File>>,
+    timeout: Option<Duration>,
+) -> Result<ProcessOutcome> {
+    if timeout.is_some() {
+        configure_process_tree(command);
+    }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
@@ -63,9 +88,13 @@ pub(crate) fn run_logged_process(
     let stdout_handle = spawn_capture_stream(stdout, Arc::clone(&log), OutputStream::Stdout);
     let stderr_handle = spawn_capture_stream(stderr, Arc::clone(&log), OutputStream::Stderr);
 
-    let status = child.wait().with_context(|| format!("wait for {label}"))?;
+    let status = match timeout {
+        Some(timeout) => wait_with_timeout(label, &mut child, &log, timeout),
+        None => child.wait().with_context(|| format!("wait for {label}")),
+    };
     let mut stats = join_capture_stream("stdout", stdout_handle)?;
     stats.merge(join_capture_stream("stderr", stderr_handle)?);
+    let status = status?;
 
     Ok(ProcessOutcome {
         passed: status.success(),
@@ -73,6 +102,89 @@ pub(crate) fn run_logged_process(
         mirrored_diagnostics: stats.mirrored_lines,
         had_suppressed_output: stats.had_suppressed_output,
     })
+}
+
+fn wait_with_timeout(
+    label: &str,
+    child: &mut Child,
+    log: &Arc<Mutex<fs::File>>,
+    timeout: Duration,
+) -> Result<std::process::ExitStatus> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().with_context(|| format!("poll {label}"))? {
+            return Ok(status);
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            let message = format!(
+                "{label} timed out after {} seconds; terminating its process tree",
+                timeout.as_secs()
+            );
+            write_mirrored_line(log, &message)?;
+            terminate_process_tree(child)
+                .with_context(|| format!("terminate timed-out {label} process tree"))?;
+            anyhow::bail!("{message}");
+        }
+        thread::sleep((timeout - elapsed).min(Duration::from_millis(50)));
+    }
+}
+
+#[cfg(unix)]
+fn configure_process_tree(command: &mut ProcessCommand) {
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_tree(_command: &mut ProcessCommand) {}
+
+#[cfg(unix)]
+fn terminate_process_tree(child: &mut Child) -> Result<()> {
+    let process_group = -(child.id() as i32);
+    // SAFETY: the child was spawned as the leader of a new process group. A
+    // negative pid targets exactly that group and never the xtask process.
+    unsafe {
+        libc::kill(process_group, libc::SIGTERM);
+    }
+    let grace_started = Instant::now();
+    while grace_started.elapsed() < Duration::from_millis(250) {
+        if child
+            .try_wait()
+            .context("poll process after SIGTERM")?
+            .is_some()
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    // SAFETY: same process-group invariant as the SIGTERM call above.
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    child.wait().context("wait for terminated process tree")?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn terminate_process_tree(child: &mut Child) -> Result<()> {
+    let status = ProcessCommand::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .status()
+        .context("run taskkill for timed-out process tree")?;
+    let _ = child.kill();
+    let _ = child.wait();
+    if !status.success() {
+        anyhow::bail!("taskkill failed with {status}");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn terminate_process_tree(child: &mut Child) -> Result<()> {
+    child.kill().context("kill timed-out process")?;
+    child.wait().context("wait for timed-out process")?;
+    Ok(())
 }
 
 pub(crate) fn spawn_capture_stream<R>(
@@ -278,6 +390,41 @@ mod tests {
         .expect("capture test output");
         fs::remove_file(path).expect("remove capture test log");
         (stats, mirrored)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_terminates_descendants_that_inherit_capture_pipes() {
+        let id = NEXT_TEST_LOG.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "psychevo-xtask-timeout-{}-{id}.log",
+            std::process::id()
+        ));
+        let log = create_step_log(&path).expect("create timeout test log");
+        let mut command = ProcessCommand::new("sh");
+        command.args(["-c", "sleep 30 & wait"]);
+
+        let started = Instant::now();
+        let error = run_logged_process_with_timeout(
+            "descendant timeout fixture",
+            &mut command,
+            log,
+            Duration::from_millis(100),
+        )
+        .expect_err("fixture must time out");
+
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            error
+                .to_string()
+                .contains("descendant timeout fixture timed out")
+        );
+        assert!(
+            fs::read_to_string(&path)
+                .expect("read timeout log")
+                .contains("terminating its process tree")
+        );
+        fs::remove_file(path).expect("remove timeout test log");
     }
 
     #[test]

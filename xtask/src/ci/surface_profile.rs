@@ -276,8 +276,8 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
         &[
             "turnStartReceivedToAdmittedMs",
             "turnAdmittedToAcceptedMs",
-            "turnAcceptedToAdapterMs",
-            "adapterToUserEntryProjectedMs",
+            "turnAcceptedToExecutionStartedMs",
+            "executionStartedToUserEntryProjectedMs",
             "userEntryProjectedToFirstAssistantMs",
             "firstAssistantToTurnCompletedMs",
         ],
@@ -441,8 +441,8 @@ mod tests {
         let gateway_summary = serde_json::json!({
             "turnStartReceivedToAdmittedMs": metric,
             "turnAdmittedToAcceptedMs": metric,
-            "turnAcceptedToAdapterMs": metric,
-            "adapterToUserEntryProjectedMs": metric,
+            "turnAcceptedToExecutionStartedMs": metric,
+            "executionStartedToUserEntryProjectedMs": metric,
             "userEntryProjectedToFirstAssistantMs": metric,
             "firstAssistantToTurnCompletedMs": metric
         });

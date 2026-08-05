@@ -1,4 +1,5 @@
 mod ci;
+mod desktop_wdio;
 mod doctor;
 mod host_command;
 mod init;
@@ -52,7 +53,7 @@ fn main() -> Result<()> {
 }
 
 fn generate_gateway_protocol(root: &std::path::Path, check: bool) -> Result<()> {
-    psychevo_gateway_protocol::generate_typescript_and_schema(root, check)?;
+    psychevo_gateway_protocol::codegen::generate_typescript_and_schema(root, check)?;
     let mut args = vec![
         "--dir",
         "packages/protocol",

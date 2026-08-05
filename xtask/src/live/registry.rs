@@ -24,7 +24,7 @@ pub(crate) enum LiveCheckAction {
         package: &'static str,
         test: &'static str,
         features: &'static [&'static str],
-        provider_required: bool,
+        provider_support: LiveProviderSupport,
     },
     DeterministicPlaywright {
         spec: &'static str,
@@ -36,6 +36,13 @@ pub(crate) enum LiveCheckAction {
         needs_opencode: bool,
         needs_skill_cwd: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LiveProviderSupport {
+    None,
+    Any,
+    Only(&'static [&'static str]),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -91,8 +98,8 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo",
             test: "live_xiaomi_token_plan_read_tool",
-            features: &["product"],
-            provider_required: true,
+            features: &[],
+            provider_support: LiveProviderSupport::Only(&["xiaomi-token-plan"]),
         },
     },
     LiveCheck {
@@ -102,8 +109,8 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo",
             test: "live_xiaomi_token_plan_model_fetch",
-            features: &["product"],
-            provider_required: true,
+            features: &[],
+            provider_support: LiveProviderSupport::Only(&["xiaomi-token-plan"]),
         },
     },
     LiveCheck {
@@ -114,7 +121,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
             package: "psychevo-gateway",
             test: "live_xiaomi_token_plan_automation_manual_run_completes",
             features: &[],
-            provider_required: true,
+            provider_support: LiveProviderSupport::Only(&["xiaomi-token-plan"]),
         },
     },
     LiveCheck {
@@ -125,7 +132,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
             package: "psychevo-gateway",
             test: "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins",
             features: &[],
-            provider_required: false,
+            provider_support: LiveProviderSupport::None,
         },
     },
     LiveCheck {
@@ -201,16 +208,14 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         id: "pevo-acp-server-live",
         description: "Run Psychevo ACP server live validation",
         suites: &["acp"],
-        action: LiveCheckAction::Playwright {
+        action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/pevo-acp-server-live.spec.ts",
             grep: "streams standard ACP updates, accepts model config, and reports usage @live",
-            needs_opencode: false,
-            needs_skill_cwd: false,
         },
     },
     LiveCheck {
-        id: "opencode-acp-gui-live",
-        description: "Run OpenCode ACP GUI live validation",
+        id: "opencode-acp-gui-lifecycle-live",
+        description: "Run one OpenCode ACP GUI Turn and Session lifecycle validation",
         suites: &["acp"],
         action: LiveCheckAction::Playwright {
             spec: "apps/workbench/e2e/opencode-acp-live.spec.ts",
@@ -226,17 +231,6 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::Playwright {
             spec: "apps/workbench/e2e/opencode-acp-live.spec.ts",
             grep: "delegates @opencode through the native runtime @live",
-            needs_opencode: true,
-            needs_skill_cwd: false,
-        },
-    },
-    LiveCheck {
-        id: "opencode-acp-session-lifecycle-live",
-        description: "Validate real OpenCode ACP list, fork, close, resume, and delete capability projection",
-        suites: &["acp"],
-        action: LiveCheckAction::Playwright {
-            spec: "apps/workbench/e2e/opencode-acp-live.spec.ts",
-            grep: "creates and uses OpenCode ACP from the GUI @live",
             needs_opencode: true,
             needs_skill_cwd: false,
         },
@@ -640,22 +634,28 @@ mod tests {
         assert!(matches!(
             checks[0].action,
             LiveCheckAction::CargoIgnoredTest {
-                provider_required: false,
+                provider_support: LiveProviderSupport::None,
                 ..
             }
         ));
     }
 
     #[test]
-    fn psychevo_live_checks_enable_the_private_product_surface() {
+    fn psychevo_live_checks_use_the_public_framework_surface() {
         for id in ["runtime-provider-read", "runtime-model-fetch"] {
-            let command = command_for_plan(check_by_id(id).expect("runtime live check"));
+            let check = check_by_id(id).expect("runtime live check");
+            let command = command_for_plan(check);
             assert!(
-                command
-                    .windows(2)
-                    .any(|args| args == ["--features", "product"]),
-                "{id} plan must compile its private integration-test surface: {command:?}"
+                !command.iter().any(|argument| argument == "--features"),
+                "{id} must compile against the ordinary Framework surface: {command:?}"
             );
+            assert!(matches!(
+                check.action,
+                LiveCheckAction::CargoIgnoredTest {
+                    provider_support: LiveProviderSupport::Only(&["xiaomi-token-plan"]),
+                    ..
+                }
+            ));
         }
     }
 
@@ -685,6 +685,25 @@ mod tests {
     }
 
     #[test]
+    fn registry_does_not_execute_one_playwright_test_under_multiple_check_ids() {
+        let mut registered = BTreeSet::new();
+        for check in LIVE_CHECKS {
+            let pair = match check.action {
+                LiveCheckAction::Playwright { spec, grep, .. }
+                | LiveCheckAction::DeterministicPlaywright { spec, grep } => (spec, grep),
+                _ => continue,
+            };
+            assert!(
+                registered.insert(pair),
+                "live check '{}' repeats Playwright test {} / {}",
+                check.id,
+                pair.0,
+                pair.1
+            );
+        }
+    }
+
+    #[test]
     fn acp_suite_includes_psychevo_and_opencode_checks() {
         let checks = select_checks(&LiveSelection {
             checks: Vec::new(),
@@ -696,9 +715,8 @@ mod tests {
         let ids = checks.iter().map(|check| check.id).collect::<BTreeSet<_>>();
         for expected in [
             "pevo-acp-server-live",
-            "opencode-acp-gui-live",
+            "opencode-acp-gui-lifecycle-live",
             "opencode-acp-delegate-live",
-            "opencode-acp-session-lifecycle-live",
             "codex-acp-session-lifecycle-live",
             "agent-acp-session-lifecycle",
         ] {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["ffmpeg", "opencode", "sqlite3"],
+  "workspaces": {
+    "apps/desktop": {
+      "ignoreDependencies": [
+        "@excalidraw/excalidraw",
+        "@file-viewer/renderer-image",
+        "@file-viewer/renderer-ofd",
+        "@file-viewer/renderer-pdf",
+        "@file-viewer/renderer-presentation",
+        "@file-viewer/renderer-spreadsheet",
+        "@file-viewer/renderer-word",
+        "@wdio/local-runner",
+        "@wdio/tauri-service"
+      ]
+    }
+  }
+}

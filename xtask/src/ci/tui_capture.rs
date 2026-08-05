@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 use super::process::{
-    LoggedChild, ProcessOutcome, command_exists, run_logged_process, write_log_line,
+    LoggedChild, ProcessOutcome, command_exists, run_logged_process_with_timeout, write_log_line,
     write_mirrored_line,
 };
 
@@ -36,8 +36,8 @@ const TUI_CAPTURE_SCREENSHOTS: &[&str] = &[
     "22-agent-background-handoff.png",
     "10-agent-tool-running.png",
     "11-agent-session-running.png",
-    "12-agent-parent-completed.png",
     "12-agents-running.png",
+    "12-agent-parent-completed.png",
     "13-agents-available.png",
     "14-agent-actions.png",
     "15-agent-run-prompt.png",
@@ -45,6 +45,10 @@ const TUI_CAPTURE_SCREENSHOTS: &[&str] = &[
 
 const TUI_CAPTURE_DEPS: &[&str] = &["vhs", "ttyd", "ffmpeg", "python3", "git"];
 const TUI_CAPTURE_DEPS_INSTALL_HINT: &str = "cargo xtask doctor deps check --only vhs";
+const TUI_BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const TUI_INIT_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+const TUI_VHS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const TUI_FIXTURE_COMMAND_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 pub(crate) fn run_tui_vhs_demo(
     root: &Path,
@@ -73,18 +77,10 @@ pub(crate) fn run_tui_vhs_demo(
     ensure_dir(&fixture_home)?;
 
     let out_dir = tui_capture_artifact_dir(artifact_root);
-    if out_dir.exists() {
-        fs::remove_dir_all(&out_dir)
-            .with_context(|| format!("remove stale TUI artifact dir {}", out_dir.display()))?;
-    }
     fs::create_dir_all(&out_dir)
         .with_context(|| format!("create TUI artifact dir {}", out_dir.display()))?;
 
     let workdir_path = artifact_root.join("visual").join("tui-work-cwd");
-    if workdir_path.exists() {
-        fs::remove_dir_all(&workdir_path)
-            .with_context(|| format!("remove stale TUI workdir {}", workdir_path.display()))?;
-    }
     fs::create_dir_all(&workdir_path)
         .with_context(|| format!("create TUI workdir {}", workdir_path.display()))?;
     let _workdir = TempWorkDir::new(workdir_path.clone());
@@ -102,7 +98,12 @@ pub(crate) fn run_tui_vhs_demo(
             .args(["build", "-p", "psychevo-cli", "--quiet"])
             .current_dir(root)
             .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-        let outcome = run_logged_process("build psychevo-cli", &mut cargo, Arc::clone(&log))?;
+        let outcome = run_logged_process_with_timeout(
+            "build psychevo-cli",
+            &mut cargo,
+            Arc::clone(&log),
+            TUI_BUILD_TIMEOUT,
+        )?;
         mirrored_diagnostics += outcome.mirrored_diagnostics;
         had_suppressed_output |= outcome.had_suppressed_output;
         if !outcome.passed {
@@ -157,7 +158,12 @@ pub(crate) fn run_tui_vhs_demo(
         .current_dir(root)
         .env("PSYCHEVO_HOME", &home)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-    let outcome = run_logged_process("pevo init for TUI capture", &mut init, Arc::clone(&log))?;
+    let outcome = run_logged_process_with_timeout(
+        "pevo init for TUI capture",
+        &mut init,
+        Arc::clone(&log),
+        TUI_INIT_TIMEOUT,
+    )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
     had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
@@ -210,7 +216,12 @@ pub(crate) fn run_tui_vhs_demo(
         .current_dir(&out_dir)
         .env("PATH", path_with_capture_prefixes(root, &pevo_bin)?)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-    let outcome = run_logged_process("vhs TUI capture", &mut vhs, Arc::clone(&log))?;
+    let outcome = run_logged_process_with_timeout(
+        "vhs TUI capture",
+        &mut vhs,
+        Arc::clone(&log),
+        TUI_VHS_TIMEOUT,
+    )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
     had_suppressed_output |= outcome.had_suppressed_output;
     let mock_stats = mock_provider.stop()?;
@@ -263,10 +274,11 @@ fn prepare_fixture_workdir(
         .args(["init", "-b", "main"])
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-    let outcome = run_logged_process(
+    let outcome = run_logged_process_with_timeout(
         "prepare TUI fixture: git init",
         &mut git_init,
         Arc::clone(log),
+        TUI_FIXTURE_COMMAND_TIMEOUT,
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
     had_suppressed_output |= outcome.had_suppressed_output;
@@ -292,10 +304,11 @@ fn prepare_fixture_workdir(
         .args(["add", "inline-diff-fixture.txt"])
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-    let outcome = run_logged_process(
+    let outcome = run_logged_process_with_timeout(
         "prepare TUI fixture: git add",
         &mut git_add,
         Arc::clone(log),
+        TUI_FIXTURE_COMMAND_TIMEOUT,
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
     had_suppressed_output |= outcome.had_suppressed_output;
@@ -317,10 +330,11 @@ fn prepare_fixture_workdir(
         .args(["commit", "-m", "add inline diff fixture"])
         .current_dir(root)
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
-    let outcome = run_logged_process(
+    let outcome = run_logged_process_with_timeout(
         "prepare TUI fixture: git commit",
         &mut commit,
         Arc::clone(log),
+        TUI_FIXTURE_COMMAND_TIMEOUT,
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
     had_suppressed_output |= outcome.had_suppressed_output;
@@ -346,14 +360,6 @@ fn prepare_permission_approval_fixture(
     workdir_path: &Path,
 ) -> Result<String> {
     let external_dir = artifact_root.join("visual").join("tui-permission-external");
-    if external_dir.exists() {
-        fs::remove_dir_all(&external_dir).with_context(|| {
-            format!(
-                "remove stale TUI permission fixture dir {}",
-                external_dir.display()
-            )
-        })?;
-    }
     fs::create_dir_all(&external_dir)
         .with_context(|| format!("create {}", external_dir.display()))?;
 
@@ -688,6 +694,24 @@ mod tests {
             screenshot_names_in_tape_template(template),
             TUI_CAPTURE_SCREENSHOTS
         );
+    }
+
+    #[test]
+    fn running_agent_capture_precedes_completion_and_empty_state() {
+        let template = include_str!("../../fixtures/tui-capture/pevo-tui-demo.tape.tpl");
+        let running = template
+            .find("Screenshot \"12-agents-running.png\"")
+            .expect("running screenshot");
+        let completed = template
+            .find("Wait+Screen /Translation complete/")
+            .expect("parent completion");
+        let empty = template
+            .find("Wait+Screen /No running subagents/")
+            .expect("empty running tab");
+
+        assert!(running < completed);
+        assert!(completed < empty);
+        assert!(template[..running].contains("Wait+Screen /translate_to_chinese/"));
     }
 
     #[test]

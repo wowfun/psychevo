@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
@@ -17,11 +18,12 @@ use crate::ci::process::{
     write_mirrored_line,
 };
 use crate::ci::retention::warn_if_ci_retention_cleanup_fails;
+use crate::desktop_wdio::{DesktopWdioOptions, DesktopWdioTimeouts, run_desktop_wdio};
 use crate::host_command;
 
 use self::registry::{
     DEFAULT_SUITE, LIVE_CHECKS, LIVE_SUITES, LiveCheck, LiveCheckAction, LiveProvider,
-    LiveSelection, command_for_plan, resolve_providers, select_checks,
+    LiveProviderSupport, LiveSelection, command_for_plan, resolve_providers, select_checks,
 };
 pub(crate) use environment::LiveEnvMode;
 use environment::{
@@ -91,7 +93,7 @@ struct LiveRunOutput {
     checks: Vec<CheckRunOutput>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 struct ProviderOutput {
     id: &'static str,
     model: &'static str,
@@ -112,17 +114,25 @@ struct CheckOutput {
 
 #[derive(Debug, Serialize)]
 struct CheckPlanOutput {
-    id: &'static str,
+    id: String,
+    check_id: &'static str,
     description: &'static str,
     suites: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<ProviderOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_reason: Option<String>,
     command: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 struct CheckRunOutput {
-    id: &'static str,
+    id: String,
+    check_id: &'static str,
     description: &'static str,
     status: LiveStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<ProviderOutput>,
     artifact_path: String,
     log_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,6 +159,44 @@ struct CheckResult {
     detail: Option<String>,
     environment: Option<LiveEnvironmentPathsOutput>,
     had_suppressed_output: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PlannedLiveCheck {
+    check: &'static LiveCheck,
+    provider: Option<LiveProvider>,
+}
+
+impl PlannedLiveCheck {
+    fn id(self) -> String {
+        self.provider.map_or_else(
+            || self.check.id.to_string(),
+            |provider| format!("{}@{}", self.check.id, provider.id),
+        )
+    }
+
+    fn artifact_path(self, artifact_root: &Path) -> PathBuf {
+        let root = artifact_root.join("live").join(self.check.id);
+        self.provider
+            .map_or(root.clone(), |provider| root.join(provider.id))
+    }
+
+    fn provider_output(self) -> Option<ProviderOutput> {
+        self.provider.map(provider_output)
+    }
+
+    fn unsupported_reason(self) -> Option<String> {
+        let provider = self.provider?;
+        match provider_support(self.check) {
+            LiveProviderSupport::Only(allowed) if !allowed.contains(&provider.id) => Some(format!(
+                "check '{}' supports provider(s) [{}], not '{}'",
+                self.check.id,
+                allowed.join(", "),
+                provider.id
+            )),
+            _ => None,
+        }
+    }
 }
 
 impl CheckResult {
@@ -248,7 +296,10 @@ pub(crate) fn run_ci_single_provider_live(
 ) -> Result<ProcessOutcome> {
     let providers = vec![registry::XIAOMI_TOKEN_PLAN];
     let check = registry::check_by_id("provider-smoke").context("provider-smoke check")?;
-    let check_dir = artifact_root.join("live").join(check.id);
+    let check_dir = artifact_root
+        .join("live")
+        .join(check.id)
+        .join(providers[0].id);
     fs::create_dir_all(check_dir.join("logs"))
         .with_context(|| format!("create {}", check_dir.display()))?;
     let result = run_check(
@@ -328,6 +379,7 @@ fn plan_output(
 ) -> Result<LivePlanOutput> {
     let checks = select_checks(selection)?;
     let providers = providers_for_checks(&checks, &selection.providers)?;
+    let checks = planned_checks(&checks, &providers);
     Ok(LivePlanOutput {
         default_suite: DEFAULT_SUITE,
         environment: LiveEnvironmentPlanOutput { mode: env_mode },
@@ -336,10 +388,13 @@ fn plan_output(
         checks: checks
             .into_iter()
             .map(|check| CheckPlanOutput {
-                id: check.id,
-                description: check.description,
-                suites: check.suites.to_vec(),
-                command: command_for_plan(check),
+                id: check.id(),
+                check_id: check.check.id,
+                description: check.check.description,
+                suites: check.check.suites.to_vec(),
+                provider: check.provider_output(),
+                skip_reason: check.unsupported_reason(),
+                command: command_for_plan(check.check),
             })
             .collect(),
     })
@@ -365,41 +420,37 @@ fn execute_live(
 
     let checks = select_checks(selection)?;
     let providers = providers_for_checks(&checks, &selection.providers)?;
+    let checks = planned_checks(&checks, &providers);
     let mut outputs = Vec::new();
     for check in checks {
-        println!("live {} ...", check.id);
-        let check_dir = artifact_root.join("live").join(check.id);
+        let id = check.id();
+        println!("live {id} ...");
+        let check_dir = check.artifact_path(&artifact_root);
         let log_path = check_dir.join("logs").join("check.log");
         fs::create_dir_all(check_dir.join("logs"))
             .with_context(|| format!("create {}", check_dir.display()))?;
         let log = create_step_log(&log_path)?;
-        let result = run_check(
-            root,
-            &artifact_root,
-            &check_dir,
-            check,
-            &providers,
-            env_mode,
-            Arc::clone(&log),
-        )?;
-        let environment = result.environment.clone();
-        let output = CheckRunOutput {
-            id: check.id,
-            description: check.description,
-            status: result.status.clone(),
-            artifact_path: display_path(&check_dir),
-            log_path: display_path(&log_path),
-            home_path: environment.as_ref().map(|env| env.home_path.clone()),
-            config_path: environment.as_ref().map(|env| env.config_path.clone()),
-            db_path: environment.as_ref().map(|env| env.db_path.clone()),
-            detail: result.detail.clone(),
+        let result = if let Some(reason) = check.unsupported_reason() {
+            skipped_with_env(Arc::clone(&log), reason, None)?
+        } else {
+            let scoped_providers = check.provider.as_slice();
+            run_check(
+                root,
+                &artifact_root,
+                &check_dir,
+                check.check,
+                scoped_providers,
+                env_mode,
+                Arc::clone(&log),
+            )?
         };
+        let output = check_run_output(check, result, &check_dir, &log_path);
         fs::write(
             check_dir.join("result.json"),
             serde_json::to_vec_pretty(&output)?,
         )
         .with_context(|| format!("write {}", check_dir.join("result.json").display()))?;
-        println!("live {}: {:?}", check.id, output.status);
+        println!("live {}: {:?}", output.id, output.status);
         outputs.push(output);
     }
 
@@ -423,6 +474,28 @@ fn execute_live(
         warn_if_ci_retention_cleanup_fails(root, &artifact_root);
     }
     Ok(run)
+}
+
+fn check_run_output(
+    check: PlannedLiveCheck,
+    result: CheckResult,
+    check_dir: &Path,
+    log_path: &Path,
+) -> CheckRunOutput {
+    let environment = result.environment.as_ref();
+    CheckRunOutput {
+        id: check.id(),
+        check_id: check.check.id,
+        description: check.check.description,
+        status: result.status,
+        provider: check.provider_output(),
+        artifact_path: display_path(check_dir),
+        log_path: display_path(log_path),
+        home_path: environment.map(|env| env.home_path.clone()),
+        config_path: environment.map(|env| env.config_path.clone()),
+        db_path: environment.map(|env| env.db_path.clone()),
+        detail: result.detail,
+    }
 }
 
 fn resolve_live_artifact_root(
@@ -451,17 +524,50 @@ fn providers_for_checks(
     }
 }
 
-fn check_requires_provider(check: &LiveCheck) -> bool {
+fn planned_checks(
+    checks: &[&'static LiveCheck],
+    providers: &[LiveProvider],
+) -> Vec<PlannedLiveCheck> {
+    checks
+        .iter()
+        .flat_map(|check| match provider_support(check) {
+            LiveProviderSupport::None => vec![PlannedLiveCheck {
+                check,
+                provider: None,
+            }],
+            LiveProviderSupport::Any | LiveProviderSupport::Only(_) => providers
+                .iter()
+                .copied()
+                .map(|provider| PlannedLiveCheck {
+                    check,
+                    provider: Some(provider),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn provider_support(check: &LiveCheck) -> LiveProviderSupport {
     match check.action {
-        LiveCheckAction::DesktopNativeSmoke { provider_required } => provider_required,
+        LiveCheckAction::DesktopNativeSmoke { provider_required } => {
+            if provider_required {
+                LiveProviderSupport::Any
+            } else {
+                LiveProviderSupport::None
+            }
+        }
         LiveCheckAction::CargoIgnoredTest {
-            provider_required, ..
-        } => provider_required,
+            provider_support, ..
+        } => provider_support,
         LiveCheckAction::ProviderSmoke
         | LiveCheckAction::PevoDoctorLive
-        | LiveCheckAction::Playwright { .. } => true,
-        LiveCheckAction::DeterministicPlaywright { .. } => false,
+        | LiveCheckAction::Playwright { .. } => LiveProviderSupport::Any,
+        LiveCheckAction::DeterministicPlaywright { .. } => LiveProviderSupport::None,
     }
+}
+
+fn check_requires_provider(check: &LiveCheck) -> bool {
+    provider_support(check) != LiveProviderSupport::None
 }
 
 fn run_check(
@@ -695,7 +801,6 @@ fn run_desktop_native_smoke_check(
         provider = Some(selected_provider);
     }
     let environment = Some(live_env.to_output());
-    let live_environment = Some(live_env);
 
     let skip_reason = desktop_native_skip_reason();
     write_desktop_capability_snapshot(check_dir, provider_required, skip_reason.clone())?;
@@ -718,236 +823,36 @@ fn run_desktop_native_smoke_check(
     };
 
     let wdio_artifact_root = check_dir.join("wdio");
-    fs::create_dir_all(&wdio_artifact_root)
-        .with_context(|| format!("create {}", wdio_artifact_root.display()))?;
     let provider_token = provider.map(|_| desktop_provider_live_sentinel());
     let floating_text = desktop_floating_live_text(provider_token.as_deref());
-
-    let mut build = host_command::pnpm(["--filter", "@psychevo/desktop", "tauri:wdio-build"])?;
-    build.current_dir(root);
-    configure_desktop_wdio_command(
-        &mut build,
-        &wdio_artifact_root,
-        &floating_text,
-        live_environment.as_ref(),
-        provider,
-        Some(pevo_bin.as_path()),
-        provider_token.as_deref(),
-    );
-    let outcome = run_logged_process("desktop native WDIO build", &mut build, Arc::clone(&log))?;
-    if !outcome.passed {
-        return Ok(check_result_from_outcome(
-            outcome,
-            "Desktop native WDIO build failed",
-            environment,
-        )?
-        .include_suppressed_output(had_suppressed_output));
-    }
-    had_suppressed_output |= outcome.had_suppressed_output;
-
-    let mut wdio = host_command::pnpm(["--filter", "@psychevo/desktop", "wdio"])?;
-    wdio.current_dir(root);
-    configure_desktop_wdio_command(
-        &mut wdio,
-        &wdio_artifact_root,
-        &floating_text,
-        live_environment.as_ref(),
-        provider,
-        Some(pevo_bin.as_path()),
-        provider_token.as_deref(),
-    );
-    let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, Arc::clone(&log))?;
-    let outcome_had_suppressed_output = outcome.had_suppressed_output;
-    let cleanup_outcome = stop_desktop_live_gateway(
+    let options = DesktopWdioOptions {
         root,
-        &pevo_bin,
-        live_environment
-            .as_ref()
-            .expect("Desktop live environment is always configured"),
-        Arc::clone(&log),
-    )?;
-    had_suppressed_output |= cleanup_outcome.had_suppressed_output;
-    if !cleanup_outcome.passed {
-        let detail = if outcome.passed {
-            "Desktop native WDIO Gateway cleanup failed"
-        } else {
-            "Desktop native WDIO smoke and Gateway cleanup failed"
-        };
-        return Ok(failed_result(log, detail.to_string(), environment)?
-            .include_suppressed_output(had_suppressed_output || outcome_had_suppressed_output));
-    }
-    if outcome.passed
-        && let Err(error) = validate_desktop_startup_artifacts(&wdio_artifact_root)
-    {
-        return Ok(failed_result(
-            log,
-            format!("Desktop native startup evidence is invalid: {error:#}"),
-            environment,
-        )?
-        .include_suppressed_output(had_suppressed_output || outcome_had_suppressed_output));
+        artifact_root: &wdio_artifact_root,
+        pevo_bin: &pevo_bin,
+        floating_text: &floating_text,
+        provider_token: provider_token.as_deref(),
+        timeouts: DesktopWdioTimeouts {
+            build: Duration::from_secs(45 * 60),
+            smoke: Duration::from_secs(15 * 60),
+            cleanup: Duration::from_secs(2 * 60),
+        },
+    };
+    let run = run_desktop_wdio(&options, Arc::clone(&log), |command| {
+        live_env.apply_to_command(command, provider);
+    })?;
+    had_suppressed_output |= run.outcome.had_suppressed_output;
+    if let Some(detail) = run.failure_detail {
+        return Ok(failed_result(log, detail, environment)?
+            .include_suppressed_output(had_suppressed_output));
     }
     Ok(
-        check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)?
+        check_result_from_outcome(run.outcome, "Desktop native WDIO smoke failed", environment)?
             .include_suppressed_output(had_suppressed_output),
     )
 }
 
 fn desktop_live_environment_mode(_requested: LiveEnvMode) -> LiveEnvMode {
     LiveEnvMode::Isolated
-}
-
-fn stop_desktop_live_gateway(
-    root: &Path,
-    pevo_bin: &Path,
-    live_env: &LiveEnvironment,
-    log: Arc<Mutex<fs::File>>,
-) -> Result<ProcessOutcome> {
-    let mut command = ProcessCommand::new(pevo_bin);
-    configure_desktop_gateway_stop_command(&mut command, root, live_env);
-    run_logged_process("desktop native managed Gateway cleanup", &mut command, log)
-}
-
-fn configure_desktop_gateway_stop_command(
-    command: &mut ProcessCommand,
-    root: &Path,
-    live_env: &LiveEnvironment,
-) {
-    command.args(["gateway", "stop"]).current_dir(root);
-    live_env.apply_to_command(command, None);
-}
-
-fn validate_desktop_startup_artifacts(wdio_artifact_root: &Path) -> Result<()> {
-    const REQUIRED_CHECKPOINTS: &[&str] = &[
-        "process_start",
-        "window_ready",
-        "managed_gateway_ready",
-        "bridge_connected",
-        "gui_ready",
-        "draft_context_ready",
-    ];
-    const SCREENSHOT_CHECKPOINTS: &[&str] = &["gui_ready", "draft_context_ready"];
-
-    let manifest_path = wdio_artifact_root.join("desktop-startup-journey.json");
-    let manifest: serde_json::Value = serde_json::from_slice(
-        &fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
-    )
-    .with_context(|| format!("parse {}", manifest_path.display()))?;
-    if manifest
-        .get("schemaVersion")
-        .and_then(serde_json::Value::as_u64)
-        != Some(1)
-    {
-        bail!(
-            "{} has an unsupported schemaVersion",
-            manifest_path.display()
-        );
-    }
-    if manifest
-        .pointer("/run/outcome")
-        .and_then(serde_json::Value::as_str)
-        != Some("passed")
-    {
-        bail!("{} does not describe a passed run", manifest_path.display());
-    }
-    let checkpoints = manifest
-        .get("checkpoints")
-        .and_then(serde_json::Value::as_array)
-        .with_context(|| format!("{} is missing checkpoints", manifest_path.display()))?;
-    for id in REQUIRED_CHECKPOINTS {
-        let matching = checkpoints
-            .iter()
-            .filter(|checkpoint| {
-                checkpoint.get("id").and_then(serde_json::Value::as_str) == Some(id)
-            })
-            .collect::<Vec<_>>();
-        if matching.len() != 1 {
-            bail!(
-                "{} contains {} '{}' checkpoints; expected exactly one",
-                manifest_path.display(),
-                matching.len(),
-                id
-            );
-        }
-        let checkpoint = matching[0];
-        if checkpoint.get("status").and_then(serde_json::Value::as_str) != Some("complete") {
-            bail!(
-                "{} checkpoint '{}' is incomplete",
-                manifest_path.display(),
-                id
-            );
-        }
-        if SCREENSHOT_CHECKPOINTS.contains(id) {
-            let screenshot_path = checkpoint
-                .pointer("/screenshot/path")
-                .and_then(serde_json::Value::as_str)
-                .with_context(|| {
-                    format!(
-                        "{} checkpoint '{}' has no screenshot path",
-                        manifest_path.display(),
-                        id
-                    )
-                })?;
-            let relative = Path::new(screenshot_path);
-            if relative.is_absolute()
-                || relative.components().any(|component| {
-                    matches!(
-                        component,
-                        std::path::Component::ParentDir
-                            | std::path::Component::RootDir
-                            | std::path::Component::Prefix(_)
-                    )
-                })
-            {
-                bail!(
-                    "{} checkpoint '{}' has an unsafe screenshot path",
-                    manifest_path.display(),
-                    id
-                );
-            }
-            let screenshot = wdio_artifact_root.join(relative);
-            if !screenshot.is_file() {
-                bail!(
-                    "{} checkpoint '{}' screenshot is missing: {}",
-                    manifest_path.display(),
-                    id,
-                    screenshot.display()
-                );
-            }
-        }
-    }
-    let rust_trace = wdio_artifact_root.join("desktop-startup-rust.jsonl");
-    if !rust_trace.is_file() {
-        bail!(
-            "Desktop Rust startup trace is missing: {}",
-            rust_trace.display()
-        );
-    }
-    Ok(())
-}
-
-fn configure_desktop_wdio_command(
-    command: &mut ProcessCommand,
-    wdio_artifact_root: &Path,
-    floating_text: &str,
-    live_env: Option<&LiveEnvironment>,
-    provider: Option<LiveProvider>,
-    pevo_bin: Option<&Path>,
-    provider_token: Option<&str>,
-) {
-    if let Some(live_env) = live_env {
-        live_env.apply_to_command(command, provider);
-    }
-    if let Some(pevo_bin) = pevo_bin {
-        command.env("PSYCHEVO_PEVO_BIN", pevo_bin);
-    }
-    command
-        .env("PSYCHEVO_WDIO_ARTIFACT_ROOT", wdio_artifact_root)
-        .env("PSYCHEVO_FLOATING_TEXT", floating_text);
-    if let Some(token) = provider_token {
-        command
-            .env("PSYCHEVO_DESKTOP_PROVIDER_LIVE", "1")
-            .env("PSYCHEVO_FLOATING_PROVIDER_TOKEN", token);
-    }
 }
 
 fn desktop_provider_live_sentinel() -> String {
@@ -1071,7 +976,7 @@ fn run_pevo_doctor_live_check(
     command
         .args(["doctor", "--live", "--json"])
         .current_dir(root);
-    live_env.apply_to_command(&mut command, None);
+    live_env.apply_to_command(&mut command, providers.first().copied());
     let outcome = run_logged_process("pevo-doctor-live", &mut command, log)?;
     Ok(check_result_from_outcome(
         outcome,
@@ -1677,19 +1582,24 @@ fn observed_display_variables() -> Vec<String> {
 }
 
 fn provider_outputs(providers: &[LiveProvider]) -> Vec<ProviderOutput> {
-    providers
-        .iter()
-        .map(|provider| ProviderOutput {
-            id: provider.id,
-            model: provider.model,
-        })
-        .collect()
+    providers.iter().copied().map(provider_output).collect()
+}
+
+fn provider_output(provider: LiveProvider) -> ProviderOutput {
+    ProviderOutput {
+        id: provider.id,
+        model: provider.model,
+    }
 }
 
 fn print_plan(plan: &LivePlanOutput) {
     println!("live\tdefault-suite={}", plan.default_suite);
     for check in &plan.checks {
-        println!("  {}\t{}", check.id, check.command.join(" "));
+        if let Some(reason) = &check.skip_reason {
+            println!("  {}\tskip: {reason}", check.id);
+        } else {
+            println!("  {}\t{}", check.id, check.command.join(" "));
+        }
     }
 }
 
@@ -1718,7 +1628,7 @@ fn playwright_timeout_ms(check_id: &str) -> u64 {
         "web-skill-live" => 900_000,
         "opencode-acp-delegate-live" => 540_000,
         "web-subagent-live" => 420_000,
-        "web-automation-live" | "opencode-acp-gui-live" => 360_000,
+        "web-automation-live" | "opencode-acp-gui-lifecycle-live" => 360_000,
         _ => 240_000,
     }
 }
@@ -1761,7 +1671,12 @@ mod tests {
         )
         .expect("plan");
         assert_eq!(plan.checks.len(), 1);
-        assert_eq!(plan.checks[0].id, "provider-smoke");
+        assert_eq!(plan.checks[0].id, "provider-smoke@xiaomi-token-plan");
+        assert_eq!(plan.checks[0].check_id, "provider-smoke");
+        assert_eq!(
+            plan.checks[0].provider.map(|provider| provider.id),
+            Some("xiaomi-token-plan")
+        );
         assert_eq!(plan.providers[0].id, "xiaomi-token-plan");
         assert_eq!(plan.environment.mode, LiveEnvMode::Shared);
     }
@@ -1795,19 +1710,108 @@ mod tests {
             Some(Path::new("/tmp/artifacts")),
         )
         .expect("plan");
-        let ids = plan.checks.iter().map(|check| check.id).collect::<Vec<_>>();
+        let ids = plan
+            .checks
+            .iter()
+            .map(|check| check.id.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(
             ids,
             vec![
                 "web-composer-draft-open-first-send",
-                "web-composer-live",
-                "web-automation-live",
-                "web-subagent-live",
-                "web-skill-live"
+                "web-composer-live@deepseek",
+                "web-automation-live@deepseek",
+                "web-subagent-live@deepseek",
+                "web-skill-live@deepseek"
             ]
         );
         assert_eq!(plan.providers[0].id, "deepseek");
         assert_eq!(plan.artifact_root.as_deref(), Some("/tmp/artifacts"));
+    }
+
+    #[test]
+    fn multi_provider_plan_expands_checks_and_exposes_allowlisted_skips() {
+        let plan = plan_output(
+            &LiveSelection {
+                checks: vec![
+                    "runtime-provider-read".to_string(),
+                    "web-composer-live".to_string(),
+                ],
+                suites: Vec::new(),
+                all: false,
+                providers: vec!["xiaomi-token-plan".to_string(), "deepseek".to_string()],
+            },
+            LiveEnvMode::Isolated,
+            Some(Path::new("/tmp/live-evidence")),
+        )
+        .expect("multi-provider plan");
+
+        assert_eq!(
+            plan.checks
+                .iter()
+                .map(|check| check.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "runtime-provider-read@xiaomi-token-plan",
+                "runtime-provider-read@deepseek",
+                "web-composer-live@xiaomi-token-plan",
+                "web-composer-live@deepseek",
+            ]
+        );
+        assert!(plan.checks[0].skip_reason.is_none());
+        assert!(
+            plan.checks[1]
+                .skip_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("not 'deepseek'"))
+        );
+        assert!(
+            plan.checks[2..]
+                .iter()
+                .all(|check| check.skip_reason.is_none())
+        );
+        assert_eq!(
+            plan.checks
+                .iter()
+                .map(|check| check.provider.map(|provider| provider.id))
+                .collect::<Vec<_>>(),
+            vec![
+                Some("xiaomi-token-plan"),
+                Some("deepseek"),
+                Some("xiaomi-token-plan"),
+                Some("deepseek"),
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_scoped_result_names_provider_in_identity_and_artifact_path() {
+        let check = PlannedLiveCheck {
+            check: registry::check_by_id("web-composer-live").expect("live check"),
+            provider: Some(registry::DEEPSEEK),
+        };
+        let check_dir = check.artifact_path(Path::new("/tmp/live-evidence"));
+        let output = check_run_output(
+            check,
+            CheckResult {
+                status: LiveStatus::Passed,
+                detail: None,
+                environment: None,
+                had_suppressed_output: false,
+            },
+            &check_dir,
+            &check_dir.join("logs/check.log"),
+        );
+        let json = serde_json::to_value(output).expect("result JSON");
+
+        assert_eq!(json["id"], "web-composer-live@deepseek");
+        assert_eq!(json["check_id"], "web-composer-live");
+        assert_eq!(json["provider"]["id"], "deepseek");
+        assert!(
+            json["artifact_path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/live/web-composer-live/deepseek"))
+        );
     }
 
     #[test]
@@ -1935,7 +1939,7 @@ mod tests {
         let planned = plan
             .checks
             .iter()
-            .map(|check| (check.id, check.command.clone()))
+            .map(|check| (check.id.as_str(), check.command.clone()))
             .collect::<Vec<_>>();
         assert_eq!(
             planned,
@@ -1949,7 +1953,7 @@ mod tests {
                     ],
                 ),
                 (
-                    "desktop-floating-provider-live",
+                    "desktop-floating-provider-live@xiaomi-token-plan",
                     vec![
                         "xtask-internal".to_string(),
                         "desktop-native-smoke".to_string(),
@@ -2026,162 +2030,5 @@ mod tests {
             Some(registry::XIAOMI_TOKEN_PLAN.model)
         );
         let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn desktop_native_wdio_command_uses_live_environment_without_provider() {
-        let root = std::env::temp_dir().join(format!(
-            "psychevo-xtask-desktop-live-env-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let dev_home = root.join(".local").join(".psychevo-dev");
-        fs::create_dir_all(&dev_home).expect("dev home");
-        fs::write(dev_home.join("config.toml"), "").expect("config");
-        fs::write(dev_home.join(".env"), "DUMMY_ENV=1\n").expect("env");
-
-        let prerequisites = LivePrerequisites::load(&root).expect("prerequisites");
-        let check_dir = root.join("check");
-        let live_env = prerequisites
-            .resolve(LiveEnvMode::Shared, &check_dir)
-            .expect("live env");
-        let mut command = ProcessCommand::new("unused-test-command");
-        configure_desktop_wdio_command(
-            &mut command,
-            Path::new("/tmp/wdio-artifacts"),
-            "selected text",
-            Some(&live_env),
-            None,
-            Some(Path::new("/tmp/pevo")),
-            None,
-        );
-
-        assert_eq!(
-            command_env(&command, "PSYCHEVO_HOME").as_deref(),
-            Some(dev_home.to_string_lossy().as_ref())
-        );
-        assert_eq!(
-            command_env(&command, "PSYCHEVO_CONFIG").as_deref(),
-            Some(dev_home.join("config.toml").to_string_lossy().as_ref())
-        );
-        assert_eq!(
-            command_env(&command, "PSYCHEVO_DB").as_deref(),
-            Some(dev_home.join("state.db").to_string_lossy().as_ref())
-        );
-        assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
-        assert!(command_env(&command, "PSYCHEVO_INFERENCE_PROVIDER").is_none());
-        assert!(command_env(&command, "PSYCHEVO_DESKTOP_PROVIDER_LIVE").is_none());
-
-        fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[test]
-    fn desktop_gateway_cleanup_uses_check_local_environment() {
-        let root = std::env::temp_dir().join(format!(
-            "psychevo-xtask-desktop-cleanup-env-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let dev_home = root.join(".local").join(".psychevo-dev");
-        fs::create_dir_all(&dev_home).expect("dev home");
-        fs::write(dev_home.join("config.toml"), "").expect("config");
-        fs::write(dev_home.join(".env"), "DUMMY_ENV=1\n").expect("env");
-        let prerequisites = LivePrerequisites::load(&root).expect("prerequisites");
-        let check_dir = root.join("check");
-        let live_env = prerequisites
-            .resolve(LiveEnvMode::Isolated, &check_dir)
-            .expect("live env");
-        let mut command = ProcessCommand::new("/tmp/pevo");
-
-        configure_desktop_gateway_stop_command(&mut command, &root, &live_env);
-
-        assert_eq!(
-            command
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            ["gateway", "stop"]
-        );
-        assert_eq!(command.get_current_dir(), Some(root.as_path()));
-        assert_eq!(
-            command_env(&command, "PSYCHEVO_HOME").as_deref(),
-            Some(check_dir.join("home").to_string_lossy().as_ref())
-        );
-        assert_eq!(
-            command_env(&command, "PSYCHEVO_DB").as_deref(),
-            Some(check_dir.join("state.db").to_string_lossy().as_ref())
-        );
-        assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
-
-        fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    #[test]
-    fn desktop_startup_artifact_validation_requires_complete_screenshot_evidence() {
-        let root = std::env::temp_dir().join(format!(
-            "psychevo-xtask-desktop-startup-artifacts-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let screenshots = root.join("screenshots");
-        fs::create_dir_all(&screenshots).expect("screenshots");
-        for filename in ["gui-ready.png", "draft-ready.png"] {
-            fs::write(screenshots.join(filename), "proof").expect("screenshot");
-        }
-        fs::write(root.join("desktop-startup-rust.jsonl"), "{}\n").expect("rust trace");
-        let checkpoints = [
-            "process_start",
-            "window_ready",
-            "managed_gateway_ready",
-            "bridge_connected",
-            "gui_ready",
-            "draft_context_ready",
-        ]
-        .into_iter()
-        .map(|id| {
-            let screenshot = match id {
-                "gui_ready" => serde_json::json!({ "path": "screenshots/gui-ready.png" }),
-                "draft_context_ready" => {
-                    serde_json::json!({ "path": "screenshots/draft-ready.png" })
-                }
-                _ => serde_json::Value::Null,
-            };
-            serde_json::json!({ "id": id, "screenshot": screenshot, "status": "complete" })
-        })
-        .collect::<Vec<_>>();
-        fs::write(
-            root.join("desktop-startup-journey.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "schemaVersion": 1,
-                "run": { "outcome": "passed" },
-                "checkpoints": checkpoints,
-            }))
-            .expect("manifest json"),
-        )
-        .expect("manifest");
-
-        validate_desktop_startup_artifacts(&root).expect("valid startup evidence");
-        fs::remove_file(screenshots.join("draft-ready.png")).expect("remove screenshot");
-        let error = validate_desktop_startup_artifacts(&root)
-            .expect_err("missing screenshot must fail")
-            .to_string();
-        assert!(error.contains("draft_context_ready"));
-
-        fs::remove_dir_all(root).expect("cleanup");
-    }
-
-    fn command_env(command: &ProcessCommand, key: &str) -> Option<String> {
-        command.get_envs().find_map(|(env_key, value)| {
-            (env_key == key).then(|| value.map(|value| value.to_string_lossy().into_owned()))?
-        })
     }
 }
