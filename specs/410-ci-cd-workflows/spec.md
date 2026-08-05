@@ -371,6 +371,12 @@ Every third-party `uses:` reference in tracked workflows is pinned to exactly
 values and validates that invariant by value rather than maintaining an action
 name or workflow-line inventory; local `./` actions are exempt.
 
+Every hosted workflow that provisions Python uses the full-commit-pinned
+`actions/setup-python` v7 action, whose JavaScript action runtime is Node.js 24,
+while continuing to install Python 3.12 explicitly. The action implementation
+runtime is independent of both the provisioned Python version and the
+repository's separately provisioned Node.js toolchain.
+
 The canonical local functional regression remains four explicit commands:
 `cargo xtask ci run --profile rust-broad`, `cargo xtask ci run --profile
 sdk-contracts`, `cargo xtask ci run --profile desktop-rust`, and `cargo xtask

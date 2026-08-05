@@ -2,6 +2,9 @@
 
 ## 2026-08-06
 
+- Upgraded every hosted Python setup step to the immutable `setup-python` v7
+  action so its implementation runs on Node.js 24 instead of the retired
+  Node.js 20 runtime, without changing the provisioned Python 3.12 toolchain.
 - Made Linux native-keyring builds self-contained by statically building the
   DBus client dependency, so Rust and installed-artifact CI no longer require
   runner-specific DBus development packages.
