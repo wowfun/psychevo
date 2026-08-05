@@ -63,6 +63,10 @@ test instances must not share the bounded user-facing managed port range, so a
 stale server from an interrupted run cannot exhaust later test launches. The
 harness treats a nonzero `gateway stop` exit as a cleanup failure and retains
 that test root for diagnosis instead of silently deleting its ownership state.
+The deterministic Web gate builds the test `pevo` executable before entering
+the browser journey. Its bounded wait for the printed Gateway URL therefore
+measures process startup rather than an unbounded clean Rust compilation; CI
+must not weaken that startup boundary to absorb build time.
 
 Live model, live skill, GUI automation, and ACP peer validation are opt-in and
 selected through `cargo xtask live`. They may use the repo-local development

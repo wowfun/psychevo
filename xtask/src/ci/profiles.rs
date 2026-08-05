@@ -603,6 +603,20 @@ const WEB_STEPS: &[WorkflowStep] = &[
         live: false,
     },
     WorkflowStep {
+        id: "critical-browser-pevo-build",
+        description: "Build pevo before measuring the critical browser journey startup",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "build",
+            "--locked",
+            "-p",
+            "psychevo-cli",
+            "--bin",
+            "pevo",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
         id: "critical-browser-journey",
         description: "Run the deterministic critical first-Turn browser journey",
         action: WorkflowStepAction::WorkbenchCriticalJourney,
@@ -1700,7 +1714,7 @@ mod tests {
     }
 
     #[test]
-    fn web_plan_covers_all_workspace_tests_typechecks_and_builds() {
+    fn web_plan_prebuilds_pevo_before_the_bounded_critical_journey() {
         let plan = plan_profile("web", None).expect("web profile");
         let ids = plan.steps.iter().map(|step| step.id).collect::<Vec<_>>();
         assert_eq!(
@@ -1709,6 +1723,7 @@ mod tests {
                 "workspace-tests",
                 "workspace-typecheck",
                 "workspace-builds",
+                "critical-browser-pevo-build",
                 "critical-browser-journey",
             ]
         );
@@ -1718,6 +1733,18 @@ mod tests {
         );
         assert_eq!(
             plan.steps[3].command,
+            vec![
+                "cargo",
+                "build",
+                "--locked",
+                "-p",
+                "psychevo-cli",
+                "--bin",
+                "pevo",
+            ]
+        );
+        assert_eq!(
+            plan.steps[4].command,
             vec!["xtask-internal", "critical-browser-journey"]
         );
     }

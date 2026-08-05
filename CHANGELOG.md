@@ -5,6 +5,8 @@
 - Made Linux native-keyring builds self-contained by statically building the
   DBus client dependency, so Rust and installed-artifact CI no longer require
   runner-specific DBus development packages.
+- Separated the Web gate's clean CLI compilation from its bounded Gateway
+  startup measurement, retaining the strict browser-journey startup timeout.
 
 ## 2026-08-05
 
