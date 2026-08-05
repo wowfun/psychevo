@@ -32,6 +32,10 @@ import {
   type ThreadTurnPreparation,
   type ThreadTurnStartInput
 } from "./thread-controller";
+import {
+  notifyObservers,
+  type ObserverDiagnosticHandler
+} from "./observer";
 
 export interface ThreadSessionClient {
   connectionSnapshot(): GatewayConnectionSnapshot;
@@ -48,6 +52,7 @@ export interface ThreadSessionClient {
 export interface ThreadSessionOptions {
   client?: ThreadSessionClient | null;
   context?: ThreadContextReadResult | null;
+  reportDiagnostic?: ObserverDiagnosticHandler;
   snapshot?: ThreadSnapshot | null;
 }
 
@@ -116,6 +121,7 @@ export class ThreadSession {
   private client: ThreadSessionClient | null = null;
   private readonly controller: ThreadController;
   private readonly listeners = new Set<() => void>();
+  private readonly reportDiagnostic: ObserverDiagnosticHandler | undefined;
   private view: ThreadSessionView;
   private publishDepth = 0;
   private unsubscribeClient: (() => void) | null = null;
@@ -131,6 +137,7 @@ export class ThreadSession {
   private historyMutationSequence = 0;
 
   constructor(options: ThreadSessionOptions = {}) {
+    this.reportDiagnostic = options.reportDiagnostic;
     this.controller = new ThreadController(options.snapshot ?? null);
     this.controller.setContext(options.context ?? null);
     this.view = {
@@ -443,7 +450,12 @@ export class ThreadSession {
       return;
     }
     this.view = { context, liveEntries, threadSnapshot };
-    for (const listener of this.listeners) listener();
+    notifyObservers(
+      this.listeners,
+      (listener) => listener(),
+      "thread_session_listener",
+      this.reportDiagnostic
+    );
   }
 
   private batchViewUpdate(update: () => void): void {
@@ -546,7 +558,19 @@ export class ThreadSession {
       this.controller.applyGatewayEvents([...sameTurn, event]);
       return;
     }
-    if (!pacedGatewayEvent(event) || this.isFirstAssistantText(event)) {
+    if (!pacedGatewayEvent(event)) {
+      if (this.eventQueue.length > 0) {
+        this.cancelFrame();
+        this.flushEventQueue();
+      }
+      this.controller.applyGatewayEvent(event);
+      return;
+    }
+    if (this.isFirstAssistantText(event)) {
+      if (this.eventQueue.length > 0) {
+        this.cancelFrame();
+        this.flushEventQueue();
+      }
       this.controller.applyGatewayEvent(event);
       return;
     }

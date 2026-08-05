@@ -15,9 +15,17 @@ The Rust SDK consists of three crates:
 - `psychevo` owns the high-level `Application`, `Client`, `Thread`, and
   `TurnHandle` API.
 
-The default `psychevo` feature set exposes the Framework API. Psychevo's private
-Gateway, ACP, and CLI crates opt into an `internal` feature for product
-assembly. That feature is not part of the supported SDK interface.
+The default `psychevo` build exposes the complete Framework API; private
+Gateway, ACP, and CLI crates consume the same named interfaces and have no
+privileged compatibility feature or hidden SDK surface.
+
+The Framework's default feature set is empty. Enable `native-keyring` only
+when an embedded host wants `SystemMcpOAuthCredentialStore` to use the host
+credential backend; otherwise pass an `McpOAuthCredentialStore` to
+`Application::builder().mcp_oauth_credential_store(...)`. The instance-owned
+store is used consistently by MCP views, diagnostics, Agent handoffs, and
+runtime launches. Psychevo's
+Gateway, ACP, and CLI enable this cost-bearing platform capability explicitly.
 
 Python uses three distributions with the same version:
 
@@ -77,7 +85,8 @@ async fn main() -> psychevo::Result<()> {
     assert_eq!(snapshot.id, thread.id());
     let _summaries = client.list_threads(ThreadListQuery::default()).await?;
 
-    application.shutdown().await
+    application.shutdown().await?.require_clean()?;
+    Ok(())
 }
 ```
 

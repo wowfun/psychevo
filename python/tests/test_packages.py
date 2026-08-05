@@ -112,6 +112,9 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(any(name.endswith("/licenses/LICENSE") for name in sdk_names))
 
         with zipfile.ZipFile(app) as archive:
+            self.assertFalse(
+                any("build_backend" in name for name in archive.namelist())
+            )
             self.assertTrue(
                 any(name.endswith("/licenses/LICENSE") for name in archive.namelist())
             )
@@ -122,6 +125,9 @@ class PackageTests(unittest.TestCase):
             )
             self.assertEqual((binary.external_attr >> 16) & 0o111, 0o111)
         with zipfile.ZipFile(cli) as archive:
+            self.assertFalse(
+                any("build_backend" in name for name in archive.namelist())
+            )
             self.assertTrue(
                 any(name.endswith("/licenses/LICENSE") for name in archive.namelist())
             )

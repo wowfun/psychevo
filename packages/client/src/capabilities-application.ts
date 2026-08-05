@@ -9,6 +9,10 @@ import type {
   GatewayRequestInit,
   GatewayRequestOptions
 } from "./index";
+import {
+  notifyObservers,
+  type ObserverDiagnosticHandler
+} from "./observer";
 
 export type CapabilityDomain = "agents" | "skills" | "plugins" | "mcp" | "tools";
 
@@ -113,7 +117,10 @@ export class CapabilitiesApplication implements CapabilitiesClient {
   private disposed = false;
   private lifecycleEpoch = 0;
 
-  constructor(client: CapabilitiesClient | null = null) {
+  constructor(
+    client: CapabilitiesClient | null = null,
+    private readonly reportDiagnostic?: ObserverDiagnosticHandler
+  ) {
     this.client = client;
   }
 
@@ -412,7 +419,12 @@ export class CapabilitiesApplication implements CapabilitiesClient {
   }
 
   private emit(): void {
-    for (const listener of this.listeners) listener();
+    notifyObservers(
+      this.listeners,
+      (listener) => listener(),
+      "capabilities_listener",
+      this.reportDiagnostic
+    );
   }
 
   private requireClient(): CapabilitiesClient {

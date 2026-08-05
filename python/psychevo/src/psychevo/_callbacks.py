@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ._wire import wire_list, wire_object, wire_string, wire_string_tuple
+
 JsonValue = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 )
@@ -64,13 +66,15 @@ class FilesystemApprovalTarget:
 
     @classmethod
     def from_wire(cls, value: object) -> "FilesystemApprovalTarget":
-        if not isinstance(value, dict):
-            raise TypeError("filesystem approval target must be an object")
-        requested_path = value.get("requestedPath")
-        resolved_path = value.get("resolvedPath")
-        if not isinstance(requested_path, str) or not isinstance(resolved_path, str):
-            raise TypeError("filesystem approval target paths must be strings")
-        return cls(requested_path=requested_path, resolved_path=resolved_path)
+        value = wire_object(value, "filesystem approval target")
+        return cls(
+            requested_path=wire_string(
+                value, "requestedPath", "filesystem approval target"
+            ),
+            resolved_path=wire_string(
+                value, "resolvedPath", "filesystem approval target"
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,17 +84,15 @@ class FilesystemApprovalRequest:
 
     @classmethod
     def from_wire(cls, value: object) -> "FilesystemApprovalRequest":
-        if not isinstance(value, dict):
-            raise TypeError("filesystem approval detail must be an object")
-        targets = value.get("targets")
-        scope_candidates = value.get("scopeCandidates")
-        if not isinstance(targets, list) or not isinstance(scope_candidates, list):
-            raise TypeError("filesystem approval detail has invalid lists")
-        if not all(isinstance(item, str) for item in scope_candidates):
-            raise TypeError("filesystem approval scope candidates must be strings")
+        value = wire_object(value, "filesystem approval detail")
+        targets = wire_list(value.get("targets"), "filesystem approval targets")
+        scope_candidates = wire_string_tuple(
+            value.get("scopeCandidates"),
+            "filesystem approval scopeCandidates",
+        )
         return cls(
             targets=tuple(FilesystemApprovalTarget.from_wire(item) for item in targets),
-            scope_candidates=tuple(scope_candidates),
+            scope_candidates=scope_candidates,
         )
 
 
@@ -113,47 +115,36 @@ McpStartupTarget = McpStdioStartupTarget | McpHttpStartupTarget
 
 
 def _mcp_startup_target_from_wire(value: object) -> McpStartupTarget:
-    if not isinstance(value, dict):
-        raise TypeError("MCP startup target must be an object")
+    value = wire_object(value, "MCP startup target")
     kind = value.get("kind")
     if kind == "stdio":
-        command = value.get("command")
-        args = value.get("args")
-        cwd = value.get("cwd")
-        env_names = value.get("envNames")
-        if (
-            not isinstance(command, str)
-            or not isinstance(cwd, str)
-            or not isinstance(args, list)
-            or not all(isinstance(item, str) for item in args)
-            or not isinstance(env_names, list)
-            or not all(isinstance(item, str) for item in env_names)
-        ):
-            raise TypeError("MCP stdio startup target is malformed")
+        command = wire_string(value, "command", "MCP stdio startup target")
+        args = wire_string_tuple(value.get("args"), "MCP stdio startup target args")
+        cwd = wire_string(value, "cwd", "MCP stdio startup target")
+        env_names = wire_string_tuple(
+            value.get("envNames"), "MCP stdio startup target envNames"
+        )
         return McpStdioStartupTarget(
             command=command,
-            args=tuple(args),
+            args=args,
             cwd=cwd,
-            env_names=tuple(env_names),
+            env_names=env_names,
         )
     if kind == "http":
-        url = value.get("url")
-        header_names = value.get("headerNames")
-        credential_names = value.get("credentialNames")
-        if (
-            not isinstance(url, str)
-            or not isinstance(header_names, list)
-            or not all(isinstance(item, str) for item in header_names)
-            or not isinstance(credential_names, list)
-            or not all(isinstance(item, str) for item in credential_names)
-        ):
-            raise TypeError("MCP HTTP startup target is malformed")
+        url = wire_string(value, "url", "MCP HTTP startup target")
+        header_names = wire_string_tuple(
+            value.get("headerNames"), "MCP HTTP startup target headerNames"
+        )
+        credential_names = wire_string_tuple(
+            value.get("credentialNames"),
+            "MCP HTTP startup target credentialNames",
+        )
         return McpHttpStartupTarget(
             url=url,
-            header_names=tuple(header_names),
-            credential_names=tuple(credential_names),
+            header_names=header_names,
+            credential_names=credential_names,
         )
-    raise TypeError("MCP startup target kind is invalid")
+    raise ValueError("MCP startup target kind is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,15 +155,10 @@ class McpStartupApprovalRequest:
 
     @classmethod
     def from_wire(cls, value: object) -> "McpStartupApprovalRequest":
-        if not isinstance(value, dict):
-            raise TypeError("MCP startup approval detail must be an object")
-        server = value.get("server")
-        source = value.get("source")
-        if not isinstance(server, str) or not isinstance(source, str):
-            raise TypeError("MCP startup approval detail fields must be strings")
+        value = wire_object(value, "MCP startup approval detail")
         return cls(
-            server=server,
-            source=source,
+            server=wire_string(value, "server", "MCP startup approval detail"),
+            source=wire_string(value, "source", "MCP startup approval detail"),
             target=_mcp_startup_target_from_wire(value.get("target")),
         )
 

@@ -318,6 +318,63 @@ describe("GatewayClient transport", () => {
     expect(states).toContain("connected:1");
   });
 
+  it("can connect again after close interrupts an in-flight connection", async () => {
+    const transport = new DeferredGatewayTransport();
+    const client = new GatewayClient(transport);
+
+    const first = client.connect();
+    const firstRejection = expect(first).rejects.toMatchObject({
+      code: "connect_failed",
+      delivery: "not_sent"
+    });
+    client.close();
+    await firstRejection;
+    expect(client.connectionSnapshot().state).toBe("closed");
+
+    const second = client.connect();
+    expect(transport.connectCalls).toBe(2);
+    transport.resolveLatestConnect();
+    await expect(second).resolves.toBeUndefined();
+    expect(client.connectionSnapshot()).toMatchObject({
+      state: "connected",
+      generation: 1
+    });
+  });
+
+  it("isolates an immediate connection subscriber failure", () => {
+    const client = new GatewayClient(new FakeGatewayTransport());
+    const diagnostics: Array<{ kind: string; message: string }> = [];
+    client.subscribeDiagnostics((diagnostic) => diagnostics.push(diagnostic));
+
+    expect(() => client.subscribeConnectionState(() => {
+      throw new Error(`immediate:${"x".repeat(1_100)}`);
+    })).not.toThrow();
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.kind).toBe("connection_handler");
+    expect(diagnostics[0]?.message.length).toBe(1_000);
+  });
+
+  it("continues connection state delivery when an update subscriber fails", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    const states: string[] = [];
+    const diagnostics: string[] = [];
+    client.subscribeDiagnostics((diagnostic) => diagnostics.push(diagnostic.kind));
+    client.subscribeConnectionState((snapshot) => {
+      if (snapshot.state !== "idle") {
+        throw new Error("broken connection observer");
+      }
+    });
+    client.subscribeConnectionState((snapshot) => states.push(snapshot.state));
+
+    await expect(client.connect()).resolves.toBeUndefined();
+
+    expect(client.connectionSnapshot().state).toBe("connected");
+    expect(states).toEqual(["idle", "connecting", "connected"]);
+    expect(diagnostics).toEqual(["connection_handler", "connection_handler"]);
+  });
+
   it("reconnects after a successful generation with capped-policy first delay", async () => {
     vi.useFakeTimers();
     const transport = new FakeGatewayTransport();
@@ -560,5 +617,34 @@ class FakeGatewayTransport implements GatewayTransport {
     for (const handler of this.disconnectHandlers) {
       handler(message);
     }
+  }
+}
+
+class DeferredGatewayTransport implements GatewayTransport {
+  connectCalls = 0;
+  private latestResolve: (() => void) | null = null;
+
+  connect(): Promise<void> {
+    this.connectCalls += 1;
+    return new Promise((resolve) => {
+      this.latestResolve = resolve;
+    });
+  }
+
+  close(): void {}
+
+  onDisconnect(_handler: (message: string) => void): () => void {
+    return () => undefined;
+  }
+
+  onMessage(_handler: GatewayRawMessageHandler): () => void {
+    return () => undefined;
+  }
+
+  send(_data: string): void {}
+
+  resolveLatestConnect(): void {
+    this.latestResolve?.();
+    this.latestResolve = null;
   }
 }

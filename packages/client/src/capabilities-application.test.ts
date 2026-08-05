@@ -14,6 +14,26 @@ afterEach(() => {
 });
 
 describe("CapabilitiesApplication", () => {
+  it("isolates state subscribers and reports a bounded diagnostic", () => {
+    const diagnostics: Array<{ source: string; message: string }> = [];
+    const application = new CapabilitiesApplication(
+      null,
+      (diagnostic) => diagnostics.push(diagnostic)
+    );
+    const later = vi.fn();
+    application.subscribe(() => {
+      throw new Error(`broken capability observer:${"x".repeat(1_100)}`);
+    });
+    application.subscribe(later);
+
+    expect(() => application.activate(scope("/repo"))).not.toThrow();
+
+    expect(later).toHaveBeenCalledOnce();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.source).toBe("capabilities_listener");
+    expect(diagnostics[0]?.message.length).toBe(1_000);
+  });
+
   it("deduplicates concurrent reads for one canonical scope", async () => {
     const pending = deferred<unknown>();
     const client = fakeClient((method) => (

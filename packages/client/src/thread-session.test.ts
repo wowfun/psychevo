@@ -21,6 +21,51 @@ import {
 import { emptyThreadSnapshot } from "./thread-controller";
 
 describe("ThreadSession", () => {
+  it("isolates view subscribers and reports a bounded diagnostic", () => {
+    const diagnostics: Array<{ source: string; message: string }> = [];
+    const session = new ThreadSession({
+      context: readyContext(),
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      snapshot: emptyThreadSnapshot(scope())
+    });
+    const later = vi.fn();
+    session.subscribe(() => {
+      throw new Error(`broken view observer:${"x".repeat(1_100)}`);
+    });
+    session.subscribe(later);
+
+    expect(() => session.setContext({
+      ...readyContext(),
+      contextRevision: "context-2"
+    })).not.toThrow();
+
+    expect(later).toHaveBeenCalledOnce();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.source).toBe("thread_session_listener");
+    expect(diagnostics[0]?.message.length).toBe(1_000);
+  });
+
+  it("contains a failing view-subscriber diagnostic callback", () => {
+    const session = new ThreadSession({
+      context: readyContext(),
+      reportDiagnostic: () => {
+        throw new Error("broken diagnostic sink");
+      },
+      snapshot: emptyThreadSnapshot(scope())
+    });
+    const later = vi.fn();
+    session.subscribe(() => {
+      throw new Error("broken view observer");
+    });
+    session.subscribe(later);
+
+    expect(() => session.setContext({
+      ...readyContext(),
+      contextRevision: "context-2"
+    })).not.toThrow();
+    expect(later).toHaveBeenCalledOnce();
+  });
+
   it("publishes one immutable composite view for a context-only update", () => {
     const session = new ThreadSession({
       context: readyContext(),
@@ -402,6 +447,86 @@ describe("ThreadSession", () => {
     vi.useRealTimers();
   });
 
+  it("does not let terminal activity state overtake already received paced transcript output", async () => {
+    vi.useFakeTimers();
+    const client = new FakeThreadSessionClient();
+    const session = readySession(client, runningSnapshot());
+
+    const priorUser = streamedEntryEvent("entryCompleted", "prompt", 0, "completed");
+    priorUser.entry = {
+      ...priorUser.entry,
+      id: "user-1",
+      role: "user",
+      blocks: priorUser.entry.blocks.map((block) => ({ ...block, id: "user-block-1" }))
+    };
+    client.notify(gatewayNotification(priorUser));
+    client.notify(gatewayNotification(streamedEntryEvent(
+      "entryStarted",
+      "Native determin",
+      1,
+      "running"
+    )));
+    expect(session.getSnapshot()?.entries.map((entry) => entry.role))
+      .toEqual(["user", "assistant"]);
+    client.notify(gatewayNotification({
+      type: "entryBlockTextDelta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      entryId: "entry-1",
+      blockId: "block-1",
+      text: "istic response",
+      updatedAtMs: 2
+    }));
+    client.notify(gatewayNotification(streamedEntryEvent(
+      "entryUpdated",
+      "Native deterministic response",
+      2,
+      "running"
+    )));
+    client.notify(gatewayNotification(streamedEntryEvent(
+      "entryCompleted",
+      "Native deterministic response",
+      3,
+      "completed"
+    )));
+    client.notify(gatewayNotification({
+      type: "activityChanged",
+      threadId: "thread-1",
+      activity: {
+        activeTurnId: null,
+        queuedTurns: 0,
+        running: false
+      }
+    }));
+    client.notify(gatewayNotification({
+      type: "turnCompleted",
+      committedEntries: [],
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: {
+        id: "turn-1",
+        threadId: "thread-1",
+        status: "completed",
+        outcome: "normal",
+        error: null,
+        startedAtMs: 1,
+        completedAtMs: 3
+      }
+    }));
+    await vi.runAllTimersAsync();
+
+    expect(session.getSnapshot()?.activity.running).toBe(false);
+    expect(session.getSnapshot()?.entries.map((entry) => ({
+      body: entry.blocks[0]?.body,
+      role: entry.role,
+      status: entry.status
+    }))).toEqual([
+      { body: "prompt", role: "user", status: "completed" },
+      { body: "Native deterministic response", role: "assistant", status: "completed" }
+    ]);
+    vi.useRealTimers();
+  });
+
   it("rejects unrelated Thread events before they enter the pacing queue", () => {
     vi.useFakeTimers();
     const client = new FakeThreadSessionClient();
@@ -641,6 +766,31 @@ function entryEvent(
       messageSeq: null
     }
   };
+}
+
+function streamedEntryEvent<T extends "entryStarted" | "entryUpdated" | "entryCompleted">(
+  type: T,
+  text: string,
+  streamSeq: number,
+  status: "running" | "completed"
+): Extract<GatewayEvent, { type: T }> {
+  const event = entryEvent("entryUpdated", text);
+  return {
+    ...event,
+    type,
+    entry: {
+      ...event.entry,
+      source: "runtime.stream",
+      status,
+      metadata: {
+        authoritativeBlocks: true,
+        liveOrder: 0,
+        projection: "assistant",
+        streamSeq
+      },
+      blocks: event.entry.blocks.map((block) => ({ ...block, status }))
+    }
+  } as Extract<GatewayEvent, { type: T }>;
 }
 
 function deferred<T>() {

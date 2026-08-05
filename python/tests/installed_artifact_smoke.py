@@ -12,12 +12,17 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 PYTHON_ROOT = ROOT / "python"
-VERSION = "0.1.0"
+VERSION = str(
+    tomllib.loads(
+        (PYTHON_ROOT / "psychevo" / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+)
 FINAL_ANSWER = "Installed artifact response"
 
 
@@ -135,7 +140,11 @@ async def smoke_installed_client(
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
-def build_and_smoke(artifact_root: Path) -> dict[str, object]:
+def build_and_smoke(
+    artifact_root: Path,
+    *,
+    app_server_only: bool = False,
+) -> dict[str, object]:
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is required for installed artifact validation")
@@ -184,7 +193,17 @@ def build_and_smoke(artifact_root: Path) -> dict[str, object]:
 
     started = time.monotonic()
     run([uv, "build", "--wheel", "--out-dir", str(wheels), str(PYTHON_ROOT / "psychevo")])
-    run([uv, "build", "--sdist", "--out-dir", str(sdists), str(PYTHON_ROOT / "psychevo")])
+    if not app_server_only:
+        run(
+            [
+                uv,
+                "build",
+                "--sdist",
+                "--out-dir",
+                str(sdists),
+                str(PYTHON_ROOT / "psychevo"),
+            ]
+        )
     run(
         [
             uv,
@@ -195,77 +214,97 @@ def build_and_smoke(artifact_root: Path) -> dict[str, object]:
             str(PYTHON_ROOT / "app-server-bin"),
         ]
     )
-    pevo = (
-        artifact_root.parent
-        / "cli-target"
-        / "release"
-        / ("pevo.exe" if os.name == "nt" else "pevo")
-    )
-    workbench = ROOT / "apps" / "workbench" / "dist"
-    run(
-        [
-            uv,
-            "build",
-            "--wheel",
-            "--out-dir",
-            str(wheels),
-            str(PYTHON_ROOT / "cli-bin"),
-        ],
-        env={
-            "PSYCHEVO_CLI_BINARY": str(pevo),
-            "PSYCHEVO_WORKBENCH_DIST": str(workbench),
-        },
-    )
+    if not app_server_only:
+        pevo = (
+            artifact_root.parent
+            / "cli-target"
+            / "release"
+            / ("pevo.exe" if os.name == "nt" else "pevo")
+        )
+        workbench = ROOT / "apps" / "workbench" / "dist"
+        run(
+            [
+                uv,
+                "build",
+                "--wheel",
+                "--out-dir",
+                str(wheels),
+                str(PYTHON_ROOT / "cli-bin"),
+            ],
+            env={
+                "PSYCHEVO_CLI_BINARY": str(pevo),
+                "PSYCHEVO_WORKBENCH_DIST": str(workbench),
+            },
+        )
     build_seconds = time.monotonic() - started
 
-    sdk_sdist = newest(sdists, f"psychevo-{VERSION}.tar.gz")
+    sdk_wheel = newest(wheels, f"psychevo-{VERSION}-*.whl")
+    sdk_sdist = (
+        None
+        if app_server_only
+        else newest(sdists, f"psychevo-{VERSION}.tar.gz")
+    )
     app_wheel = newest(wheels, f"psychevo_app_server_bin-{VERSION}-*.whl")
-    cli_wheel = newest(wheels, f"psychevo_cli_bin-{VERSION}-*.whl")
+    cli_wheel = (
+        None
+        if app_server_only
+        else newest(wheels, f"psychevo_cli_bin-{VERSION}-*.whl")
+    )
     with tempfile.TemporaryDirectory(prefix="psychevo-installed-artifact-") as temp_name:
         temp = Path(temp_name)
         environment = temp / "venv"
         run([uv, "venv", "--python", sys.executable, str(environment)])
         python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        installed_pevo = environment / (
-            "Scripts/pevo.exe" if os.name == "nt" else "bin/pevo"
-        )
-        run(
-            [
-                uv,
-                "pip",
-                "install",
-                "--python",
-                str(python),
-                "--find-links",
-                str(wheels),
-                str(sdk_sdist),
-                str(cli_wheel),
-            ]
-        )
+        install_command = [
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--find-links",
+            str(wheels),
+            str(sdk_wheel if sdk_sdist is None else sdk_sdist),
+        ]
+        if cli_wheel is not None:
+            install_command.append(str(cli_wheel))
+        run(install_command)
         freeze = run(
             [uv, "pip", "freeze", "--python", str(python)],
             capture_output=True,
         ).stdout.splitlines()
+        import_statement = (
+            "import psychevo,psychevo_app_server_bin;"
+            "assert psychevo.__version__==psychevo_app_server_bin.__version__"
+            f"=={VERSION!r};"
+        )
+        if cli_wheel is not None:
+            import_statement = (
+                "import psychevo,psychevo_app_server_bin,psychevo_cli_bin;"
+                "assert psychevo.__version__==psychevo_app_server_bin.__version__"
+                f"==psychevo_cli_bin.__version__=={VERSION!r};"
+            )
         import_probe = run(
             [
                 str(python),
                 "-c",
-                (
-                    "import psychevo,psychevo_app_server_bin,psychevo_cli_bin;"
-                    "assert psychevo.__version__==psychevo_app_server_bin.__version__"
-                    "==psychevo_cli_bin.__version__=='0.1.0';"
-                    "print(psychevo_app_server_bin.executable())"
-                ),
+                import_statement + "print(psychevo_app_server_bin.executable())",
             ],
             capture_output=True,
         )
         installed_binary = Path(import_probe.stdout.strip().splitlines()[-1])
-        cli_version = run(
-            [str(installed_pevo), "--version"],
-            capture_output=True,
-        ).stdout.strip()
-        if VERSION not in cli_version:
-            raise RuntimeError(f"installed pevo reported unexpected version: {cli_version}")
+        cli_version = None
+        if cli_wheel is not None:
+            installed_pevo = environment / (
+                "Scripts/pevo.exe" if os.name == "nt" else "bin/pevo"
+            )
+            cli_version = run(
+                [str(installed_pevo), "--version"],
+                capture_output=True,
+            ).stdout.strip()
+            if VERSION not in cli_version:
+                raise RuntimeError(
+                    f"installed pevo reported unexpected version: {cli_version}"
+                )
         home = temp / "home"
         cwd = temp / "workspace"
         home.mkdir()
@@ -297,9 +336,14 @@ def build_and_smoke(artifact_root: Path) -> dict[str, object]:
 
         if FakeProvider.request_count < 1:
             raise RuntimeError("installed App Server made no fake-provider request")
-        package_artifacts = [sdk_sdist, app_wheel, cli_wheel]
+        package_artifacts = [sdk_wheel, app_wheel]
+        if sdk_sdist is not None:
+            package_artifacts.append(sdk_sdist)
+        if cli_wheel is not None:
+            package_artifacts.append(cli_wheel)
         return {
             "schemaVersion": 1,
+            "scope": "app-server" if app_server_only else "full",
             "platform": platform.platform(),
             "python": platform.python_version(),
             "buildSeconds": round(build_seconds, 3),
@@ -338,8 +382,16 @@ def main() -> None:
         / "package"
         / "python",
     )
+    parser.add_argument(
+        "--app-server-only",
+        action="store_true",
+        help="build and smoke only the installable SDK and App Server artifacts",
+    )
     args = parser.parse_args()
-    report = build_and_smoke(args.artifact_root.resolve())
+    report = build_and_smoke(
+        args.artifact_root.resolve(),
+        app_server_only=args.app_server_only,
+    )
     report_path = args.artifact_root / "installed-artifact-smoke.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"installed artifact smoke: ok ({report_path})")
