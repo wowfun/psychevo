@@ -1,37 +1,40 @@
-pub(crate) use super::*;
-use futures::stream;
-use psychevo_ai::{
-    AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, FakeLanguageAdapter, FinishReason,
-    FinishReasonKind, LanguageAdapter, LanguageAdapterEvent, LanguageModel, LanguageRequest,
-    Provider, Usage,
-};
-use std::sync::Mutex;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-#[allow(dead_code)]
+use futures::{future::BoxFuture, stream};
+use psychevo_ai::{
+    AbortSignal, AdapterCall, AdapterFuture, AdapterStream, AssistantSource, DeploymentConfig,
+    FakeLanguageAdapter, FinishReason, FinishReasonKind, LanguageAdapter, LanguageAdapterEvent,
+    LanguageModel, LanguageRequest, Outcome, Provider, Usage,
+};
+use serde_json::{Value, json};
+use tokio::sync::watch;
+
+use crate::Result;
+use crate::agent::assistant::InlineThinkParser;
+use crate::agent::run_agent_loop;
+use crate::agent::stream::stream_assistant;
+use crate::agent::tools::execute_tool_batch;
+use crate::control::ControlHandle;
+use crate::events::{AgentEvent, EventSink};
+use crate::request::{AgentLoopRequest, ToolSearchOptions};
+use crate::support::{NoopEventSink, user_text_message};
+use crate::tool_router::{ToolRouter, ToolRouterError};
+use crate::types::{
+    AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, ToolBinding,
+    ToolCallBlock, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, ToolExecutionMode,
+    ToolExposure, ToolOutput, UserContentBlock,
+};
+
 #[derive(Debug, Clone)]
 enum RawStreamEvent {
     Text(String),
     Reasoning(String),
-    ToolStart {
-        content_index: usize,
-        call_index: usize,
-        id: String,
-        name: String,
-    },
-    ToolArgs {
-        content_index: usize,
-        call_index: usize,
-        delta: String,
-    },
-    ToolEnd {
-        content_index: usize,
-        call_index: usize,
-    },
     Done(Outcome),
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum StreamEvent {
     TextDelta {
@@ -60,20 +63,6 @@ pub(crate) enum StreamEvent {
     ToolCallEnd {
         content_index: usize,
         call_index: usize,
-    },
-    ProviderToolStart {
-        id: String,
-        name: String,
-        action: Option<Value>,
-    },
-    ProviderToolEnd {
-        id: String,
-        name: String,
-        action: Option<Value>,
-        status: String,
-    },
-    Source {
-        source: AssistantSource,
     },
     Usage {
         usage: Value,
@@ -203,35 +192,6 @@ fn raw_stream_event(event: RawStreamEvent) -> StreamEvent {
             text,
             reasoning_content: None,
         },
-        RawStreamEvent::ToolStart {
-            content_index,
-            call_index,
-            id,
-            name,
-        } => StreamEvent::ToolCallStart {
-            content_index,
-            call_index,
-            id,
-            name,
-        },
-        RawStreamEvent::ToolArgs {
-            content_index,
-            call_index,
-            delta,
-        } => StreamEvent::ToolCallDelta {
-            content_index,
-            call_index,
-            id: None,
-            name: None,
-            arguments_delta: delta,
-        },
-        RawStreamEvent::ToolEnd {
-            content_index,
-            call_index,
-        } => StreamEvent::ToolCallEnd {
-            content_index,
-            call_index,
-        },
         RawStreamEvent::Done(outcome) => StreamEvent::Done {
             outcome,
             finish_reason: None,
@@ -344,43 +304,6 @@ fn normalize_test_events(events: Vec<StreamEvent>) -> Vec<LanguageAdapterEvent> 
                 normalized.push(LanguageAdapterEvent::ToolCallEnd {
                     content_index: sdk_index,
                     arguments_raw,
-                });
-            }
-            StreamEvent::ProviderToolStart { id, name, action } => {
-                close_text(&mut normalized, &mut text_index);
-                close_reasoning(&mut normalized, &mut reasoning_index);
-                let content_index = next_content_index;
-                next_content_index += 1;
-                normalized.push(LanguageAdapterEvent::ProviderToolStart {
-                    content_index,
-                    id,
-                    name,
-                    action,
-                });
-            }
-            StreamEvent::ProviderToolEnd {
-                id,
-                name,
-                action,
-                status,
-            } => {
-                let content_index = next_content_index.saturating_sub(1);
-                normalized.push(LanguageAdapterEvent::ProviderToolEnd {
-                    content_index,
-                    id,
-                    name,
-                    action,
-                    status,
-                });
-            }
-            StreamEvent::Source { source } => {
-                close_text(&mut normalized, &mut text_index);
-                close_reasoning(&mut normalized, &mut reasoning_index);
-                let content_index = next_content_index;
-                next_content_index += 1;
-                normalized.push(LanguageAdapterEvent::Source {
-                    content_index,
-                    source,
                 });
             }
             StreamEvent::Usage { usage } => {
@@ -1175,6 +1098,78 @@ pub(crate) fn user_message_deserializes_text_blocks_and_serializes_local_images(
             "timestamp_ms": 2
         })
     );
+}
+
+#[test]
+pub(crate) fn assistant_source_blocks_round_trip_without_discriminator_collision() {
+    let message = Message::Assistant {
+        content: vec![
+            AssistantBlock::Source {
+                source: AssistantSource::UrlCitation(psychevo_ai::UrlCitationSource {
+                    url: "https://example.com/source".to_string(),
+                    title: "Source".to_string(),
+                    start_index: Some(1),
+                    end_index: Some(7),
+                }),
+            },
+            AssistantBlock::Source {
+                source: AssistantSource::Image(psychevo_ai::ImageSearchSource {
+                    image_url: "https://example.com/image.png".to_string(),
+                    thumbnail_url: Some("https://example.com/thumb.png".to_string()),
+                    source_website_url: "https://example.com".to_string(),
+                    caption: Some("Image".to_string()),
+                }),
+            },
+            AssistantBlock::Source {
+                source: AssistantSource::Provider {
+                    kind: "future_source".to_string(),
+                    data: json!({ "id": "source-1" }),
+                },
+            },
+        ],
+        timestamp_ms: 3,
+        finish_reason: Some("stop".to_string()),
+        outcome: Outcome::Normal,
+        model: Some("model".to_string()),
+        provider: Some("provider".to_string()),
+    };
+
+    let value = serde_json::to_value(&message).expect("assistant source message json");
+    assert_eq!(
+        value["content"],
+        json!([
+            {
+                "type": "source",
+                "source": {
+                    "type": "url_citation",
+                    "url": "https://example.com/source",
+                    "title": "Source",
+                    "start_index": 1,
+                    "end_index": 7
+                }
+            },
+            {
+                "type": "source",
+                "source": {
+                    "type": "image",
+                    "image_url": "https://example.com/image.png",
+                    "thumbnail_url": "https://example.com/thumb.png",
+                    "source_website_url": "https://example.com",
+                    "caption": "Image"
+                }
+            },
+            {
+                "type": "source",
+                "source": {
+                    "type": "provider",
+                    "kind": "future_source",
+                    "data": { "id": "source-1" }
+                }
+            }
+        ])
+    );
+    let decoded = serde_json::from_value::<Message>(value).expect("assistant source round trip");
+    assert_eq!(decoded, message);
 }
 
 #[tokio::test]

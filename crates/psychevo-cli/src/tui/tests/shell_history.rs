@@ -1,5 +1,20 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    attach_pending_framework_agent_running_for_session, buffer_text, drain_fullscreen_until_idle,
+    draw_fullscreen_for_test, test_app, test_shell_running_control,
+};
+use crate::tui::tests::{
+    insert_tui_message, runtime_turn_event, start_thread_fixture, test_app_with_models,
+};
+use crate::tui::{
+    ComposerHistoryKind, CrosstermEvent, CursorMove, FullscreenUi, KeyCode, KeyEvent, KeyModifiers,
+    Modifier, PresentedShellEvent, RunningTask, RunningTurn, RunningTurnEvents, ShellCommandEvent,
+    ShellCommandOutcome, ShellCommandResult, TUI_ROLE_ACCENT, TUI_ROLE_SURFACE_BG, TranscriptKind,
+    TranscriptRow, TurnEvent, TurnResult, parse_shell_escape_input, presented_shell_event_channel,
+    textarea_text, textarea_with_text, wall_now_ms,
+};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
+use tokio::sync::mpsc;
 #[tokio::test]
 pub(crate) async fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
     let parsed = parse_shell_escape_input("  !echo hi").expect("shell escape");
@@ -37,6 +52,7 @@ pub(crate) async fn shell_escape_history_survives_session_history_replacement() 
 pub(crate) async fn esc_clears_empty_shell_mode_composer() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
+    app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
 
@@ -71,16 +87,14 @@ pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -109,16 +123,14 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -161,11 +173,7 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
 pub(crate) async fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("session");
+    let session = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     let prompt_ms = wall_now_ms() - 12_500;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -196,18 +204,17 @@ pub(crate) async fn historical_unfinished_prompt_without_live_work_does_not_show
 pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
+    app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -234,21 +241,57 @@ pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
 }
 
 #[tokio::test]
+pub(crate) async fn esc_interrupts_typed_fullscreen_shell_control() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    let shell = app
+        .runtime
+        .client()
+        .shell_command(app.shell_command_request("pending shell".to_string()))
+        .expect("typed shell command");
+    let control = shell.control();
+    let (_tx, rx) = mpsc::unbounded_channel::<PresentedShellEvent>();
+    let task = tokio::spawn(async {
+        std::future::pending::<psychevo::Result<ShellCommandResult>>().await
+    });
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control: control.clone().into(),
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Shell(rx),
+        task: RunningTask::UserShell(task),
+    });
+    ui.start_assistant();
+
+    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("esc");
+
+    assert!(control.is_interrupted());
+    assert!(ui.interrupt_requested);
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[tokio::test]
 pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
+    app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -464,26 +507,12 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp).await;
     app.current_session = None;
-    let session_id = StateRuntime::open(&app.db_path)
-        .await
-        .expect("store")
-        .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
-        .await
-        .expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock/model", "mock", None).await;
     let mut ui = FullscreenUi::new(&app);
-    let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
-    ui.running = Some(RunningTurn {
-        session_id: None,
-        control,
-        selector: None,
-        turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
-        task: RunningTask::Agent(task),
-    });
+    attach_pending_framework_agent_running_for_session(&app, &mut ui, &session_id).await;
+    let running = ui.running.as_ref().expect("pending agent Turn");
+    assert_eq!(running.session_id.as_deref(), Some(session_id.as_str()));
+    let turn_id = running.turn_id.clone().expect("pending agent Turn id");
     ui.start_assistant();
 
     app.submit_fullscreen_text(&mut ui, "!printf aux-shell".to_string(), true)
@@ -492,14 +521,23 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
 
     assert!(ui.queued_inputs.is_empty());
     assert_eq!(ui.pending_auxiliary_shell_commands.len(), 1);
+    let pending = ui
+        .pending_auxiliary_shell_commands
+        .front()
+        .expect("pending auxiliary Shell");
+    assert_eq!(
+        pending.owner_session_id.as_deref(),
+        Some(session_id.as_str())
+    );
+    assert_eq!(pending.owner_turn_id.as_deref(), Some(turn_id.as_str()));
     assert_eq!(ui.auxiliary_shell_tasks.len(), 0);
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
     let text = buffer_text(&buffer);
     assert!(text.contains("shell 1"), "{text}");
 
-    app.apply_fullscreen_stream_event(
+    app.apply_fullscreen_turn_event(
         &mut ui,
-        RunStreamEvent::value(serde_json::json!({
+        runtime_turn_event(serde_json::json!({
             "type": "run_start",
             "session_id": session_id,
             "provider": "mock",
@@ -529,7 +567,15 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
     );
 
     if let Some(running) = ui.running.take() {
-        running.task.abort();
+        running.control.abort();
+        match running.task {
+            RunningTask::Agent(task) => {
+                let _ = task.await;
+            }
+            RunningTask::UserShell(task) => {
+                let _ = task.await;
+            }
+        }
     }
 }
 
@@ -537,32 +583,15 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
 pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let session_id = StateRuntime::open(&app.db_path)
-        .await
-        .expect("store")
-        .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
-        .await
-        .expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock/model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let marker = app.cwd.join("should-not-exist");
     let mut ui = FullscreenUi::new(&app);
-    let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
-    ui.running = Some(RunningTurn {
-        session_id: None,
-        control,
-        selector: None,
-        turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
-        task: RunningTask::Agent(task),
-    });
+    attach_pending_framework_agent_running_for_session(&app, &mut ui, &session_id).await;
     ui.start_assistant();
-    app.apply_fullscreen_stream_event(
+    app.apply_fullscreen_turn_event(
         &mut ui,
-        RunStreamEvent::value(serde_json::json!({
+        runtime_turn_event(serde_json::json!({
             "type": "run_start",
             "session_id": session_id,
             "provider": "mock",
@@ -593,9 +622,21 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     assert!(ui.auxiliary_shell_tasks.is_empty());
     assert!(!marker.exists());
     assert!(app.had_error);
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Error
+            && (row.text.contains("config") || row.text.contains("PSYCHEVO_HOME"))
+    }));
 
     if let Some(running) = ui.running.take() {
-        running.task.abort();
+        running.control.abort();
+        match running.task {
+            RunningTask::Agent(task) => {
+                let _ = task.await;
+            }
+            RunningTask::UserShell(task) => {
+                let _ = task.await;
+            }
+        }
     }
 }
 
@@ -702,8 +743,8 @@ pub(crate) async fn tool_only_thinking_message_does_not_create_turn_meta() {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "thinking only".to_string(),
         },
         true,
@@ -737,8 +778,8 @@ pub(crate) async fn assistant_text_deltas_append_to_one_live_answer_row() {
     ui.start_assistant();
 
     for text in ["hello", " world"] {
-        assert!(!ui.apply_stream_event(
-            RunStreamEvent::AssistantTextDelta {
+        assert!(!ui.apply_turn_event(
+            TurnEvent::MessageDelta {
                 text: text.to_string(),
             },
             true,
@@ -901,8 +942,8 @@ pub(crate) async fn interrupted_reasoning_only_turn_meta_includes_interrupted() 
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "So the situation is incomplete.".to_string(),
         },
         true,
@@ -937,23 +978,28 @@ pub(crate) async fn interrupted_user_shell_renders_interrupted_marker() {
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.interrupt_requested = true;
-    ui.apply_value_event(
-        &serde_json::json!({
-            "type": "tool_execution_end",
-            "tool_name": "exec_command",
-            "tool_call_id": "shell_1",
-            "source": "user_shell",
-            "args": { "cmd": "find /home/kevin -name tmp.txt -type f" },
-            "outcome": "aborted",
-            "result": {
+    ui.apply_shell_event(PresentedShellEvent {
+        presentation_id: 1,
+        event: ShellCommandEvent::Started {
+            thread_id: Some("thread-1".to_string()),
+            command: "find /home/kevin -name tmp.txt -type f".to_string(),
+            started_at_ms: wall_now_ms(),
+        },
+    });
+    ui.apply_shell_event(PresentedShellEvent {
+        presentation_id: 1,
+        event: ShellCommandEvent::Completed {
+            thread_id: Some("thread-1".to_string()),
+            output: serde_json::json!({
                 "output": "(no output)",
                 "exit_code": null,
                 "error": "aborted",
                 "truncated": false
-            }
-        }),
-        false,
-    );
+            }),
+            outcome: ShellCommandOutcome::Interrupted,
+            elapsed_ms: 4_000,
+        },
+    });
 
     let row = ui
         .transcript
@@ -963,4 +1009,94 @@ pub(crate) async fn interrupted_user_shell_renders_interrupted_marker() {
     assert_eq!(row.text, "interrupted");
     assert!(row.interrupted);
     assert!(!row.failed);
+    assert_eq!(row.tool_elapsed, Some(Duration::from_secs(4)));
+}
+
+#[tokio::test]
+pub(crate) async fn typed_user_shell_events_render_without_turn_stream_conversion() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+
+    assert!(ui.apply_shell_event(PresentedShellEvent {
+        presentation_id: 7,
+        event: ShellCommandEvent::Started {
+            thread_id: Some("thread-1".to_string()),
+            command: "printf typed-shell".to_string(),
+            started_at_ms: wall_now_ms(),
+        },
+    }));
+    assert!(!ui.apply_shell_event(PresentedShellEvent {
+        presentation_id: 7,
+        event: ShellCommandEvent::Completed {
+            thread_id: Some("thread-1".to_string()),
+            output: serde_json::json!({"output": "typed-shell", "exit_code": 0}),
+            outcome: ShellCommandOutcome::Completed,
+            elapsed_ms: 25,
+        },
+    }));
+
+    let rows = ui
+        .transcript
+        .iter()
+        .filter(|row| row.user_shell)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "! printf typed-shell");
+    assert_eq!(rows[0].text, "typed-shell");
+    assert_eq!(rows[0].tool_elapsed, Some(Duration::from_millis(25)));
+    assert!(!rows[0].failed);
+    assert!(!rows[0].interrupted);
+}
+
+#[tokio::test]
+pub(crate) async fn typed_auxiliary_shell_events_keep_concurrent_rows_distinct() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let (mut first_rx, first_emit) = presented_shell_event_channel();
+    let (mut second_rx, second_emit) = presented_shell_event_channel();
+
+    first_emit(ShellCommandEvent::Started {
+        thread_id: Some("thread-1".to_string()),
+        command: "printf same-command".to_string(),
+        started_at_ms: wall_now_ms(),
+    });
+    second_emit(ShellCommandEvent::Started {
+        thread_id: Some("thread-1".to_string()),
+        command: "printf same-command".to_string(),
+        started_at_ms: wall_now_ms(),
+    });
+    let first_started = first_rx.try_recv().expect("first started event");
+    let second_started = second_rx.try_recv().expect("second started event");
+    assert_ne!(
+        first_started.presentation_id,
+        second_started.presentation_id
+    );
+    ui.apply_shell_event(first_started);
+    ui.apply_shell_event(second_started);
+
+    second_emit(ShellCommandEvent::Completed {
+        thread_id: Some("thread-1".to_string()),
+        output: serde_json::json!({"output": "second", "exit_code": 0}),
+        outcome: ShellCommandOutcome::Completed,
+        elapsed_ms: 10,
+    });
+    first_emit(ShellCommandEvent::Completed {
+        thread_id: Some("thread-1".to_string()),
+        output: serde_json::json!({"output": "first", "exit_code": 0}),
+        outcome: ShellCommandOutcome::Completed,
+        elapsed_ms: 10,
+    });
+    ui.apply_shell_event(second_rx.try_recv().expect("second completion event"));
+    ui.apply_shell_event(first_rx.try_recv().expect("first completion event"));
+
+    let mut output = ui
+        .transcript
+        .iter()
+        .filter(|row| row.user_shell)
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>();
+    output.sort_unstable();
+    assert_eq!(output, ["first", "second"]);
 }

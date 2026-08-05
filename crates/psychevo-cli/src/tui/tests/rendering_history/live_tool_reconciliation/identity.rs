@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::{RuntimeToolLedgerRow, assert_runtime_tool_ledger, runtime_tool_ledger};
+use crate::tui::FullscreenUi;
+use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::tests::runtime_turn_event;
+use serde_json::Value;
+use tempfile::tempdir;
 
 #[tokio::test]
 async fn later_assistant_message_reusing_tool_position_keeps_both_calls() {
@@ -7,8 +11,8 @@ async fn later_assistant_message_reusing_tool_position_keeps_both_calls() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -27,8 +31,8 @@ async fn later_assistant_message_reusing_tool_position_keeps_both_calls() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_call_pending",
             "tool_call_id": "call-write",
             "tool_name": "write",
@@ -39,8 +43,8 @@ async fn later_assistant_message_reusing_tool_position_keeps_both_calls() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -100,8 +104,8 @@ async fn idless_parallel_same_name_calls_keep_distinct_positions() {
     let mut ui = FullscreenUi::new(&app);
 
     for content_index in [1, 2] {
-        ui.apply_stream_event(
-            RunStreamEvent::value(serde_json::json!({
+        ui.apply_turn_event(
+            runtime_turn_event(serde_json::json!({
                 "type": "tool_call_pending",
                 "tool_name": "write",
                 "arguments_json": "",
@@ -152,8 +156,8 @@ async fn unmatched_completion_does_not_replace_active_call_at_same_position() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -172,8 +176,8 @@ async fn unmatched_completion_does_not_replace_active_call_at_same_position() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-orphan",
             "tool_name": "exec_command",
@@ -227,8 +231,8 @@ async fn idless_completion_does_not_replace_stable_active_call_at_same_position(
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -247,8 +251,8 @@ async fn idless_completion_does_not_replace_stable_active_call_at_same_position(
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_name": "read",
             "content_index": 1,
@@ -295,8 +299,8 @@ async fn pending_call_with_new_stable_id_does_not_adopt_occupied_position() {
     let mut ui = FullscreenUi::new(&app);
 
     for (tool_call_id, cmd) in [("call-first", "echo first"), ("call-second", "echo second")] {
-        ui.apply_stream_event(
-            RunStreamEvent::value(serde_json::json!({
+        ui.apply_turn_event(
+            runtime_turn_event(serde_json::json!({
                 "type": "tool_call_pending",
                 "tool_call_id": tool_call_id,
                 "tool_name": "exec_command",
@@ -339,8 +343,8 @@ async fn execution_start_with_new_stable_id_does_not_adopt_occupied_position() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -359,8 +363,8 @@ async fn execution_start_with_new_stable_id_does_not_adopt_occupied_position() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-start",
             "tool_name": "exec_command",
@@ -390,8 +394,8 @@ async fn write_stdin_cleanup_does_not_delete_different_call_at_same_position() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-exec",
             "tool_name": "exec_command",
@@ -400,8 +404,8 @@ async fn write_stdin_cleanup_does_not_delete_different_call_at_same_position() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_yielded",
             "session_id": 42,
             "tool_call_id": "call-exec",
@@ -410,8 +414,8 @@ async fn write_stdin_cleanup_does_not_delete_different_call_at_same_position() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_call_pending",
             "tool_call_id": "call-poll-existing",
             "tool_name": "write_stdin",
@@ -422,8 +426,8 @@ async fn write_stdin_cleanup_does_not_delete_different_call_at_same_position() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_call_pending",
             "tool_call_id": "call-poll-new",
             "tool_name": "write_stdin",
@@ -463,8 +467,8 @@ async fn persisted_session_fault_trace_keeps_primary_tool_order() {
             1,
         )],
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_yielded",
             "session_id": 0,
             "tool_call_id": "call_db1eb62c5de64e59a6359f30",
@@ -673,8 +677,8 @@ async fn persisted_session_fault_trace_keeps_primary_tool_order() {
 }
 
 fn apply_tool_message(ui: &mut FullscreenUi<'_>, content: Vec<Value>) {
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -708,8 +712,8 @@ fn complete_tool(
     content_index: u64,
     call_index: u64,
 ) {
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,

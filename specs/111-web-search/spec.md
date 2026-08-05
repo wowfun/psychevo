@@ -135,6 +135,12 @@ Workbench and render as compact links in TUI. Image results remain remote
 metadata, are not downloaded as artifacts, and show caption/source first;
 Workbench loads a thumbnail only after explicit expansion.
 
+The persisted provider-neutral Message encoding must unambiguously retain both
+the outer assistant-block kind and the inner source kind. Every URL citation,
+image source, and provider-extension source must serialize and deserialize back
+to the same semantic source block; nested discriminators must not collide or
+emit duplicate JSON object keys.
+
 Local runtime search keeps the exact model-visible
 `external_untrusted_web_search` framing in the persisted tool-result message.
 Committed transcript projection decodes that exact wrapper back into the

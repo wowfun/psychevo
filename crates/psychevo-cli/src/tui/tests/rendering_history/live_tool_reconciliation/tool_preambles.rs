@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
-use super::*;
+use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::tests::{line_text, reasoning_completed_turn_event};
+use crate::tui::{FullscreenUi, TranscriptKind, TurnEvent, thinking_lines};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn failed_tool_end_does_not_create_intermediate_turn_meta() {
@@ -51,8 +53,8 @@ pub(crate) async fn failed_tool_end_does_not_create_intermediate_turn_meta() {
         ui.transcript
     );
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "The query failed; I will continue with available context.".to_string(),
         },
         true,
@@ -66,7 +68,7 @@ pub(crate) async fn failed_tool_end_does_not_create_intermediate_turn_meta() {
         ui.transcript
     );
 
-    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_turn_event(reasoning_completed_turn_event(), true, false);
     ui.apply_value_event(
         &serde_json::json!({
             "type": "message_end",
@@ -324,8 +326,8 @@ pub(crate) async fn tool_call_preamble_stays_between_reasoning_and_tool_rows() {
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "The comments are too many. Let me query them in batches.".to_string(),
         },
         true,
@@ -630,8 +632,8 @@ pub(crate) async fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn
             .all(|row| row.kind != TranscriptKind::Meta)
     );
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me compose the report carefully.".to_string(),
         },
         true,
@@ -658,8 +660,8 @@ pub(crate) async fn visible_answer_update_completes_active_thinking_without_reas
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "I have enough context and will answer now.".to_string(),
         },
         true,
@@ -728,14 +730,14 @@ pub(crate) async fn aborted_reasoning_only_message_does_not_recreate_failure_met
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me compose this carefully. I'll write the full report.".to_string(),
         },
         true,
         false,
     );
-    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_turn_event(reasoning_completed_turn_event(), true, false);
     ui.apply_value_event(
         &serde_json::json!({
             "type": "message_end",

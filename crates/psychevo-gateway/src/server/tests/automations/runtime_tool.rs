@@ -1,15 +1,30 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use super::helpers::{AutomationTurnProbe, web_state_with_automation_turn_probe};
+use crate::server::automations;
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::session_view::thread_snapshot;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn gateway_turns_expose_model_facing_automation_tool() {
     let (_temp, state) = web_state().await;
 
-    let options = state.run_options(state.inner.cwd.clone(), Some("thread-1".to_string()));
-
-    assert!(
-        options
-            .runtime_tools
-            .iter()
-            .any(|tool| tool.name() == "automation")
+    let (caller, _) = state.thread_turn_request(
+        state.inner.cwd.clone(),
+        Some("thread-1".to_string()),
+        Vec::new(),
     );
+
+    assert!(caller.has_runtime_tool("automation"));
 }
 
 #[tokio::test]
@@ -104,12 +119,16 @@ fn collect_missing_automation_schema_descriptions(
 #[tokio::test]
 async fn automation_tool_create_defaults_to_current_thread() {
     let (_temp, state) = web_state().await;
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "web".to_string();
     let thread_id = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("Thread")
+        .id()
+        .to_string();
     let value = automations::automation_tool_execute_for_test(
         state.clone(),
         state.inner.cwd.clone(),
@@ -132,7 +151,7 @@ async fn automation_tool_create_defaults_to_current_thread() {
 
 #[tokio::test]
 async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool() {
-    let backend = Arc::new(AutomationFakeBackend::default());
+    let backend = Arc::new(AutomationTurnProbe::default());
     *backend.model_tool_args.lock().expect("tool args") = Some(json!({
         "action": "create",
         "target": "currentThread",
@@ -140,7 +159,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         "prompt": "Send one useful software engineering tip.",
         "schedule": { "kind": "interval", "everyMinutes": 1 }
     }));
-    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
+    let (_temp, state) = web_state_with_automation_turn_probe(backend.clone()).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -149,7 +168,8 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .await.expect("source")
+            .await
+            .expect("source")
             .is_none()
     );
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -158,7 +178,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -175,7 +195,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -200,7 +220,8 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
     let accepted_turn_id = accepted["turnId"].as_str().expect("accepted turn id");
     let resumed_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let resumed = thread_snapshot(&state, &resumed_scope, Some(&accepted_thread_id))
-        .await.expect("accepted Thread snapshot");
+        .await
+        .expect("accepted Thread snapshot");
     assert_eq!(
         resumed["turnStartReceipts"],
         json!([{
@@ -263,7 +284,8 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .await.expect("source binding")
+            .await
+            .expect("source binding")
             .as_deref(),
         Some(target_thread_id.as_str())
     );
@@ -283,8 +305,8 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
 
 #[tokio::test]
 async fn draft_open_remains_empty_without_creating_session() {
-    let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend).await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -295,7 +317,7 @@ async fn draft_open_remains_empty_without_creating_session() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
@@ -309,10 +331,15 @@ async fn draft_open_remains_empty_without_creating_session() {
     assert_eq!(
         state
             .inner
-            .state
-
-            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .await.expect("sessions")
+            .framework
+            .list_threads(psychevo::ThreadListQuery {
+                cwd: Some(state.inner.cwd.clone()),
+                limit: 1,
+                ..psychevo::ThreadListQuery::default()
+            })
+            .await
+            .expect("Threads")
+            .threads
             .len(),
         0
     );
@@ -321,15 +348,16 @@ async fn draft_open_remains_empty_without_creating_session() {
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .await.expect("source lookup")
+            .await
+            .expect("source lookup")
             .is_none()
     );
 }
 
 #[tokio::test]
 async fn automation_tool_manages_project_lifecycle_actions() {
-    let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend.clone()).await;
     let cwd = state.inner.cwd.clone();
 
     let created = automations::automation_tool_execute_for_test(

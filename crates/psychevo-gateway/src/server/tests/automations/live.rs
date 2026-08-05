@@ -1,3 +1,18 @@
+use std::time::Duration;
+
+use psychevo::application::AutomationRunStatus;
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use super::helpers::{
+    live_xiaomi_token_plan_unavailable, live_xiaomi_token_plan_web_state,
+    wait_for_automation_status_with_timeout,
+};
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+
 #[tokio::test]
 #[ignore = "live provider opt-in"]
 async fn live_xiaomi_token_plan_automation_manual_run_completes() {
@@ -13,7 +28,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("create-live-automation")),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -38,7 +53,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("run-live-automation")),
             method: "automation/run".to_string(),
             params: Some(json!({ "automationId": automation_id })),
@@ -51,25 +66,25 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
     let task = wait_for_automation_status_with_timeout(
         &state,
         &automation_id,
-        "completed",
+        AutomationRunStatus::Completed,
         Duration::from_secs(180),
     )
     .await;
     assert_eq!(task.model.as_deref(), Some(MODEL));
     let runs = state
         .inner
-        .state
-
+        .durability
         .automation_runs_for_task(&automation_id, 5)
-        .await.expect("automation runs");
-    assert_eq!(runs[0].status, "completed");
+        .await
+        .expect("automation runs");
+    assert_eq!(runs[0].status, AutomationRunStatus::Completed);
     assert!(runs[0].thread_id.is_some());
     let summary = state
         .inner
-        .state
-
-        .session_summary(runs[0].thread_id.as_deref().expect("thread id"))
-        .await.expect("session summary")
+        .framework
+        .thread_summary(runs[0].thread_id.as_deref().expect("thread id"))
+        .await
+        .expect("session summary")
         .expect("session");
     assert_eq!(summary.provider, PROVIDER);
 }

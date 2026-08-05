@@ -1,7 +1,20 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use super::helpers::{AutomationTurnProbe, web_state_with_automation_framework_provider};
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+
 #[tokio::test]
 async fn automation_draft_returns_model_draft_without_persisting_task() {
-    let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state, provider_requests) =
+        web_state_with_automation_framework_provider(backend.clone()).await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let drafted = handle_rpc(
@@ -9,7 +22,7 @@ async fn automation_draft_returns_model_draft_without_persisting_task() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "automation/draft".to_string(),
             params: Some(json!({
@@ -32,7 +45,7 @@ async fn automation_draft_returns_model_draft_without_persisting_task() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "automation/list".to_string(),
             params: None,
@@ -47,19 +60,29 @@ async fn automation_draft_returns_model_draft_without_persisting_task() {
             .is_empty()
     );
 
-    let backend_runs = backend.runs.lock().expect("runs").clone();
-    assert_eq!(backend_runs.len(), 1);
-    assert_eq!(backend_runs[0].runtime_source, "automation-draft");
-    assert!(backend_runs[0].runtime_tools.is_empty());
     assert!(
-        backend_runs[0]
-            .prompt
+        backend.runs.lock().expect("runs").is_empty(),
+        "automation/draft must not bypass Framework through a legacy Gateway executor"
+    );
+    let provider_requests = provider_requests.lock().expect("provider requests");
+    assert_eq!(provider_requests.len(), 2);
+    assert!(
+        provider_requests[0]
+            .to_string()
             .contains("Return only one JSON object")
     );
-    let sandbox = backend_runs[0]
-        .sandbox_override
-        .as_ref()
-        .expect("draft sandbox override");
-    assert!(sandbox.enabled);
-    assert_eq!(sandbox.mode, psychevo::__product::runtime::RunSandboxMode::ReadOnly);
+    let tool_names = provider_requests[0]["tools"]
+        .as_array()
+        .expect("provider tools")
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(!tool_names.contains("automation"));
+    assert!(!tool_names.contains("spawn_agent"));
+    assert!(!tool_names.contains("clarify"));
+    assert!(
+        provider_requests[1].to_string().contains("read-only"),
+        "the Framework runtime must reject the model's write in the read-only sandbox"
+    );
+    assert!(!state.inner.cwd.join("draft-write.txt").exists());
 }

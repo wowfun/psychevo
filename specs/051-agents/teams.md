@@ -125,6 +125,13 @@ does not require worktree isolation.
 `agent/status` includes team and mission labels on child rows when available.
 `team/status` returns the active or requested team run with grouped member rows,
 child status, final summaries, depth cap, concurrency cap, and pause state.
+The Framework Thread interface owns the durable team/mission status query and
+returns typed run and member values. When no run id is requested, it selects the
+active run for that Thread, otherwise the most recently started completed run.
+Gateway projects that semantic result and must not read Store records or decode
+`members_json`. A structurally invalid durable member payload is a bounded read
+error rather than an empty team, because silently dropping every member would
+misrepresent the run.
 
 `agent/control` owns interactive controls shared by team and non-team child
 runs:
@@ -160,6 +167,10 @@ revalidate model, mode, catalog-backed per-turn, and safety values against its
 current capability contract. ACP model/effort/mode and versioned capability-pack
 options require exact selectable choices from the cached Thread Context for the
 effective model.
+The same pre-delivery check also requires the captured backend reference to
+equal the resolved Profile backend. It applies after immutable binding as well
+as during first binding, so a child cannot bypass Team activation freshness by
+resuming an already-created Thread.
 Reasoning summary, arbitrary feature keys, and output schemas are not Team
 options because the stable catalog does not enumerate them. Unsupported values
 are never ignored.

@@ -2,8 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::__product::persistence::StateRuntime;
-use psychevo::{__product::runtime::StatsOptions, __product::usage::usage_stats};
+use psychevo::{Application, UsageQuery};
 use serde_json::Value;
 
 use crate::args::StatsArgs;
@@ -16,14 +15,26 @@ pub(crate) async fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let report = usage_stats(StatsOptions {
-        state: StateRuntime::open(&db_path).await?,
-        cwd,
-        all: args.all,
-        days: args.days,
-        limit: args.limit,
-    })
-    .await?;
+    let application = Application::builder()
+        .home(&home)
+        .database_path(db_path)
+        .build()
+        .await?;
+    let report = application
+        .client()
+        .usage(UsageQuery {
+            cwd,
+            all: args.all,
+            days: args.days,
+            limit: args.limit,
+        })
+        .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let report = report?;
+    shutdown?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {

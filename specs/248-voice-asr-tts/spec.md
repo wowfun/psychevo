@@ -102,6 +102,15 @@ streaming/realtime path that explicitly understands raw PCM.
 - Realtime starts one thread-scoped session, accepts audio/text/speech appends,
   emits normalized live events, and closes with a reason.
 
+Framework `Configuration` is the first-party application boundary over those
+traits. It owns effective voice configuration and credential resolution,
+provider construction, ASR format/MIME validation, and capability invocation.
+It returns provider-neutral voice results plus an opaque realtime control and
+typed event stream. Gateway owns RPC authorization, connection-local realtime
+session ids, channel policy, routing, and notification projection only; it must
+not import or receive `psychevo-ai` Provider, Secret, Media, Adapter, sender, or
+event types. This is one semantic boundary, not a pass-through facade.
+
 Provider errors are structured and bounded. Xiaomi HTTP failures preserve
 status, provider code, and parseable retry metadata before the response body is
 consumed. Callers must fall back to text when TTS or realtime delivery fails.

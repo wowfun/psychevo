@@ -113,20 +113,22 @@ impl ProviderError {
 }
 
 #[cfg(any(feature = "openai", feature = "xiaomi"))]
-pub(crate) fn legacy_error(error: crate::Error, phase: ErrorPhase) -> ProviderError {
+pub(crate) fn legacy_error(error: crate::types::Error, phase: ErrorPhase) -> ProviderError {
     match error {
-        crate::Error::Http(error) => ProviderError::new(
+        crate::types::Error::Http(error) => ProviderError::new(
             ErrorKind::Transport,
             phase,
             format!("HTTP transport failed: {error}"),
         ),
-        crate::Error::Json(error) => ProviderError::new(
+        crate::types::Error::Json(error) => ProviderError::new(
             ErrorKind::Protocol,
             phase,
             format!("provider JSON failed: {error}"),
         ),
-        crate::Error::Provider(message) => ProviderError::provider(phase, None, None, message),
-        crate::Error::ProviderResponse {
+        crate::types::Error::Provider(message) => {
+            ProviderError::provider(phase, None, None, message)
+        }
+        crate::types::Error::ProviderResponse {
             status,
             code,
             retry_after_seconds,

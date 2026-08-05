@@ -1,3 +1,23 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use psychevo_agent_core::{Message, user_text_message};
+use psychevo_ai::{GenerationEvent, LanguageModel, LanguageRequest, Provider};
+use serde_json::{Value, json};
+
+use super::super::generation_provider;
+use super::super::titles::called_agent_names;
+use crate::agents::AgentDefinition;
+use crate::config::{
+    LoadedRunConfig, ResolvedRunProvider, parse_provider_model_spec, resolve_one_provider,
+};
+use crate::error::{Error, Result};
+use crate::prompt_assembly::PROMPT_PREFIX_NOTICE_METADATA_KEY;
+use crate::store::{PromptPrefixRecord, StateRuntime};
+use crate::types::{
+    ApprovalHandler, ApprovalsReviewer, PermissionApprovalDecision, PermissionApprovalRequest,
+    PermissionConfig, RunOptions, SelectedAgent,
+};
 
 pub(crate) fn prompt_prefix_invalidation_reason(
     record: &PromptPrefixRecord,
@@ -255,24 +275,27 @@ pub(crate) async fn record_missed_required_agents(
         "Required agent delegation was not performed: {}",
         missed.join(", ")
     );
-    store.append_message_with_metrics(
-        session_id,
-        &user_text_message(text),
-        None,
-        Some(json!({
-            "agent_notification": {
-                "type": "missing_required_agent_call",
-                "agents": missed,
-                "hidden": true
-            }
-        })),
-    )
-    .await
+    store
+        .append_message_with_metrics(
+            session_id,
+            &user_text_message(text),
+            None,
+            Some(json!({
+                "agent_notification": {
+                    "type": "missing_required_agent_call",
+                    "agents": missed,
+                    "hidden": true
+                }
+            })),
+        )
+        .await
 }
 
 #[cfg(test)]
 mod main_agent_input_tests {
-    use super::*;
+    use serde_json::json;
+
+    use super::super::helpers::main_agent_input_from_sources;
 
     #[test]
     fn explicit_agent_wins_over_session_agent() {
@@ -324,8 +347,15 @@ mod main_agent_input_tests {
 
 #[cfg(test)]
 mod smart_reviewer_tests {
-    use super::*;
     use psychevo_ai::{Fake, FakeLanguageAdapter};
+    use serde_json::json;
+
+    use super::{smart_review_permission, smart_reviewer_model};
+    use crate::config::{load_run_config, resolve_one_provider};
+    use crate::paths::canonical_cwd;
+    use crate::run::generation_provider;
+    use crate::types::PermissionApprovalRequest;
+    use psychevo_ai::LanguageModel;
 
     fn fake_model(text: &str) -> LanguageModel {
         Fake::with_language(FakeLanguageAdapter::text(text))
@@ -352,15 +382,10 @@ mod smart_reviewer_tests {
 
     #[tokio::test]
     async fn smart_reviewer_allows_once_from_json() {
-        let provider =
-            fake_model(r#"{"decision":"allow","risk":"low","rationale":"read-only"}"#);
-        let decision = smart_review_permission(
-            provider,
-            json!({}),
-            request(),
-        )
-        .await
-        .expect("review");
+        let provider = fake_model(r#"{"decision":"allow","risk":"low","rationale":"read-only"}"#);
+        let decision = smart_review_permission(provider, json!({}), request())
+            .await
+            .expect("review");
         assert_eq!(
             decision.outcome,
             crate::types::PermissionApprovalOutcome::AllowOnce
@@ -370,13 +395,9 @@ mod smart_reviewer_tests {
     #[tokio::test]
     async fn smart_reviewer_fails_closed_on_malformed_json() {
         let provider = fake_model("not json");
-        let err = smart_review_permission(
-            provider,
-            json!({}),
-            request(),
-        )
-        .await
-        .expect_err("malformed JSON should fail");
+        let err = smart_review_permission(provider, json!({}), request())
+            .await
+            .expect_err("malformed JSON should fail");
         assert!(err.to_string().contains("expected ident"));
     }
 

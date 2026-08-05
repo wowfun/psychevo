@@ -216,6 +216,11 @@ seam. A slow or failed subscriber cannot block or unwind Turn execution. When a
 subscriber falls behind, it receives one explicit resync condition for the
 accumulated gap and must re-read the authoritative bounded Thread snapshot;
 Application does not add an unbounded relay or durable full-event journal.
+The consumer marks its incremental projection invalid immediately. It must
+rebuild from that snapshot before applying terminal reconciliation, inferring
+unfinished Tool state, or settling the visible Turn; merely warning and
+continuing with the gapped projection is invalid. Events received after the
+resync condition may be applied only to the rebuilt projection.
 
 Presentation transports own delivery state. WebSocket, ACP, TUI, channel, and
 dashboard adapters may track whether a preview was sent, whether final content

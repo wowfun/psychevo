@@ -1,4 +1,18 @@
-use super::*;
+use agent_client_protocol::schema::v1::{
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    SessionConfigSelectOptions, SetSessionConfigOptionRequest,
+};
+use agent_client_protocol::{Agent, ConnectionTo, UntypedMessage};
+use psychevo::{Error, application::RunStreamSink};
+use serde_json::{Value, json};
+
+use super::lifecycle::acp_agent_not_delivered_error;
+use super::metadata_permissions::emit_runtime_event;
+use super::session_projection::{
+    AcpLegacyModelState, AcpNotificationIngress, acp_response_with_projection_barrier,
+    effective_legacy_models,
+};
+use super::stdio_turn::{AcpPeerTurnContext, acp_not_delivered_error};
 
 #[derive(Debug, Clone)]
 pub(super) struct AcpPeerConfigSelection {
@@ -208,7 +222,6 @@ fn acp_config_option_value(
                     .iter()
                     .flat_map(|group| group.options.iter())
                     .any(|option| option.value.to_string() == requested),
-                #[allow(unreachable_patterns)]
                 _ => false,
             };
             if !found {
@@ -227,7 +240,6 @@ fn acp_config_option_value(
                 option.id
             ))),
         },
-        #[allow(unreachable_patterns)]
         _ => Err(Error::Message(format!(
             "ACP config option `{}` has an unsupported value type",
             option.id

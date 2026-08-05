@@ -3,9 +3,10 @@ use std::collections::BTreeSet;
 use psychevo_agent_core::now_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, Sqlite, Transaction};
 
-use crate::error::Result;
+use crate::application::AgentMissionRegistration;
+use crate::error::{Error, Result};
 
 use super::StateRuntime;
 use super::store_message_fields::optional_json_string;
@@ -17,6 +18,38 @@ pub enum AgentEdgeStatus {
     Closed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCoordinationRunStatus {
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl AgentCoordinationRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "running" => Ok(Self::Running),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
+            other => Err(Error::Message(format!(
+                "invalid persisted Agent coordination run status: {other}"
+            ))),
+        }
+    }
+}
+
 impl AgentEdgeStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -25,10 +58,13 @@ impl AgentEdgeStatus {
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Self {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
-            "closed" => Self::Closed,
-            _ => Self::Open,
+            "open" => Ok(Self::Open),
+            "closed" => Ok(Self::Closed),
+            other => Err(Error::Message(format!(
+                "invalid persisted Agent edge status: {other}"
+            ))),
         }
     }
 }
@@ -54,7 +90,7 @@ pub struct AgentTeamRunInput<'a> {
     pub leader_agent_name: &'a str,
     pub members: Value,
     pub max_parallel_agents: u64,
-    pub status: &'a str,
+    pub status: AgentCoordinationRunStatus,
     pub metadata: Option<Value>,
 }
 
@@ -69,7 +105,7 @@ pub struct AgentTeamRunRecord {
     pub leader_agent_name: String,
     pub members: Value,
     pub max_parallel_agents: u64,
-    pub status: String,
+    pub status: AgentCoordinationRunStatus,
     pub started_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub final_summary: Option<String>,
@@ -84,7 +120,7 @@ pub struct AgentMissionRunInput<'a> {
     pub team_name: Option<&'a str>,
     pub goal: &'a str,
     pub lead_agent_name: &'a str,
-    pub status: &'a str,
+    pub status: AgentCoordinationRunStatus,
     pub metadata: Option<Value>,
 }
 
@@ -96,14 +132,88 @@ pub struct AgentMissionRunRecord {
     pub team_name: Option<String>,
     pub goal: String,
     pub lead_agent_name: String,
-    pub status: String,
+    pub status: AgentCoordinationRunStatus,
     pub started_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub final_summary: Option<String>,
     pub metadata: Option<Value>,
 }
 
+const INSERT_AGENT_TEAM_RUN_SQL: &str = r#"
+    INSERT INTO agent_team_runs (
+        id, parent_session_id, mission_run_id, team_name, description,
+        source_path, leader_agent_name, members_json, max_parallel_agents,
+        status, started_at_ms, metadata_json
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+    "#;
+
+const INSERT_AGENT_MISSION_RUN_SQL: &str = r#"
+    INSERT INTO agent_mission_runs (
+        id, parent_session_id, team_run_id, team_name, goal,
+        lead_agent_name, status, started_at_ms, metadata_json
+    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    "#;
+
+pub(super) async fn insert_agent_mission_registration_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    parent_session_id: &str,
+    request: &AgentMissionRegistration,
+    now: i64,
+) -> Result<()> {
+    if let Some(team) = request.team.as_ref() {
+        let members_json = serde_json::to_string(&team.members)?;
+        let metadata_json = optional_json_string(&request.metadata)?;
+        let max_parallel_agents = i64::try_from(team.max_parallel_agents).unwrap_or(i64::MAX);
+        sqlx::query(INSERT_AGENT_TEAM_RUN_SQL)
+            .bind(&team.id)
+            .bind(parent_session_id)
+            .bind(&request.id)
+            .bind(&team.name)
+            .bind(team.description.as_deref())
+            .bind(team.source_path.as_deref())
+            .bind(&team.leader_agent_name)
+            .bind(members_json)
+            .bind(max_parallel_agents)
+            .bind(AgentCoordinationRunStatus::Running.as_str())
+            .bind(now)
+            .bind(metadata_json)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    let metadata_json = optional_json_string(&request.metadata)?;
+    sqlx::query(INSERT_AGENT_MISSION_RUN_SQL)
+        .bind(&request.id)
+        .bind(parent_session_id)
+        .bind(request.team.as_ref().map(|team| team.id.as_str()))
+        .bind(request.team.as_ref().map(|team| team.name.as_str()))
+        .bind(&request.goal)
+        .bind(&request.lead_agent_name)
+        .bind(AgentCoordinationRunStatus::Running.as_str())
+        .bind(now)
+        .bind(metadata_json)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 impl StateRuntime {
+    pub(crate) async fn register_agent_mission(
+        &self,
+        parent_session_id: &str,
+        request: &AgentMissionRegistration,
+    ) -> Result<()> {
+        let now = now_ms();
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            insert_agent_mission_registration_in_tx(&mut tx, parent_session_id, request, now)
+                .await?;
+            tx.commit().await?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn upsert_agent_edge(
         &self,
         parent_session_id: &str,
@@ -213,12 +323,31 @@ impl StateRuntime {
         if target.is_empty() {
             return Ok(None);
         }
-        for edge in self.list_agent_edges().await? {
-            if edge.child_session_id == target || agent_edge_metadata_matches(&edge, target) {
-                return Ok(Some(edge));
-            }
-        }
-        Ok(None)
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let row = sqlx::query(
+                r#"
+                SELECT parent_session_id, child_session_id, status,
+                       created_at_ms, updated_at_ms, metadata_json
+                FROM agent_edges
+                WHERE child_session_id = ?1
+                   OR json_extract(metadata_json, '$.agent.id') = ?1
+                   OR json_extract(metadata_json, '$.agent.task_name') = ?1
+                ORDER BY CASE
+                    WHEN child_session_id = ?1 THEN 0
+                    WHEN json_extract(metadata_json, '$.agent.id') = ?1 THEN 1
+                    ELSE 2
+                END,
+                updated_at_ms DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(target)
+            .fetch_optional(&mut *conn)
+            .await?;
+            row.as_ref().map(agent_edge_from_row).transpose()
+        })
+        .await
     }
 
     pub async fn close_agent_edge_subtree(&self, child_session_id: &str) -> Result<()> {
@@ -246,27 +375,19 @@ impl StateRuntime {
         let metadata_json = optional_json_string(&input.metadata)?;
         let max_parallel_agents = i64::try_from(input.max_parallel_agents).unwrap_or(i64::MAX);
         self.agent_write(
-            sqlx::query(
-                r#"
-                INSERT INTO agent_team_runs (
-                    id, parent_session_id, mission_run_id, team_name, description,
-                    source_path, leader_agent_name, members_json, max_parallel_agents,
-                    status, started_at_ms, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                "#,
-            )
-            .bind(input.id)
-            .bind(input.parent_session_id)
-            .bind(input.mission_run_id)
-            .bind(input.team_name)
-            .bind(input.description)
-            .bind(input.source_path)
-            .bind(input.leader_agent_name)
-            .bind(members_json)
-            .bind(max_parallel_agents)
-            .bind(input.status)
-            .bind(now)
-            .bind(metadata_json),
+            sqlx::query(INSERT_AGENT_TEAM_RUN_SQL)
+                .bind(input.id)
+                .bind(input.parent_session_id)
+                .bind(input.mission_run_id)
+                .bind(input.team_name)
+                .bind(input.description)
+                .bind(input.source_path)
+                .bind(input.leader_agent_name)
+                .bind(members_json)
+                .bind(max_parallel_agents)
+                .bind(input.status.as_str())
+                .bind(now)
+                .bind(metadata_json),
         )
         .await?;
         Ok(AgentTeamRunRecord {
@@ -279,7 +400,7 @@ impl StateRuntime {
             leader_agent_name: input.leader_agent_name.to_string(),
             members: input.members,
             max_parallel_agents: input.max_parallel_agents,
-            status: input.status.to_string(),
+            status: input.status,
             started_at_ms: now,
             ended_at_ms: None,
             final_summary: None,
@@ -294,23 +415,16 @@ impl StateRuntime {
         let now = now_ms();
         let metadata_json = optional_json_string(&input.metadata)?;
         self.agent_write(
-            sqlx::query(
-                r#"
-                INSERT INTO agent_mission_runs (
-                    id, parent_session_id, team_run_id, team_name, goal,
-                    lead_agent_name, status, started_at_ms, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-            )
-            .bind(input.id)
-            .bind(input.parent_session_id)
-            .bind(input.team_run_id)
-            .bind(input.team_name)
-            .bind(input.goal)
-            .bind(input.lead_agent_name)
-            .bind(input.status)
-            .bind(now)
-            .bind(metadata_json),
+            sqlx::query(INSERT_AGENT_MISSION_RUN_SQL)
+                .bind(input.id)
+                .bind(input.parent_session_id)
+                .bind(input.team_run_id)
+                .bind(input.team_name)
+                .bind(input.goal)
+                .bind(input.lead_agent_name)
+                .bind(input.status.as_str())
+                .bind(now)
+                .bind(metadata_json),
         )
         .await?;
         Ok(AgentMissionRunRecord {
@@ -320,7 +434,7 @@ impl StateRuntime {
             team_name: input.team_name.map(str::to_string),
             goal: input.goal.to_string(),
             lead_agent_name: input.lead_agent_name.to_string(),
-            status: input.status.to_string(),
+            status: input.status,
             started_at_ms: now,
             ended_at_ms: None,
             final_summary: None,
@@ -331,7 +445,7 @@ impl StateRuntime {
     pub async fn update_agent_team_run_status(
         &self,
         id: &str,
-        status: &str,
+        status: AgentCoordinationRunStatus,
         final_summary: Option<&str>,
         ended: bool,
     ) -> Result<()> {
@@ -346,7 +460,7 @@ impl StateRuntime {
                 WHERE id = ?4
                 "#,
             )
-            .bind(status)
+            .bind(status.as_str())
             .bind(final_summary)
             .bind(ended_at_ms)
             .bind(id),
@@ -357,7 +471,7 @@ impl StateRuntime {
     pub async fn update_agent_mission_run_status(
         &self,
         id: &str,
-        status: &str,
+        status: AgentCoordinationRunStatus,
         final_summary: Option<&str>,
         ended: bool,
     ) -> Result<()> {
@@ -372,7 +486,7 @@ impl StateRuntime {
                 WHERE id = ?4
                 "#,
             )
-            .bind(status)
+            .bind(status.as_str())
             .bind(final_summary)
             .bind(ended_at_ms)
             .bind(id),
@@ -428,6 +542,49 @@ impl StateRuntime {
             rows.into_iter()
                 .map(|row| agent_mission_run_from_row(&row))
                 .collect()
+        })
+        .await
+    }
+
+    pub(crate) async fn current_agent_coordination_runs(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<(Option<AgentTeamRunRecord>, Option<AgentMissionRunRecord>)> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let team = sqlx::query(
+                r#"
+                SELECT id, parent_session_id, mission_run_id, team_name, description,
+                       source_path, leader_agent_name, members_json, max_parallel_agents,
+                       status, started_at_ms, ended_at_ms, final_summary, metadata_json
+                FROM agent_team_runs
+                WHERE parent_session_id = ?1
+                ORDER BY (ended_at_ms IS NULL) DESC, started_at_ms DESC, id DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(parent_session_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| agent_team_run_from_row(&row))
+            .transpose()?;
+            let mission = sqlx::query(
+                r#"
+                SELECT id, parent_session_id, team_run_id, team_name, goal,
+                       lead_agent_name, status, started_at_ms, ended_at_ms,
+                       final_summary, metadata_json
+                FROM agent_mission_runs
+                WHERE parent_session_id = ?1
+                ORDER BY (ended_at_ms IS NULL) DESC, started_at_ms DESC, id DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(parent_session_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| agent_mission_run_from_row(&row))
+            .transpose()?;
+            Ok((team, mission))
         })
         .await
     }
@@ -519,7 +676,7 @@ pub(crate) fn agent_team_run_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<A
         leader_agent_name: row.try_get(6)?,
         members: serde_json::from_str(&members_json)?,
         max_parallel_agents: max_parallel_agents.max(0) as u64,
-        status: row.try_get(9)?,
+        status: AgentCoordinationRunStatus::parse(row.try_get::<String, _>(9)?.as_str())?,
         started_at_ms: row.try_get(10)?,
         ended_at_ms: row.try_get(11)?,
         final_summary: row.try_get(12)?,
@@ -540,7 +697,7 @@ pub(crate) fn agent_mission_run_from_row(
         team_name: row.try_get(3)?,
         goal: row.try_get(4)?,
         lead_agent_name: row.try_get(5)?,
-        status: row.try_get(6)?,
+        status: AgentCoordinationRunStatus::parse(row.try_get::<String, _>(6)?.as_str())?,
         started_at_ms: row.try_get(7)?,
         ended_at_ms: row.try_get(8)?,
         final_summary: row.try_get(9)?,
@@ -556,28 +713,11 @@ pub(crate) fn agent_edge_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Agent
     Ok(AgentEdgeRecord {
         parent_session_id: row.try_get(0)?,
         child_session_id: row.try_get(1)?,
-        status: AgentEdgeStatus::parse(&status),
+        status: AgentEdgeStatus::parse(&status)?,
         created_at_ms: row.try_get(3)?,
         updated_at_ms: row.try_get(4)?,
         metadata: metadata_json
             .map(|value| serde_json::from_str(&value))
             .transpose()?,
     })
-}
-
-pub(crate) fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
-    let Some(metadata) = edge.metadata.as_ref().and_then(Value::as_object) else {
-        return false;
-    };
-    let Some(agent) = metadata.get("agent").and_then(Value::as_object) else {
-        return false;
-    };
-    agent
-        .get("id")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == target)
-        || agent
-            .get("task_name")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value == target)
 }

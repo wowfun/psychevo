@@ -108,9 +108,7 @@ impl Drop for ProcessTreeGuard {
 }
 
 #[cfg(windows)]
-fn create_job(
-    child_handle: std::os::windows::io::RawHandle,
-) -> io::Result<ProcessTreeGuard> {
+fn create_job(child_handle: std::os::windows::io::RawHandle) -> io::Result<ProcessTreeGuard> {
     use std::ffi::c_void;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows_sys::Win32::System::JobObjects::{

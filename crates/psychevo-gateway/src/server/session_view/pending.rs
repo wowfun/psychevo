@@ -1,4 +1,14 @@
-async fn prune_pending_actions(
+use serde_json::Value;
+
+use psychevo::application::GatewayActivityState;
+
+use crate::gateway_now_ms;
+use psychevo_gateway_protocol::events_transcript::{GatewayActionKind, PendingActionView};
+use psychevo_gateway_protocol::source::GatewayThreadSelector;
+
+use super::super::binding::WebState;
+
+pub(in super::super) async fn prune_pending_actions(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
@@ -143,10 +153,13 @@ async fn pending_interaction_context_state(
     let Some(activity_id) = request.activity_id else {
         return Ok(PendingInteractionState::Visible);
     };
-    let Some(activity) = state.inner.state.gateway_activity(activity_id).await? else {
+    let Some(activity) = state.inner.durability.gateway_activity(activity_id).await? else {
         return Ok(PendingInteractionState::Stale);
     };
-    if !matches!(activity.status.as_str(), "running" | "queued") {
+    if !matches!(
+        activity.status,
+        GatewayActivityState::Running | GatewayActivityState::Queued
+    ) {
         return Ok(PendingInteractionState::Stale);
     }
     if activity.lease_expires_at_ms < gateway_now_ms() {

@@ -1,7 +1,21 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::fetch_variants::drain_catalog_until_idle;
+use crate::tui::tests::fixtures::{
+    FixtureKind, buffer_text, draw_fullscreen_for_test, fixture_ui, test_app,
+};
+use crate::tui::tests::{
+    TuiCatalogServer, install_tui_test_config, line_text, materialize_current_thread_fixture,
+    test_app_with_models,
+};
+use crate::tui::{
+    BottomPanel, BottomRowStyle, BottomSelectionRow, BottomSelectionValue, ConfiguredModel,
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, ModelCatalogEntry, ModelCatalogStatus,
+    ModelPanel, ModelRowSource, ModelTab, ProviderSetupPresetId, ProviderWizardField, SlashCommand,
+    TuiApp, model_info_lines,
+};
+use serde_json::Value;
+use std::fs;
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn model_command_opens_searchable_bottom_picker() {
@@ -293,11 +307,12 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
         .insert("PSYCHEVO_MODELS_DEV_URL".to_string(), server.base_url);
     app.env_map
         .insert("XIAOMI_KEY".to_string(), "test-key".to_string());
-    app.config_path = Some(config_path);
+    install_tui_test_config(&mut app, &config_path);
     app.current_model = Some("xiaomi-token-plan/mimo-v2-omni".to_string());
     app.model_state
         .set_model("/old", "xiaomi-token-plan/unused-model", None);
     app.refresh_selected_model();
+    materialize_current_thread_fixture(&mut app).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
@@ -365,6 +380,7 @@ pub(crate) async fn startup_warmup_fetches_missing_metadata_cache_silently() {
     );
     app.env_map
         .insert("PSYCHEVO_MODELS_DEV_URL".to_string(), server.base_url);
+    materialize_current_thread_fixture(&mut app).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
 
     app.start_missing_model_metadata_cache_warmup();
@@ -478,8 +494,9 @@ api = "{}"
     let mut app = test_app(&temp).await;
     app.env_map
         .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
-    app.config_path = Some(config_path);
+    install_tui_test_config(&mut app, &config_path);
     app.current_model = Some("mock/mock-model".to_string());
+    materialize_current_thread_fixture(&mut app).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
@@ -547,7 +564,7 @@ api = "http://api.example/v1"
 "#,
     )
     .expect("config");
-    app.config_path = Some(config_path);
+    install_tui_test_config(&mut app, &config_path);
     app.current_model = Some("mock/mock-model".to_string());
     let mut ui = FullscreenUi::new(&app);
 

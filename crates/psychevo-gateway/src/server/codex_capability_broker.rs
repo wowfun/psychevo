@@ -6,8 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
-use psychevo::__agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
-use psychevo::__ai::AbortSignal;
+use psychevo::application::{AbortSignal, ToolBinding, ToolExecutionMode, ToolOutput};
 use psychevo::{Error, Result};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -15,6 +14,13 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, MutexGuard, Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
+
+use crate::{GatewayEventEmitter, gateway_now_ms};
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent, PendingActionView,
+};
+
+use super::binding::WebState;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const ELICITATION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -61,7 +67,7 @@ struct BrokerCommand {
 
 impl BrokerCommand {
     fn from_profile(
-        config: &psychevo::__product::configuration::CodexPluginsConfig,
+        config: &psychevo::config::CodexPluginsConfig,
         env: &BTreeMap<String, String>,
     ) -> Self {
         let program = config
@@ -128,8 +134,8 @@ pub(super) struct CodexPluginAuthority {
 pub(super) type CodexCapabilityBroker = CodexPluginAuthority;
 
 pub(super) struct CodexRuntimeContributions {
-    pub(super) capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
-    pub(super) runtime_tools: Vec<psychevo::__product::runtime::RuntimeTool>,
+    pub(super) capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
+    pub(super) runtime_tools: Vec<psychevo::application::RuntimeTool>,
     pub(super) lease_id: Option<String>,
 }
 
@@ -142,15 +148,13 @@ struct RuntimePluginDetail {
 
 #[derive(Clone)]
 struct CodexRuntimeProfile {
-    capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
+    capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
     delegated_tools: Vec<CodexDelegatedToolDescriptor>,
 }
 
 #[derive(Clone, PartialEq)]
-#[allow(dead_code)]
 struct CodexRuntimeInventory {
-    capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
-    delegated_servers: BTreeSet<String>,
+    capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
     delegated_tools: Vec<CodexDelegatedToolDescriptor>,
     warnings: Vec<String>,
 }
@@ -198,8 +202,7 @@ impl CodexPluginAuthority {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(".psychevo"));
         let config =
-            psychevo::__product::configuration::load_codex_plugins_profile_config(&profile_home)
-                .unwrap_or_default();
+            psychevo::config::load_codex_plugins_profile_config(&profile_home).unwrap_or_default();
         let private_home = profile_home.join("codex");
         if config.enabled {
             let _ = ensure_private_home(&private_home);
@@ -426,7 +429,7 @@ impl CodexPluginAuthority {
             },
             "resolvedBinary": self.command.read().expect("Codex command lock poisoned").program,
             "version": version,
-            "compatibilityProfile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibilityProfile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "privateHome": self.private_home,
             "platform": std::env::consts::OS,
             "generation": self.generation.load(Ordering::Acquire),
@@ -474,15 +477,12 @@ impl CodexPluginAuthority {
         let profile_home = self.private_home.parent().ok_or_else(|| {
             Error::Message("Codex private home has no profile parent".to_string())
         })?;
-        let write = psychevo::__product::configuration::write_codex_plugins_profile_config(
-            profile_home,
-            enabled,
-            binary,
-        )?;
+        let write =
+            psychevo::config::write_codex_plugins_profile_config(profile_home, enabled, binary)?;
         let _draining = self.begin_draining().await;
         self.enabled.store(false, Ordering::Release);
         self.stop().await;
-        let config = psychevo::__product::configuration::CodexPluginsConfig {
+        let config = psychevo::config::CodexPluginsConfig {
             enabled,
             binary: binary
                 .map(str::trim)
@@ -623,7 +623,7 @@ impl CodexPluginAuthority {
                 identity.selector(),
                 CodexTrustRecord {
                     fingerprint: fingerprint.clone(),
-                    trusted_at_ms: super::gateway_now_ms(),
+                    trusted_at_ms: gateway_now_ms(),
                 },
             );
         } else {
@@ -889,10 +889,10 @@ impl CodexPluginAuthority {
         let profile_home = self.private_home.parent().ok_or_else(|| {
             Error::Message("Codex private home has no profile parent".to_string())
         })?;
-        if let Err(err) = psychevo::__product::capabilities::codex_plugin_set_enabled_value(
+        if let Err(err) = psychevo::plugins::codex_plugin_set_enabled_value(
             profile_home,
             cwd,
-            psychevo::__product::capabilities::PluginScope::Global,
+            psychevo::plugins::PluginScope::Global,
             &identity.selector(),
             Some(true),
         ) {
@@ -932,7 +932,7 @@ impl CodexPluginAuthority {
             "materialization": result,
             "detail": detail,
             "fingerprint": fingerprint,
-            "policy": psychevo::__product::capabilities::codex_plugin_policy_value(
+            "policy": psychevo::plugins::codex_plugin_policy_value(
                 profile_home,
                 cwd,
                 &identity.selector(),
@@ -1052,11 +1052,11 @@ impl CodexPluginAuthority {
 
     pub(super) async fn runtime_contributions(
         &self,
-        state: super::WebState,
+        state: WebState,
         cwd: &std::path::Path,
         psychevo_thread_id: &str,
         turn_id: Option<String>,
-        event_sink: Option<super::GatewayEventEmitter>,
+        event_sink: Option<GatewayEventEmitter>,
     ) -> Result<CodexRuntimeContributions> {
         let Some(profile) = self.ready_runtime_profile(cwd).await else {
             log_codex_authority_event("inventory_not_ready", cwd, None);
@@ -1104,7 +1104,7 @@ impl CodexPluginAuthority {
             .into_iter()
             .map(|descriptor| {
                 let source = format!("codex:mcp:{}", descriptor.server_name);
-                psychevo::__product::runtime::RuntimeTool::with_source(
+                psychevo::application::RuntimeTool::with_source(
                     Arc::new(CodexMcpTool {
                         state: state.clone(),
                         cwd: cwd.to_path_buf(),
@@ -1198,14 +1198,12 @@ impl CodexPluginAuthority {
         let mut delegated_servers = BTreeSet::new();
         for plugin in &plugins {
             if let Some(root) = &plugin.package_root {
-                capability_roots.push(
-                    psychevo::__product::capabilities::SelectedCapabilityRoot::codex_local(
-                        plugin.identity.selector(),
-                        plugin.identity.plugin.clone(),
-                        plugin.identity.marketplace.clone(),
-                        root,
-                    ),
-                );
+                capability_roots.push(psychevo::extensions::SelectedCapabilityRoot::codex_local(
+                    plugin.identity.selector(),
+                    plugin.identity.plugin.clone(),
+                    plugin.identity.marketplace.clone(),
+                    root,
+                ));
             } else {
                 delegated_servers.extend(
                     plugin
@@ -1268,7 +1266,6 @@ impl CodexPluginAuthority {
 
         Ok(CodexRuntimeInventory {
             capability_roots,
-            delegated_servers,
             delegated_tools,
             warnings,
         })
@@ -1310,7 +1307,7 @@ impl CodexPluginAuthority {
                 };
                 if self.enforce_policy {
                     let profile_home = self.private_home.parent().unwrap_or_else(|| Path::new("."));
-                    let policy = psychevo::__product::capabilities::codex_plugin_policy_value(
+                    let policy = psychevo::plugins::codex_plugin_policy_value(
                         profile_home,
                         cwd,
                         &identity.selector(),
@@ -1682,11 +1679,7 @@ fn codex_detail_fingerprint(identity: &CodexPluginIdentity, detail: &Value) -> R
         .or_else(|| plugin.pointer("/summary/version"))
         .or_else(|| plugin.get("version"))
         .and_then(Value::as_str);
-    psychevo::__product::capabilities::external_plugin_fingerprint(
-        root.as_deref(),
-        &identity.selector(),
-        version,
-    )
+    psychevo::plugins::external_plugin_fingerprint(root.as_deref(), &identity.selector(), version)
 }
 
 fn find_codex_package_root(path: &Path) -> Option<PathBuf> {
@@ -1824,7 +1817,7 @@ pub(super) fn merge_plugin_list(mut native: Value, codex: Result<Value>) -> Valu
                         "source_kind": "codex_marketplace",
                         "scope": "codex_home",
                         "manifest_kind": "codex",
-                        "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+                        "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
                         "component_statuses": [],
                         "enabled": enabled,
                         "installed": installed,
@@ -1883,8 +1876,7 @@ pub(super) fn apply_codex_policy_views(mut value: Value, home: &Path, cwd: &Path
         if !selector.starts_with("codex:") {
             continue;
         }
-        let policy =
-            psychevo::__product::capabilities::codex_plugin_policy_value(home, cwd, selector)?;
+        let policy = psychevo::plugins::codex_plugin_policy_value(home, cwd, selector)?;
         let enabled = policy
             .get("effectiveEnabled")
             .and_then(Value::as_bool)
@@ -1974,7 +1966,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
     let component = |component: &str, level: &str, owner: &str, readiness: &str, reason: &str| {
         json!({
             "component": component,
-            "compatibilityProfile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibilityProfile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "highestLevel": level,
             "executionOwner": owner,
             "readiness": readiness,
@@ -2188,7 +2180,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
             "source_id": format!("codex:{}", identity.marketplace),
             "scope_name": "codex_home",
             "manifest_kind": "codex",
-            "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "component_statuses": statuses,
             "installed": installed,
             "enabled": enabled,
@@ -2199,7 +2191,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
         "manifest": plugin,
         "inspection": {
             "authority": "codex",
-            "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "component_statuses": statuses,
         }
     })
@@ -2207,11 +2199,11 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
 
 #[derive(Clone)]
 struct CodexMcpTool {
-    state: super::WebState,
+    state: WebState,
     cwd: PathBuf,
     psychevo_thread_id: String,
     turn_id: Option<String>,
-    event_sink: Option<super::GatewayEventEmitter>,
+    event_sink: Option<GatewayEventEmitter>,
     name: String,
     server_name: String,
     remote_name: String,
@@ -2298,10 +2290,10 @@ impl ToolBinding for CodexMcpTool {
 
 #[derive(Clone)]
 struct CodexElicitationContext {
-    state: super::WebState,
+    state: WebState,
     psychevo_thread_id: String,
     turn_id: Option<String>,
-    event_sink: Option<super::GatewayEventEmitter>,
+    event_sink: Option<GatewayEventEmitter>,
 }
 
 impl CodexElicitationContext {
@@ -2328,10 +2320,10 @@ impl CodexElicitationContext {
                     responder,
                 },
             );
-        let _ = event_sink.emit(super::GatewayEvent::ActionRequested {
-            action: super::PendingActionView {
+        let _ = event_sink.emit(GatewayEvent::ActionRequested {
+            action: PendingActionView {
                 action_id: action_id.clone(),
-                kind: super::GatewayActionKind::Clarify,
+                kind: GatewayActionKind::Clarify,
                 title: Some("Codex App request".to_string()),
                 summary: params
                     .get("message")
@@ -2359,10 +2351,10 @@ impl CodexElicitationContext {
         match decision {
             Ok(Ok(result)) => result,
             _ => {
-                let _ = event_sink.emit(super::GatewayEvent::ActionResolved {
+                let _ = event_sink.emit(GatewayEvent::ActionResolved {
                     action_id,
-                    kind: super::GatewayActionKind::Clarify,
-                    outcome: super::GatewayActionOutcome::TimedOut,
+                    kind: GatewayActionKind::Clarify,
+                    outcome: GatewayActionOutcome::TimedOut,
                     payload: json!({"owner":"codex_capability_broker"}),
                 });
                 json!({"action":"cancel","content":null,"_meta":null})
@@ -2395,7 +2387,7 @@ pub(super) struct PendingCodexElicitation {
     fields: Vec<ElicitationField>,
     mode: String,
     meta: Option<Value>,
-    event_sink: super::GatewayEventEmitter,
+    event_sink: GatewayEventEmitter,
     responder: oneshot::Sender<Value>,
 }
 
@@ -2580,14 +2572,15 @@ fn titled_elicitation_options(options: Option<&Value>) -> Option<Vec<Value>> {
 }
 
 pub(super) fn respond_to_elicitation(
-    state: &super::WebState,
+    state: &WebState,
     interaction_id: &str,
-    response: psychevo_gateway_protocol::ThreadInteractionResponse,
-) -> Result<Option<psychevo_gateway_protocol::ThreadInteractionRespondResult>> {
+    response: psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse,
+) -> Result<Option<psychevo_gateway_protocol::thread_command_turn::ThreadInteractionRespondResult>>
+{
     if !matches!(
         response,
-        psychevo_gateway_protocol::ThreadInteractionResponse::Clarify { .. }
-            | psychevo_gateway_protocol::ThreadInteractionResponse::CancelClarify
+        psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::Clarify { .. }
+            | psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::CancelClarify
     ) {
         return Err(Error::Message(
             "Codex App elicitation requires a clarify response".to_string(),
@@ -2603,27 +2596,25 @@ pub(super) fn respond_to_elicitation(
         return Ok(None);
     };
     let (result, outcome) = match response {
-        psychevo_gateway_protocol::ThreadInteractionResponse::Clarify { answers } => {
+        psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::Clarify { answers } => {
             let result = accepted_elicitation(&pending, answers);
-            (result, super::GatewayActionOutcome::Accepted)
+            (result, GatewayActionOutcome::Accepted)
         }
-        psychevo_gateway_protocol::ThreadInteractionResponse::CancelClarify => (
+        psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::CancelClarify => (
             json!({"action":"cancel","content":null,"_meta":pending.meta}),
-            super::GatewayActionOutcome::Cancelled,
+            GatewayActionOutcome::Cancelled,
         ),
         _ => unreachable!("response kind checked before taking the pending elicitation"),
     };
-    let _ = pending
-        .event_sink
-        .emit(super::GatewayEvent::ActionResolved {
-            action_id: interaction_id.to_string(),
-            kind: super::GatewayActionKind::Clarify,
-            outcome,
-            payload: json!({"owner":"codex_capability_broker"}),
-        });
+    let _ = pending.event_sink.emit(GatewayEvent::ActionResolved {
+        action_id: interaction_id.to_string(),
+        kind: GatewayActionKind::Clarify,
+        outcome,
+        payload: json!({"owner":"codex_capability_broker"}),
+    });
     let _ = pending.responder.send(result);
     Ok(Some(
-        psychevo_gateway_protocol::ThreadInteractionRespondResult {
+        psychevo_gateway_protocol::thread_command_turn::ThreadInteractionRespondResult {
             accepted: true,
             interaction_id: interaction_id.to_string(),
             outcome,
@@ -2689,13 +2680,13 @@ fn validate_negotiated_profile(
         .ok_or_else(|| {
             Error::Message(format!(
                 "Codex plugin compatibility profile `{}` requires initialize.userAgent",
-                psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
             ))
         })?;
     let version = extract_semantic_version(user_agent).ok_or_else(|| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not extract a version from userAgent",
-            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
         ))
     })?;
     let reported_home = initialize
@@ -2705,27 +2696,27 @@ fn validate_negotiated_profile(
         .ok_or_else(|| {
             Error::Message(format!(
                 "Codex plugin compatibility profile `{}` requires initialize.codexHome",
-                psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
             ))
         })?;
     let expected = std::fs::canonicalize(expected_home).map_err(|err| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not canonicalize private home `{}`: {err}",
-            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             expected_home.display()
         ))
     })?;
     let reported = std::fs::canonicalize(&reported_home).map_err(|err| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not canonicalize reported home `{}`: {err}",
-            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             reported_home.display()
         ))
     })?;
     if reported != expected {
         return Err(Error::Message(format!(
             "Codex plugin compatibility profile `{}` rejected codexHome `{}`; expected Psychevo private home `{}`",
-            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             reported.display(),
             expected.display()
         )));
@@ -3182,6 +3173,12 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    use crate::composition::GatewayApplication;
+    use crate::server::GatewayWebServerConfig;
+    use crate::server::binding::{AuthContext, WebState};
+    use crate::server::rpc_dispatch::handle_rpc;
+    use crate::server::rpc_json::RpcRequest;
+
     #[test]
     fn runtime_inventory_cache_stays_bounded() {
         let mut inventories = BTreeMap::new();
@@ -3536,21 +3533,20 @@ mod tests {
             Duration::from_secs(3),
         ));
         let runtime =
-            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
+            GatewayApplication::open(home, temp.path().join("state.db"), None, BTreeMap::new())
                 .await
-                .expect("state");
-        let gateway = crate::Gateway::new(runtime);
-        let state = super::super::WebState::new(super::super::GatewayWebServerConfig::new(
-            gateway,
-            home,
+                .expect("composition");
+        let state = WebState::new(GatewayWebServerConfig::with_static(
+            runtime,
             cwd,
-            None,
-            BTreeMap::new(),
             temp.path().join("static"),
         ));
         let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
         let event_sink = crate::GatewayEventEmitter::new(move |event| {
-            if let crate::GatewayEvent::ActionRequested { action } = event {
+            if let psychevo_gateway_protocol::events_transcript::GatewayEvent::ActionRequested {
+                action,
+            } = event
+            {
                 let _ = action_tx.send(action.action_id);
             }
         });
@@ -3591,7 +3587,7 @@ mod tests {
         respond_to_elicitation(
             &state,
             &action_id,
-            psychevo_gateway_protocol::ThreadInteractionResponse::Clarify {
+            psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::Clarify {
                 answers: vec![vec!["Yes".to_string()]],
             },
         )
@@ -3722,29 +3718,21 @@ mod tests {
                 std::env::var("PATH").unwrap_or_default(),
             ),
         ]);
-        let runtime =
-            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
-                .await
-                .expect("state");
-        let gateway = crate::Gateway::new(runtime);
-        let config = super::super::GatewayWebServerConfig::new(
-            gateway,
-            home,
-            cwd.clone(),
-            None,
-            env,
-            temp.path().join("static"),
-        );
-        let state = super::super::WebState::new(config);
+        let runtime = GatewayApplication::open(home, temp.path().join("state.db"), None, env)
+            .await
+            .expect("composition");
+        let config =
+            GatewayWebServerConfig::with_static(runtime, cwd.clone(), temp.path().join("static"));
+        let state = WebState::new(config);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
         tokio::time::timeout(
             Duration::from_millis(100),
-            super::super::handle_rpc(
+            handle_rpc(
                 state.clone(),
-                super::super::AuthContext::Bearer,
+                AuthContext::Bearer,
                 tx.clone(),
-                super::super::RpcRequest {
+                RpcRequest {
                     jsonrpc: "2.0".to_string(),
                     id: Some(json!(1)),
                     method: "initialize".to_string(),
@@ -3782,11 +3770,11 @@ mod tests {
         let thread_state = state.clone();
         let thread_cwd = cwd.clone();
         let mut draft_open = tokio::spawn(async move {
-            super::super::handle_rpc(
+            handle_rpc(
                 thread_state,
-                super::super::AuthContext::Bearer,
+                AuthContext::Bearer,
                 tx,
-                super::super::RpcRequest {
+                RpcRequest {
                     jsonrpc: "2.0".to_string(),
                     id: Some(json!(2)),
                     method: "thread/draft/open".to_string(),
@@ -3903,20 +3891,12 @@ mod tests {
             env.clone(),
             Duration::from_secs(2),
         );
-        let runtime =
-            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
-                .await
-                .expect("state");
-        let gateway = crate::Gateway::new(runtime);
-        let config = super::super::GatewayWebServerConfig::new(
-            gateway,
-            home,
-            cwd.clone(),
-            None,
-            env,
-            temp.path().join("static"),
-        );
-        let state = super::super::WebState::new(config);
+        let runtime = GatewayApplication::open(home, temp.path().join("state.db"), None, env)
+            .await
+            .expect("composition");
+        let config =
+            GatewayWebServerConfig::with_static(runtime, cwd.clone(), temp.path().join("static"));
+        let state = WebState::new(config);
 
         broker
             .prepare_runtime_inventory(&cwd)
@@ -4425,20 +4405,12 @@ mod tests {
                 std::env::var("PATH").unwrap_or_default(),
             ),
         ]);
-        let runtime =
-            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
-                .await
-                .expect("state");
-        let gateway = crate::Gateway::new(runtime);
-        let config = super::super::GatewayWebServerConfig::new(
-            gateway,
-            home,
-            cwd.clone(),
-            None,
-            env,
-            temp.path().join("static"),
-        );
-        let state = super::super::WebState::new(config);
+        let runtime = GatewayApplication::open(home, temp.path().join("state.db"), None, env)
+            .await
+            .expect("composition");
+        let config =
+            GatewayWebServerConfig::with_static(runtime, cwd.clone(), temp.path().join("static"));
+        let state = WebState::new(config);
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let events_for_sink = events.clone();
         let event_sink = crate::GatewayEventEmitter::new(move |event| {
@@ -4482,7 +4454,7 @@ mod tests {
         assert_eq!(contributions.capability_roots.len(), 1);
         assert!(matches!(
             contributions.capability_roots[0].authority,
-            psychevo::__product::capabilities::CapabilityRootAuthority::Codex { .. }
+            psychevo::extensions::CapabilityRootAuthority::Codex { .. }
         ));
         assert_eq!(contributions.runtime_tools.len(), 1);
         assert_eq!(
@@ -4548,7 +4520,7 @@ mod tests {
                         .expect("events")
                         .iter()
                         .find_map(|event| match event {
-                            crate::GatewayEvent::ActionRequested { action } => {
+                            psychevo_gateway_protocol::events_transcript::GatewayEvent::ActionRequested { action } => {
                                 Some(action.action_id.clone())
                             }
                             _ => None,
@@ -4564,7 +4536,7 @@ mod tests {
         let response = respond_to_elicitation(
             &state,
             &action_id,
-            psychevo_gateway_protocol::ThreadInteractionResponse::Clarify {
+            psychevo_gateway_protocol::thread_command_turn::ThreadInteractionResponse::Clarify {
                 answers: vec![vec!["Yes".to_string()]],
             },
         )

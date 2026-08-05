@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AuxiliaryAgentTask, TranscriptRow, Value, active_tool_row, active_tool_title,
+    assistant_text_from_event, format_compact_count, pluralize, single_line_preview, tool_title,
+    usage_total_tokens,
+};
 
 pub(crate) fn auxiliary_agent_live_for_session(
     agent: &AuxiliaryAgentTask,
@@ -22,7 +25,7 @@ pub(crate) fn current_session_matches(
     }
 }
 
-fn completed_agent_invocation_row(row: &TranscriptRow) -> bool {
+pub(super) fn completed_agent_invocation_row(row: &TranscriptRow) -> bool {
     row.tool_name.as_deref() == Some("spawn_agent")
         && !active_tool_row(row)
         && (row.tool_started.is_none()

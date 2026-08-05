@@ -1,3 +1,24 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use agent_client_protocol::schema::v2::{
+    ClientCapabilities, Cost, SessionId, SessionUpdate, UsageUpdate,
+};
+use agent_client_protocol::{Client, ConnectionTo, Error};
+use psychevo::application::{Configuration, ConfigurationQuery};
+use psychevo::command_registry::{
+    SlashCommandParse, SlashCommandSurface, dynamic_slash_command_effect, parse_slash_command_line,
+    slash_invocation_effect,
+};
+use psychevo::{ApprovalHandler, ImageInput, TurnRequest};
+use serde_json::Value;
+
+use crate::commands::{SlashPromptAction, acp_command_capabilities, send_session_update};
+use crate::protocol::env_flag_enabled;
+use crate::stdio::{AcpSession, PsychevoAcpAgent};
+
+use super::options_and_tests::AcpUsageUpdateContext;
+
 impl PsychevoAcpAgent {
     pub(crate) fn turn_request(
         &self,
@@ -6,7 +27,7 @@ impl PsychevoAcpAgent {
         image_inputs: Vec<ImageInput>,
         approval_handler: Option<Arc<dyn ApprovalHandler>>,
     ) -> TurnRequest {
-        let mut request = TurnRequest::new(prompt)
+        TurnRequest::new(prompt)
             .with_prompt_images(image_inputs, true)
             .with_identity("acp", None)
             .with_model(session.model.clone(), session.reasoning_effort.clone())
@@ -18,103 +39,45 @@ impl PsychevoAcpAgent {
             )
             .with_approval(approval_handler, false)
             .with_environment(Some(self.options.inherited_env.clone()), None, None)
-            .with_mcp_servers(session.mcp_servers.clone());
-        request.__set_adapter_options(AdapterTurnOptions {
-            snapshot_root: Some(self.options.home.join("snapshots")),
-            ..AdapterTurnOptions::default()
-        });
-        request
+            .with_mcp_servers(session.mcp_servers.clone())
+            .with_framework_context(
+                Some(self.options.home.join("snapshots")),
+                None,
+                Vec::new(),
+                None,
+            )
     }
 
-    pub(crate) fn run_options(
+    pub(crate) fn configuration_for_session(
         &self,
         session: &AcpSession,
-        prompt: String,
-        image_inputs: Vec<ImageInput>,
-        approval_handler: Option<Arc<dyn ApprovalHandler>>,
-    ) -> RunOptions {
-        RunOptions {
-            state: self.state.clone(),
-            cwd: session.cwd.clone(),
-            snapshot_root: Some(self.options.home.join("snapshots")),
-            session: session.runtime_session_id.clone(),
-            continue_latest: false,
-            prompt,
-            image_inputs,
-            extract_prompt_image_sources: false,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: self.options.config_path.clone(),
-            project_context_override: None,
-            model: session.model.clone(),
-            reasoning_effort: session.reasoning_effort.clone(),
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            external_agent_delegate: None,
-            include_reasoning: true,
-            mode: session.mode,
-            permission_mode: session.permission_mode,
-            sandbox_override: None,
-            approval_handler,
-            clarify_enabled: false,
-            inherited_env: Some(self.options.inherited_env.clone()),
-            agent: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: session.mcp_servers.clone(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
-        }
+    ) -> psychevo::Result<Configuration> {
+        self.configuration(
+            session.cwd.clone(),
+            session.model.clone(),
+            session.reasoning_effort.clone(),
+        )
     }
 
-    pub(crate) fn probe_run_options(&self, cwd: PathBuf, model: Option<String>) -> RunOptions {
-        RunOptions {
-            state: self.state.clone(),
-            cwd,
-            snapshot_root: None,
-            session: None,
-            continue_latest: false,
-            prompt: String::new(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: false,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: self.options.config_path.clone(),
-            project_context_override: None,
-            model,
-            reasoning_effort: None,
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            external_agent_delegate: None,
-            include_reasoning: false,
-            mode: RunMode::Default,
-            permission_mode: None,
-            sandbox_override: None,
-            approval_handler: None,
-            clarify_enabled: false,
-            inherited_env: Some(self.options.inherited_env.clone()),
-            agent: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
-        }
+    pub(crate) fn configuration(
+        &self,
+        cwd: PathBuf,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+    ) -> psychevo::Result<Configuration> {
+        let mut query = ConfigurationQuery::new(cwd);
+        query.model = model;
+        query.reasoning_effort = reasoning_effort;
+        query.inherited_env = Some(self.options.inherited_env.clone());
+        self.framework.configuration(query)
     }
 
     pub(crate) fn ready_auth_provider(&self) -> Option<String> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let options = self.probe_run_options(cwd, None);
-        let selected = selected_configured_model(&options).ok().flatten()?;
-        model_catalog_providers(&options)
+        let configuration = self.configuration(cwd, None, None).ok()?;
+        let selected = configuration.selected_model().ok().flatten()?;
+        configuration
+            .model_catalog_providers()
             .ok()?
             .into_iter()
             .find(|provider| provider.provider == selected.provider && provider.fetchable())
@@ -135,7 +98,7 @@ impl PsychevoAcpAgent {
             .unwrap_or(false)
     }
 
-    fn client_terminal_output_enabled(&self, capabilities: &ClientCapabilities) -> bool {
+    pub(super) fn client_terminal_output_enabled(&self, capabilities: &ClientCapabilities) -> bool {
         self.options
             .inherited_env
             .get("PSYCHEVO_ACP_TERMINAL_OUTPUT")
@@ -147,7 +110,7 @@ impl PsychevoAcpAgent {
             })
     }
 
-    fn send_usage_update_from_context(
+    pub(super) fn send_usage_update_from_context(
         &self,
         cx: &ConnectionTo<Client>,
         session_id: SessionId,
@@ -206,39 +169,32 @@ impl PsychevoAcpAgent {
         prompt: &str,
         cx: &ConnectionTo<Client>,
     ) -> Result<SlashPromptAction, Error> {
-        use psychevo::__product::commands::{SlashCommandParse, SlashCommandSurface};
-
         let dynamic = self.dynamic_slash_commands(session);
-        let effect_and_action =
-            match psychevo::__product::commands::parse_slash_command_line(prompt) {
-                SlashCommandParse::NotSlash => return Ok(SlashPromptAction::NotSlashOrPassThrough),
-                SlashCommandParse::Unknown {
-                    command,
-                    args,
-                    original: _,
-                } => {
-                    if let Some(effect) =
-                        psychevo::__product::commands::dynamic_slash_command_effect(
-                            &command, &args, &dynamic,
-                        )
-                    {
-                        (effect, None)
-                    } else {
-                        return Ok(SlashPromptAction::NotSlashOrPassThrough);
-                    }
+        let effect_and_action = match parse_slash_command_line(prompt) {
+            SlashCommandParse::NotSlash => return Ok(SlashPromptAction::NotSlashOrPassThrough),
+            SlashCommandParse::Unknown {
+                command,
+                args,
+                original: _,
+            } => {
+                if let Some(effect) = dynamic_slash_command_effect(&command, &args, &dynamic) {
+                    (effect, None)
+                } else {
+                    return Ok(SlashPromptAction::NotSlashOrPassThrough);
                 }
-                SlashCommandParse::Known(invocation) => {
-                    let active_turn = session.turn.is_some();
-                    let effect = psychevo::__product::commands::slash_invocation_effect(
-                        &invocation,
-                        acp_command_capabilities(),
-                        SlashCommandSurface::Acp,
-                        active_turn,
-                    )
-                    .map_err(|message| Error::invalid_params().data(message))?;
-                    (effect, Some(invocation.spec.action))
-                }
-            };
+            }
+            SlashCommandParse::Known(invocation) => {
+                let active_turn = session.active_turn();
+                let effect = slash_invocation_effect(
+                    &invocation,
+                    acp_command_capabilities(),
+                    SlashCommandSurface::Acp,
+                    active_turn,
+                )
+                .map_err(|message| Error::invalid_params().data(message))?;
+                (effect, Some(invocation.spec.action))
+            }
+        };
 
         self.apply_slash_effect(
             session_id,

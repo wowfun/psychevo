@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::super::specs::{
+    AvailableSlashCommand, AvailableSlashCommands, COMMANDS, CliCommandSpec, CommandArgumentKind,
+    CommandCapability, CommandGroup, CommandOutputKind, CommandStatus, DynamicSlashCommand,
+    PEVO_CLI, SLASH_COMMANDS, SlashCommandAction, SlashCommandEffect, SlashCommandInvocation,
+    SlashCommandParse, SlashCommandSpec, SlashCommandSurface, TUI_SLASH, command_presentation,
+};
 
 pub const CUSTOM_SKILL_COMMAND: SlashCommandSpec = SlashCommandSpec {
     canonical: "/<skill-or-bundle>",

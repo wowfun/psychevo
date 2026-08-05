@@ -1,25 +1,42 @@
-async fn thread_snapshot(
+use psychevo::application::{
+    AgentRelationshipStatus, GatewayActivityRecord, ThreadPresentationBackend,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use crate::gateway::activity::GatewayActivity;
+use crate::gateway::public_api::BoundedTranscriptPage;
+use crate::gateway_now_ms;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
+};
+use psychevo_gateway_protocol::source::{GatewaySource, GatewayThread, GatewayThreadSelector};
+
+use super::super::binding::WebState;
+use super::super::scope_session::{ResolvedScope, gateway_backend_info_for_thread_handle};
+use super::super::thread_application::{
+    authoritative_history_projection, authoritative_history_view,
+};
+use super::pending::prune_pending_actions;
+
+pub(in super::super) async fn thread_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo::Result<Value> {
-    let store = &state.inner.state;
-    let thread = if let Some(thread_id) = thread_id {
-        let forked_from_thread_id = store
-            .session_metadata(thread_id)
-            .await?
-            .and_then(|metadata| {
-                metadata
-                    .get("forkedFromThreadId")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            });
+    let framework_thread = match thread_id {
+        Some(thread_id) => Some(state.inner.framework.resume_thread(thread_id).await?),
+        None => None,
+    };
+    let thread = if let Some(framework_thread) = framework_thread.as_ref() {
+        let summary = framework_thread.summary().await?;
         Some(GatewayThread {
-                id: thread_id.to_string(),
-                backend: gateway_backend_info_for_thread(state, thread_id).await?,
-                source_key: Some(scope.source.source_key()),
-                forked_from_thread_id,
-            })
+            id: framework_thread.id().to_string(),
+            backend: gateway_backend_info_for_thread_handle(framework_thread).await?,
+            source_key: Some(scope.source.source_key()),
+            forked_from_thread_id: summary.forked_from_thread_id,
+        })
     } else {
         None
     };
@@ -27,13 +44,14 @@ async fn thread_snapshot(
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
     let pending_actions = prune_pending_actions(state, &selector, thread_id).await?;
-    let activity = snapshot_activity(state, &scope.source, thread_id).await?;
-    let turn_start_receipts = if let Some(thread_id) = thread_id {
-        store
-            .gateway_turn_start_receipts(thread_id)
+    let activity =
+        snapshot_activity_for_thread(state, &scope.source, framework_thread.as_ref()).await?;
+    let turn_start_receipts = if let Some(framework_thread) = framework_thread.as_ref() {
+        framework_thread
+            .turn_start_receipts()
             .await?
             .into_iter()
-            .map(|receipt| wire::TurnStartReceipt {
+            .map(|receipt| wire::events_transcript::TurnStartReceipt {
                 client_turn_id: receipt.client_turn_id,
                 turn_id: receipt.turn_id,
             })
@@ -43,7 +61,7 @@ async fn thread_snapshot(
     };
     let history_page = match thread_id {
         Some(thread_id) => authoritative_history_projection(state, scope, thread_id).await?,
-        None => crate::BoundedTranscriptPage {
+        None => BoundedTranscriptPage {
             entries: Vec::new(),
             next_cursor: None,
         },
@@ -51,7 +69,7 @@ async fn thread_snapshot(
     let mut history = authoritative_history_view(state, thread_id).await?;
     history.cursor = history_page.next_cursor;
     let history_editing = if let Some(thread_id) = thread_id {
-        thread_history_editing_value(store, thread_id).await?
+        state.inner.gateway.history_editing_state(thread_id).await?
     } else {
         None
     };
@@ -68,52 +86,7 @@ async fn thread_snapshot(
     }))
 }
 
-async fn thread_history_editing_value(
-    store: &psychevo::__product::persistence::StateRuntime,
-    thread_id: &str,
-) -> psychevo::Result<Option<Value>> {
-    let Some(revert) = store.session_revert_state(thread_id).await? else {
-        return Ok(None);
-    };
-    let hidden_entry_count = store
-        .messages_from_count(thread_id, revert.start_seq)
-        .await?;
-    Ok(Some(match revert.kind {
-        SessionRevertKind::WorkspaceUndo { .. } => json!({
-            "kind": "workspaceUndo",
-            "boundaryMessageId": format!("message:{}", revert.start_seq),
-            "hiddenEntryCount": hidden_entry_count,
-            "replacementDraft": null,
-            "availableActions": ["redoWorkspace"],
-        }),
-        SessionRevertKind::ConversationEdit {
-            boundary_message_id,
-            draft,
-        } => json!({
-            "kind": "conversationEdit",
-            "boundaryMessageId": boundary_message_id,
-            "hiddenEntryCount": hidden_entry_count,
-            "replacementDraft": {
-                "parts": draft.into_iter().map(conversation_draft_part_value).collect::<Vec<_>>(),
-            },
-            "availableActions": ["restoreHistory"],
-        }),
-    }))
-}
-
-fn conversation_draft_part_value(part: ConversationDraftPart) -> Value {
-    match part {
-        ConversationDraftPart::Text { text } => json!({"type": "text", "text": text}),
-        ConversationDraftPart::LocalImage { path } => {
-            json!({"type": "image", "input": {"kind": "localPath", "path": path}})
-        }
-        ConversationDraftPart::ImageUrl { url } => {
-            json!({"type": "image", "input": {"kind": "url", "url": url}})
-        }
-    }
-}
-
-async fn thread_snapshot_live(
+pub(in super::super) async fn thread_snapshot_live(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
@@ -121,43 +94,50 @@ async fn thread_snapshot_live(
     thread_snapshot(state, scope, thread_id).await
 }
 
-async fn snapshot_activity(
+pub(in super::super) async fn snapshot_activity(
     state: &WebState,
     source: &GatewaySource,
     thread_id: Option<&str>,
 ) -> psychevo::Result<GatewayActivity> {
+    let thread = match thread_id {
+        Some(thread_id) => Some(state.inner.framework.resume_thread(thread_id).await?),
+        None => None,
+    };
+    snapshot_activity_for_thread(state, source, thread.as_ref()).await
+}
+
+async fn snapshot_activity_for_thread(
+    state: &WebState,
+    source: &GatewaySource,
+    thread: Option<&psychevo::Thread>,
+) -> psychevo::Result<GatewayActivity> {
+    let thread_id = thread.map(psychevo::Thread::id);
     let activity = state.activity(source, thread_id).await;
-    let Some(thread_id) = thread_id else {
+    let Some(thread) = thread else {
         return Ok(activity);
     };
+    let thread_id = thread.id();
     if activity.running || activity.active_turn_id.is_some() || activity.takeover_state.is_some() {
         return Ok(activity);
     }
 
-    if state
-        .inner
-        .state
-
-        .gateway_runtime_binding(thread_id)
-        .await?
-        .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"))
-    {
+    if thread.presentation_backend().await? == ThreadPresentationBackend::Acp {
         return Ok(activity);
     }
 
-    let Some(edge) = state.inner.state.find_agent_edge(thread_id).await? else {
+    let Some(relationship) = thread.agent_relationship().await? else {
         return Ok(activity);
     };
-    if edge.child_session_id != thread_id || edge.status != psychevo::__product::persistence::AgentEdgeStatus::Open
+    if relationship.child_thread_id != thread_id
+        || relationship.status != AgentRelationshipStatus::Open
     {
         return Ok(activity);
     }
 
     let Some(parent_record) = state
         .inner
-        .state
-
-        .active_gateway_activity_for_thread(&edge.parent_session_id)
+        .durability
+        .active_gateway_activity_for_thread(&relationship.parent_thread_id)
         .await?
     else {
         return Ok(activity);
@@ -165,14 +145,16 @@ async fn snapshot_activity(
     if parent_record.lease_expires_at_ms < gateway_now_ms() {
         return Ok(activity);
     }
-    let parent_activity = state.activity(source, Some(&edge.parent_session_id)).await;
+    let parent_activity = state
+        .activity(source, Some(&relationship.parent_thread_id))
+        .await;
     if parent_activity.running {
         return Ok(parent_activity);
     }
     Ok(activity)
 }
 
-async fn replay_running_live_transcript_overlay(
+pub(in super::super) async fn replay_running_live_transcript_overlay(
     state: &WebState,
     thread_id: &str,
     activity: &GatewayActivity,
@@ -187,20 +169,16 @@ async fn replay_running_live_transcript_overlay(
 
     let snapshots = state
         .inner
-        .state
-
-        .list_gateway_live_snapshots_for_thread(thread_id, Some(active_turn_id), 1000)
+        .gateway
+        .live_snapshots_for_thread(thread_id, active_turn_id, 1000)
         .await?;
     for snapshot in snapshots {
-        let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event) else {
-            continue;
-        };
-        apply_live_transcript_overlay(entries, thread_id, active_turn_id, event);
+        apply_live_transcript_overlay(entries, thread_id, active_turn_id, snapshot.event);
     }
     Ok(())
 }
 
-async fn active_turn_projection_window(
+pub(in super::super) async fn active_turn_projection_window(
     state: &WebState,
     thread_id: &str,
     activity: &GatewayActivity,
@@ -213,8 +191,7 @@ async fn active_turn_projection_window(
     };
     let Some(record) = state
         .inner
-        .state
-
+        .durability
         .active_gateway_activity_for_thread(thread_id)
         .await?
     else {
@@ -229,9 +206,7 @@ async fn active_turn_projection_window(
     Ok(Some((active_turn_id.to_string(), first_committed_seq)))
 }
 
-fn first_committed_seq_from_activity_intent(
-    record: &psychevo::__product::persistence::GatewayActivityRecord,
-) -> Option<i64> {
+fn first_committed_seq_from_activity_intent(record: &GatewayActivityRecord) -> Option<i64> {
     record
         .intent
         .as_ref()

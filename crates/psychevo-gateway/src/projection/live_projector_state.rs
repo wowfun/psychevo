@@ -1,19 +1,30 @@
+use std::collections::BTreeMap;
+
+use psychevo_gateway_protocol::events_transcript::{GatewayEvent, TranscriptBlock};
+
+use super::live_helpers::{event_thread_id, live_assistant_entry_id};
+use super::{GatewayLiveProjector, LiveEntryState};
+
 impl GatewayLiveProjector {
-    fn upsert_block(&mut self, segment: usize, block: TranscriptBlock) {
+    pub(super) fn upsert_block(&mut self, segment: usize, block: TranscriptBlock) {
         self.entry_state_mut(segment).upsert_block(block);
     }
 
-    fn replace_blocks(&mut self, segment: usize, blocks: BTreeMap<String, TranscriptBlock>) {
+    pub(super) fn replace_blocks(
+        &mut self,
+        segment: usize,
+        blocks: BTreeMap<String, TranscriptBlock>,
+    ) {
         self.entry_state_mut(segment).replace_blocks(blocks);
     }
 
-    fn entry_state_mut(&mut self, segment: usize) -> &mut LiveEntryState {
+    pub(super) fn entry_state_mut(&mut self, segment: usize) -> &mut LiveEntryState {
         self.entries
             .entry(segment)
             .or_insert_with(|| LiveEntryState::new(segment))
     }
 
-    fn emit_entry_event(
+    pub(super) fn emit_entry_event(
         &mut self,
         turn_id: &str,
         segment: usize,
@@ -45,7 +56,7 @@ impl GatewayLiveProjector {
         }
     }
 
-    fn append_block_text(
+    pub(super) fn append_block_text(
         &mut self,
         turn_id: &str,
         segment: usize,
@@ -70,10 +81,7 @@ impl GatewayLiveProjector {
             .get_mut(&block_id)
             .expect("live text block must exist after initialization");
         live_block.updated_at_ms = updated_at_ms;
-        live_block
-            .body
-            .get_or_insert_default()
-            .push_str(text);
+        live_block.body.get_or_insert_default().push_str(text);
 
         if !entry_started || !block_exists {
             return self.emit_entry_event(turn_id, segment, false, true);
@@ -88,11 +96,11 @@ impl GatewayLiveProjector {
         }
     }
 
-    fn advance_assistant_segment(&mut self) {
+    pub(super) fn advance_assistant_segment(&mut self) {
         self.assistant_segment += 1;
     }
 
-    fn prepare_turn(&mut self, turn_id: &str) {
+    pub(super) fn prepare_turn(&mut self, turn_id: &str) {
         if self.active_turn_id.as_deref() == Some(turn_id) {
             return;
         }
@@ -102,7 +110,7 @@ impl GatewayLiveProjector {
         self.active_turn_id = Some(turn_id.to_string());
     }
 
-    fn reset_turn_state(&mut self) {
+    pub(super) fn reset_turn_state(&mut self) {
         self.active_turn_id = None;
         self.assistant_segment = 0;
         self.entries.clear();
@@ -114,7 +122,7 @@ impl GatewayLiveProjector {
         self.exec_sessions.clear();
     }
 
-    fn attach_thread_id(&mut self, event: &mut GatewayEvent) {
+    pub(super) fn attach_thread_id(&mut self, event: &mut GatewayEvent) {
         if self.thread_id.is_none()
             && let Some(thread_id) = event_thread_id(event)
         {
@@ -178,7 +186,7 @@ impl GatewayLiveProjector {
     }
 }
 
-fn force_event_thread_id(event: &mut GatewayEvent, thread_id: &str) {
+pub(super) fn force_event_thread_id(event: &mut GatewayEvent, thread_id: &str) {
     match event {
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }

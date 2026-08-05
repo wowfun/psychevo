@@ -1,24 +1,15 @@
+#[cfg(test)]
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::fs;
-#[cfg(feature = "native-channels")]
-use std::future::Future;
-use std::path::PathBuf;
-#[cfg(feature = "native-channels")]
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use std::time::Duration;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use futures::future::BoxFuture;
-use psychevo::{Error, Result};
-use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue};
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
-#[cfg(feature = "native-channels")]
-use tokio::sync::mpsc;
 
-use super::{ImAdapter, ImAttachment, ImIdentity, ImInboundMessage, ImOutboundMessage};
+#[cfg(test)]
+use super::{ImAdapter, ImAttachment};
 
 #[cfg(feature = "native-channels")]
 mod feishu_lark;

@@ -1,7 +1,19 @@
+use super::formatting::format_exec_prefix_for_status;
+use crate::tui::app_commands::resolve_tui_turn_admission_target;
+use crate::tui::{
+    AgentMissionRegistration, ConfigScope, ContextSnapshot, FullscreenUi, HelpPanel,
+    MAX_TEAM_PARALLEL_AGENTS_CAP, PathBuf, RefreshThreadContextResult, SessionArtifactKind,
+    SessionExportFormat, SessionExportOptions, SessionExportWriteResult, TuiApp, TurnOutcome,
+    TurnPrinter, UsageQuery, Value, assistant_text_from_message, default_session_export_filename,
+    format_nanodollars, format_slash_help_with_config, json_i64, slash_help_sections_with_config,
+};
+use anyhow::{Result, anyhow};
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
+
 impl TuiApp {
     pub(crate) fn permissions_status_text(&self) -> Result<String> {
-        let options = self.run_options(String::new());
-        let value = permission_rules_value(&options, ConfigScope::Local)?;
+        let value = self.configuration()?.permission_rules(ConfigScope::Local)?;
         let permissions = &value["permissions"];
         let mut lines = vec![
             format!("mode: {}", self.current_mode.as_str()),
@@ -63,11 +75,9 @@ impl TuiApp {
     }
 
     pub(crate) fn sandbox_status_text(&self) -> Result<String> {
-        let options = self.run_options(String::new());
-        Ok(psychevo::__product::platform::sandbox_status_text(
-            &options,
-            self.current_mode,
-        )?)
+        Ok(self
+            .configuration()?
+            .sandbox_status_text(self.current_mode)?)
     }
 
     pub(crate) async fn agents_status_text(&self) -> String {
@@ -89,60 +99,28 @@ impl TuiApp {
             ));
         }
         if let Some(parent) = self.current_session.as_deref() {
-            let control = self.application.agent_control();
-            let value = control.status_value_for(Some(parent), false).await;
-            let running = value
-                .get("agents")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            if running.is_empty() {
+            let control = self.runtime.application().agent_control();
+            let agents = control.status_records(Some(parent), false).await;
+            if agents.is_empty() {
                 sections.push("Running/Completed\nNo child agents for this session.".to_string());
             } else {
-                let control = value.get("control").unwrap_or(&Value::Null);
-                let cap = control
-                    .get("concurrencyCap")
-                    .or_else(|| control.get("concurrency_cap"))
-                    .and_then(Value::as_i64)
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                let spawning = if control
-                    .get("spawningPaused")
-                    .or_else(|| control.get("spawning_paused"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
+                let spawning = if control.spawning_paused(parent) {
                     "spawning paused"
                 } else {
                     "spawning active"
                 };
                 sections.push(format!(
-                    "Running/Completed ({spawning}, cap {cap})\n{}",
-                    running
+                    "Running/Completed ({spawning}, cap {MAX_TEAM_PARALLEL_AGENTS_CAP})\n{}",
+                    agents
                         .iter()
                         .map(|agent| format!(
                             "{}\t{}\t{}\tteam:{}\tmission:{}\tmember:{}",
-                            agent.get("id").and_then(Value::as_str).unwrap_or_default(),
-                            agent
-                                .get("agent_name")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default(),
-                            agent
-                                .get("status")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default(),
-                            agent
-                                .get("team_name")
-                                .and_then(Value::as_str)
-                                .unwrap_or("-"),
-                            agent
-                                .get("mission_run_id")
-                                .and_then(Value::as_str)
-                                .unwrap_or("-"),
-                            agent
-                                .get("team_member_id")
-                                .and_then(Value::as_str)
-                                .unwrap_or("-")
+                            agent.id,
+                            agent.agent_name,
+                            agent.status.as_str(),
+                            agent.team_name.as_deref().unwrap_or("-"),
+                            agent.mission_run_id.as_deref().unwrap_or("-"),
+                            agent.team_member_id.as_deref().unwrap_or("-")
                         ))
                         .collect::<Vec<_>>()
                         .join("\n")
@@ -169,14 +147,9 @@ impl TuiApp {
     }
 
     pub(crate) async fn stats_status_text(&self) -> Result<String> {
-        let report = usage_stats(StatsOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            all: false,
-            days: None,
-            limit: 5,
-        })
-        .await?;
+        let mut query = UsageQuery::new(&self.cwd);
+        query.limit = 5;
+        let report = self.runtime.client().usage(query).await?;
         let totals = report.get("totals").unwrap_or(&Value::Null);
         Ok(format!(
             "sessions: {}  messages: {}  tokens: {}  cost: {}",
@@ -201,18 +174,20 @@ impl TuiApp {
             SessionArtifactKind::Export,
             session_id,
         );
-        let store = &self.state_runtime;
-        Ok(write_session_export(
-            store,
-            session_id,
-            &output,
-            SessionExportOptions {
-                format: options.format,
-                include: options.include.clone(),
-                artifact_kind: SessionArtifactKind::Export,
-            },
-        )
-        .await?)
+        Ok(self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await?
+            .write_export(
+                &output,
+                SessionExportOptions {
+                    format: options.format,
+                    include: options.include.clone(),
+                    artifact_kind: SessionArtifactKind::Export,
+                },
+            )
+            .await?)
     }
 
     pub(crate) async fn write_tui_share(
@@ -229,18 +204,20 @@ impl TuiApp {
             SessionArtifactKind::Share,
             session_id,
         );
-        let store = &self.state_runtime;
-        Ok(write_session_export(
-            store,
-            session_id,
-            &output,
-            SessionExportOptions {
-                format: SessionExportFormat::Markdown,
-                include: options.include.clone(),
-                artifact_kind: SessionArtifactKind::Share,
-            },
-        )
-        .await?)
+        Ok(self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await?
+            .write_export(
+                &output,
+                SessionExportOptions {
+                    format: SessionExportFormat::Markdown,
+                    include: options.include.clone(),
+                    artifact_kind: SessionArtifactKind::Share,
+                },
+            )
+            .await?)
     }
 
     pub(crate) fn resolve_tui_export_path(
@@ -278,43 +255,44 @@ impl TuiApp {
             .current_session
             .clone()
             .ok_or_else(|| anyhow!("no session context yet"))?;
-        Ok(context_snapshot(ContextOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            session,
-            config_path: self.config_path.clone(),
-            inherited_env: Some(self.env_map.clone()),
-        })
-        .await?)
+        Ok(self
+            .runtime
+            .client()
+            .resume_thread(session)
+            .await?
+            .context_snapshot(Some(self.env_map.clone()))
+            .await?)
     }
 
     pub(crate) async fn reload_context_for_current_session(
         &self,
         ui: &FullscreenUi<'_>,
-    ) -> Result<psychevo::__product::runtime::ReloadContextResult> {
-        if ui.running.is_some() {
+    ) -> Result<RefreshThreadContextResult> {
+        if ui.foreground_turn_active() {
             return Err(anyhow!("finish the current turn before reloading context"));
         }
         let session = self
             .current_session
             .clone()
             .ok_or_else(|| anyhow!("no session context yet"))?;
-        Ok(reload_session_context(ReloadContextOptions {
-            state: self.state_runtime.clone(),
-            session,
-            config_path: self.config_path.clone(),
-            mode: Some(self.current_mode),
-            inherited_env: Some(self.env_map.clone()),
-            agent: self.current_agent.clone(),
-            no_agents: self.no_agents,
-            no_skills: self.no_skills,
-            invalidation_reason: "manual_reload".to_string(),
-            notice: None,
-        })
-        .await?)
+        Ok(self
+            .runtime
+            .client()
+            .resume_thread(session)
+            .await?
+            .refresh_context(self.refresh_thread_context_request("manual_reload", None))
+            .await?)
     }
 
     pub(crate) async fn submit_prompt(&mut self, prompt: String) -> Result<()> {
+        self.submit_prompt_with_mission(prompt, None).await
+    }
+
+    pub(crate) async fn submit_prompt_with_mission(
+        &mut self,
+        prompt: String,
+        mission: Option<AgentMissionRegistration>,
+    ) -> Result<()> {
         let stdout = Arc::new(Mutex::new(io::stdout()));
         let turn = Arc::new(Mutex::new(TurnPrinter::new(
             self.renderer,
@@ -325,25 +303,67 @@ impl TuiApp {
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
             writeln!(stdout, "Prompt: {prompt}")?;
         }
-        let turn_for_events = Arc::clone(&turn);
-        let stdout_for_events = Arc::clone(&stdout);
-        let mut request = self.framework_turn_request_with_images(prompt, Vec::new());
-        request.__set_adapter_options(psychevo::AdapterTurnOptions {
-            snapshot_root: Some(self.home.join("snapshots")),
-            run_stream_observer: Some(Arc::new(move |event| {
-                let mut turn = turn_for_events.lock().expect("turn lock poisoned");
-                let mut stdout = stdout_for_events.lock().expect("stdout lock poisoned");
+        let request = self
+            .framework_turn_request_with_images(prompt, Vec::new())
+            .with_framework_context(Some(self.home.join("snapshots")), None, Vec::new(), None);
+        let request = if let Some(mission) = mission {
+            request.with_admission_mission(mission)
+        } else {
+            request
+        };
+        let target = resolve_tui_turn_admission_target(
+            self.runtime.client(),
+            self.current_session.as_deref(),
+            self.force_new_once,
+            &self.cwd,
+        )
+        .await?;
+        let handle = target.start(self.runtime.client(), request).await?;
+        let mut events = handle.events();
+        let render = async {
+            while let Some(event) = events.next().await {
+                let mut turn = turn.lock().expect("turn lock poisoned");
+                let mut stdout = stdout.lock().expect("stdout lock poisoned");
                 let _ = turn.render_event(&event, &mut *stdout);
-            })),
-            ..Default::default()
-        });
-        let thread = self.framework_thread().await?;
-        let result = thread.start_turn(request).await?.wait().await?;
+            }
+        };
+        let (result, ()) = tokio::join!(handle.wait(), render);
+        let result = result?;
         self.last_context_snapshot = result.context_snapshot.clone();
+        let needs_authoritative_reload = turn
+            .lock()
+            .expect("turn lock poisoned")
+            .needs_authoritative_reload();
+        let authoritative_answer = if needs_authoritative_reload {
+            let history = self
+                .runtime
+                .client()
+                .resume_thread(result.thread_id.clone())
+                .await?
+                .history()
+                .latest(Some(200))
+                .await?;
+            history
+                .items
+                .iter()
+                .rev()
+                .find_map(|item| {
+                    serde_json::to_value(&item.message)
+                        .ok()
+                        .and_then(|message| assistant_text_from_message(&message))
+                })
+                .unwrap_or_else(|| result.final_answer.clone())
+        } else {
+            String::new()
+        };
         {
             let mut turn = turn.lock().expect("turn lock poisoned");
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
-            turn.finish(&mut *stdout)?;
+            if needs_authoritative_reload {
+                turn.finish_after_authoritative_reload(&authoritative_answer, &mut *stdout)?;
+            } else {
+                turn.finish(&mut *stdout)?;
+            }
         }
         self.current_session = Some(result.thread_id);
         self.reset_live_agent_reload_poll();

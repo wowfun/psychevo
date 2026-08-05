@@ -1,4 +1,18 @@
-use super::*;
+use std::fmt;
+use std::sync::{Arc, Mutex};
+
+use serde_json::Value;
+use tokio::sync::Notify;
+
+use super::event_log::EventLog;
+use super::{
+    DEFAULT_EVENT_CAPACITY, InteractionResponse, InteractionResponseReceipt, PendingTerminal,
+    QueuedSteerId, SharedTurnCompletion, TurnCompletion, TurnEvent, TurnEventStream, TurnHandle,
+    TurnOutcome, TurnReceipt, TurnResult, gateway_terminal_facts,
+};
+use crate::state::{GatewayTurnTerminalInput, StateRuntime};
+use crate::types::run_control;
+use crate::{Error, Result};
 
 impl PendingTerminal {
     pub(super) fn failed(receipt: TurnReceipt, message: Arc<str>) -> Self {
@@ -11,6 +25,7 @@ impl PendingTerminal {
             receipt,
             completion: Err(message),
             completed_at_ms: psychevo_agent_core::now_ms(),
+            boundary_session_seq: None,
             last_error: String::new(),
         }
     }
@@ -41,11 +56,19 @@ impl PendingTerminal {
             receipt,
             completion: Ok(Arc::new(result)),
             completed_at_ms: psychevo_agent_core::now_ms(),
+            boundary_session_seq: None,
             last_error: String::new(),
         }
     }
 
-    pub(super) async fn persist(&self, state: &StateRuntime) -> Result<()> {
+    pub(super) async fn persist(&mut self, state: &StateRuntime) -> Result<()> {
+        if self.boundary_session_seq.is_none() {
+            self.boundary_session_seq = Some(
+                state
+                    .latest_message_session_seq(&self.receipt.thread_id)
+                    .await?,
+            );
+        }
         match &self.completion {
             Ok(result) => {
                 let framework_result = serde_json::to_value(result.as_ref())?;
@@ -60,6 +83,7 @@ impl PendingTerminal {
                             error_message: None,
                             started_at_ms: None,
                             completed_at_ms: self.completed_at_ms,
+                            boundary_session_seq: self.boundary_session_seq,
                             metadata: Some(serde_json::json!({
                                 "source": "framework",
                                 "frameworkReceipt": self.receipt,
@@ -76,11 +100,12 @@ impl PendingTerminal {
                         GatewayTurnTerminalInput {
                             turn_id: &self.receipt.turn_id,
                             thread_id: &self.receipt.thread_id,
-                            status: "failed",
-                            outcome: Some("failed"),
+                            status: super::FrameworkTurnTerminalStatus::Failed,
+                            outcome: Some(super::FrameworkTurnTerminalOutcome::Failed),
                             error_message: Some(message.as_ref()),
                             started_at_ms: None,
                             completed_at_ms: self.completed_at_ms,
+                            boundary_session_seq: self.boundary_session_seq,
                             metadata: Some(serde_json::json!({
                                 "source": "framework",
                                 "frameworkReceipt": self.receipt,
@@ -226,34 +251,48 @@ impl TurnHandle {
         &self,
         input: impl Into<String>,
     ) -> std::result::Result<(), psychevo_agent_core::ControlInputError> {
-        self.__steer(input).map(|_| ())
+        self.queue_steer(input).map(|_| ())
     }
 
-    #[doc(hidden)]
-    pub fn __steer(
+    pub fn queue_steer(
         &self,
         input: impl Into<String>,
-    ) -> std::result::Result<
-        psychevo_agent_core::PendingInputId,
-        psychevo_agent_core::ControlInputError,
-    > {
-        self.control
-            .steer_user_message(psychevo_agent_core::user_text_message(input))
+    ) -> std::result::Result<QueuedSteerId, psychevo_agent_core::ControlInputError> {
+        self.queue_steer_message(psychevo_agent_core::user_text_message(input))
     }
 
-    #[doc(hidden)]
-    pub fn __cancel_steer(&self, id: psychevo_agent_core::PendingInputId) -> bool {
-        self.control.cancel_pending_user_message(id)
+    pub fn queue_steer_message(
+        &self,
+        message: psychevo_agent_core::Message,
+    ) -> std::result::Result<QueuedSteerId, psychevo_agent_core::ControlInputError> {
+        self.control.steer_user_message(message).map(QueuedSteerId)
+    }
+
+    pub fn update_queued_steer(
+        &self,
+        id: QueuedSteerId,
+        message: psychevo_agent_core::Message,
+    ) -> std::result::Result<(), psychevo_agent_core::ControlInputError> {
+        self.control.update_pending_user_message(id.0, message)
+    }
+
+    pub fn cancel_queued_steer(&self, id: QueuedSteerId) -> bool {
+        self.control.cancel_pending_user_message(id.0)
+    }
+
+    pub fn cancel_all_queued_steers(&self) -> usize {
+        self.control.cancel_all_pending_user_messages()
+    }
+
+    pub fn inject_user_message(
+        &self,
+        message: psychevo_agent_core::Message,
+    ) -> std::result::Result<(), psychevo_agent_core::ControlInputError> {
+        self.control.inject_user_message(message)
     }
 
     pub fn interrupt(&self) {
         self.control.abort();
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __control_handle(&self) -> crate::types::RunControlHandle {
-        self.control.clone()
     }
 
     pub async fn respond(

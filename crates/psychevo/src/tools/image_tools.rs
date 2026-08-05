@@ -1,8 +1,16 @@
-use psychevo_ai::{
-    DeploymentConfig, Fake, ImageModel, ImageRequest, MediaInput, OpenAi, SecretValue,
-};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
-use super::*;
+use futures::future::BoxFuture;
+use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_ai::{
+    AbortSignal, DeploymentConfig, Fake, ImageModel, ImageRequest, MediaInput, OpenAi, SecretValue,
+};
+use serde_json::{Value, json};
+
+use super::ToolRuntimeContext;
+use crate::config::ResolvedImageGenerationConfig;
+use crate::error::{Error, Result};
 
 pub(crate) const MAX_IMAGE_TOOL_INPUTS: usize = 5;
 
@@ -384,6 +392,8 @@ fn view_image_model_text(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 

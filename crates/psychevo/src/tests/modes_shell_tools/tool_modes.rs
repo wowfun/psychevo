@@ -1,7 +1,25 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::exec_sessions::{
+    configured_user_shell_context, configured_user_shell_environment, process_exists,
+    shell_quote_path, wait_for_pid_file, wait_for_process_exit,
+};
+use crate::state::StateRuntime;
+use crate::tests::assert_first_party_tool_declaration_quality;
+use crate::tools::tool_names_for_mode;
+use crate::types::{
+    ClarifyAnswer, ClarifyResponse, ClarifyResult, RunMode, RunStreamEvent, RunStreamSink,
+    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, run_control,
+};
+use crate::user_shell::run_user_shell_command_streaming_controlled;
+use psychevo_agent_core::Message;
+use psychevo_ai::Outcome;
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    fs,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn run_mode_tool_names_enforce_plan_read_only_surface() {
@@ -63,7 +81,7 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
         crate::tools::ToolRuntimeContext {
             task_id: "exec-path-test".to_string(),
             lsp: crate::config::LspConfig::default(),
-            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: None,
             env: BTreeMap::new(),
@@ -195,7 +213,7 @@ pub(crate) async fn exec_command_provider_schema_replaces_bash() {
 pub(crate) async fn exec_command_rejects_model_selected_shells() {
     let temp = tempdir().expect("temp");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let error = crate::tools::exec_command_tool_impl(
+    let error = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         temp.path().to_path_buf(),
         false,
         json!({"cmd": "printf safe", "shell": "./workspace-wrapper"}),
@@ -455,7 +473,7 @@ pub(crate) async fn clarify_tool_validates_schema_and_is_sequential() {
             "unknown field",
         ),
     ] {
-        let output = crate::tools::clarify_tool_impl(args, None, None).await;
+        let output = crate::tools::clarify::clarify_tool_impl(args, None, None).await;
         assert!(output.is_error);
         let error = output.json["error"].as_str().expect("error");
         assert!(
@@ -476,7 +494,7 @@ pub(crate) async fn clarify_tool_round_trips_answer_and_rejects_late_response() 
             .push(event);
     });
     let (handle, _control) = run_control();
-    let fut = crate::tools::clarify_tool_impl(
+    let fut = crate::tools::clarify::clarify_tool_impl(
         valid_clarify_args(),
         Some(handle.clarify.clone()),
         Some(stream),
@@ -546,7 +564,7 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
             .push(event);
     });
     let (handle, _control) = run_control();
-    let task = tokio::spawn(crate::tools::clarify_tool_impl(
+    let task = tokio::spawn(crate::tools::clarify::clarify_tool_impl(
         valid_clarify_args(),
         Some(handle.clarify.clone()),
         Some(stream),
@@ -585,7 +603,7 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
     let (timeout_handle, _control) = run_control();
     let timeout_output = tokio::time::timeout(
         Duration::from_secs(2),
-        crate::tools::clarify_tool_impl(
+        crate::tools::clarify::clarify_tool_impl(
             valid_clarify_args(),
             Some(timeout_handle.clarify.clone()),
             Some(timeout_stream),
@@ -612,7 +630,7 @@ pub(crate) async fn clarify_tool_cancel_and_timeout_emit_resolution() {
 
 #[tokio::test]
 pub(crate) async fn clarify_tool_returns_model_errors_for_invalid_or_unavailable_requests() {
-    let invalid = crate::tools::clarify_tool_impl(
+    let invalid = crate::tools::clarify::clarify_tool_impl(
         json!({
             "questions": [{
                 "id": "TargetMode",
@@ -636,7 +654,8 @@ pub(crate) async fn clarify_tool_returns_model_errors_for_invalid_or_unavailable
             .contains("unknown field")
     );
 
-    let unavailable = crate::tools::clarify_tool_impl(valid_clarify_args(), None, None).await;
+    let unavailable =
+        crate::tools::clarify::clarify_tool_impl(valid_clarify_args(), None, None).await;
     assert!(unavailable.is_error);
     assert_eq!(
         unavailable.json["error"],
@@ -674,6 +693,7 @@ pub(crate) async fn user_shell_streams_exec_command_events_without_provider_conf
         UserShellOptions {
             cwd: cwd.clone(),
             command: "printf 'shell ok\\n'".to_string(),
+            environment: std::env::vars().collect(),
             context: None,
             inject_into: None,
         },
@@ -708,6 +728,33 @@ pub(crate) async fn user_shell_streams_exec_command_events_without_provider_conf
 }
 
 #[tokio::test]
+pub(crate) async fn user_shell_nonzero_exit_is_a_failed_result() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let stream: RunStreamSink = Arc::new(|_| {});
+    let (_handle, control) = run_control();
+
+    let result = run_user_shell_command_streaming_controlled(
+        UserShellOptions {
+            cwd,
+            command: "exit 7".to_string(),
+            environment: std::env::vars().collect(),
+            context: None,
+            inject_into: None,
+        },
+        stream,
+        control,
+    )
+    .await
+    .expect("typed user Shell result");
+
+    assert_eq!(result.outcome, Outcome::Failed);
+    assert_eq!(result.tool_failures, 1);
+    assert_eq!(result.result["exit_code"].as_i64(), Some(7));
+}
+
+#[tokio::test]
 pub(crate) async fn user_shell_abort_returns_aborted_result() {
     let temp = tempdir().expect("temp");
     let cwd = temp.path().join("work");
@@ -720,6 +767,7 @@ pub(crate) async fn user_shell_abort_returns_aborted_result() {
         UserShellOptions {
             cwd,
             command: "sleep 5".to_string(),
+            environment: std::env::vars().collect(),
             context: None,
             inject_into: None,
         },
@@ -747,6 +795,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
         UserShellOptions {
             cwd: cwd.clone(),
             command: "printf 'context-ok\\n'".to_string(),
+            environment: configured_user_shell_environment(&temp),
             context: Some(context),
             inject_into: None,
         },
@@ -806,6 +855,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
         UserShellOptions {
             cwd,
             command: "printf 'again\\n'".to_string(),
+            environment: configured_user_shell_environment(&temp),
             context: Some(resume_context),
             inject_into: None,
         },
@@ -847,6 +897,7 @@ pub(crate) async fn user_shell_reports_injection_failure_without_failing_complet
         UserShellOptions {
             cwd,
             command: "printf 'completed\\n'".to_string(),
+            environment: configured_user_shell_environment(&temp),
             context: Some(context),
             inject_into: Some(inject_handle),
         },
@@ -894,10 +945,6 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
         model: None,
         reasoning_effort: None,
         mode: RunMode::Default,
-        inherited_env: Some(BTreeMap::from([(
-            "HOME".to_string(),
-            temp.path().to_string_lossy().to_string(),
-        )])),
     };
     let stream: RunStreamSink = Arc::new(|_| {});
     let (_handle, control) = run_control();
@@ -905,6 +952,10 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
         UserShellOptions {
             cwd,
             command: "touch marker".to_string(),
+            environment: BTreeMap::from([(
+                "HOME".to_string(),
+                temp.path().to_string_lossy().to_string(),
+            )]),
             context: Some(context),
             inject_into: None,
         },
@@ -934,6 +985,7 @@ pub(crate) async fn user_shell_context_records_bounded_truncated_output() {
         UserShellOptions {
             cwd,
             command: "yes x | head -c 60000".to_string(),
+            environment: configured_user_shell_environment(&temp),
             context: Some(context),
             inject_into: None,
         },
@@ -964,12 +1016,15 @@ pub(crate) async fn exec_command_abort_kills_background_child_process_group() {
     let marker = cwd.join("bg.pid");
     let command = format!("sleep 60 & echo $! > {}; wait", shell_quote_path(&marker));
     let (handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let task = tokio::spawn(crate::tools::run_exec_command_for_user_shell(
-        cwd,
-        command,
-        crate::sandbox::SandboxPolicy::disabled(),
-        receivers.abort_signal(),
-    ));
+    let task = tokio::spawn(
+        crate::tools::exec_command::sessions::session_manager::run_exec_command_for_user_shell(
+            cwd,
+            command,
+            std::env::vars().collect(),
+            crate::sandbox::SandboxPolicy::disabled(),
+            receivers.abort_signal(),
+        ),
+    );
 
     let pid = wait_for_pid_file(&marker).await;
     assert!(process_exists(pid), "background child did not start");
@@ -999,7 +1054,7 @@ pub(crate) async fn exec_command_yields_long_running_session() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let result = crate::tools::exec_command_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({"cmd": "sleep 1; printf done", "yield_time_ms": 250}),

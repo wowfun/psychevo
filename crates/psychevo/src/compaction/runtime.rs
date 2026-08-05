@@ -18,11 +18,13 @@ use crate::error::{Error, Result};
 use crate::paths::canonical_cwd;
 use crate::prompt_templates;
 use crate::state::StateRuntime;
-use crate::store::{
-    SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord,
-};
+use crate::store::{SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord};
 use crate::thread_lineage::side_conversation_session_source;
 use crate::types::{ImageInput, RunMode, RunOptions};
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
 
 pub(crate) const SUMMARY_TOOL_TEXT_LIMIT: usize = 4_000;
 pub(crate) const SUMMARY_MESSAGE_TEXT_LIMIT: usize = 12_000;
@@ -187,16 +189,17 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         });
     };
     if let Some(runtime) = &hook_runtime {
-        let pre = runtime.run_pre_compact(&json!({
-            "session_id": summary.id.clone(),
-            "reason": options.reason.as_str(),
-            "trigger": options.reason.as_str(),
-            "cwd": cwd.clone(),
-            "first_kept_session_seq": first_kept_session_seq,
-            "tokens_before": preparation.tokens_before,
-            "tokens_after_without_summary": preparation.tokens_after_without_summary,
-        }))
-        .await;
+        let pre = runtime
+            .run_pre_compact(&json!({
+                "session_id": summary.id.clone(),
+                "reason": options.reason.as_str(),
+                "trigger": options.reason.as_str(),
+                "cwd": cwd.clone(),
+                "first_kept_session_seq": first_kept_session_seq,
+                "tokens_before": preparation.tokens_before,
+                "tokens_after_without_summary": preparation.tokens_after_without_summary,
+            }))
+            .await;
         if let Some(reason) = pre.stop_reason {
             return Ok(skipped_result(&summary.id, options.reason, &reason));
         }
@@ -224,41 +227,43 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     let tokens_after = preparation
         .tokens_after_without_summary
         .saturating_add(summary_tokens);
-    let record = store.append_session_compaction(SessionCompactionInput {
-        session_id: summary.id.clone(),
-        reason: options.reason.as_str().to_string(),
-        summary_text: summary_text.clone(),
-        first_kept_session_seq,
-        created_after_session_seq: records
-            .last()
-            .map(|record| record.session_seq)
-            .unwrap_or(first_kept_session_seq),
-        tokens_before: Some(preparation.tokens_before),
-        tokens_after: Some(tokens_after),
-        summary_provider: compression.provider.provider.clone(),
-        summary_model: compression.provider.model.clone(),
-        instructions: options.instructions.clone(),
-        metadata: Some(json!({
-            "model_configured": compression.model_configured,
-            "threshold_percent": compression_config.threshold_percent,
-            "reserve_tokens": compression_config.reserve_tokens,
-            "keep_recent_tokens": compression_config.keep_recent_tokens,
-            "previous_compaction_id": previous.as_ref().map(|record| record.id),
-        })),
-    })
-    .await?;
+    let record = store
+        .append_session_compaction(SessionCompactionInput {
+            session_id: summary.id.clone(),
+            reason: options.reason.as_str().to_string(),
+            summary_text: summary_text.clone(),
+            first_kept_session_seq,
+            created_after_session_seq: records
+                .last()
+                .map(|record| record.session_seq)
+                .unwrap_or(first_kept_session_seq),
+            tokens_before: Some(preparation.tokens_before),
+            tokens_after: Some(tokens_after),
+            summary_provider: compression.provider.provider.clone(),
+            summary_model: compression.provider.model.clone(),
+            instructions: options.instructions.clone(),
+            metadata: Some(json!({
+                "model_configured": compression.model_configured,
+                "threshold_percent": compression_config.threshold_percent,
+                "reserve_tokens": compression_config.reserve_tokens,
+                "keep_recent_tokens": compression_config.keep_recent_tokens,
+                "previous_compaction_id": previous.as_ref().map(|record| record.id),
+            })),
+        })
+        .await?;
     let post_compact_warning = if let Some(runtime) = &hook_runtime {
-        let post = runtime.run_post_compact(&json!({
-            "session_id": summary.id.clone(),
-            "reason": options.reason.as_str(),
-            "trigger": options.reason.as_str(),
-            "cwd": cwd.clone(),
-            "checkpoint_id": record.id,
-            "first_kept_session_seq": record.first_kept_session_seq,
-            "tokens_before": record.tokens_before,
-            "tokens_after": record.tokens_after,
-        }))
-        .await;
+        let post = runtime
+            .run_post_compact(&json!({
+                "session_id": summary.id.clone(),
+                "reason": options.reason.as_str(),
+                "trigger": options.reason.as_str(),
+                "cwd": cwd.clone(),
+                "checkpoint_id": record.id,
+                "first_kept_session_seq": record.first_kept_session_seq,
+                "tokens_before": record.tokens_before,
+                "tokens_after": record.tokens_after,
+            }))
+            .await;
         (!post.response.diagnostics.is_empty()).then(|| {
             format!(
                 "PostCompact warnings: {}",
@@ -522,12 +527,12 @@ pub(crate) async fn generate_summary(
         let chunk_start = unit_index;
         let mut chunk_chars = 0u64;
         while unit_index < units.len() {
-            let candidate_chars =
-                fixed_user_chars.saturating_add(chunk_chars).saturating_add(units[unit_index].chars);
+            let candidate_chars = fixed_user_chars
+                .saturating_add(chunk_chars)
+                .saturating_add(units[unit_index].chars);
             let candidate_tokens =
                 system_tokens.saturating_add(estimate_char_count_tokens(candidate_chars));
-            if candidate_tokens <= budget.input_tokens
-            {
+            if candidate_tokens <= budget.input_tokens {
                 chunk_chars = chunk_chars.saturating_add(units[unit_index].chars);
                 unit_index += 1;
                 continue;
@@ -535,8 +540,7 @@ pub(crate) async fn generate_summary(
             if unit_index == chunk_start {
                 return Err(Error::Message(format!(
                     "compaction atomic message unit at session_seq {} exceeds the {} token input budget",
-                    units[unit_index].first_session_seq,
-                    budget.input_tokens
+                    units[unit_index].first_session_seq, budget.input_tokens
                 )));
             }
             break;
@@ -558,9 +562,8 @@ pub(crate) async fn generate_summary(
         );
         generated_any = true;
     }
-    previous_summary.ok_or_else(|| {
-        Error::Message("compaction did not produce a rolling summary".to_string())
-    })
+    previous_summary
+        .ok_or_else(|| Error::Message("compaction did not produce a rolling summary".to_string()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -610,10 +613,7 @@ pub(crate) fn compaction_generation_budget(
     })
 }
 
-fn validate_fixed_summary_input(
-    fixed_tokens: u64,
-    input_tokens: u64,
-) -> Result<()> {
+fn validate_fixed_summary_input(fixed_tokens: u64, input_tokens: u64) -> Result<()> {
     if fixed_tokens <= input_tokens {
         return Ok(());
     }
@@ -702,8 +702,7 @@ fn rendered_summary_units(messages: &[SessionMessageRecord]) -> Vec<RenderedSumm
 
 fn render_summary_record(record: &SessionMessageRecord) -> String {
     #[cfg(test)]
-    SUMMARY_RECORD_RENDER_COUNT
-        .with(|count| count.set(count.get().saturating_add(1)));
+    SUMMARY_RECORD_RENDER_COUNT.with(|count| count.set(count.get().saturating_add(1)));
     format!(
         "\n[session_seq={} role={}]\n{}\n",
         record.session_seq,
@@ -828,9 +827,7 @@ fn summary_user_prompt_from_rendered(
         String::new()
     };
     let previous_summary_section = if let Some(previous_summary) = previous_summary {
-        prompt_templates::compaction_summary_previous_section(&redact_secrets(
-            previous_summary,
-        ))
+        prompt_templates::compaction_summary_previous_section(&redact_secrets(previous_summary))
     } else {
         String::new()
     };
@@ -857,13 +854,15 @@ pub(crate) fn message_summary_text(message: &Message) -> String {
                 AssistantBlock::ProviderTool(call) => {
                     Some(format!("Hosted {} ({})", call.name, call.status))
                 }
-                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => {
-                    Some(format!("Source: {}", source.url))
-                }
-                AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => {
-                    Some(format!("Image source: {}", source.source_website_url))
-                }
-                AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { .. }) => None,
+                AssistantBlock::Source {
+                    source: psychevo_ai::AssistantSource::UrlCitation(source),
+                } => Some(format!("Source: {}", source.url)),
+                AssistantBlock::Source {
+                    source: psychevo_ai::AssistantSource::Image(source),
+                } => Some(format!("Image source: {}", source.source_website_url)),
+                AssistantBlock::Source {
+                    source: psychevo_ai::AssistantSource::Provider { .. },
+                } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),

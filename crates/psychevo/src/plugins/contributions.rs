@@ -170,9 +170,7 @@ fn add_static_contributions(
     for agent in agent_files_from_roots(&manifest.agent_roots) {
         assembly.agent_inputs.push(agent);
     }
-    if let Some(source) =
-        hook_source_from_manifest(record, manifest, policy, env, worker_runtime)
-    {
+    if let Some(source) = hook_source_from_manifest(record, manifest, policy, env, worker_runtime) {
         assembly.hook_sources.push(source);
     }
     for server in &manifest.mcp_servers {

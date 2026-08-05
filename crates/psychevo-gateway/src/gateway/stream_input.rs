@@ -1,64 +1,18 @@
-fn thread_key(thread_id: &str) -> String {
+use psychevo::application::{StoredEditableInputEnvelope, StoredEditableInputPart};
+use psychevo::{ImageInput, PromptDisplayMetadata};
+
+use super::agent_session::{AgentErrorStage, agent_session_error};
+use psychevo_gateway_protocol::source::{GatewayImageInput, GatewayInputPart, SourceKey};
+
+pub(super) fn thread_key(thread_id: &str) -> String {
     format!("thread:{thread_id}")
 }
 
-fn source_key_key(source_key: &SourceKey) -> String {
+pub(super) fn source_key_key(source_key: &SourceKey) -> String {
     format!("source:{}", source_key.0)
 }
 
-fn wrap_stream(
-    stream: Option<RunStreamSink>,
-    event_sink: Option<GatewayEventEmitter>,
-    turn_id: String,
-    thread_id: Option<String>,
-) -> Option<RunStreamSink> {
-    match (stream, event_sink) {
-        (None, None) => None,
-        (stream, event_sink) => {
-            let projector = Arc::new(Mutex::new(GatewayLiveProjector::new(thread_id)));
-            Some(Arc::new(move |event: RunStreamEvent| {
-                if let Some(event_sink) = &event_sink
-                    && let Some(event) = projector
-                        .lock()
-                        .expect("gateway live projector poisoned")
-                        .project(&turn_id, &event)
-                    // Adapter stream terminals are useful as an internal
-                    // projection fence, but the Framework Application owns the one
-                    // authoritative public terminal after persistence and
-                    // delivery classification have completed.
-                    && !matches!(
-                        event,
-                        GatewayEvent::TurnStarted { .. } | GatewayEvent::TurnCompleted { .. }
-                    )
-                {
-                    let fields = journey_profile::gateway_profile_event_fields(&event);
-                    gateway_profile_mark(
-                        "gateway_event_emitted",
-                        Some(&turn_id),
-                        match &event {
-                            GatewayEvent::EntryStarted { entry, .. }
-                            | GatewayEvent::EntryUpdated { entry, .. }
-                            | GatewayEvent::EntryCompleted { entry, .. } => {
-                                Some(entry.thread_id.as_str())
-                            }
-                            GatewayEvent::EntryBlockTextDelta { thread_id, .. } => {
-                                thread_id.as_deref()
-                            }
-                            _ => None,
-                        },
-                        fields,
-                    );
-                    let _ = event_sink.emit(event);
-                }
-                if let Some(stream) = &stream {
-                    stream(event);
-                }
-            }))
-        }
-    }
-}
-
-fn framework_input_parts(
+pub(super) fn framework_input_parts(
     input: &[GatewayInputPart],
 ) -> psychevo::Result<(String, Vec<ImageInput>, PromptDisplayMetadata, bool)> {
     let mut prompt_parts = Vec::new();

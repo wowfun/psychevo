@@ -1,5 +1,19 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use psychevo_gateway_protocol as wire;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
+
+use crate::gateway_now_ms;
+use crate::im::adapters::wechat_ilink_error_code_from_message;
+use psychevo_gateway_protocol::source::SourceKey;
+
+use super::WECHAT_LOGIN_GRACE_MS;
+use super::paths::redact_channel_error;
 
 const CHANNEL_INTERACTION_TOKEN_TTL_MS: i64 = 10 * 60 * 1_000;
 
@@ -79,7 +93,7 @@ impl ChannelRuntimeState {
         }
     }
 
-    pub(in crate::server) fn runner_view(&self, id: &str) -> wire::ChannelRunnerView {
+    pub(in crate::server) fn runner_view(&self, id: &str) -> wire::channels::ChannelRunnerView {
         let record = self
             .inner
             .lock()
@@ -88,7 +102,7 @@ impl ChannelRuntimeState {
             .get(id)
             .cloned()
             .unwrap_or_else(ChannelRunnerRecord::stopped);
-        wire::ChannelRunnerView {
+        wire::channels::ChannelRunnerView {
             state: record.state,
             reason: record.reason,
             last_poll_at_ms: record.last_poll_at_ms,

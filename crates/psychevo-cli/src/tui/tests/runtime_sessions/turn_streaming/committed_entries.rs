@@ -1,3 +1,15 @@
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+use crate::tui::tests::fixtures::{test_app, test_shell_running_control};
+use crate::tui::{
+    FullscreenUi, GatewayEvent, RunningTask, RunningTurn, RunningTurnEvents, SlashCommand,
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole, TranscriptKind,
+};
+
+use super::support::{gateway_test_entry, numbered_lines};
+
 #[tokio::test]
 pub(crate) async fn gateway_yielded_exec_entry_keeps_original_command_title() {
     let temp = tempdir().expect("temp");
@@ -194,7 +206,7 @@ pub(crate) async fn committed_turn_entries_keep_turn_start_notice_before_answer_
     );
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     let task = tokio::spawn(async { std::future::pending().await });
     ui.running = Some(RunningTurn {
         session_id: Some("session-1".to_string()),
@@ -210,10 +222,12 @@ pub(crate) async fn committed_turn_entries_keep_turn_start_notice_before_answer_
         GatewayEvent::TurnStarted {
             thread_id: Some("session-1".to_string()),
             turn_id: "turn-1".to_string(),
-            selected_skills: vec![psychevo_gateway::GatewaySelectedSkill {
-                name: "hackernews-daily".to_string(),
-                path: "/tmp/hackernews-daily/SKILL.md".to_string(),
-            }],
+            selected_skills: vec![
+                psychevo_gateway_protocol::events_transcript::GatewaySelectedSkill {
+                    name: "hackernews-daily".to_string(),
+                    path: "/tmp/hackernews-daily/SKILL.md".to_string(),
+                },
+            ],
         },
     );
     app.handle_fullscreen_command(&mut ui, SlashCommand::Status)
@@ -546,57 +560,6 @@ pub(crate) async fn committed_reasoning_entry_uses_middle_fold_preview() {
     assert!(row.text.contains("line 9"), "{}", row.text);
     assert!(row.text.contains("line 12"), "{}", row.text);
     assert!(!row.text.contains("line 8"), "{}", row.text);
-}
-
-fn gateway_test_entry(
-    id: &str,
-    kind: TranscriptBlockKind,
-    status: TranscriptBlockStatus,
-    title: Option<&str>,
-    text: &str,
-) -> TranscriptEntry {
-    TranscriptEntry {
-        id: id.to_string(),
-        thread_id: "session-1".to_string(),
-        turn_id: Some("turn-1".to_string()),
-        message_seq: None,
-        role: TranscriptEntryRole::Assistant,
-        status,
-        source: "runtime.stream".to_string(),
-        blocks: vec![TranscriptBlock {
-            id: format!("{id}:block"),
-            kind,
-            status,
-            order: 0,
-            phase_ordinal: None,
-            source: "runtime.stream".to_string(),
-            title: title.map(str::to_string),
-            preview: Some(text.to_string()),
-            detail: Some(text.to_string()),
-            body: Some(text.to_string()),
-            artifact_ids: Vec::new(),
-            metadata: if title == Some("Preamble") {
-                Some(serde_json::json!({"projection": "assistant_preamble"}))
-            } else {
-                None
-            },
-            result: None,
-            created_at_ms: 1,
-            updated_at_ms: 1,
-        }],
-        metadata: None,
-        usage: None,
-        accounting: None,
-        created_at_ms: 1,
-        updated_at_ms: 1,
-    }
-}
-
-fn numbered_lines(start: usize, end: usize) -> String {
-    (start..=end)
-        .map(|index| format!("line {index}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn gateway_tool_entry(

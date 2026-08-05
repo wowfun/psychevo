@@ -1,3 +1,30 @@
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
+
+use psychevo_agent_core::ToolBinding;
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use tokio::sync::watch;
+use uuid::Uuid;
+
+use crate::agents::catalog_surface::default_subagent_entrypoints;
+use crate::agents::definition_policy::{agent_allows_tool, built_in_agent, parse_agent_file};
+use crate::agents::mailbox_tools::{ListAgentsTool, now_ms};
+use crate::agents::{
+    AgentCatalog, AgentDefinition, AgentInvocationRole, AgentPermissionMode, AgentRunRecord,
+    AgentRunStatus, AgentSource, AgentSupervisor, AgentToolPolicy, agent_catalog_for_prompt,
+    agent_project_instructions_enabled, apply_agent_tool_policy, close_agent_id,
+    effective_run_mode, narrow_permission_mode_for_agent, resume_agent_id,
+    skill_catalog_visible_for_tools, view_agent_value,
+};
+use crate::state::StateRuntime;
+use crate::store::AgentEdgeStatus;
+use crate::types::{PermissionMode, RunMode};
+
+use super::super::{fake_language_model, test_agent_tool_context, test_tool};
+
 #[tokio::test]
 pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     let tmp = TempDir::new().expect("tmp");
@@ -5,7 +32,8 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let id = format!("list-agent-{}", Uuid::now_v7());
     let context = test_agent_tool_context(
         &tmp,
@@ -19,27 +47,27 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     supervisor
         .register(
             AgentRunRecord {
-                    id: id.clone(),
-                    task_name: Some("worker_task".to_string()),
-                    agent_name: "worker".to_string(),
-                    task: "List task\nraw prompt detail".to_string(),
-                    parent_session_id: parent.clone(),
-                    child_session_id: Some(format!("child-{id}")),
-                    role: AgentInvocationRole::Subagent,
-                    background: true,
-                    status: AgentRunStatus::Running,
-                    edge_status: Some(AgentEdgeStatus::Open),
-                    started_at_ms: now_ms(),
-                    ended_at_ms: None,
-                    outcome: None,
-                    final_answer: None,
-                    error: None,
-                    effective_max_spawn_depth: Some(0),
-                    team_run_id: None,
-                    mission_run_id: None,
-                    team_name: None,
-                    team_member_id: None,
-                    agent_path: None,
+                id: id.clone(),
+                task_name: Some("worker_task".to_string()),
+                agent_name: "worker".to_string(),
+                task: "List task\nraw prompt detail".to_string(),
+                parent_session_id: parent.clone(),
+                child_session_id: Some(format!("child-{id}")),
+                role: AgentInvocationRole::Subagent,
+                background: true,
+                status: AgentRunStatus::Running,
+                edge_status: Some(AgentEdgeStatus::Open),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                outcome: None,
+                final_answer: None,
+                error: None,
+                effective_max_spawn_depth: Some(0),
+                team_run_id: None,
+                mission_run_id: None,
+                team_name: None,
+                team_member_id: None,
+                agent_path: None,
             },
             None,
             4,
@@ -48,8 +76,8 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
 
     let (_tx, rx) = watch::channel(false);
     let output = ListAgentsTool::new(context)
-    .execute("call".to_string(), json!({}), AbortSignal::new(rx))
-    .await;
+        .execute("call".to_string(), json!({}), AbortSignal::new(rx))
+        .await;
 
     assert_eq!(output.json["agents"][0]["id"], id);
     assert!(output.json["agents"][0].get("child_session_id").is_some());
@@ -90,27 +118,27 @@ pub(crate) async fn control_targets_resolve_by_model_visible_task_or_report_ambi
         supervisor
             .register(
                 AgentRunRecord {
-                        id: id.clone(),
-                        task_name: Some(task.clone()),
+                    id: id.clone(),
+                    task_name: Some(task.clone()),
                     agent_name: "worker".to_string(),
-                        task: task.clone(),
-                        parent_session_id: "parent".to_string(),
-                        child_session_id: Some(format!("child-{id}")),
-                        role: AgentInvocationRole::Subagent,
-                        background: true,
-                        status: AgentRunStatus::Running,
-                        edge_status: Some(AgentEdgeStatus::Open),
-                        started_at_ms: now_ms(),
-                        ended_at_ms: None,
-                        outcome: None,
-                        final_answer: None,
-                        error: None,
-                        effective_max_spawn_depth: Some(0),
-                        team_run_id: None,
-                        mission_run_id: None,
-                        team_name: None,
-                        team_member_id: None,
-                        agent_path: None,
+                    task: task.clone(),
+                    parent_session_id: "parent".to_string(),
+                    child_session_id: Some(format!("child-{id}")),
+                    role: AgentInvocationRole::Subagent,
+                    background: true,
+                    status: AgentRunStatus::Running,
+                    edge_status: Some(AgentEdgeStatus::Open),
+                    started_at_ms: now_ms(),
+                    ended_at_ms: None,
+                    outcome: None,
+                    final_answer: None,
+                    error: None,
+                    effective_max_spawn_depth: Some(0),
+                    team_run_id: None,
+                    mission_run_id: None,
+                    team_name: None,
+                    team_member_id: None,
+                    agent_path: None,
                 },
                 None,
                 4,
@@ -126,11 +154,13 @@ pub(crate) async fn control_targets_resolve_by_model_visible_task_or_report_ambi
 
     supervisor.remove(&id_two);
     let resolved = resume_agent_id(&supervisor, &task, None)
-        .await.expect("resolve task")
+        .await
+        .expect("resolve task")
         .expect("record");
     assert_eq!(resolved.id, id_one);
     let resolved = resume_agent_id(&supervisor, &id_one, None)
-        .await.expect("resolve agent id")
+        .await
+        .expect("resolve agent id")
         .expect("record");
     assert_eq!(resolved.id, id_one);
 

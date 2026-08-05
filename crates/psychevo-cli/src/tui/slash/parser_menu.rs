@@ -1,5 +1,20 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(test)]
+use super::base_slash_menu_items;
+use super::{
+    EffectiveSlashConfig, OBSOLETE_SLASH_COMMAND_TOKENS, OLD_DYNAMIC_SKILL_PREFIX, SlashCommand,
+    SlashMenuItem, TuiExportOptions, TuiShareOptions, VARIANTS,
+};
+use anyhow::{Result, anyhow};
+use crossterm::event::{KeyCode, KeyModifiers};
+use psychevo::command_registry::{
+    CommandArgumentKind, CommandStatus, CommandSurface, SlashCommandAction, SlashCommandSpec,
+    slash_command_spec,
+};
+use psychevo::{
+    command_registry::{parse_mission_args, parse_session_export_command_args},
+    prompt_image::split_image_source_argument,
+    session_export::SessionArtifactKind,
+};
 
 pub(crate) fn normalize_key_code(code: &KeyCode) -> KeyCode {
     match code {

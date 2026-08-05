@@ -1,10 +1,65 @@
-pub(super) async fn run_due_automations_once(state: WebState) -> psychevo::Result<usize> {
+use std::path::PathBuf;
+use std::time::Duration;
+
+use psychevo::Error;
+use psychevo::application::{
+    AutomationRunFinishInput, AutomationRunRecord, AutomationRunTerminalStatus,
+    AutomationTaskRecord,
+};
+use psychevo::automations::latest_due_at_ms;
+use psychevo::{PermissionMode, RunSandboxOverride};
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use uuid::Uuid;
+
+use super::support::{
+    automation_execution_from_value, automation_kind_to_wire, automation_schedule_from_value,
+    automation_source, next_run_after_now,
+};
+use crate::gateway::activity::ThreadSurface;
+use crate::gateway::results::GatewayTurnResult;
+use crate::gateway_now_ms;
+use crate::server::binding::WebState;
+use crate::server::event_delivery::ConnectionSender;
+use crate::server::thread_application::framework_gateway_turn_result;
+use psychevo_gateway_protocol::source::{
+    BackendKind, GatewayBackendInfo, GatewayInputPart, GatewayThreadSelector,
+};
+
+const AUTOMATION_DUE_LIMIT: usize = 10;
+const AUTOMATION_SCHEDULER_TICK_MS: u64 = 30_000;
+const AUTOMATION_STALE_RUN_RECOVERY_MS: i64 = 5 * 60 * 1000;
+const AUTOMATION_STALE_RUN_RECOVERY_LIMIT: usize = 50;
+const AUTOMATION_STALE_RUN_RECOVERY_ERROR: &str =
+    "automation run recovery: stale running claim expired without an active gateway activity";
+
+pub(in crate::server) fn reconcile(state: WebState) {
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    let gateway = state.inner.gateway.clone();
+    gateway.spawn_background("automation-scheduler", async move {
+        if let Err(err) = recover_stale_automation_runs(&state).await {
+            eprintln!("automation stale-run recovery failed: {err}");
+        }
+        let mut tick = tokio::time::interval(Duration::from_millis(AUTOMATION_SCHEDULER_TICK_MS));
+        loop {
+            tick.tick().await;
+            if let Err(err) = run_due_automations_once(state.clone()).await {
+                eprintln!("automation scheduler failed: {err}");
+            }
+        }
+    });
+}
+
+pub(in crate::server) async fn run_due_automations_once(
+    state: WebState,
+) -> psychevo::Result<usize> {
     recover_stale_automation_runs(&state).await?;
     let now = gateway_now_ms();
     let due = state
         .inner
-        .state
-
+        .durability
         .due_automation_tasks(now, AUTOMATION_DUE_LIMIT)
         .await?;
     let mut accepted = 0;
@@ -23,12 +78,11 @@ pub(super) async fn run_due_automations_once(state: WebState) -> psychevo::Resul
     Ok(accepted)
 }
 
-async fn recover_stale_automation_runs(state: &WebState) -> psychevo::Result<usize> {
+pub(super) async fn recover_stale_automation_runs(state: &WebState) -> psychevo::Result<usize> {
     let now = gateway_now_ms();
     let candidates = state
         .inner
-        .state
-
+        .durability
         .stale_automation_runs_for_recovery(
             now,
             AUTOMATION_STALE_RUN_RECOVERY_MS,
@@ -54,11 +108,10 @@ async fn recover_stale_automation_runs(state: &WebState) -> psychevo::Result<usi
         });
         if state
             .inner
-            .state
-
+            .durability
             .finish_automation_run(AutomationRunFinishInput {
                 run_id: &candidate.run.id,
-                status: "failed",
+                status: AutomationRunTerminalStatus::Failed,
                 thread_id,
                 source_key,
                 error: Some(AUTOMATION_STALE_RUN_RECOVERY_ERROR),
@@ -74,7 +127,7 @@ async fn recover_stale_automation_runs(state: &WebState) -> psychevo::Result<usi
     Ok(recovered)
 }
 
-async fn start_automation_run(
+pub(super) async fn start_automation_run(
     state: WebState,
     task: AutomationTaskRecord,
     trigger: &str,
@@ -86,8 +139,7 @@ async fn start_automation_run(
         .map_err(|error| psychevo::Error::Message(error.to_string()))?;
     let Some(run) = state
         .inner
-        .state
-
+        .durability
         .claim_automation_run(&task.id, trigger)
         .await?
     else {
@@ -110,7 +162,23 @@ async fn execute_automation_run(
     match result {
         Ok(turn_result) => {
             let next = next_run_after_now(&task).unwrap_or(None);
-            let thread_id = turn_result.result.session_id.clone();
+            let thread_id = turn_result.result.thread_id.clone();
+            let (status, outcome) = match turn_result.result.outcome {
+                psychevo::TurnOutcome::Completed => {
+                    (AutomationRunTerminalStatus::Completed, "normal")
+                }
+                psychevo::TurnOutcome::Failed => (AutomationRunTerminalStatus::Failed, "failed"),
+                psychevo::TurnOutcome::Stopped => {
+                    (AutomationRunTerminalStatus::Interrupted, "stopped")
+                }
+                psychevo::TurnOutcome::Interrupted => {
+                    (AutomationRunTerminalStatus::Interrupted, "aborted")
+                }
+            };
+            let error = match (status, turn_result.result.terminal_error.as_ref()) {
+                (AutomationRunTerminalStatus::Failed, Some(error)) => Some(error.message.as_str()),
+                _ => None,
+            };
             let source_key = turn_result
                 .thread
                 .source_key
@@ -118,19 +186,18 @@ async fn execute_automation_run(
                 .map(|key| key.0.as_str());
             let metadata = json!({
                 "turnId": turn_result.turn.id,
-                "outcome": turn_result.result.outcome.as_str(),
+                "outcome": outcome,
                 "trigger": run.trigger,
             });
             let _ = state
                 .inner
-                .state
-
+                .durability
                 .finish_automation_run(AutomationRunFinishInput {
                     run_id: &run.id,
-                    status: "completed",
+                    status,
                     thread_id: Some(&thread_id),
                     source_key,
-                    error: None,
+                    error,
                     metadata: Some(metadata),
                     next_run_at_ms: next,
                 })
@@ -141,11 +208,10 @@ async fn execute_automation_run(
             let error = err.to_string();
             let _ = state
                 .inner
-                .state
-
+                .durability
                 .finish_automation_run(AutomationRunFinishInput {
                     run_id: &run.id,
-                    status: "failed",
+                    status: AutomationRunTerminalStatus::Failed,
                     thread_id: task.target_thread_id.as_deref(),
                     source_key: task.source_key.as_deref(),
                     error: Some(&error),
@@ -163,17 +229,17 @@ async fn send_automation_turn(
     out_tx: Option<ConnectionSender>,
 ) -> psychevo::Result<GatewayTurnResult> {
     let cwd = PathBuf::from(&task.cwd);
-    let (mut thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
-        wire::AutomationTaskKind::Project => {
+    let (mut thread_id, source) = match automation_kind_to_wire(task.kind) {
+        wire::automations::AutomationTaskKind::Project => {
             let source = automation_source(&task.id, &task.title);
             let thread_id = state.inner.gateway.resolve_source_thread(&source).await?;
-            (thread_id, Some(source.clone()), Some(source))
+            (thread_id, Some(source))
         }
-        wire::AutomationTaskKind::ThreadHeartbeat => {
+        wire::automations::AutomationTaskKind::ThreadHeartbeat => {
             let thread_id = task.target_thread_id.clone().ok_or_else(|| {
                 Error::Message("thread heartbeat automation requires a target thread".to_string())
             })?;
-            (Some(thread_id), None, None)
+            (Some(thread_id), None)
         }
     };
     if thread_id.is_none() {
@@ -219,20 +285,19 @@ async fn send_automation_turn(
         }],
     );
     intent.source = source;
-    intent.bind_source = bind_source;
     intent.policy.model = task.model.clone();
     intent.policy.reasoning_effort = task.reasoning_effort.clone();
     caller.set_runtime_tools(Vec::new());
     match automation_execution_from_value(task.execution.clone())?.policy {
-        wire::AutomationExecutionPolicy::AutoSandbox => {
+        wire::automations::AutomationExecutionPolicy::AutoSandbox => {
             intent.policy.permission_mode = Some(PermissionMode::BypassPermissions);
             intent.policy.sandbox_override = Some(RunSandboxOverride::workspace_write());
         }
-        wire::AutomationExecutionPolicy::AskFirst => {
+        wire::automations::AutomationExecutionPolicy::AskFirst => {
             intent.policy.permission_mode = Some(PermissionMode::Default);
         }
     }
-    caller.surface = crate::ThreadSurface::Automation;
+    caller.surface = ThreadSurface::Automation;
     caller.runtime_source = "automation".to_string();
     caller.continue_sources = vec![
         "run".to_string(),
@@ -240,7 +305,6 @@ async fn send_automation_turn(
         "web".to_string(),
         "automation".to_string(),
     ];
-    intent.lineage = Some(json!({"automationId": task.id}));
     intent.turn_id = Some(Uuid::now_v7().to_string());
     caller.observe_gateway_events(move |event| {
         let context = event_selector
@@ -257,13 +321,15 @@ async fn send_automation_turn(
         );
     });
     let submission = intent.into_framework_request(caller)?;
+    let observers = submission.observers;
     let thread = state
         .inner
         .framework
         .resume_thread(&submission.thread_id)
         .await?;
     let handle = thread.start_turn(submission.request).await?;
+    observers.attach(&state.inner.gateway, handle.clone());
     let receipt = handle.receipt().clone();
     let result = handle.wait().await?;
-    framework_gateway_turn_result(state, receipt, result)
+    Ok(framework_gateway_turn_result(receipt, result))
 }

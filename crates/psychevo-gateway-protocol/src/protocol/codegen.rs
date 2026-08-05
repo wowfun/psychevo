@@ -1,3 +1,10 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Result, bail};
+use serde_json::Value;
+
 #[derive(Debug, Clone, Copy)]
 struct ExportedType {
     name: &'static str,
@@ -18,6 +25,37 @@ struct SchemaRefEntry {
     json: String,
     schema_path: String,
 }
+
+macro_rules! exported_type {
+    ($module:ident::$ty:ident) => {
+        super::ExportedType {
+            name: stringify!($ty),
+            ts_decl: super::typescript::ts_decl::<crate::$module::$ty>,
+            schema: super::typescript::schema::<crate::$module::$ty>,
+        }
+    };
+}
+
+#[path = "codegen/exported_types.rs"]
+mod exported_types;
+#[path = "codegen/request_methods.rs"]
+mod request_methods;
+#[path = "codegen/schema_groups.rs"]
+mod schema_groups;
+#[path = "codegen/schema_render.rs"]
+mod schema_render;
+#[path = "codegen/typescript.rs"]
+mod typescript;
+
+use exported_types::exported_types;
+use request_methods::render_request_methods;
+use schema_groups::{schema_group_const, schema_group_module, schema_group_refs_const};
+use schema_render::render_schema_export;
+pub(crate) use typescript::typescript_decl_with_schema_optionality;
+use typescript::write_checked;
+
+#[cfg(test)]
+pub(crate) use typescript::{export_ts_decl, schema};
 
 pub fn generate_typescript_and_schema(repo_root: &Path, check: bool) -> Result<()> {
     let package_root = repo_root.join("packages/protocol");
@@ -200,9 +238,3 @@ pub fn generate_typescript_and_schema(repo_root: &Path, check: bool) -> Result<(
     write_checked(&generated_dir.join("index.ts"), index, check)?;
     Ok(())
 }
-
-include!("codegen/schema_render.rs");
-include!("codegen/schema_groups.rs");
-include!("codegen/typescript.rs");
-include!("codegen/exported_types.rs");
-include!("codegen/request_methods.rs");

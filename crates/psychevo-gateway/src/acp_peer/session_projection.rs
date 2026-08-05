@@ -1,16 +1,37 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::v1::{
+    AuthMethod, McpServer, SessionConfigOption, SessionConfigOptionCategory, SessionModeState,
+    SessionNotification, SessionUpdate,
+};
+use agent_client_protocol::{Agent, ConnectionTo, UntypedMessage};
+use agent_client_protocol_schema::v1::InitializeResponse;
+use futures::channel::mpsc;
+use psychevo::Error;
+use serde_json::{Value, json};
+use sha2::Digest as _;
+use tokio::sync::mpsc as tokio_mpsc;
+
+use psychevo_gateway_protocol as wire;
+
+use super::runtime_options::project_acp_runtime_options;
+use super::stream_state::AcpPeerStreamState;
+
 const ACP_MAX_AVAILABLE_COMMANDS: usize = 128;
 const ACP_MAX_COMMAND_NAME_CHARS: usize = 128;
 const ACP_MAX_COMMAND_DESCRIPTION_CHARS: usize = 1_024;
 const ACP_MAX_COMMAND_HINT_CHARS: usize = 512;
-const ACP_MAX_AGENT_NAME_CHARS: usize = 256;
+pub(super) const ACP_MAX_AGENT_NAME_CHARS: usize = 256;
 const ACP_MAX_AGENT_TITLE_CHARS: usize = 512;
 const ACP_MAX_AGENT_VERSION_CHARS: usize = 128;
 const ACP_MAX_AVAILABLE_MODES: usize = 64;
 const ACP_MAX_MODE_ID_CHARS: usize = 128;
 const ACP_MAX_MODE_NAME_CHARS: usize = 256;
 const ACP_MAX_MODE_DESCRIPTION_CHARS: usize = 1_024;
-const ACP_MAX_SESSION_TITLE_CHARS: usize = 1_024;
-const ACP_MAX_UPDATED_AT_CHARS: usize = 128;
+pub(super) const ACP_MAX_SESSION_TITLE_CHARS: usize = 1_024;
+pub(super) const ACP_MAX_UPDATED_AT_CHARS: usize = 128;
 const ACP_MAX_CURRENCY_CHARS: usize = 16;
 const ACP_MAX_AUTH_METHODS: usize = 32;
 const ACP_MAX_AUTH_METHOD_ID_CHARS: usize = 128;
@@ -138,7 +159,7 @@ pub(crate) struct AcpSessionSnapshot {
     pub(crate) native_session_id: String,
     pub(crate) agent: Option<AcpAgentIdentitySnapshot>,
     pub(crate) capabilities: AcpNegotiatedCapabilitiesSnapshot,
-    pub(crate) options: Vec<wire::RuntimeConfigOptionView>,
+    pub(crate) options: Vec<wire::thread_command_turn::RuntimeConfigOptionView>,
     pub(crate) available_commands: Vec<AcpAvailableCommandSnapshot>,
     pub(crate) available_modes: Vec<AcpSessionModeSnapshot>,
     pub(crate) current_mode_id: Option<String>,
@@ -196,34 +217,34 @@ impl AcpSessionSnapshot {
 }
 
 #[derive(Clone)]
-struct AcpResidentSession {
-    native_session_id: String,
-    agent: Option<AcpAgentIdentitySnapshot>,
-    capabilities: AcpNegotiatedCapabilitiesSnapshot,
-    config_options: Vec<SessionConfigOption>,
-    available_commands: Vec<AcpAvailableCommandSnapshot>,
-    available_modes: Vec<AcpSessionModeSnapshot>,
-    current_mode_id: Option<String>,
-    legacy_models: Option<AcpLegacyModelState>,
-    history: AcpHistorySnapshot,
-    session_info: AcpSessionInfoSnapshot,
-    session_epoch: u64,
-    last_notification_sequence: u64,
-    unknown_notification_count: u64,
+pub(super) struct AcpResidentSession {
+    pub(super) native_session_id: String,
+    pub(super) agent: Option<AcpAgentIdentitySnapshot>,
+    pub(super) capabilities: AcpNegotiatedCapabilitiesSnapshot,
+    pub(super) config_options: Vec<SessionConfigOption>,
+    pub(super) available_commands: Vec<AcpAvailableCommandSnapshot>,
+    pub(super) available_modes: Vec<AcpSessionModeSnapshot>,
+    pub(super) current_mode_id: Option<String>,
+    pub(super) legacy_models: Option<AcpLegacyModelState>,
+    pub(super) history: AcpHistorySnapshot,
+    pub(super) session_info: AcpSessionInfoSnapshot,
+    pub(super) session_epoch: u64,
+    pub(super) last_notification_sequence: u64,
+    pub(super) unknown_notification_count: u64,
     /// Exact wire declarations captured at session creation. Resume/fork reuse
     /// these values instead of re-resolving mutable MCP configuration.
-    mcp_servers: Vec<McpServer>,
-    mcp_declaration_fingerprint: String,
+    pub(super) mcp_servers: Vec<McpServer>,
+    pub(super) mcp_declaration_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AcpFactOrigin {
+pub(super) enum AcpFactOrigin {
     History,
     Live,
 }
 
 impl AcpFactOrigin {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::History => "history",
             Self::Live => "live",
@@ -232,27 +253,27 @@ impl AcpFactOrigin {
 }
 
 #[derive(Debug, Clone)]
-enum AcpPeerInboundPayload {
+pub(super) enum AcpPeerInboundPayload {
     Session(Box<SessionNotification>),
     Unknown { method: String, params: Value },
     Barrier,
 }
 
-struct AcpResidentSessionInput {
-    native_session_id: String,
-    modes: Option<SessionModeState>,
-    config_options: Vec<SessionConfigOption>,
-    legacy_models: Option<AcpLegacyModelState>,
-    session_epoch: u64,
-    loaded_from_agent: bool,
-    mcp_servers: Vec<McpServer>,
-    mcp_declaration_fingerprint: String,
+pub(super) struct AcpResidentSessionInput {
+    pub(super) native_session_id: String,
+    pub(super) modes: Option<SessionModeState>,
+    pub(super) config_options: Vec<SessionConfigOption>,
+    pub(super) legacy_models: Option<AcpLegacyModelState>,
+    pub(super) session_epoch: u64,
+    pub(super) loaded_from_agent: bool,
+    pub(super) mcp_servers: Vec<McpServer>,
+    pub(super) mcp_declaration_fingerprint: String,
 }
 
 #[derive(Debug, Clone)]
-struct AcpPeerInboundNotification {
-    sequence: u64,
-    payload: AcpPeerInboundPayload,
+pub(super) struct AcpPeerInboundNotification {
+    pub(super) sequence: u64,
+    pub(super) payload: AcpPeerInboundPayload,
 }
 
 impl AcpPeerInboundNotification {
@@ -271,7 +292,7 @@ impl AcpPeerInboundNotification {
 }
 
 #[derive(Clone)]
-struct AcpNotificationIngress {
+pub(super) struct AcpNotificationIngress {
     state: Arc<Mutex<AcpNotificationIngressState>>,
 }
 
@@ -281,10 +302,10 @@ struct AcpNotificationIngressState {
     response_barriers: BTreeMap<String, u64>,
 }
 
-type AcpResidentSessions = Arc<tokio::sync::Mutex<BTreeMap<String, AcpResidentSession>>>;
+pub(super) type AcpResidentSessions = Arc<tokio::sync::Mutex<BTreeMap<String, AcpResidentSession>>>;
 
 #[derive(Clone, Default)]
-struct AcpNotificationRouter {
+pub(super) struct AcpNotificationRouter {
     state: Arc<Mutex<AcpNotificationRouterState>>,
 }
 
@@ -299,14 +320,14 @@ struct AcpNotificationSubscriber {
     tx: tokio_mpsc::UnboundedSender<AcpPeerInboundNotification>,
 }
 
-struct AcpNotificationSubscription {
+pub(super) struct AcpNotificationSubscription {
     id: u64,
     router: AcpNotificationRouter,
     rx: tokio_mpsc::UnboundedReceiver<AcpPeerInboundNotification>,
 }
 
 impl AcpNotificationRouter {
-    fn subscribe(
+    pub(super) fn subscribe(
         &self,
         native_session_id: Option<String>,
     ) -> psychevo::Result<AcpNotificationSubscription> {
@@ -337,7 +358,7 @@ impl AcpNotificationRouter {
     /// Publishes one immutable ingress envelope to every active session task.
     /// The return value tells the generation actor whether a task currently
     /// owns reduction for the envelope's explicit native session.
-    fn publish(&self, envelope: AcpPeerInboundNotification) -> bool {
+    pub(super) fn publish(&self, envelope: AcpPeerInboundNotification) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
@@ -356,7 +377,7 @@ impl AcpNotificationRouter {
         owned
     }
 
-    fn set_native_session_id(
+    pub(super) fn set_native_session_id(
         &self,
         subscription_id: u64,
         native_session_id: Option<String>,
@@ -372,7 +393,7 @@ impl AcpNotificationRouter {
         Ok(())
     }
 
-    fn unsubscribe(&self, subscription_id: u64) {
+    pub(super) fn unsubscribe(&self, subscription_id: u64) {
         if let Ok(mut state) = self.state.lock() {
             state.subscribers.remove(&subscription_id);
         }
@@ -380,7 +401,7 @@ impl AcpNotificationRouter {
 }
 
 impl AcpNotificationSubscription {
-    fn set_native_session_id(
+    pub(super) fn set_native_session_id(
         &self,
         native_session_id: impl Into<String>,
     ) -> psychevo::Result<()> {
@@ -388,15 +409,15 @@ impl AcpNotificationSubscription {
             .set_native_session_id(self.id, Some(native_session_id.into()))
     }
 
-    fn deactivate(&self) -> psychevo::Result<()> {
+    pub(super) fn deactivate(&self) -> psychevo::Result<()> {
         self.router.set_native_session_id(self.id, None)
     }
 
-    async fn recv(&mut self) -> Option<AcpPeerInboundNotification> {
+    pub(super) async fn recv(&mut self) -> Option<AcpPeerInboundNotification> {
         self.rx.recv().await
     }
 
-    fn try_recv(&mut self) -> Option<AcpPeerInboundNotification> {
+    pub(super) fn try_recv(&mut self) -> Option<AcpPeerInboundNotification> {
         self.rx.try_recv().ok()
     }
 }
@@ -408,7 +429,7 @@ impl Drop for AcpNotificationSubscription {
 }
 
 impl AcpNotificationIngress {
-    fn channel() -> (Self, mpsc::UnboundedReceiver<AcpPeerInboundNotification>) {
+    pub(super) fn channel() -> (Self, mpsc::UnboundedReceiver<AcpPeerInboundNotification>) {
         let (tx, rx) = mpsc::unbounded();
         (
             Self {
@@ -422,21 +443,21 @@ impl AcpNotificationIngress {
         )
     }
 
-    fn notification(&self, payload: AcpPeerInboundPayload) -> psychevo::Result<u64> {
+    pub(super) fn notification(&self, payload: AcpPeerInboundPayload) -> psychevo::Result<u64> {
         self.send(payload)
     }
 
     /// Appends a deterministic ordering fence to the same ingress used by ACP
     /// notifications. Callers reduce through the returned sequence instead of
     /// sleeping or observing a momentarily empty channel.
-    fn barrier(&self) -> psychevo::Result<u64> {
+    pub(super) fn barrier(&self) -> psychevo::Result<u64> {
         self.send(AcpPeerInboundPayload::Barrier)
     }
 
     /// Called by the response dispatch interceptor while the SDK's central
     /// dispatch loop is blocked. The map lets the request waiter retrieve the
     /// exact ingress sequence after the typed response is forwarded.
-    fn response_barrier(&self, request_id: Value) -> psychevo::Result<u64> {
+    pub(super) fn response_barrier(&self, request_id: Value) -> psychevo::Result<u64> {
         let request_id = serde_json::to_string(&request_id)?;
         let mut state = self.state.lock().map_err(|_| {
             Error::Message("ACP notification projection ingress lock poisoned".to_string())
@@ -485,7 +506,9 @@ impl AcpNotificationIngress {
 /// Receives an ACP response whose exact ingress fence was inserted by the
 /// connection's response dispatch interceptor before forwarding the response
 /// to this waiter.
-async fn acp_response_with_projection_barrier<T: agent_client_protocol::JsonRpcResponse>(
+pub(super) async fn acp_response_with_projection_barrier<
+    T: agent_client_protocol::JsonRpcResponse,
+>(
     request: agent_client_protocol::SentRequest<T>,
     notification_ingress: &AcpNotificationIngress,
 ) -> Result<(T, u64), agent_client_protocol::Error> {
@@ -502,7 +525,7 @@ async fn acp_response_with_projection_barrier<T: agent_client_protocol::JsonRpcR
     Ok((response, barrier))
 }
 
-async fn acp_session_response_with_legacy_models<T, P>(
+pub(super) async fn acp_session_response_with_legacy_models<T, P>(
     cx: &ConnectionTo<Agent>,
     method: &str,
     params: P,
@@ -526,9 +549,9 @@ where
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct AcpInboundReduction {
-    barrier: Option<u64>,
-    active_session_observed: bool,
+pub(super) struct AcpInboundReduction {
+    pub(super) barrier: Option<u64>,
+    pub(super) active_session_observed: bool,
 }
 
 fn acp_agent_identity(initialized: &InitializeResponse) -> Option<AcpAgentIdentitySnapshot> {
@@ -587,7 +610,6 @@ fn acp_negotiated_capabilities(
                     AuthMethod::Agent(_) => AcpAuthMethodKindSnapshot::Agent,
                     AuthMethod::EnvVar(_) => AcpAuthMethodKindSnapshot::EnvVar,
                     AuthMethod::Terminal(_) => AcpAuthMethodKindSnapshot::Terminal,
-                    #[allow(unreachable_patterns)]
                     _ => AcpAuthMethodKindSnapshot::Unknown,
                 },
             })
@@ -604,7 +626,7 @@ fn acp_negotiated_capabilities(
     }
 }
 
-fn new_acp_resident_session(
+pub(super) fn new_acp_resident_session(
     initialized: &InitializeResponse,
     input: AcpResidentSessionInput,
 ) -> AcpResidentSession {
@@ -644,19 +666,19 @@ fn new_acp_resident_session(
     }
 }
 
-fn next_acp_session_epoch(next_session_epoch: &AtomicU64) -> psychevo::Result<u64> {
+pub(super) fn next_acp_session_epoch(next_session_epoch: &AtomicU64) -> psychevo::Result<u64> {
     next_session_epoch
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
             epoch.checked_add(1)
         })
         .map_err(|_| Error::Message("ACP session epoch exhausted".to_string()))
 }
 
-fn bounded_acp_text(value: &str, max_chars: usize) -> String {
+pub(super) fn bounded_acp_text(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
 
-fn project_legacy_model_state(value: Option<&Value>) -> Option<AcpLegacyModelState> {
+pub(super) fn project_legacy_model_state(value: Option<&Value>) -> Option<AcpLegacyModelState> {
     let value = value?.as_object()?;
     let current_model_id = value
         .get("currentModelId")
@@ -720,7 +742,7 @@ fn has_stable_model_config_option(config_options: &[SessionConfigOption]) -> boo
     })
 }
 
-fn effective_legacy_models<'a>(
+pub(super) fn effective_legacy_models<'a>(
     config_options: &[SessionConfigOption],
     legacy_models: Option<&'a AcpLegacyModelState>,
 ) -> Option<&'a AcpLegacyModelState> {
@@ -731,8 +753,8 @@ fn effective_legacy_models<'a>(
 
 fn legacy_model_runtime_option(
     legacy_models: &AcpLegacyModelState,
-) -> wire::RuntimeConfigOptionView {
-    wire::RuntimeConfigOptionView {
+) -> wire::thread_command_turn::RuntimeConfigOptionView {
+    wire::thread_command_turn::RuntimeConfigOptionView {
         id: "model".to_string(),
         name: "Model".to_string(),
         description: Some("Reported by the ACP Agent's legacy model selector.".to_string()),
@@ -742,12 +764,14 @@ fn legacy_model_runtime_option(
         values: legacy_models
             .available_models
             .iter()
-            .map(|model| wire::RuntimeConfigOptionValueView {
-                value: model.id.clone(),
-                name: model.name.clone(),
-                description: model.description.clone(),
-                group: None,
-            })
+            .map(
+                |model| wire::thread_command_turn::RuntimeConfigOptionValueView {
+                    value: model.id.clone(),
+                    name: model.name.clone(),
+                    description: model.description.clone(),
+                    group: None,
+                },
+            )
             .collect(),
     }
 }
@@ -802,13 +826,12 @@ fn project_command_input(
                 "hint": bounded_acp_text(&input.hint, ACP_MAX_COMMAND_HINT_CHARS),
             }))
         }
-        #[allow(unreachable_patterns)]
         _ => None,
     }
 }
 
 impl AcpResidentSession {
-    fn reduce_notification(
+    pub(super) fn reduce_notification(
         &mut self,
         envelope: &AcpPeerInboundNotification,
         origin: AcpFactOrigin,
@@ -883,7 +906,7 @@ impl AcpResidentSession {
     }
 }
 
-fn reduce_acp_inbound_notification(
+pub(super) fn reduce_acp_inbound_notification(
     sessions: &mut BTreeMap<String, AcpResidentSession>,
     generation: u64,
     envelope: AcpPeerInboundNotification,
@@ -932,16 +955,27 @@ fn reduce_acp_inbound_notification(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn reduce_acp_notifications_through_barrier(
+pub(super) struct AcpBarrierProjection<'a> {
+    pub(super) sessions: &'a AcpResidentSessions,
+    pub(super) generation: u64,
+    pub(super) barrier_sequence: u64,
+    pub(super) replay_native_session_id: Option<&'a str>,
+    pub(super) active_native_session_id: Option<&'a str>,
+    pub(super) active_state: Option<&'a mut AcpPeerStreamState>,
+}
+
+pub(super) async fn reduce_acp_notifications_through_barrier(
     notification_rx: &mut AcpNotificationSubscription,
-    sessions: &AcpResidentSessions,
-    generation: u64,
-    barrier_sequence: u64,
-    replay_native_session_id: Option<&str>,
-    active_native_session_id: Option<&str>,
-    mut active_state: Option<&mut AcpPeerStreamState>,
+    projection: AcpBarrierProjection<'_>,
 ) -> psychevo::Result<bool> {
+    let AcpBarrierProjection {
+        sessions,
+        generation,
+        barrier_sequence,
+        replay_native_session_id,
+        active_native_session_id,
+        mut active_state,
+    } = projection;
     let mut active_session_observed = false;
     loop {
         let envelope = notification_rx.recv().await.ok_or_else(|| {
@@ -970,7 +1004,7 @@ async fn reduce_acp_notifications_through_barrier(
     }
 }
 
-fn acp_notification_is_for_session_or_barrier(
+pub(super) fn acp_notification_is_for_session_or_barrier(
     envelope: &AcpPeerInboundNotification,
     active_native_session_id: Option<&str>,
 ) -> bool {
@@ -986,7 +1020,7 @@ fn acp_notification_is_for_session_or_barrier(
         })
 }
 
-async fn reduce_idle_acp_notification(
+pub(super) async fn reduce_idle_acp_notification(
     sessions: &AcpResidentSessions,
     generation: u64,
     envelope: AcpPeerInboundNotification,
@@ -998,7 +1032,7 @@ async fn reduce_idle_acp_notification(
     let _ = reduce_acp_inbound_notification(&mut sessions, generation, envelope, None, None, None);
 }
 
-async fn drain_acp_notification_subscription(
+pub(super) async fn drain_acp_notification_subscription(
     subscription: &mut AcpNotificationSubscription,
     sessions: &AcpResidentSessions,
     generation: u64,
@@ -1009,12 +1043,14 @@ async fn drain_acp_notification_subscription(
     }
 }
 
-fn acp_session_snapshot(session: &AcpResidentSession, generation: u64) -> AcpSessionSnapshot {
+pub(super) fn acp_session_snapshot(
+    session: &AcpResidentSession,
+    generation: u64,
+) -> AcpSessionSnapshot {
     let encoded_options = serde_json::to_vec(&session.config_options).unwrap_or_default();
     let effective_legacy_models =
         effective_legacy_models(&session.config_options, session.legacy_models.as_ref());
-    let encoded_legacy_models =
-        serde_json::to_vec(&effective_legacy_models).unwrap_or_default();
+    let encoded_legacy_models = serde_json::to_vec(&effective_legacy_models).unwrap_or_default();
     let encoded_modes = serde_json::to_vec(
         &session
             .available_modes

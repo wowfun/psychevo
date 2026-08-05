@@ -1,18 +1,26 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use axum::http::StatusCode;
+use serde_json::{Value, json};
+
+use crate::composition::GatewayApplication;
+use crate::server::{GatewayWebServerConfig, bind_gateway_web_server};
+
 async fn managed_test_config(
     temp: &tempfile::TempDir,
     instance_id: Option<&str>,
 ) -> GatewayWebServerConfig {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let runtime = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
-    let mut config = GatewayWebServerConfig::headless(
-        Gateway::new(runtime),
-        temp.path().join("home"),
-        cwd,
-        None,
-        BTreeMap::new(),
-        "managed-secret".to_string(),
-    );
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(home.join("config.toml"), "\n").expect("config");
+    let runtime =
+        GatewayApplication::open(home, temp.path().join("state.db"), None, BTreeMap::new())
+            .await
+            .expect("test composition");
+    let mut config = GatewayWebServerConfig::headless(runtime, cwd, "managed-secret".to_string());
     config.managed_instance_id = instance_id.map(str::to_string);
     config
 }

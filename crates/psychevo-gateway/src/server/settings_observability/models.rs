@@ -1,15 +1,31 @@
+use std::path::Path;
+
+use psychevo::config::{ConfigScope, ModelCatalogEntry, ModelCatalogProvider};
+use psychevo::config::{
+    REASONING_EFFORT_VALUES, model_catalog_entry_is_free, normalize_provider_id,
+    remove_config_value, set_auxiliary_model_with_reasoning, set_config_value,
+    set_default_model_with_reasoning, set_provider_model_config,
+};
+use psychevo::model_state::{ModelState, normalize_reasoning_effort};
+use psychevo::{Configuration, ConfigurationQuery, Error, ThreadModelSelection};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use super::WebState;
+use super::workbench::session_model_state_selection;
+
 fn configured_model_option_view(
-    model: &psychevo::__product::runtime::ConfiguredModel,
-) -> wire::ModelOptionView {
+    model: &psychevo::config::ConfiguredModel,
+) -> wire::settings_workspace_context::ModelOptionView {
     let reasoning_supported = model.metadata.capabilities.reasoning;
-    wire::ModelOptionView {
+    wire::settings_workspace_context::ModelOptionView {
         value: format!("{}/{}", model.provider, model.model),
         provider: model.provider.clone(),
         id: model.model.clone(),
         name: model.model_name.clone(),
         provider_name: Some(model.provider_label.clone()),
         free: configured_model_is_free(model),
-        limit: wire::ModelLimitView {
+        limit: wire::settings_workspace_context::ModelLimitView {
             context: model.context_limit,
             output: model.metadata.limits.output,
         },
@@ -18,11 +34,10 @@ fn configured_model_option_view(
     }
 }
 
-fn model_options_with_cached_catalog(
-    state: &WebState,
-    options: &RunOptions,
-    configured: &[psychevo::__product::runtime::ConfiguredModel],
-) -> Vec<wire::ModelOptionView> {
+pub(super) fn model_options_with_cached_catalog(
+    configuration: &Configuration,
+    configured: &[psychevo::config::ConfiguredModel],
+) -> Vec<wire::settings_workspace_context::ModelOptionView> {
     let mut seen = std::collections::BTreeSet::new();
     let mut views = Vec::new();
     for model in configured {
@@ -31,8 +46,8 @@ fn model_options_with_cached_catalog(
             views.push(option);
         }
     }
-    for provider in model_catalog_providers(options).unwrap_or_default() {
-        let Some(models) = read_cached_model_catalog(&state.inner.home, &provider) else {
+    for provider in configuration.model_catalog_providers().unwrap_or_default() {
+        let Some(models) = configuration.cached_model_catalog(&provider) else {
             continue;
         };
         for model in models {
@@ -56,24 +71,30 @@ fn reasoning_efforts_for_model(reasoning_supported: Option<bool>) -> Vec<String>
         .collect()
 }
 
-fn model_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<Value> {
+pub(in super::super) fn model_settings_value(
+    state: &WebState,
+    cwd: &Path,
+) -> psychevo::Result<Value> {
+    let mut query = ConfigurationQuery::profile(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
     Ok(serde_json::to_value(model_settings_result(
-        state, cwd,
+        cwd,
+        &configuration,
     )?)?)
 }
 
 fn model_settings_result(
-    state: &WebState,
     cwd: &Path,
-) -> psychevo::Result<wire::ModelSettingsResult> {
-    let options = model_settings_global_options(state, cwd);
-    let selected_model = selected_configured_model(&options)?;
+    configuration: &Configuration,
+) -> psychevo::Result<wire::settings_workspace_context::ModelSettingsResult> {
+    let selected_model = configuration.selected_model()?;
     let default_reasoning_effort = selected_model
         .as_ref()
         .and_then(|model| model.reasoning_effort.clone());
     let default_model = selected_model.map(|model| format!("{}/{}", model.provider, model.model));
-    let configured = configured_models(&options).unwrap_or_default();
-    let effective_config = config_show_value(&options, ConfigScope::Effective)?;
+    let configured = configuration.configured_models().unwrap_or_default();
+    let effective_config = configuration.config_value(ConfigScope::Effective)?;
     let effective = effective_config.get("value").unwrap_or(&Value::Null);
     let configured_provider_ids = effective
         .get("provider")
@@ -85,7 +106,7 @@ fn model_settings_result(
                 .collect::<std::collections::BTreeSet<_>>()
         })
         .unwrap_or_default();
-    let auth = auth_status_value(&options, None)?;
+    let auth = configuration.auth_status(None)?;
     let mut providers = auth
         .get("providers")
         .and_then(Value::as_array)
@@ -94,14 +115,14 @@ fn model_settings_result(
         .filter_map(|row| model_provider_view(row, &configured_provider_ids))
         .collect::<Vec<_>>();
     if !providers.iter().any(|provider| provider.id == "custom") {
-        providers.push(wire::ModelProviderView {
+        providers.push(wire::settings_workspace_context::ModelProviderView {
             id: "custom".to_string(),
             name: "Custom".to_string(),
             built_in: false,
             configured: false,
             api: None,
             api_key_env: None,
-            credential_status: wire::ModelCredentialStatus::Missing,
+            credential_status: wire::settings_workspace_context::ModelCredentialStatus::Missing,
             no_auth: false,
             can_fetch_models: false,
             unavailable_reason: Some("requires provider setup".to_string()),
@@ -112,9 +133,9 @@ fn model_settings_result(
             .cmp(&provider_sort_key(&right.id))
             .then_with(|| left.name.cmp(&right.name))
     });
-    let model_options = model_options_with_cached_catalog(state, &options, &configured);
-    Ok(wire::ModelSettingsResult {
-        scope: wire::ModelSettingsScope::Global,
+    let model_options = model_options_with_cached_catalog(configuration, &configured);
+    Ok(wire::settings_workspace_context::ModelSettingsResult {
+        scope: wire::settings_workspace_context::ModelSettingsScope::Global,
         cwd: cwd.display().to_string(),
         default_model,
         default_reasoning_effort,
@@ -124,43 +145,35 @@ fn model_settings_result(
             auxiliary_model_assignment_view(effective, "compression", "Context compression"),
         ],
         model_options,
-        voice: voice_config_value(&options).ok(),
-        image_generation: image_generation_config_value(&options).ok(),
+        voice: configuration.voice_settings().ok(),
+        image_generation: configuration.image_generation_settings().ok(),
     })
-}
-
-fn model_settings_global_options(state: &WebState, cwd: &Path) -> RunOptions {
-    let mut options = state.run_options(cwd.to_path_buf(), None);
-    options.config_path = Some(state.inner.home.join("config.toml"));
-    options
 }
 
 fn model_provider_view(
     row: &Value,
     configured_provider_ids: &std::collections::BTreeSet<String>,
-) -> Option<wire::ModelProviderView> {
+) -> Option<wire::settings_workspace_context::ModelProviderView> {
     let id = row.get("provider").and_then(Value::as_str)?.to_string();
-    let api = row
-        .get("api")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let api = row.get("api").and_then(Value::as_str).map(str::to_string);
     let status = match row
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("missing")
     {
-        "present" => wire::ModelCredentialStatus::Present,
-        "not_required" => wire::ModelCredentialStatus::NotRequired,
-        _ => wire::ModelCredentialStatus::Missing,
+        "present" => wire::settings_workspace_context::ModelCredentialStatus::Present,
+        "not_required" => wire::settings_workspace_context::ModelCredentialStatus::NotRequired,
+        _ => wire::settings_workspace_context::ModelCredentialStatus::Missing,
     };
-    let can_fetch_models = api.is_some() && status != wire::ModelCredentialStatus::Missing;
+    let can_fetch_models =
+        api.is_some() && status != wire::settings_workspace_context::ModelCredentialStatus::Missing;
     let unavailable_reason = (!can_fetch_models).then(|| {
         row.get("api_key_env")
             .and_then(Value::as_str)
             .map(|key| format!("missing {key}"))
             .unwrap_or_else(|| "requires provider setup".to_string())
     });
-    Some(wire::ModelProviderView {
+    Some(wire::settings_workspace_context::ModelProviderView {
         id: id.clone(),
         name: row
             .get("name")
@@ -185,7 +198,7 @@ fn auxiliary_model_assignment_view(
     effective: &Value,
     task: &str,
     label: &str,
-) -> wire::AuxiliaryModelAssignmentView {
+) -> wire::settings_workspace_context::AuxiliaryModelAssignmentView {
     let task_value = effective
         .get("auxiliary")
         .and_then(|auxiliary| auxiliary.get(task));
@@ -211,7 +224,7 @@ fn auxiliary_model_assignment_view(
     let reasoning_effort = task_value
         .and_then(|value| value.get("model"))
         .and_then(config_model_reasoning_effort);
-    wire::AuxiliaryModelAssignmentView {
+    wire::settings_workspace_context::AuxiliaryModelAssignmentView {
         task: task.to_string(),
         label: label.to_string(),
         provider,
@@ -244,36 +257,43 @@ fn config_model_reasoning_effort(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-async fn model_provider_catalog_value(
+pub(in super::super) async fn model_provider_catalog_value(
     state: &WebState,
     cwd: &Path,
-    params: wire::ModelProviderCatalogParams,
+    params: wire::settings_workspace_context::ModelProviderCatalogParams,
 ) -> psychevo::Result<Value> {
-    let options = model_settings_global_options(state, cwd);
+    let mut query = ConfigurationQuery::profile(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
     let provider_id = normalize_provider_id(&params.provider_id);
-    let provider = model_catalog_provider(&options, &provider_id)?
+    let provider = configuration
+        .model_catalog_provider(&provider_id)?
         .ok_or_else(|| Error::Config(format!("unknown provider: {provider_id}")))?;
-    let models = fetch_and_cache_model_catalog(&state.inner.home, &provider).await?;
+    let models = configuration
+        .fetch_and_cache_model_catalog(&provider)
+        .await?;
     let models = models
         .into_iter()
         .map(|model| catalog_model_option_view(&provider, model))
         .collect();
-    Ok(serde_json::to_value(wire::ModelProviderCatalogResult {
-        provider_id: provider.provider,
-        models,
-    })?)
+    Ok(serde_json::to_value(
+        wire::settings_workspace_context::ModelProviderCatalogResult {
+            provider_id: provider.provider,
+            models,
+        },
+    )?)
 }
 
 fn catalog_model_option_view(
     provider: &ModelCatalogProvider,
     model: ModelCatalogEntry,
-) -> wire::ModelOptionView {
+) -> wire::settings_workspace_context::ModelOptionView {
     let reasoning_supported = model.metadata.capabilities.reasoning;
-    wire::ModelOptionView {
+    wire::settings_workspace_context::ModelOptionView {
         provider: provider.provider.clone(),
         value: format!("{}/{}", provider.provider, model.id),
         free: model_catalog_entry_is_free(&provider.provider, &model),
-        limit: wire::ModelLimitView {
+        limit: wire::settings_workspace_context::ModelLimitView {
             context: model.context_limit,
             output: model.metadata.limits.output,
         },
@@ -285,7 +305,7 @@ fn catalog_model_option_view(
     }
 }
 
-async fn model_state_read_value(
+pub(in super::super) async fn model_state_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
@@ -295,11 +315,11 @@ async fn model_state_read_value(
     )?)
 }
 
-async fn model_state_set_value(
+pub(in super::super) async fn model_state_set_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-    params: wire::ModelStateSetParams,
+    params: wire::settings_workspace_context::ModelStateSetParams,
 ) -> psychevo::Result<Value> {
     let (model_spec, provider, model_id) = normalize_provider_qualified_model(&params.model)?;
     let reasoning_effort = normalize_model_state_reasoning_effort(params.reasoning_effort)?;
@@ -309,24 +329,16 @@ async fn model_state_set_value(
     model_state.set_model(&cwd_key, model_spec.clone(), reasoning_effort.clone());
     model_state.save(&path)?;
     if let Some(thread_id) = thread_id {
-        let store = &state.inner.state;
-        store
-            .set_session_model(thread_id, &provider, &model_id)
-            .await?;
-        let mut metadata = serde_json::Map::new();
-        metadata.insert("model".to_string(), Value::String(model_spec));
-        if let Some(reasoning_effort) = reasoning_effort {
-            metadata.insert(
-                "reasoningEffort".to_string(),
-                Value::String(reasoning_effort),
-            );
-        }
-        store
-            .set_session_metadata_field(
-                thread_id,
-                SESSION_COMPOSER_MODEL_METADATA_KEY,
-                Some(Value::Object(metadata)),
-            )
+        state
+            .inner
+            .framework
+            .resume_thread(thread_id)
+            .await?
+            .set_model_selection(ThreadModelSelection {
+                provider,
+                model: model_id,
+                reasoning_effort,
+            })
             .await?;
     }
     Ok(serde_json::to_value(
@@ -338,14 +350,14 @@ async fn model_state_result(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo::Result<wire::ModelStateResult> {
+) -> psychevo::Result<wire::settings_workspace_context::ModelStateResult> {
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
     let cwd_key = cwd.to_string_lossy().to_string();
     let session_selection = match thread_id {
         Some(thread_id) => session_model_state_selection(state, thread_id).await?,
         None => None,
     };
-    Ok(wire::ModelStateResult {
+    Ok(wire::settings_workspace_context::ModelStateResult {
         cwd: cwd.display().to_string(),
         thread_id: thread_id.map(str::to_string),
         model: session_selection
@@ -360,9 +372,7 @@ async fn model_state_result(
     })
 }
 
-fn normalize_provider_qualified_model(
-    value: &str,
-) -> psychevo::Result<(String, String, String)> {
+fn normalize_provider_qualified_model(value: &str) -> psychevo::Result<(String, String, String)> {
     let value = value.trim();
     let Some((provider, model)) = value.split_once('/') else {
         return Err(Error::Config(
@@ -393,11 +403,14 @@ fn normalize_model_state_reasoning_effort(
     Ok(reasoning_effort)
 }
 
-fn model_provider_save_value(
+pub(in super::super) fn model_provider_save_value(
     state: &WebState,
     cwd: &Path,
-    params: wire::ModelProviderSaveParams,
+    params: wire::settings_workspace_context::ModelProviderSaveParams,
 ) -> psychevo::Result<Value> {
+    let mut query = ConfigurationQuery::profile(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
     let provider_id = normalize_provider_id(&params.provider_id);
     validate_model_provider_id(&provider_id)?;
     let name = params
@@ -408,7 +421,10 @@ fn model_provider_save_value(
     let api = validate_model_api(&params.api)?;
     let config_dir = state.inner.home.clone();
     remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.label"))?;
-    remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.options"))?;
+    remove_config_value(
+        config_dir.clone(),
+        &format!("provider.{provider_id}.options"),
+    )?;
     if let Some(name) = name {
         set_config_value(
             config_dir.clone(),
@@ -439,15 +455,17 @@ fn model_provider_save_value(
             json!(true),
         )?;
     } else {
-        remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.no_auth"))?;
+        remove_config_value(
+            config_dir.clone(),
+            &format!("provider.{provider_id}.no_auth"),
+        )?;
         if let Some(api_key) = params
             .api_key
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let options = state.run_options(cwd.to_path_buf(), None);
-            set_provider_api_key(&options, config_dir.clone(), &provider_id, api_key)?;
+            configuration.set_provider_api_key(ConfigScope::Global, &provider_id, api_key)?;
         }
     }
     if let Some(model) = params.model {
@@ -455,19 +473,22 @@ fn model_provider_save_value(
         let model_value = model_config_value(&model)?;
         set_provider_model_config(config_dir.clone(), &provider_id, &model_id, model_value)?;
     }
-    model_settings_value(state, cwd)
+    Ok(serde_json::to_value(model_settings_result(
+        cwd,
+        &configuration,
+    )?)?)
 }
 
-fn model_assignment_set_value(
+pub(in super::super) fn model_assignment_set_value(
     state: &WebState,
     cwd: &Path,
-    params: wire::ModelAssignmentSetParams,
+    params: wire::settings_workspace_context::ModelAssignmentSetParams,
 ) -> psychevo::Result<Value> {
     let provider = normalize_provider_id(&params.provider);
     validate_model_provider_id(&provider)?;
     let reasoning_effort = assignment_reasoning_effort(params.reasoning_effort.as_deref());
     match params.target {
-        wire::ModelAssignmentTarget::Default => {
+        wire::settings_workspace_context::ModelAssignmentTarget::Default => {
             let model_spec = format!("{provider}/{}", params.model.trim());
             set_default_model_with_reasoning(
                 &state.inner.home,
@@ -476,16 +497,18 @@ fn model_assignment_set_value(
                 &model_spec,
                 reasoning_effort,
             )?;
-            Ok(serde_json::to_value(wire::ModelAssignmentSetResult {
-                ok: true,
-                target: wire::ModelAssignmentTarget::Default,
-                task: None,
-                provider,
-                model: params.model.trim().to_string(),
-                reasoning_effort: reasoning_effort.map(str::to_string),
-            })?)
+            Ok(serde_json::to_value(
+                wire::settings_workspace_context::ModelAssignmentSetResult {
+                    ok: true,
+                    target: wire::settings_workspace_context::ModelAssignmentTarget::Default,
+                    task: None,
+                    provider,
+                    model: params.model.trim().to_string(),
+                    reasoning_effort: reasoning_effort.map(str::to_string),
+                },
+            )?)
         }
-        wire::ModelAssignmentTarget::Auxiliary => {
+        wire::settings_workspace_context::ModelAssignmentTarget::Auxiliary => {
             let task = params
                 .task
                 .as_deref()
@@ -499,14 +522,16 @@ fn model_assignment_set_value(
                 params.model.trim(),
                 reasoning_effort,
             )?;
-            Ok(serde_json::to_value(wire::ModelAssignmentSetResult {
-                ok: true,
-                target: wire::ModelAssignmentTarget::Auxiliary,
-                task: Some(task.to_string()),
-                provider,
-                model: params.model.trim().to_string(),
-                reasoning_effort: reasoning_effort.map(str::to_string),
-            })?)
+            Ok(serde_json::to_value(
+                wire::settings_workspace_context::ModelAssignmentSetResult {
+                    ok: true,
+                    target: wire::settings_workspace_context::ModelAssignmentTarget::Auxiliary,
+                    task: Some(task.to_string()),
+                    provider,
+                    model: params.model.trim().to_string(),
+                    reasoning_effort: reasoning_effort.map(str::to_string),
+                },
+            )?)
         }
     }
 }
@@ -552,15 +577,13 @@ fn validate_model_id(value: &str) -> psychevo::Result<String> {
         return Err(Error::Config("model id is required".to_string()));
     }
     if value.contains('\n') || value.contains('\r') {
-        return Err(Error::Config(
-            "model id must be a single line".to_string(),
-        ));
+        return Err(Error::Config("model id must be a single line".to_string()));
     }
     Ok(value.to_string())
 }
 
 fn model_config_value(
-    model: &wire::ModelProviderSaveModelParams,
+    model: &wire::settings_workspace_context::ModelProviderSaveModelParams,
 ) -> psychevo::Result<Value> {
     let mut object = advanced_model_metadata_object(
         model.advanced_format.as_deref(),
@@ -601,10 +624,15 @@ fn advanced_model_metadata_object(
     let Some(raw) = raw else {
         return Ok(serde_json::Map::new());
     };
-    let value = match format.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+    let value = match format
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("toml") => {
-            let value = toml::from_str::<toml::Value>(raw)
-                .map_err(|err| Error::Config(format!("advanced metadata TOML is invalid: {err}")))?;
+            let value = toml::from_str::<toml::Value>(raw).map_err(|err| {
+                Error::Config(format!("advanced metadata TOML is invalid: {err}"))
+            })?;
             serde_json::to_value(value)
                 .map_err(|err| Error::Config(format!("advanced metadata TOML is invalid: {err}")))?
         }
@@ -617,7 +645,7 @@ fn advanced_model_metadata_object(
         .ok_or_else(|| Error::Config("advanced metadata must be an object".to_string()))
 }
 
-fn configured_model_is_free(model: &psychevo::__product::runtime::ConfiguredModel) -> bool {
+fn configured_model_is_free(model: &psychevo::config::ConfiguredModel) -> bool {
     let Some(cost) = &model.metadata.cost else {
         return false;
     };

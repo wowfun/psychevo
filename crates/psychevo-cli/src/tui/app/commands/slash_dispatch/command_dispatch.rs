@@ -1,3 +1,20 @@
+use crate::tui::app_commands::{
+    fork_prompt_marker, format_skill_mutation_result, json_string, json_string_array,
+    mission_command_args, normalize_dynamic_skill_name, skill_args_without_scope,
+    skill_option_value, skill_prompt_marker, skill_scope_from_args,
+};
+use crate::tui::support_diff_render::workspace_diff_plain_text;
+use crate::tui::{
+    ContextFormatOptions, ImageInput, InstallOptions, PermissionMode,
+    RELOAD_CONTEXT_DEPRECATED_MESSAGE, RunMode, SideConversationSurface, SlashCommand,
+    SubmittedSlashInput, TuiApp, Value, collect_workspace_diff,
+    format_context_snapshot_text_with_options, install_skill, mission_prompt_marker,
+    model_metadata_explicitly_disallows_image_input, parse_shell_escape_input,
+    remove_installed_skill, scan_skill_path, set_skill_config_value, set_skill_enabled,
+    view_skill_value,
+};
+use anyhow::{Result, anyhow};
+
 impl TuiApp {
     pub(crate) async fn handle_line(&mut self, line: &str) -> Result<bool> {
         if let Some(shell) = parse_shell_escape_input(line) {
@@ -74,28 +91,21 @@ impl TuiApp {
                     .current_session
                     .clone()
                     .ok_or_else(|| anyhow!("no session context yet"))?;
-                let result = reload_session_context(ReloadContextOptions {
-                    state: self.state_runtime.clone(),
-                    session,
-                    config_path: self.config_path.clone(),
-                    mode: Some(self.current_mode),
-                    inherited_env: Some(self.env_map.clone()),
-                    agent: self.current_agent.clone(),
-                    no_agents: self.no_agents,
-                    no_skills: self.no_skills,
-                    invalidation_reason: "manual_reload".to_string(),
-                    notice: None,
-                })
-                .await?;
+                let result = self
+                    .runtime
+                    .client()
+                    .resume_thread(session)
+                    .await?
+                    .refresh_context(self.refresh_thread_context_request("manual_reload", None))
+                    .await?;
                 println!(
                     "reloaded context: {} v{}; side cleanup deleted {}",
                     result.prefix_hash,
                     result.version,
-                    self.state_runtime.delete_sessions_for_cwd_with_source(
-                        &self.cwd,
-                        TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-                    )
-                    .await?
+                    self.runtime
+                        .client()
+                        .cleanup_side_conversations(&self.cwd, SideConversationSurface::Tui)
+                        .await?
                 );
                 Ok(())
             }
@@ -170,10 +180,13 @@ impl TuiApp {
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
             SlashCommand::Mission { team, goal } => {
-                self.record_mission_metadata(team.as_deref(), &goal).await?;
+                let mission = self.mission_registration(team.as_deref(), &goal)?;
                 let args = mission_command_args(team.as_deref(), &goal);
                 let prompt = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
-                return self.submit_prompt(prompt).await.map(|_| false);
+                return self
+                    .submit_prompt_with_mission(prompt, Some(mission))
+                    .await
+                    .map(|_| false);
             }
             SlashCommand::Compact(instructions) => self.run_scripted_compaction(instructions).await,
             SlashCommand::SkillInvoke { name, args } => {
@@ -480,11 +493,7 @@ impl TuiApp {
             return "usage: /skills uninstall <name> [--local|-g|--global]".to_string();
         };
         format_skill_mutation_result(remove_installed_skill(
-            &self.home,
-            &self.cwd,
-            target,
-            name,
-            None,
+            &self.home, &self.cwd, target, name, None,
         ))
     }
 
@@ -595,5 +604,4 @@ impl TuiApp {
             })
             .then(|| skill_prompt_marker(name, args))
     }
-
 }

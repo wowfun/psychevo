@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(feature = "openai")]
+use futures::future::BoxFuture;
+use tokio::sync::watch;
+
+#[cfg(feature = "openai")]
+use crate::types::GenerationRequest;
+#[cfg(feature = "openai")]
+use crate::{GenerationStream, Result};
+
 #[derive(Clone, Debug)]
 pub struct AbortSignal {
     pub(crate) rx: watch::Receiver<bool>,

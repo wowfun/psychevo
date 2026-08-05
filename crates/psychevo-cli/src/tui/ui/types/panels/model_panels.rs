@@ -1,3 +1,9 @@
+use crate::tui::{BottomPanel, BottomSelectionPanel, HelpPanel, HelpTab};
+use crate::tui::{
+    SlashHelpSections,
+    ui_types::{AgentTab, BottomSelectionValue, SessionListView},
+};
+
 impl BottomPanel {
     pub(crate) fn selection(&self) -> &BottomSelectionPanel {
         match self {

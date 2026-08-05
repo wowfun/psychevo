@@ -219,12 +219,22 @@ export const appServerSchemas = {
 },
   AppThreadForkParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "beforeSessionSeq": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "threadId": {
@@ -270,6 +280,108 @@ export const appServerSchemas = {
     "threadId"
   ],
   "title": "AppThreadCompactParams",
+  "type": "object"
+},
+  AppThreadCompactResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "checkpointId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "compacted": {
+      "type": "boolean"
+    },
+    "firstKeptSessionSeq": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "tokensAfter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tokensBefore": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "checkpointId",
+    "compacted",
+    "firstKeptSessionSeq",
+    "message",
+    "reason",
+    "summary",
+    "summaryModel",
+    "summaryProvider",
+    "threadId",
+    "tokensAfter",
+    "tokensBefore"
+  ],
+  "title": "AppThreadCompactResult",
   "type": "object"
 },
   AppThreadListParams: {
@@ -616,6 +728,11 @@ export const appServerSchemas = {
         "sequential"
       ],
       "type": "string"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -630,10 +747,12 @@ export const appServerSchemas = {
     },
     "parameters": true,
     "timeoutMs": {
-      "default": 300000,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "allOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        }
+      ],
+      "default": 300000
     }
   },
   "required": [
@@ -661,10 +780,12 @@ export const appServerSchemas = {
         },
         "parameters": true,
         "timeoutMs": {
-          "default": 300000,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "allOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            }
+          ],
+          "default": 300000
         }
       },
       "required": [
@@ -681,6 +802,11 @@ export const appServerSchemas = {
         "sequential"
       ],
       "type": "string"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -1225,6 +1351,13 @@ export const appServerSchemas = {
 },
   AppPendingInteraction: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "interactionId": {
       "type": "string"
@@ -1234,15 +1367,17 @@ export const appServerSchemas = {
     },
     "payload": true,
     "requestedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "resolution": true,
     "resolvedAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "status": {
@@ -1269,13 +1404,19 @@ export const appServerSchemas = {
 },
   AppThreadItem: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "accounting": true,
     "message": true,
     "metadata": true,
     "sessionSeq": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "usage": true
   },
@@ -1288,6 +1429,13 @@ export const appServerSchemas = {
 },
   AppThreadSummary: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "activeTurnId": {
       "type": [
@@ -1305,15 +1453,13 @@ export const appServerSchemas = {
       "type": "string"
     },
     "messageCount": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "source": {
       "type": "string"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "title": {
       "type": [
@@ -1322,12 +1468,10 @@ export const appServerSchemas = {
       ]
     },
     "toolCallCount": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     }
   },
   "required": [
@@ -1356,15 +1500,17 @@ export const appServerSchemas = {
         },
         "payload": true,
         "requestedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "resolution": true,
         "resolvedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "status": {
@@ -1394,8 +1540,7 @@ export const appServerSchemas = {
         "message": true,
         "metadata": true,
         "sessionSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "usage": true
       },
@@ -1404,6 +1549,11 @@ export const appServerSchemas = {
         "sessionSeq"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -1430,8 +1580,7 @@ export const appServerSchemas = {
       "type": "array"
     },
     "messageCount": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "pendingInteractions": {
       "default": [],
@@ -1444,8 +1593,7 @@ export const appServerSchemas = {
       "type": "string"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "title": {
       "type": [
@@ -1454,12 +1602,10 @@ export const appServerSchemas = {
       ]
     },
     "toolCallCount": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     }
   },
   "required": [
@@ -1496,15 +1642,13 @@ export const appServerSchemas = {
           "type": "string"
         },
         "messageCount": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "source": {
           "type": "string"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "title": {
           "type": [
@@ -1513,12 +1657,10 @@ export const appServerSchemas = {
           ]
         },
         "toolCallCount": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -1532,6 +1674,11 @@ export const appServerSchemas = {
         "updatedAtMs"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -1603,15 +1750,22 @@ export const appServerSchemas = {
         "interrupted"
       ],
       "type": "string"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
     "contextLimit": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "contextSnapshot": true,
@@ -1645,9 +1799,7 @@ export const appServerSchemas = {
       "type": "string"
     },
     "toolFailures": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "warnings": {
       "default": [],
@@ -1720,17 +1872,24 @@ export const appServerSchemas = {
         "turnId"
       ],
       "type": "object"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "oneOf": [
     {
       "properties": {
         "queuePosition": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "receipt": {
@@ -1846,6 +2005,7 @@ export const appServerSchemas = {
         }
       },
       "required": [
+        "text",
         "type"
       ],
       "type": "object"
@@ -1987,9 +2147,7 @@ export const appServerSchemas = {
     {
       "properties": {
         "missed": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "type": {
           "enum": [
@@ -2023,11 +2181,13 @@ export const appServerSchemas = {
         {
           "properties": {
             "queuePosition": {
-              "format": "uint",
-              "minimum": 0.0,
-              "type": [
-                "integer",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/JsonSafeU64"
+                },
+                {
+                  "type": "null"
+                }
               ]
             },
             "receipt": {
@@ -2143,6 +2303,7 @@ export const appServerSchemas = {
             }
           },
           "required": [
+            "text",
             "type"
           ],
           "type": "object"
@@ -2284,9 +2445,7 @@ export const appServerSchemas = {
         {
           "properties": {
             "missed": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
+              "$ref": "#/definitions/JsonSafeU64"
             },
             "type": {
               "enum": [
@@ -2336,6 +2495,11 @@ export const appServerSchemas = {
         "turnId"
       ],
       "type": "object"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {

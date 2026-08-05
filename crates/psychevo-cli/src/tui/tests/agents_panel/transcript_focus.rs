@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{FixtureKind, fixture_ui, test_app};
+use crate::tui::{
+    FocusMode, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind, Rect, TranscriptHitTarget, TranscriptKind, TuiApp,
+};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn ctrl_t_focuses_transcript_and_space_toggles_expandable_row() {

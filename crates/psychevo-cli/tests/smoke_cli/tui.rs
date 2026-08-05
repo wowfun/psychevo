@@ -1,5 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::{
+    MockSseServer, init_tui_home, isolated_run_cmd, isolated_tui_cmd, sse_metadata_usage_then_text,
+    sse_reasoning_then_text, sse_text, write_multi_model_config, write_run_config,
+    write_run_config_with_reasoning,
+};
+use rusqlite::Connection;
+use serde_json::Value;
+use std::io::Write;
+use std::process::{Command, Stdio};
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn cli_tui_initial_prompt_shows_thinking_by_default() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text(
@@ -262,12 +270,13 @@ pub(crate) async fn cli_tui_help_prints_commands_from_registry() {
 }
 
 #[tokio::test]
-pub(crate) async fn cli_tui_new_is_silent_until_next_prompt() {
+pub(crate) async fn cli_tui_new_binds_the_next_prompt_before_streaming_its_answer() {
+    let server = MockSseServer::start(vec![sse_text("new-session-visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
-    let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
+    let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args(["tui", "--cd", cwd.to_str().expect("cwd")])
@@ -280,7 +289,7 @@ pub(crate) async fn cli_tui_new_is_silent_until_next_prompt() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"/new\n/quit\n")
+        .write_all(b"/new\nhello new session\n/quit\n")
         .expect("write stdin");
     let output = child.wait_with_output().expect("output");
     assert!(
@@ -290,6 +299,17 @@ pub(crate) async fn cli_tui_new_is_silent_until_next_prompt() {
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout");
     assert!(!stdout.contains("new session will start on next prompt"));
+    assert!(stdout.contains("new-session-visible"), "{stdout}");
+
+    let conn = Connection::open(&db).expect("db");
+    let (sessions, messages): (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM sessions), (SELECT COUNT(*) FROM messages)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("persisted new-session Turn");
+    assert_eq!((sessions, messages), (1, 2));
 }
 
 #[tokio::test]

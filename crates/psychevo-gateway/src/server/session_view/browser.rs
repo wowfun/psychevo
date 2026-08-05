@@ -1,6 +1,19 @@
-async fn thread_browser_value(
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+use psychevo::HumanThreadBrowserQuery;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use crate::gateway::activity::GatewayActivity;
+use crate::gateway_now_ms;
+
+use super::super::binding::WebState;
+use super::summary::{session_project_value, session_summary_value};
+
+pub(in super::super) async fn thread_browser_value(
     state: &WebState,
-    params: wire::ThreadBrowserParams,
+    params: wire::thread_command_turn::ThreadBrowserParams,
     cwd: Option<PathBuf>,
 ) -> psychevo::Result<Value> {
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
@@ -20,43 +33,43 @@ async fn thread_browser_value(
         .filter(|(_, activity)| activity.running || activity.takeover_state.is_some())
         .map(|(thread_id, _)| thread_id.clone())
         .collect::<Vec<_>>();
-    let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
-    let cursor_cwd = params.cursor.as_ref().map(|cursor| cursor.cwd.as_str());
+    let cursor_cwd = params.cursor.as_ref().map(|cursor| cursor.cwd.clone());
     let cursor_offset = params
         .cursor
         .as_ref()
         .map(|cursor| cursor.offset)
         .unwrap_or(0);
-    let projections = state.inner.state.browse_human_sessions(
-        psychevo::__product::persistence::SessionBrowserRequest {
-            cwd: cwd.as_deref(),
+    let workspaces = state
+        .inner
+        .framework
+        .browse_human_threads(HumanThreadBrowserQuery {
+            cwd,
             archived: params.archived.unwrap_or(false),
             cursor_cwd,
             cursor_offset,
             limit,
             recent_since_ms,
-            include_session_ids: &include_ids,
-            active_session_ids: &active_ids,
-        },
-    )
-    .await?;
+            include_thread_ids: include_ids,
+            active_thread_ids: active_ids,
+        })
+        .await?;
 
-    let mut workspaces = projections
+    let workspaces = workspaces
         .into_iter()
         .map(|workspace| {
             let cwd = workspace.cwd;
             let sessions = workspace
-                .sessions
+                .threads
                 .into_iter()
-                .map(|projection| {
+                .map(|presentation| {
                     let activity = activity_snapshot
-                        .get(&projection.summary.id)
+                        .get(&presentation.summary.id)
                         .cloned()
                         .unwrap_or_else(|| GatewayActivity {
                             framework_revision: Some(framework_revision.clone()),
                             ..GatewayActivity::default()
                         });
-                    session_summary_value(projection, activity)
+                    session_summary_value(presentation, activity)
                 })
                 .collect::<Vec<_>>();
             let next_cursor = workspace.next_offset.map(|offset| {
@@ -74,33 +87,5 @@ async fn thread_browser_value(
             })
         })
         .collect::<Vec<_>>();
-    workspaces.sort_by(|left, right| {
-        let left_latest = browser_workspace_latest_at(left);
-        let right_latest = browser_workspace_latest_at(right);
-        right_latest.cmp(&left_latest).then_with(|| {
-            left.get("cwd")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .cmp(
-                    right
-                        .get("cwd")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default(),
-                )
-        })
-    });
     Ok(json!({ "workspaces": workspaces }))
-}
-
-fn browser_workspace_latest_at(workspace: &Value) -> i64 {
-    workspace
-        .get("sessions")
-        .and_then(Value::as_array)
-        .and_then(|sessions| {
-            sessions
-                .iter()
-                .filter_map(|session| session.get("updatedAtMs").and_then(Value::as_i64))
-                .max()
-        })
-        .unwrap_or_default()
 }

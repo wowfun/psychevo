@@ -1,5 +1,28 @@
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::time::Duration;
+
+use serde_json::{Value, json};
+
+use super::super::text_edit::truncate_lint_output;
+use super::lsp_manager::{
+    LspClient, LspDiagnosticRun, LspFileState, LspServerCommand, LspServerDefinition,
+    LspServerMatch, LspServerResolution,
+};
+use crate::config::LspConfig;
+use crate::error::{Error, Result};
+use crate::managed_tools::{find_on_path, is_executable_file, resolve_psychevo_home};
+use crate::tools::cwd::CwdTool;
+use crate::types::RunStreamEvent;
+
 impl LspClient {
-    pub(crate) fn start(
+    pub(super) fn start(
         command: LspServerCommand,
         cwd: PathBuf,
         timeout: Duration,
@@ -50,7 +73,7 @@ impl LspClient {
         Ok(client)
     }
 
-    pub(crate) fn initialize(&self, timeout: Duration) -> Result<()> {
+    fn initialize(&self, timeout: Duration) -> Result<()> {
         let _io = self
             .io_lock
             .lock()
@@ -105,7 +128,7 @@ impl LspClient {
         Ok(())
     }
 
-    pub(crate) fn diagnostics(
+    pub(super) fn diagnostics(
         &self,
         path: &Path,
         content: &str,
@@ -205,12 +228,12 @@ impl LspClient {
         })
     }
 
-    pub(crate) fn next_request_id(&self) -> i64 {
+    fn next_request_id(&self) -> i64 {
         self.next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub(crate) fn shutdown(&self) {
+    pub(super) fn shutdown(&self) {
         if let Ok(mut stdin) = self.stdin.lock()
             && let Some(stdin) = stdin.as_mut()
         {
@@ -236,11 +259,7 @@ impl Drop for LspClient {
     }
 }
 
-pub(crate) fn wait_for_lsp_response(
-    rx: &Receiver<Value>,
-    id: i64,
-    timeout: Duration,
-) -> Result<Value> {
+fn wait_for_lsp_response(rx: &Receiver<Value>, id: i64, timeout: Duration) -> Result<Value> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
         let remaining = timeout.saturating_sub(start.elapsed());
@@ -258,7 +277,7 @@ pub(crate) fn wait_for_lsp_response(
     Err(Error::Message("LSP initialize timed out".to_string()))
 }
 
-pub(crate) fn wait_for_lsp_diagnostics(
+fn wait_for_lsp_diagnostics(
     rx: &Receiver<Value>,
     uri: &str,
     timeout: Duration,
@@ -289,7 +308,7 @@ pub(crate) fn wait_for_lsp_diagnostics(
     Err(Error::Message("LSP diagnostics timed out".to_string()))
 }
 
-pub(crate) fn resolve_lsp_server_with_env(
+pub(super) fn resolve_lsp_server_with_env(
     path: &Path,
     config: &LspConfig,
     env_map: &BTreeMap<String, String>,
@@ -329,7 +348,7 @@ pub(crate) fn resolve_lsp_server_with_env(
     LspServerResolution::Missing
 }
 
-pub(crate) fn lsp_server_match(path: &Path) -> Option<LspServerMatch> {
+pub(super) fn lsp_server_match(path: &Path) -> Option<LspServerMatch> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     match ext.as_str() {
         "rs" => Some(LspServerMatch {
@@ -408,7 +427,7 @@ pub(crate) fn lsp_server_match(path: &Path) -> Option<LspServerMatch> {
     }
 }
 
-pub(crate) fn managed_lsp_binary(
+fn managed_lsp_binary(
     definition: &LspServerDefinition,
     env_map: &BTreeMap<String, String>,
 ) -> Option<PathBuf> {
@@ -417,11 +436,11 @@ pub(crate) fn managed_lsp_binary(
     Some(npm_bin_dir(&home.join("lsp").join("node")).join(npm_bin_name(definition.binary)))
 }
 
-pub(crate) fn npm_bin_dir(install_dir: &Path) -> PathBuf {
+pub(super) fn npm_bin_dir(install_dir: &Path) -> PathBuf {
     install_dir.join("node_modules").join(".bin")
 }
 
-pub(crate) fn npm_bin_name(name: &str) -> String {
+pub(super) fn npm_bin_name(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.cmd")
     } else {
@@ -429,7 +448,7 @@ pub(crate) fn npm_bin_name(name: &str) -> String {
     }
 }
 
-pub(crate) fn find_executable_path(
+pub(super) fn find_executable_path(
     name: &str,
     env_map: &BTreeMap<String, String>,
     path_prefixes: &[PathBuf],
@@ -437,7 +456,7 @@ pub(crate) fn find_executable_path(
     find_on_path(name, combined_path(env_map, path_prefixes), env_map)
 }
 
-pub(crate) fn combined_path(
+fn combined_path(
     env_map: &BTreeMap<String, String>,
     path_prefixes: &[PathBuf],
 ) -> Option<OsString> {
@@ -446,13 +465,13 @@ pub(crate) fn combined_path(
         .flatten()
 }
 
-pub(crate) fn hash_content(content: &str) -> u64 {
+fn hash_content(content: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     hasher.finish()
 }
 
-pub(crate) fn emit_lsp_status(
+pub(super) fn emit_lsp_status(
     tool: &CwdTool,
     status: &str,
     server_id: Option<&str>,
@@ -482,7 +501,7 @@ pub(crate) fn emit_lsp_status(
 }
 
 #[cfg(test)]
-pub(crate) fn command_available(program: &str) -> bool {
+pub(super) fn command_available(program: &str) -> bool {
     std::env::var_os("PATH")
         .and_then(|paths| {
             std::env::split_paths(&paths)
@@ -493,7 +512,7 @@ pub(crate) fn command_available(program: &str) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) fn lsp_diagnostics_with_command(
+pub(super) fn lsp_diagnostics_with_command(
     server: &LspServerCommand,
     cwd: &Path,
     path: &Path,
@@ -606,7 +625,7 @@ pub(crate) fn lsp_diagnostics_with_command(
     Ok(diagnostics)
 }
 
-pub(crate) fn send_lsp(stdin: &mut std::process::ChildStdin, message: Value) -> Result<()> {
+fn send_lsp(stdin: &mut std::process::ChildStdin, message: Value) -> Result<()> {
     let body = serde_json::to_string(&message)?;
     std::io::Write::write_all(
         stdin,
@@ -616,9 +635,7 @@ pub(crate) fn send_lsp(stdin: &mut std::process::ChildStdin, message: Value) -> 
     Ok(())
 }
 
-pub(crate) fn read_lsp_message(
-    reader: &mut dyn std::io::BufRead,
-) -> std::io::Result<Option<Value>> {
+fn read_lsp_message(reader: &mut dyn std::io::BufRead) -> std::io::Result<Option<Value>> {
     let mut content_len = None;
     loop {
         let mut line = String::new();
@@ -641,7 +658,7 @@ pub(crate) fn read_lsp_message(
     Ok(serde_json::from_slice(&body).ok())
 }
 
-pub(crate) fn file_uri(path: &Path) -> String {
+fn file_uri(path: &Path) -> String {
     let raw = path
         .canonicalize()
         .unwrap_or_else(|_| path.to_path_buf())
@@ -650,7 +667,7 @@ pub(crate) fn file_uri(path: &Path) -> String {
     format!("file://{}", percent_encode_path(&raw))
 }
 
-pub(crate) fn percent_encode_path(path: &str) -> String {
+fn percent_encode_path(path: &str) -> String {
     let mut out = String::new();
     for byte in path.as_bytes() {
         let ch = *byte as char;
@@ -664,7 +681,7 @@ pub(crate) fn percent_encode_path(path: &str) -> String {
 }
 
 #[cfg(test)]
-pub(crate) fn lsp_language_id(path: &Path) -> &'static str {
+fn lsp_language_id(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -682,7 +699,7 @@ pub(crate) fn lsp_language_id(path: &Path) -> &'static str {
     }
 }
 
-pub(crate) fn lsp_diag_key(diag: &Value) -> String {
+pub(super) fn lsp_diag_key(diag: &Value) -> String {
     format!(
         "{}|{}|{}|{}",
         diag.get("severity").and_then(Value::as_i64).unwrap_or(1),
@@ -696,7 +713,7 @@ pub(crate) fn lsp_diag_key(diag: &Value) -> String {
     )
 }
 
-pub(crate) fn format_lsp_diagnostics(path: &Path, diagnostics: &[Value]) -> Option<String> {
+pub(super) fn format_lsp_diagnostics(path: &Path, diagnostics: &[Value]) -> Option<String> {
     if diagnostics.is_empty() {
         return None;
     }

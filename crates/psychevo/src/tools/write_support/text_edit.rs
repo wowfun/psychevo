@@ -1,10 +1,21 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
+use std::process::Stdio;
+use std::time::Duration;
 
-#[allow(unused_imports)]
-use serde_json::json;
+use psychevo_agent_core::ToolOutput;
+use serde_json::{Value, json};
+use similar::TextDiff;
+
+use super::patch_lsp::lsp_diagnostics_after;
+use crate::error::{Error, Result};
+use crate::tools::cwd::CwdTool;
+use crate::tools::file_mutation::{FileMutationBackend, FileVersion};
+use crate::tools::read::value_reports_error;
+use crate::tools::truncation::{
+    dominant_line_ending, normalize_lf, restore_line_endings, truncate_tail,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TextFile {

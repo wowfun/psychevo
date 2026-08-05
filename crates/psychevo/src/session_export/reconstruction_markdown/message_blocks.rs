@@ -1,3 +1,10 @@
+use psychevo_agent_core::{AssistantBlock, Message};
+
+use crate::session_export::assembly::ExportMessageRecord;
+use crate::session_export::markdown_helpers::{
+    push_fenced_json, push_fenced_text, push_line, user_content_markdown,
+};
+
 pub(crate) fn render_markdown_message(out: &mut String, record: &ExportMessageRecord) {
     match &record.message {
         Message::User { content, .. } => {
@@ -37,16 +44,36 @@ pub(crate) fn render_markdown_message(out: &mut String, record: &ExportMessageRe
                     }
                     AssistantBlock::ProviderTool(call) => {
                         push_line(out, "");
-                        push_line(out, &format!("#### Hosted tool: `{}` (`{}`, {})", call.name, call.id, call.status));
-                        if let Some(action) = &call.action { push_fenced_json(out, action); }
+                        push_line(
+                            out,
+                            &format!(
+                                "#### Hosted tool: `{}` (`{}`, {})",
+                                call.name, call.id, call.status
+                            ),
+                        );
+                        if let Some(action) = &call.action {
+                            push_fenced_json(out, action);
+                        }
                     }
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => {
-                        push_line(out, &format!("- Source: [{}]({})", source.title, source.url));
+                    AssistantBlock::Source {
+                        source: psychevo_ai::AssistantSource::UrlCitation(source),
+                    } => {
+                        push_line(
+                            out,
+                            &format!("- Source: [{}]({})", source.title, source.url),
+                        );
                     }
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => {
-                        push_line(out, &format!("- Image source: {}", source.source_website_url));
+                    AssistantBlock::Source {
+                        source: psychevo_ai::AssistantSource::Image(source),
+                    } => {
+                        push_line(
+                            out,
+                            &format!("- Image source: {}", source.source_website_url),
+                        );
                     }
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { kind, .. }) => {
+                    AssistantBlock::Source {
+                        source: psychevo_ai::AssistantSource::Provider { kind, .. },
+                    } => {
                         push_line(out, &format!("- Provider source: {kind}"));
                     }
                 }

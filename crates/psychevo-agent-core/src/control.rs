@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+use psychevo_ai::AbortSignal;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::sync::watch;
+
+use crate::types::Message;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct PendingInputId(u64);
 
@@ -237,6 +244,21 @@ impl ControlHandle {
         input.released(1, removed.bytes);
         true
     }
+
+    pub fn cancel_all_pending_user_messages(&self) -> usize {
+        let mut input = self
+            .input
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let canceled = input.steered.len();
+        let released_bytes = input
+            .steered
+            .iter()
+            .fold(0usize, |total, item| total.saturating_add(item.bytes));
+        input.steered.clear();
+        input.released(canceled, released_bytes);
+        canceled
+    }
 }
 
 impl ControlReceivers {
@@ -326,7 +348,13 @@ fn message_payload_bytes(message: &Message) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use psychevo_ai::Outcome;
+
+    use super::{
+        ControlHandle, ControlInputError, MAX_CONTROL_INPUT_BYTES, MAX_CONTROL_INPUT_ITEMS,
+    };
+    use crate::support::user_text_message;
+    use crate::types::{AssistantBlock, Message, UserContentBlock};
 
     #[test]
     fn control_input_capacity_rejects_newest_and_recovers_after_drain() {
@@ -451,6 +479,36 @@ mod tests {
             content.as_slice(),
             [UserContentBlock::Text(text)] if text.text == "small"
         ));
+    }
+
+    #[test]
+    fn cancel_all_pending_inputs_releases_exact_capacity() {
+        let (control, mut receivers) = ControlHandle::new();
+        control
+            .inject_user_message(user_text_message("injected"))
+            .expect("injected input");
+        for index in 0..(MAX_CONTROL_INPUT_ITEMS - 1) {
+            control
+                .steer_user_message(user_text_message(format!("steer-{index}")))
+                .expect("pending steer");
+        }
+
+        assert_eq!(
+            control.inject_user_message(user_text_message("full")),
+            Err(ControlInputError::CountLimit {
+                limit: MAX_CONTROL_INPUT_ITEMS,
+            })
+        );
+        assert_eq!(
+            control.cancel_all_pending_user_messages(),
+            MAX_CONTROL_INPUT_ITEMS - 1
+        );
+        assert!(receivers.drain_pending_user_messages().is_empty());
+        assert_eq!(receivers.drain_injected_messages().len(), 1);
+        control
+            .inject_user_message(user_text_message("capacity restored"))
+            .expect("cancellation releases accounting");
+        assert_eq!(control.cancel_all_pending_user_messages(), 0);
     }
 
     #[test]

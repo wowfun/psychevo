@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, Value, assistant_message_stream_event_type, scoped_tool_position_key,
+    streaming_tool_calls_from_event,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn apply_streaming_tool_calls(&mut self, value: &Value) -> bool {

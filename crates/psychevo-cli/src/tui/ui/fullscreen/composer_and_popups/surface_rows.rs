@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, FullscreenUi, MouseWheelTarget, PendingImageAttachment,
+    TUI_TURN_START_TRANSCRIPT_SOURCE, TranscriptKind, TranscriptRow, UiEphemeralStatus, Value,
+    attachment_metadata_text, composer_terminal_cursor_position, message_timestamp_ms,
+    pending_input_id_from_message_end, rect_contains,
+};
+use ratatui::layout::Rect;
+use std::time::Instant;
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn bottom_panel_hit(&self, column: u16, row: u16) -> Option<usize> {
@@ -106,7 +112,7 @@ impl<'a> FullscreenUi<'a> {
         if let Some(index) = self
             .pending_steers
             .iter()
-            .position(|input| input.id.as_u64() == pending_id)
+            .position(|input| input.id.matches_observed_id(pending_id))
         {
             let input = self
                 .pending_steers

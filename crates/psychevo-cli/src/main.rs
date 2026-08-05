@@ -1,14 +1,12 @@
-#![allow(clippy::module_inception)]
-
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::Parser;
+use psychevo::command_registry::{CLI_COMMANDS, CommandSurface};
 
 pub(crate) mod args;
-pub(crate) mod command_registry;
 pub(crate) mod commands;
 pub(crate) mod env;
 pub(crate) mod profiles;
@@ -73,9 +71,9 @@ async fn runtime_main() -> ExitCode {
 
 pub(crate) async fn run() -> Result<ExitCode> {
     debug_assert!(
-        command_registry::CLI_COMMANDS
+        CLI_COMMANDS
             .iter()
-            .all(|spec| spec.surface == command_registry::CommandSurface::PevoCli)
+            .all(|spec| spec.surface == CommandSurface::PevoCli)
     );
     let mut cli = Cli::parse();
     let default_tui_cd = apply_root_cd(cli.cd.take(), &mut cli.command)?;

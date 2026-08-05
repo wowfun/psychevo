@@ -1,3 +1,37 @@
+use std::collections::VecDeque;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+use super::message_summaries::validate_session_trace_id;
+use super::sink::SessionTraceDraft;
+
+pub const SESSION_TRACE_SCHEMA_VERSION: u64 = 2;
+pub const SESSION_TRACE_DEFAULT_LIMIT: usize = 200;
+pub const SESSION_TRACE_MAX_LIMIT: usize = 1_000;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionTraceReadOptions {
+    pub after_seq: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTraceReadResult {
+    pub thread_id: String,
+    pub available: bool,
+    pub events: Vec<Value>,
+    pub warnings: Vec<String>,
+    pub truncated: bool,
+    pub next_after_seq: Option<u64>,
+}
+
 pub fn read_session_trace(
     db_path: &Path,
     session_id: &str,
@@ -142,7 +176,7 @@ pub fn session_trace_path(db_path: &Path, session_id: &str) -> Result<Option<Pat
     ))
 }
 
-fn append_trace_record(
+pub(super) fn append_trace_record(
     path: &Path,
     session_id: &str,
     invocation_id: &str,
@@ -180,7 +214,7 @@ fn append_trace_record(
     Ok(())
 }
 
-fn max_valid_seq(path: &Path) -> Result<u64, String> {
+pub(super) fn max_valid_seq(path: &Path) -> Result<u64, String> {
     if !path.exists() {
         return Ok(0);
     }
@@ -199,7 +233,7 @@ fn max_valid_seq(path: &Path) -> Result<u64, String> {
     Ok(seq)
 }
 
-fn set_last_error(slot: &Arc<Mutex<Option<String>>>, message: String) {
+pub(super) fn set_last_error(slot: &Arc<Mutex<Option<String>>>, message: String) {
     if let Ok(mut current) = slot.lock() {
         *current = Some(message);
     }

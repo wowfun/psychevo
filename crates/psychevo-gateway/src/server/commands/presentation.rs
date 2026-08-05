@@ -1,3 +1,9 @@
+use psychevo::command_registry::{
+    AvailableSlashCommand, CommandArgumentKind, CommandCapability, CommandPresentation,
+    SlashCommandAction,
+};
+use psychevo_gateway_protocol as wire;
+
 pub(super) fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bool {
     matches!(
         command.action,
@@ -26,7 +32,7 @@ pub(super) fn web_desktop_command_visible(command: &AvailableSlashCommand) -> bo
     )
 }
 
-fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
+pub(super) fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
     matches!(
         action,
         SlashCommandAction::Help
@@ -54,7 +60,10 @@ fn web_desktop_action_visible(action: SlashCommandAction) -> bool {
     )
 }
 
-pub(super) fn command_item_matches(command: &wire::CommandListItem, query: &str) -> bool {
+pub(in super::super) fn command_item_matches(
+    command: &wire::thread_command_turn::CommandListItem,
+    query: &str,
+) -> bool {
     let query = query.to_ascii_lowercase();
     query.is_empty()
         || command.name.to_ascii_lowercase().contains(&query)
@@ -74,7 +83,9 @@ pub(super) fn command_item_matches(command: &wire::CommandListItem, query: &str)
             .is_some_and(|target| target.to_ascii_lowercase().contains(&query))
 }
 
-pub(super) fn command_item_completion_detail(command: &wire::CommandListItem) -> String {
+pub(in super::super) fn command_item_completion_detail(
+    command: &wire::thread_command_turn::CommandListItem,
+) -> String {
     let destination = match command.destination.as_deref().unwrap_or("none") {
         "commands" => "Panel",
         "history" => "History",
@@ -88,19 +99,19 @@ pub(super) fn command_item_completion_detail(command: &wire::CommandListItem) ->
     format!("{destination} - {}", command.summary)
 }
 
-fn command_alternate_action(
+pub(super) fn command_alternate_action(
     presentation: CommandPresentation,
-) -> Option<wire::CommandAlternateAction> {
+) -> Option<wire::thread_command_turn::CommandAlternateAction> {
     presentation
         .alternate_action
-        .map(|action| wire::CommandAlternateAction {
+        .map(|action| wire::thread_command_turn::CommandAlternateAction {
             action_type: action.action_type.as_str().to_string(),
             target: action.target.to_string(),
             label: action.label.to_string(),
         })
 }
 
-fn command_argument_kind(kind: CommandArgumentKind) -> &'static str {
+pub(super) fn command_argument_kind(kind: CommandArgumentKind) -> &'static str {
     match kind {
         CommandArgumentKind::None => "none",
         CommandArgumentKind::RequiredValue => "required_value",

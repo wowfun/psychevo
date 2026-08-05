@@ -1,40 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-
-pub(crate) fn agent_child_event_ends_live_backlog(event: &RunStreamEvent) -> bool {
-    match event {
-        RunStreamEvent::Event(value) => matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("message_end") | Some("run_end")
-        ),
-        RunStreamEvent::Scoped { event, .. } => agent_child_event_ends_live_backlog(event),
-        _ => false,
-    }
-}
-
-pub(crate) fn stream_event_session_id(event: &RunStreamEvent) -> Option<&str> {
-    match event {
-        RunStreamEvent::Event(value) => value.get("session_id").and_then(Value::as_str),
-        RunStreamEvent::Scoped { session_id, .. } => Some(session_id.as_str()),
-        _ => None,
-    }
-}
-
-pub(crate) fn stream_event_is_clarify_request(event: &RunStreamEvent) -> bool {
-    match event {
-        RunStreamEvent::ClarifyRequest(_) => true,
-        RunStreamEvent::Event(value) => {
-            value.get("type").and_then(Value::as_str) == Some("action_requested")
-                && value.get("kind").and_then(Value::as_str) == Some("clarify")
-        }
-        RunStreamEvent::Scoped { event, .. } => stream_event_is_clarify_request(event),
-        _ => false,
-    }
-}
+pub(crate) use crate::tui::support_turn_event::{
+    turn_event_ends_agent_child_backlog as agent_child_event_ends_live_backlog,
+    turn_event_ends_session_backlog as session_live_event_ends_backlog,
+    turn_event_is_clarify_request, turn_event_session_id,
+};
+use crate::tui::{
+    AuxiliaryAgentTask, FullscreenUi, GatewayActionKind, GatewayEvent, Outcome, TerminalReason,
+    TuiLiveEvent, TurnEvent, TurnOutcome,
+};
 
 pub(crate) fn tui_live_event_is_clarify_request(event: &TuiLiveEvent) -> bool {
     match event {
-        TuiLiveEvent::Runtime(event) => stream_event_is_clarify_request(event),
+        TuiLiveEvent::Turn(event) => turn_event_is_clarify_request(event),
+        TuiLiveEvent::Shell(_) => false,
         TuiLiveEvent::Gateway(event) => matches!(
             event.as_ref(),
             GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action }
@@ -49,7 +26,7 @@ pub(crate) fn buffer_session_live_event(
     event: impl Into<TuiLiveEvent>,
 ) {
     let event = event.into();
-    if matches!(&event, TuiLiveEvent::Runtime(event) if session_live_event_ends_backlog(event))
+    if matches!(&event, TuiLiveEvent::Turn(event) if session_live_event_ends_backlog(event))
         || matches!(&event, TuiLiveEvent::Gateway(event) if matches!(event.as_ref(), GatewayEvent::TurnCompleted { .. }))
     {
         ui.session_live_event_backlog.remove(session_id);
@@ -59,10 +36,8 @@ pub(crate) fn buffer_session_live_event(
         .session_live_event_backlog
         .entry(session_id.to_string())
         .or_default();
-    if let (
-        TuiLiveEvent::Gateway(current),
-        Some(TuiLiveEvent::Gateway(previous)),
-    ) = (&event, backlog.last_mut())
+    if let (TuiLiveEvent::Gateway(current), Some(TuiLiveEvent::Gateway(previous))) =
+        (&event, backlog.last_mut())
         && let (
             GatewayEvent::EntryBlockTextDelta {
                 turn_id,
@@ -97,10 +72,7 @@ pub(crate) fn buffer_session_live_event(
     }
 }
 
-pub(crate) fn push_pending_unowned_agent_event(
-    agent: &mut AuxiliaryAgentTask,
-    event: RunStreamEvent,
-) {
+pub(crate) fn push_pending_unowned_agent_event(agent: &mut AuxiliaryAgentTask, event: TurnEvent) {
     agent.pending_unowned_live_events.push(event);
     const MAX_PENDING_UNOWNED_AGENT_EVENTS: usize = 500;
     if agent.pending_unowned_live_events.len() > MAX_PENDING_UNOWNED_AGENT_EVENTS {
@@ -121,30 +93,49 @@ pub(crate) fn flush_pending_unowned_agent_events(
     }
 }
 
-pub(crate) fn session_live_event_ends_backlog(event: &RunStreamEvent) -> bool {
-    match event {
-        RunStreamEvent::Event(value) => matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("message_end") | Some("agent_end") | Some("run_end")
-        ),
-        RunStreamEvent::Scoped { event, .. } => session_live_event_ends_backlog(event),
-        _ => false,
-    }
-}
-
 pub(crate) fn turn_ended_error_message(
-    outcome: Outcome,
+    outcome: TurnOutcome,
     terminal_reason: Option<TerminalReason>,
 ) -> String {
-    turn_ended_error_text(
+    let outcome = match outcome {
+        TurnOutcome::Completed => "normal",
+        TurnOutcome::Stopped => "stopped",
+        TurnOutcome::Failed => "failed",
+        TurnOutcome::Interrupted => "aborted",
+    };
+    format_turn_ended_error(
         outcome,
         terminal_reason.map(TerminalReason::message).as_deref(),
     )
 }
 
 pub(crate) fn turn_ended_error_text(outcome: Outcome, terminal_message: Option<&str>) -> String {
+    format_turn_ended_error(outcome.as_str(), terminal_message)
+}
+
+fn format_turn_ended_error(outcome: &str, terminal_message: Option<&str>) -> String {
     match terminal_message.filter(|message| !message.trim().is_empty()) {
-        Some(message) => format!("turn ended: {} - {message}", outcome.as_str()),
-        None => format!("turn ended: {}", outcome.as_str()),
+        Some(message) => format!("turn ended: {outcome} - {message}"),
+        None => format!("turn ended: {outcome}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_turn_outcomes_keep_existing_tui_labels() {
+        for (outcome, label) in [
+            (TurnOutcome::Completed, "normal"),
+            (TurnOutcome::Stopped, "stopped"),
+            (TurnOutcome::Failed, "failed"),
+            (TurnOutcome::Interrupted, "aborted"),
+        ] {
+            assert_eq!(
+                turn_ended_error_message(outcome, None),
+                format!("turn ended: {label}")
+            );
+        }
     }
 }

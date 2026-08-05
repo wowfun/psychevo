@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::support_turn_event::turn_event_presentation_value;
+use crate::tui::{
+    FullscreenUi, Instant, TranscriptRow, TurnEvent, Value, agent_child_status_text,
+    agent_session_start_title, append_agent_child_live_fragment, apply_agent_child_value_preview,
+    evidence_kind, refresh_agent_child_preview, tool_id_key,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn apply_agent_session_start(&mut self, value: &Value) {
@@ -49,7 +53,7 @@ impl<'a> FullscreenUi<'a> {
     pub(crate) fn apply_agent_child_preview_event(
         &mut self,
         child_session_id: &str,
-        event: &RunStreamEvent,
+        event: &TurnEvent,
     ) -> bool {
         let Some(row) = self
             .transcript
@@ -60,14 +64,14 @@ impl<'a> FullscreenUi<'a> {
         };
         let mut changed = false;
         match event {
-            RunStreamEvent::AssistantTextDelta { text } => {
+            TurnEvent::MessageDelta { text } => {
                 changed |= append_agent_child_live_fragment(
                     &mut row.agent_child_live_text,
                     "Response",
                     text,
                 );
             }
-            RunStreamEvent::ReasoningDelta { text } => {
+            TurnEvent::ReasoningDelta { text } => {
                 if append_agent_child_live_fragment(
                     &mut row.agent_child_live_text,
                     "Thinking",
@@ -76,12 +80,24 @@ impl<'a> FullscreenUi<'a> {
                     changed = true;
                 }
             }
-            RunStreamEvent::ReasoningEnd => {}
-            RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
-            RunStreamEvent::Event(value) => {
-                changed |= apply_agent_child_value_preview(row, value);
+            TurnEvent::ReasoningCompleted { .. }
+            | TurnEvent::InteractionRequested { .. }
+            | TurnEvent::InteractionResolved { .. } => {}
+            event @ (TurnEvent::Runtime { .. }
+            | TurnEvent::Message { .. }
+            | TurnEvent::Tool { .. }
+            | TurnEvent::Warning { .. }) => {
+                if let Some(value) = turn_event_presentation_value(event) {
+                    changed |= apply_agent_child_value_preview(row, value.as_ref());
+                }
             }
-            RunStreamEvent::Scoped { .. } => {}
+            TurnEvent::Scoped { .. } => {}
+            TurnEvent::ActivityChanged { .. }
+            | TurnEvent::Accepted { .. }
+            | TurnEvent::Started { .. }
+            | TurnEvent::Completed { .. }
+            | TurnEvent::Failed { .. }
+            | TurnEvent::ResyncRequired { .. } => {}
         }
         if changed {
             refresh_agent_child_preview(row);

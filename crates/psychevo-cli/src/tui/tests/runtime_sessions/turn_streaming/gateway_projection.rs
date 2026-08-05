@@ -1,10 +1,33 @@
+use std::time::Duration;
+
+use psychevo_gateway_protocol::source::{GatewayTurn, GatewayTurnStatus};
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+use crate::tui::tests::fixtures::{
+    attach_background_agent_running, buffer_text, draw_fullscreen_for_test, finished_turn_result,
+    test_app, test_shell_running_control,
+};
+use crate::tui::tests::{
+    insert_tui_message_with_metadata, reasoning_completed_turn_event, runtime_turn_event,
+    start_thread_fixture,
+};
+use crate::tui::{
+    FullscreenUi, GatewayEvent, Outcome, RunningTask, RunningTurn, RunningTurnEvents,
+    StartThreadRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    TranscriptEntry, TranscriptEntryRole, TranscriptKind, TurnEvent, TurnResult,
+    toggle_transcript_row_details, tool_id_key,
+};
+
+use super::support::{gateway_test_entry, numbered_lines};
+
 #[tokio::test]
 pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "message_update",
         "message": {
             "role": "assistant",
@@ -17,7 +40,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         }
     })))
     .expect("send text");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_call_pending",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -26,7 +49,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         "call_index": 0
     })))
     .expect("send pending");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -36,7 +59,7 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
         }
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -51,15 +74,15 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     .expect("send end");
     drop(tx);
 
-    let result = finished_run_result(&app);
+    let result = finished_turn_result("finished-session");
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -160,7 +183,10 @@ pub(crate) async fn fullscreen_write_preview_opens_once_and_preserves_manual_col
     let row = &ui.transcript[idx];
     assert_eq!(row.title, "write report.md");
     assert_eq!(row.write_preview_phase.as_deref(), Some("generating"));
-    assert!(row.expandable_text().contains("Generating · 5 bytes · 1 line"));
+    assert!(
+        row.expandable_text()
+            .contains("Generating · 5 bytes · 1 line")
+    );
     assert!(row.expandable_text().contains("first"));
     assert!(!row.details_collapsed);
 
@@ -191,7 +217,8 @@ pub(crate) async fn fullscreen_write_preview_opens_once_and_preserves_manual_col
 }
 
 #[tokio::test]
-pub(crate) async fn fullscreen_write_preview_transitions_to_writing_and_collapses_once_on_success() {
+pub(crate) async fn fullscreen_write_preview_transitions_to_writing_and_collapses_once_on_success()
+{
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -234,7 +261,11 @@ pub(crate) async fn fullscreen_write_preview_transitions_to_writing_and_collapse
     ui.apply_value_event(&completed, false);
     assert!(ui.transcript[idx].write_argument_preview.is_none());
     assert!(ui.transcript[idx].details_collapsed);
-    assert!(!ui.transcript[idx].expandable_text().contains("complete body"));
+    assert!(
+        !ui.transcript[idx]
+            .expandable_text()
+            .contains("complete body")
+    );
 
     toggle_transcript_row_details(&mut ui.transcript[idx]);
     assert!(!ui.transcript[idx].details_collapsed);
@@ -260,7 +291,11 @@ pub(crate) async fn fullscreen_write_preview_transitions_to_writing_and_collapse
         ui.apply_value_event(&late, false);
         assert!(ui.transcript[idx].write_argument_preview.is_none());
         assert!(ui.transcript[idx].tool_started.is_none());
-        assert!(!ui.transcript[idx].expandable_text().contains("late preview"));
+        assert!(
+            !ui.transcript[idx]
+                .expandable_text()
+                .contains("late preview")
+        );
     }
 }
 
@@ -306,7 +341,12 @@ pub(crate) async fn fullscreen_failed_write_retains_preview_and_failure_reason()
 
 #[tokio::test]
 pub(crate) async fn fullscreen_consumes_gateway_write_preview_metadata() {
-    fn entry(status: TranscriptBlockStatus, phase: &str, text: &str, body: &str) -> TranscriptEntry {
+    fn entry(
+        status: TranscriptBlockStatus,
+        phase: &str,
+        text: &str,
+        body: &str,
+    ) -> TranscriptEntry {
         TranscriptEntry {
             id: "live:turn-write:assistant:0".to_string(),
             thread_id: "session-1".to_string(),
@@ -376,7 +416,9 @@ pub(crate) async fn fullscreen_consumes_gateway_write_preview_metadata() {
         .expect("write row");
     assert!(!ui.transcript[idx].details_collapsed);
     assert!(
-        ui.transcript[idx].expandable_text().contains("unfinished body"),
+        ui.transcript[idx]
+            .expandable_text()
+            .contains("unfinished body"),
         "{:#?}",
         ui.transcript[idx]
     );
@@ -402,11 +444,18 @@ pub(crate) async fn fullscreen_consumes_gateway_write_preview_metadata() {
 pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_completion() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    app.current_session = Some("typed-session".to_string());
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(StartThreadRequest::new(&app.cwd))
+        .await
+        .expect("thread");
+    let session_id = thread.id().to_string();
+    app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(GatewayEvent::TurnStarted {
-        thread_id: Some("typed-session".to_string()),
+        thread_id: Some(session_id.clone()),
         turn_id: "turn-1".to_string(),
         selected_skills: Vec::new(),
     })
@@ -415,7 +464,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
         turn_id: "turn-1".to_string(),
         entry: TranscriptEntry {
             id: "live:turn-1:assistant".to_string(),
-            thread_id: "typed-session".to_string(),
+            thread_id: session_id.clone(),
             turn_id: Some("turn-1".to_string()),
             message_seq: None,
             role: TranscriptEntryRole::Assistant,
@@ -455,11 +504,11 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     })
     .expect("send answer");
     tx.send(GatewayEvent::TurnCompleted {
-        thread_id: Some("typed-session".to_string()),
+        thread_id: Some(session_id.clone()),
         turn_id: "turn-1".to_string(),
         turn: GatewayTurn {
             id: "turn-1".to_string(),
-            thread_id: Some("typed-session".to_string()),
+            thread_id: Some(session_id.clone()),
             status: GatewayTurnStatus::Completed,
             outcome: Some("normal".to_string()),
             error: None,
@@ -471,32 +520,13 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     .expect("send turn complete");
     drop(tx);
 
-    let result_db_path = temp.path().join("state.db");
-    let result_cwd = temp.path().to_path_buf();
     let task = tokio::spawn(async move {
-        Ok(psychevo::__product::runtime::RunResult {
-            session_id: "typed-session".to_string(),
-            outcome: Outcome::Normal,
-            terminal_reason: None,
+        Ok(TurnResult {
             final_answer: "All done.".to_string(),
-            db_path: result_db_path,
-            cwd: result_cwd,
-            provider: "mock".to_string(),
-            model: "mock-model".to_string(),
-            base_url: "http://127.0.0.1".to_string(),
-            api_key_env: None,
-            reasoning_effort: None,
-            context_limit: None,
-            tool_failures: 0,
-            selected_agent: None,
-            selected_skills: Vec::new(),
-            context_snapshot: None,
-            terminal_error: None,
-            events: Vec::new(),
-            warnings: Vec::new(),
+            ..finished_turn_result(session_id)
         })
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
@@ -527,30 +557,11 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
 }
 
 #[tokio::test]
-pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_without_thread_leaks() {
+pub(crate) async fn opening_target_replays_and_continues_its_gateway_stream_without_thread_leaks() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await.expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-run-1",
-                    "name": "opencode",
-                    "task": "stream the delegated task"
-                }
-            })),
-        )
-        .await.expect("agent edge");
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    let child = start_thread_fixture(&app, &app.cwd, "agent", "mock-model", "mock", None).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
@@ -595,16 +606,13 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     })
     .expect("send other answer");
 
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: Some(parent.clone()),
         control,
@@ -630,8 +638,9 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
         ui.transcript
     );
 
-    app.open_agent_target_session(&mut ui, &child)
-        .await.expect("open child session");
+    app.open_session_direct(&mut ui, &child)
+        .await
+        .expect("open child session");
 
     assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
     assert!(ui.transcript.iter().any(|row| {
@@ -698,7 +707,8 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_session_direct(&mut ui, &parent)
-        .await.expect("return to parent session");
+        .await
+        .expect("return to parent session");
     assert!(
         ui.transcript.iter().any(|row| row.text == "parent later"),
         "{:?}",
@@ -712,11 +722,16 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
         ui.transcript
     );
 
-    app.open_agent_target_session(&mut ui, &child)
-        .await.expect("reopen child session");
-    assert!(ui.transcript.iter().any(|row| {
-        row.kind == TranscriptKind::Answer && row.text == "child answer after open"
-    }), "{:?}", ui.transcript);
+    app.open_session_direct(&mut ui, &child)
+        .await
+        .expect("reopen child session");
+    assert!(
+        ui.transcript.iter().any(|row| {
+            row.kind == TranscriptKind::Answer && row.text == "child answer after open"
+        }),
+        "{:?}",
+        ui.transcript
+    );
     assert!(
         ui.transcript.iter().all(|row| {
             row.text != "parent only"
@@ -729,7 +744,8 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_session_direct(&mut ui, &parent)
-        .await.expect("return to parent before child completion");
+        .await
+        .expect("return to parent before child completion");
     app.apply_gateway_event(
         &mut ui,
         Some(&parent),
@@ -933,7 +949,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "run_start",
         "session_id": "streamed-session",
         "provider": "mock",
@@ -941,7 +957,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -954,46 +970,29 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
         }
     })))
     .expect("send answer");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []
     })))
     .expect("send agent end");
 
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: "streamed-session".to_string(),
-        outcome: Outcome::Normal,
-        terminal_reason: None,
+    let result = TurnResult {
         final_answer: "hi".to_string(),
-        db_path: app.db_path.clone(),
-        cwd: app.cwd.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
-        tool_failures: 0,
-        selected_agent: None,
-        selected_skills: Vec::new(),
-        context_snapshot: None,
-        terminal_error: None,
-        events: Vec::new(),
-        warnings: Vec::new(),
+        ..finished_turn_result("streamed-session")
     };
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -1075,13 +1074,7 @@ fn gateway_text_entry_for_thread(
     kind: TranscriptBlockKind,
     text: &str,
 ) -> TranscriptEntry {
-    let mut entry = gateway_test_entry(
-        id,
-        kind,
-        TranscriptBlockStatus::Running,
-        None,
-        text,
-    );
+    let mut entry = gateway_test_entry(id, kind, TranscriptBlockStatus::Running, None, text);
     entry.thread_id = thread_id.to_string();
     entry.turn_id = Some(format!("{thread_id}-turn"));
     entry
@@ -1094,7 +1087,7 @@ pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
     let session_id = "visible-live-session".to_string();
     app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
-    attach_background_agent_running(&mut ui, &session_id);
+    attach_background_agent_running(&app, &mut ui, &session_id);
     ui.running_elapsed_override = Some(Duration::from_secs(11));
 
     ui.start_assistant();
@@ -1133,11 +1126,10 @@ pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
         false,
     );
 
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived")
-    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived"));
     assert!(
         ui.transcript
             .iter()
@@ -1155,16 +1147,15 @@ pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
 pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mimo-v2-omni",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mimo-v2-omni",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     insert_tui_message_with_metadata(
         &app.db_path,
         &session_id,
@@ -1200,20 +1191,20 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     );
     app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
-    attach_background_agent_running(&mut ui, &session_id);
+    attach_background_agent_running(&app, &mut ui, &session_id);
 
     app.load_current_session_history(&mut ui)
-        .await.expect("load history");
+        .await
+        .expect("load history");
 
     assert!(
         ui.status_running_elapsed(app.current_session.as_deref())
             .is_some()
     );
-    assert!(
-        ui.transcript
-            .iter()
-            .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived")
-    );
+    assert!(ui
+        .transcript
+        .iter()
+        .any(|row| row.kind == TranscriptKind::Answer && row.text == "final answer has arrived"));
     assert!(
         ui.transcript
             .iter()
@@ -1396,8 +1387,8 @@ pub(crate) async fn streaming_thinking_preview_tail_updates_while_collapsed() {
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: numbered_lines(1, 8),
         },
         true,
@@ -1410,8 +1401,8 @@ pub(crate) async fn streaming_thinking_preview_tail_updates_while_collapsed() {
         .expect("thinking row");
     assert!(ui.transcript[idx].text.contains("line 8"));
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: format!("\n{}", numbered_lines(9, 12)),
         },
         true,
@@ -1425,13 +1416,13 @@ pub(crate) async fn streaming_thinking_preview_tail_updates_while_collapsed() {
     assert!(row.text.contains("line 12"), "{}", row.text);
     assert!(!row.text.contains("line 8"), "{}", row.text);
 
-    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_turn_event(reasoning_completed_turn_event(), true, false);
     let row = &mut ui.transcript[idx];
     assert!(row.details_collapsed);
 
     toggle_transcript_row_details(row);
     assert!(!row.details_collapsed);
-    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_turn_event(reasoning_completed_turn_event(), true, false);
     assert!(!ui.transcript[idx].details_collapsed);
 }
 

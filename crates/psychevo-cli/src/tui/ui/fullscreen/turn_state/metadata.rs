@@ -1,3 +1,4 @@
+use crate::tui::{ClarifyRequestEvent, TranscriptRow, Value};
 
 pub(crate) fn exec_row_full_text_without_history_marker(row: &TranscriptRow) -> String {
     let full = if row.full_text.is_some() {

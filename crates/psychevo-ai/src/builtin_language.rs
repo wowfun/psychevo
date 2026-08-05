@@ -3,18 +3,25 @@ use std::collections::{BTreeMap, VecDeque};
 use futures::{StreamExt, stream};
 use serde_json::{Value, json};
 
-use crate::{
-    AdapterCall, AdapterFuture, AdapterResult, AdapterStream, AssistantContent, ErrorKind,
-    ErrorPhase, FinishReason, FinishReasonKind, GenerationProvider, GenerationRequest,
-    GenerationStream, GenerationTool, HostedWebSearchTool, LanguageAdapter, LanguageAdapterEvent,
-    LanguageRequest, LanguageTool, MediaInput, Message, ModelDescriptor, ModelTarget, Outcome,
-    ProviderError, RequestPreview, StreamEvent, TextContent, ToolChoice, Usage, UserContent,
-    Warning,
+use crate::GenerationStream;
+use crate::control::GenerationProvider;
+use crate::metadata::{allowlisted_provider_metadata, normalize_usage};
+use crate::openai::provider::OpenAiChatProvider;
+use crate::openai::request::{
+    capability_is_true, model_metadata_disables_image_input, openai_chat_completions_endpoint,
+    openai_chat_request_body,
+};
+use crate::openai::responses::{
+    OpenAiResponsesProvider, openai_responses_request_body, responses_endpoint,
+};
+use crate::types::{
+    GenerationRequest, GenerationTool, HostedWebSearchTool, ModelTarget, Outcome, StreamEvent,
 };
 use crate::{
-    OpenAiChatProvider, OpenAiResponsesProvider, allowlisted_provider_metadata,
-    model_metadata_disables_image_input, normalize_usage, openai_chat_request_body,
-    openai_responses_request_body,
+    AdapterCall, AdapterFuture, AdapterResult, AdapterStream, AssistantContent, ErrorKind,
+    ErrorPhase, FinishReason, FinishReasonKind, LanguageAdapter, LanguageAdapterEvent,
+    LanguageRequest, LanguageTool, MediaInput, Message, ModelDescriptor, ProviderError,
+    RequestPreview, TextContent, ToolChoice, Usage, UserContent, Warning,
 };
 
 const OPENAI_PREVIEW_BASE_URL: &str = "https://api.openai.com/v1";
@@ -30,7 +37,7 @@ pub struct OpenAiChatAdapter;
 
 impl OpenAiChatAdapter {
     pub fn endpoint(base_url: &str) -> String {
-        crate::openai_chat_completions_endpoint(base_url)
+        openai_chat_completions_endpoint(base_url)
     }
 
     pub fn preview(
@@ -82,7 +89,7 @@ pub struct OpenAiResponsesAdapter;
 
 impl OpenAiResponsesAdapter {
     pub fn endpoint(base_url: &str) -> String {
-        crate::responses_endpoint(base_url)
+        responses_endpoint(base_url)
     }
 
     pub fn preview(
@@ -203,7 +210,7 @@ fn legacy_request(
         && !profile
             .and_then(|profile| profile.capabilities.get("developer_role"))
             .copied()
-            .unwrap_or_else(|| crate::capability_is_true(&metadata, "developer_role"))
+            .unwrap_or_else(|| capability_is_true(&metadata, "developer_role"))
     {
         warnings.push(Warning::new(
             "developer_role_folded",
@@ -823,7 +830,8 @@ fn normalize_finish_reason(outcome: Outcome, raw: Option<String>) -> Option<Fini
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::normalize_finish_reason;
+    use crate::{FinishReasonKind, Outcome};
 
     #[test]
     fn content_filter_normalizes_to_content_filter() {

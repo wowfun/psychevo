@@ -1,13 +1,13 @@
 use super::{
     AbortSignal, AgentEdgeRecord, AgentEdgeStatus, AgentRunPhase, AgentRunState, AgentSupervisor,
-    BTreeMap, BTreeSet, ContinuationAdmission, ControlHandle, Error, HashMap, Map, Message, Path,
-    PathBuf, Result, SessionSummary, StateRuntime, Value, fs, json, user_text_message,
+    BTreeMap, BTreeSet, ContinuationAdmission, ControlHandle, Error, HashMap, Map, Path, PathBuf,
+    Result, SessionSummary, StateRuntime, Value, fs, json, user_text_message,
 };
 use super::{
     catalog_surface::{
         AgentCatalog, AgentDefinition, AgentDiagnostic, AgentInvocationRole, AgentRunRecord,
-        AgentRunStatus, AgentSource, AgentToolContext,
-        MAX_AGENT_SPAWN_DEPTH_CAP, SUBAGENT_TASK_LABEL_MAX_CHARS,
+        AgentRunStatus, AgentSource, AgentToolContext, MAX_AGENT_SPAWN_DEPTH_CAP,
+        SUBAGENT_TASK_LABEL_MAX_CHARS,
     },
     child_runs::{ChildRun, bind_child_model, default_task_name, run_child_agent},
     definition_policy::parse_agent_file,
@@ -766,88 +766,17 @@ pub(crate) async fn child_session_tokens_value(
     store: &StateRuntime,
     session_id: &str,
 ) -> Option<Value> {
-    let messages = store.load_tui_message_summaries(session_id).await.ok()?;
-    let mut input = 0u64;
-    let mut output = 0u64;
-    let mut reasoning = 0u64;
-    let mut total = 0u64;
-    let mut has_input = false;
-    let mut has_output = false;
-    let mut has_reasoning = false;
-    let mut has_total = false;
-
-    for summary in messages {
-        if !matches!(summary.message, Message::Assistant { .. }) {
-            continue;
-        }
-        let Some(usage) = summary.usage else {
-            continue;
-        };
-        let input_value = usage_counter(&usage, &["input_tokens", "prompt_tokens", "input"]);
-        let output_value = usage_counter(&usage, &["output_tokens", "completion_tokens", "output"]);
-        let reasoning_value = usage_counter(&usage, &["reasoning_tokens", "reasoning"]);
-        if let Some(value) = input_value {
-            input = input.saturating_add(value);
-            has_input = true;
-        }
-        if let Some(value) = output_value {
-            output = output.saturating_add(value);
-            has_output = true;
-        }
-        if let Some(value) = reasoning_value {
-            reasoning = reasoning.saturating_add(value);
-            has_reasoning = true;
-        }
-        if let Some(value) = usage_counter(&usage, &["total_tokens", "total"]) {
-            total = total.saturating_add(value);
-            has_total = true;
-        } else if input_value.is_some() || output_value.is_some() || reasoning_value.is_some() {
-            total = total
-                .saturating_add(input_value.unwrap_or(0))
-                .saturating_add(output_value.unwrap_or(0))
-                .saturating_add(reasoning_value.unwrap_or(0));
-            has_total = true;
-        }
-    }
-
-    if !(has_input || has_output || has_reasoning || has_total) {
-        return None;
-    }
-    let mut object = Map::new();
-    if has_input {
-        object.insert("input".to_string(), Value::from(input));
-    }
-    if has_output {
-        object.insert("output".to_string(), Value::from(output));
-    }
-    if has_reasoning {
-        object.insert("reasoning".to_string(), Value::from(reasoning));
-    }
-    if has_total {
-        object.insert("total".to_string(), Value::from(total));
-    }
-    Some(Value::Object(object))
-}
-
-pub(crate) fn usage_counter(usage: &Value, keys: &[&str]) -> Option<u64> {
-    keys.iter()
-        .find_map(|key| usage.get(*key).and_then(Value::as_u64))
+    crate::stats::session_agent_token_totals(store, session_id)
+        .await
+        .ok()
+        .flatten()
 }
 
 pub(crate) async fn latest_session_assistant_usage(
     store: &StateRuntime,
     session_id: &str,
 ) -> Option<Value> {
-    store
-        .load_tui_message_summaries(session_id)
-        .await
-        .ok()?
-        .into_iter()
-        .rev()
-        .find_map(|summary| match summary.message {
-            Message::Assistant { .. } => summary.usage,
-            _ => None,
-        })
+    store.latest_assistant_usage(session_id).await.ok()?
 }
 
 pub(crate) fn usage_total_tokens(usage: &Value) -> Option<u64> {

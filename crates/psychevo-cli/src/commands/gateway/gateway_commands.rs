@@ -2,15 +2,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::{
-    __product::configuration::channel_list_value, __product::configuration::channel_summary_value,
-    __product::configuration::resolve_default_workspace_cwd, __product::platform::canonicalize_cwd,
-};
+use psychevo::paths::canonicalize_cwd;
 use serde_json::{Value, json};
 
 use crate::args::{
     GatewayArgs, GatewayCommand, GatewayOpenArgs, GatewayStartArgs, WebArgs, WebCommand,
 };
+use crate::commands::common::CommandConfiguration;
 use crate::commands::serve::resolve_static_dir_diagnostic;
 use crate::env::resolve_explicit_path;
 
@@ -96,10 +94,12 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
 
 async fn resolve_open_cwd(ctx: &GatewayContext, args: &GatewayOpenArgs) -> Result<PathBuf> {
     if args.default_workspace {
-        let options = ctx.run_options(ctx.cwd.clone()).await?;
-        return Ok(canonicalize_cwd(&resolve_default_workspace_cwd(
-            &options, &ctx.cwd,
-        )?)?);
+        let configuration = CommandConfiguration::open(&ctx.env_map, &ctx.home, &ctx.cwd).await?;
+        let result = (|| {
+            let cwd = configuration.configuration().default_workspace_cwd()?;
+            Ok(canonicalize_cwd(&cwd)?)
+        })();
+        return configuration.finish(result).await;
     }
     match &args.cd {
         Some(cd) => Ok(canonicalize_cwd(&resolve_explicit_path(
@@ -140,21 +140,27 @@ async fn status() -> Result<ExitCode> {
     let mut status = managed_status(&ctx.paths).await?;
     status["profile"] = Value::String(ctx.profile_name.clone());
     status["profileHome"] = Value::String(ctx.home.display().to_string());
-    let options = ctx.run_options(ctx.cwd.clone()).await?;
-    status["channels"] = channel_summary_value(&options).unwrap_or_else(|_| {
-        json!({
-            "configured": 0,
-            "enabled": 0,
-            "ready": 0,
-            "blocked": 0,
-            "setup_needed": true,
-        })
-    });
-    status["channelDetails"] = channel_list_value(&options).unwrap_or_else(|_| {
-        json!({
-            "channels": [],
-        })
-    });
+    let configuration = CommandConfiguration::open(&ctx.env_map, &ctx.home, &ctx.cwd).await?;
+    status["channels"] = configuration
+        .configuration()
+        .channel_summary()
+        .unwrap_or_else(|_| {
+            json!({
+                "configured": 0,
+                "enabled": 0,
+                "ready": 0,
+                "blocked": 0,
+                "setup_needed": true,
+            })
+        });
+    status["channelDetails"] = configuration
+        .configuration()
+        .channels()
+        .unwrap_or_else(|_| {
+            json!({
+                "channels": [],
+            })
+        });
     if status
         .get("running")
         .and_then(Value::as_bool)
@@ -164,7 +170,7 @@ async fn status() -> Result<ExitCode> {
         merge_channel_runtime_status(&mut status["channelDetails"], &runtime);
         status["channelRuntime"] = channel_runtime_summary(&runtime);
     }
-    print_json(status)
+    configuration.finish(print_json(status)).await
 }
 
 async fn stop() -> Result<ExitCode> {
@@ -202,4 +208,66 @@ async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
         "profileHome": ctx.home,
         "restarted": true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::commands::gateway::managed::managed_paths;
+
+    #[tokio::test]
+    async fn default_workspace_uses_framework_configuration_and_canonicalizes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let cwd = temp.path().join("caller");
+        let workspace_root = temp.path().join("configured-workspaces");
+        let default_workspace = workspace_root.join("general");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        std::fs::create_dir_all(&default_workspace).expect("default workspace");
+        let root = workspace_root.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            home.join("config.toml"),
+            format!("[workspaces]\nroot = \"{root}\"\n"),
+        )
+        .expect("config");
+        std::fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
+        std::fs::write(
+            cwd.join(".psychevo/config.toml"),
+            "[workspaces]\nroot = \"ignored-project-workspaces\"\n",
+        )
+        .expect("project config");
+        let env_map = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home.as_path().display().to_string(),
+            ),
+        ]);
+        let ctx = GatewayContext {
+            cwd,
+            home: home.clone(),
+            profile_name: "default".to_string(),
+            env_map,
+            paths: managed_paths(&home),
+        };
+        let args = GatewayOpenArgs {
+            cd: None,
+            default_workspace: true,
+            bind: None,
+            no_browser: true,
+            print_url: false,
+        };
+
+        let resolved = resolve_open_cwd(&ctx, &args)
+            .await
+            .expect("default workspace");
+
+        assert_eq!(
+            resolved,
+            psychevo::paths::canonicalize_cwd(&default_workspace).expect("canonical workspace")
+        );
+    }
 }

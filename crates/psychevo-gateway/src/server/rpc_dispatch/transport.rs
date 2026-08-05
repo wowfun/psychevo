@@ -1,12 +1,51 @@
-async fn readyz() -> impl IntoResponse {
-    Json(wire::ReadyzResult {
+use std::collections::HashMap;
+use std::future::Future;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::body::Body;
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::header::{LOCATION, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
+use axum::response::{IntoResponse, Json};
+use futures::{SinkExt, StreamExt};
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway_protocol as wire;
+use serde::Deserialize;
+use serde_json::{Value, json};
+#[cfg(test)]
+use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
+use uuid::Uuid;
+
+use crate::gateway_now_ms;
+
+use super::super::auth_input::{now_ms, source_from_input};
+use super::super::binding::{AuthContext, BrowserSession, LaunchEntry, WebState};
+use super::super::browser_session_store::browser_session_cookie;
+use super::super::download_static::launch_expired_page;
+use super::super::event_delivery::{ConnectionSender, OutboxReceive, connection_outbox};
+use super::super::rpc_json::{RpcRequest, rpc_error, rpc_error_with_data, rpc_result};
+use super::handle_rpc;
+
+const RPC_IN_FLIGHT_LIMIT: usize = 32;
+const RPC_PENDING_LIMIT: usize = 32;
+
+pub(in super::super) async fn readyz() -> impl IntoResponse {
+    Json(wire::agents_backend_rpc::ReadyzResult {
         ok: true,
         server: "psychevo-gateway".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
 
-async fn managed_identity(State(state): State<WebState>, headers: HeaderMap) -> impl IntoResponse {
+pub(in super::super) async fn managed_identity(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     if !state
         .auth_from_headers(&headers)
         .is_some_and(|auth| auth.is_bearer())
@@ -27,11 +66,11 @@ async fn managed_identity(State(state): State<WebState>, headers: HeaderMap) -> 
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ManagedShutdownParams {
-    instance_id: String,
+pub(in super::super) struct ManagedShutdownParams {
+    pub(in super::super) instance_id: String,
 }
 
-async fn managed_shutdown(
+pub(in super::super) async fn managed_shutdown(
     State(state): State<WebState>,
     headers: HeaderMap,
     Json(params): Json<ManagedShutdownParams>,
@@ -61,11 +100,11 @@ async fn managed_shutdown(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LaunchQuery {
-    open_token: String,
+pub(in super::super) struct LaunchQuery {
+    pub(in super::super) open_token: String,
 }
 
-async fn ws_handler(
+pub(in super::super) async fn ws_handler(
     State(state): State<WebState>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
@@ -76,10 +115,10 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state, auth))
 }
 
-async fn create_launch(
+pub(in super::super) async fn create_launch(
     State(state): State<WebState>,
     headers: HeaderMap,
-    Json(params): Json<wire::CreateLaunchParams>,
+    Json(params): Json<wire::agents_backend_rpc::CreateLaunchParams>,
 ) -> impl IntoResponse {
     if !state
         .auth_from_headers(&headers)
@@ -97,7 +136,11 @@ async fn create_launch(
                 .into_response();
         }
     };
-    let source = source_from_input(params.source, &cwd, wire::GatewaySourceLifetime::Persistent);
+    let source = source_from_input(
+        params.source,
+        &cwd,
+        wire::source::GatewaySourceLifetime::Persistent,
+    );
     let launch_id = Uuid::now_v7().to_string();
     let open_token = Uuid::now_v7().to_string();
     let expires_at_ms = now_ms() + 30_000;
@@ -119,7 +162,7 @@ async fn create_launch(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("127.0.0.1");
     let open_url = format!("http://{host}/_gateway/launch/{launch_id}?openToken={open_token}");
-    Json(wire::CreateLaunchResult {
+    Json(wire::agents_backend_rpc::CreateLaunchResult {
         launch_id,
         expires_at_ms,
         open_url,
@@ -127,7 +170,7 @@ async fn create_launch(
     .into_response()
 }
 
-async fn consume_launch(
+pub(in super::super) async fn consume_launch(
     State(state): State<WebState>,
     AxumPath(launch_id): AxumPath<String>,
     Query(query): Query<LaunchQuery>,
@@ -183,7 +226,10 @@ fn shell_redirect() -> Response<Body> {
     response
 }
 
-fn prune_expired_launches(launches: &mut HashMap<String, LaunchEntry>, now_ms: i64) {
+pub(in super::super) fn prune_expired_launches(
+    launches: &mut HashMap<String, LaunchEntry>,
+    now_ms: i64,
+) {
     launches.retain(|_, entry| entry.expires_at_ms >= now_ms);
 }
 
@@ -354,14 +400,14 @@ fn spawn_bounded_rpc_response<F, T>(
     });
 }
 
-fn spawn_gateway_live_event_tailer(state: WebState) {
+pub(in super::super) fn spawn_gateway_live_event_tailer(state: WebState) {
     let weak_state = Arc::downgrade(&state.inner);
     let gateway = state.inner.gateway.clone();
     gateway.spawn_background("gateway-live-event-tailer", async move {
         let mut last_seq = state
             .inner
-            .state
-            .latest_gateway_live_event_seq()
+            .gateway
+            .latest_live_event_seq()
             .await
             .unwrap_or_default();
         drop(state);
@@ -376,80 +422,83 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
             let state = WebState { inner };
             let events = match state
                 .inner
-                .state
-
-                .list_gateway_live_events_after(last_seq, 100)
+                .gateway
+                .poll_foreign_live_events(last_seq, None, 100)
                 .await
             {
                 Ok(events) => events,
                 Err(_) => continue,
             };
-            for record in events {
-                last_seq = last_seq.max(record.seq);
-                if record.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                    continue;
-                }
-                let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
-                    continue;
-                };
-                let context = state.pending_context_for_live_event(&record).await;
-                state.publish_gateway_event_with_context(event, context, None);
+            last_seq = events.next_seq;
+            for observation in events.events {
+                state.publish_gateway_event_with_context(
+                    observation.event,
+                    observation.context.into(),
+                    None,
+                );
             }
             let now = gateway_now_ms();
-            let snapshots = match state.inner.state.list_gateway_live_snapshots(1000).await {
+            let snapshots = match state.inner.gateway.foreign_live_snapshots(None, 1000).await {
                 Ok(snapshots) => snapshots,
                 Err(_) => continue,
             };
             for snapshot in snapshots {
-                if snapshot.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                    continue;
-                }
                 if snapshot_revisions
                     .get(&snapshot.snapshot_key)
                     .is_some_and(|revision| *revision >= snapshot.revision)
                 {
                     continue;
                 }
-                if let Some(activity_id) = snapshot.activity_id.as_deref() {
-                    let Ok(Some(activity)) =
-                        state.inner.state.gateway_activity(activity_id).await
-                    else {
-                        continue;
-                    };
-                    if !matches!(activity.status.as_str(), "running" | "queued")
-                        || activity.lease_expires_at_ms < now
-                    {
-                        continue;
-                    }
-                }
-                let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event.clone())
-                else {
-                    continue;
-                };
                 snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
                 state.publish_gateway_event_with_context(
-                    event,
-                    PendingInteractionContext::default(),
+                    snapshot.event,
+                    snapshot.context.into(),
                     None,
                 );
             }
             if now.saturating_sub(last_cleanup_ms) > 60_000 {
                 let _ = state
                     .inner
-                    .state
-
-                    .cleanup_gateway_live_events_before(now - 10 * 60_000)
-                    .await;
-                let _ = state
-                    .inner
-                    .state
-
-                    .cleanup_gateway_live_snapshots_before(now - 10 * 60_000)
+                    .gateway
+                    .cleanup_retained_live_projection(now - 10 * 60_000)
                     .await;
                 last_cleanup_ms = now;
             }
         }
     });
+}
+
+async fn handle_rpc_text(
+    state: &WebState,
+    auth: &AuthContext,
+    out_tx: ConnectionSender,
+    text: &str,
+) -> Option<String> {
+    let request = match serde_json::from_str::<RpcRequest>(text) {
+        Ok(request) => request,
+        Err(err) => {
+            return Some(rpc_error(
+                Value::Null,
+                -32700,
+                format!("invalid json: {err}"),
+            ));
+        }
+    };
+    if request.jsonrpc != wire::source::JSONRPC_VERSION {
+        return Some(rpc_error(
+            request.id.clone().unwrap_or(Value::Null),
+            -32600,
+            "invalid JSON-RPC version".to_string(),
+        ));
+    }
+    let id = request.id.clone()?;
+    let result = handle_rpc(state.clone(), auth.clone(), out_tx, request).await;
+    Some(match result {
+        Ok(value) => rpc_result(id, value),
+        Err(err) => {
+            rpc_error_with_data(id, -32000, err.to_string(), err.structured_data().cloned())
+        }
+    })
 }
 
 #[cfg(test)]
@@ -545,42 +594,3 @@ mod transport_tests {
         drop(held_permit);
     }
 }
-
-async fn handle_rpc_text(
-    state: &WebState,
-    auth: &AuthContext,
-    out_tx: ConnectionSender,
-    text: &str,
-) -> Option<String> {
-    let request = match serde_json::from_str::<RpcRequest>(text) {
-        Ok(request) => request,
-        Err(err) => {
-            return Some(rpc_error(
-                Value::Null,
-                -32700,
-                format!("invalid json: {err}"),
-            ));
-        }
-    };
-    if request.jsonrpc != wire::JSONRPC_VERSION {
-        return Some(rpc_error(
-            request.id.clone().unwrap_or(Value::Null),
-            -32600,
-            "invalid JSON-RPC version".to_string(),
-        ));
-    }
-    let id = request.id.clone()?;
-    let result = handle_rpc(state.clone(), auth.clone(), out_tx, request).await;
-    Some(match result {
-        Ok(value) => rpc_result(id, value),
-        Err(err) => {
-            rpc_error_with_data(id, -32000, err.to_string(), err.structured_data().cloned())
-        }
-    })
-}
-use std::future::Future;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::task::JoinSet;
-
-const RPC_IN_FLIGHT_LIMIT: usize = 32;
-const RPC_PENDING_LIMIT: usize = 32;

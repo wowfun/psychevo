@@ -1193,8 +1193,7 @@ async fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
         },
     );
 
-    let assembly =
-        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
     assert_eq!(assembly.mcp_servers.len(), 1);
     assert_eq!(assembly.mcp_servers[0].name, "stdio");
@@ -1257,8 +1256,7 @@ async fn static_plugin_discovery_defers_worker_until_default_tool_materializatio
         },
     );
 
-    let assembly =
-        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
     assert_eq!(assembly.worker_runtimes.len(), 1);
     assert!(!assembly.worker_runtimes[0].started().await);
@@ -1351,7 +1349,7 @@ for line in sys.stdin:
         marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
     );
     let windows_worker = format!(
-            r#"#!/usr/bin/env node
+        r#"#!/usr/bin/env node
 const fs = require("fs");
 const readline = require("readline");
 const input = readline.createInterface({{ input: process.stdin, crlfDelay: Infinity }});
@@ -1365,12 +1363,9 @@ input.on("line", (line) => {{
   }}
 }});
 "#,
-            marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
-        );
-    write_worker(
-        &source,
-        test_worker_fixture(&unix_worker, &windows_worker),
+        marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
     );
+    write_worker(&source, test_worker_fixture(&unix_worker, &windows_worker));
     install_plugin(
         &home,
         &cwd,
@@ -1393,8 +1388,7 @@ input.on("line", (line) => {{
         },
     );
 
-    let assembly =
-        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
     assert!(!assembly.worker_runtimes[0].started().await);
     let (_, warnings) = materialize_plugin_worker_tools(&assembly.worker_runtimes).await;
     assert!(warnings.is_empty(), "{warnings:?}");
@@ -1924,12 +1918,7 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let runtime = PluginWorkerRuntime::new(
-        record.clone(),
-        manifest,
-        spec,
-        BTreeMap::new(),
-    );
+    let runtime = PluginWorkerRuntime::new(record.clone(), manifest, spec, BTreeMap::new());
 
     let tool = PluginWorkerTool {
         plugin_name: record.name,
@@ -2062,7 +2051,13 @@ fn install_from_local_git_source_materializes_record() {
     let serialized = serde_json::to_string(&record).expect("serialize record");
     assert!(!serialized.contains("private-user"));
     assert!(!serialized.contains("private-secret"));
-    assert!(!record.package_root.display().to_string().contains("private-"));
+    assert!(
+        !record
+            .package_root
+            .display()
+            .to_string()
+            .contains("private-")
+    );
     let ref_record = install_plugin(
         &temp.path().join("home-ref"),
         &cwd,
@@ -2133,10 +2128,8 @@ async fn activating_a_legacy_git_record_removes_only_top_level_metadata() {
         },
     );
 
-    let first =
-        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
-    let second =
-        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let first = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    let second = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
     assert!(first.warnings.is_empty(), "{:?}", first.warnings);
     assert!(second.warnings.is_empty(), "{:?}", second.warnings);

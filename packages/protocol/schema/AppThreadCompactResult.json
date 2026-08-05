@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "checkpointId": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "compacted": {
+      "type": "boolean"
+    },
+    "firstKeptSessionSeq": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryModel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summaryProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "tokensAfter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tokensBefore": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "checkpointId",
+    "compacted",
+    "firstKeptSessionSeq",
+    "message",
+    "reason",
+    "summary",
+    "summaryModel",
+    "summaryProvider",
+    "threadId",
+    "tokensAfter",
+    "tokensBefore"
+  ],
+  "title": "AppThreadCompactResult",
+  "type": "object"
+}

@@ -1,4 +1,22 @@
-fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageSummary]) {
+use std::collections::BTreeMap;
+
+use psychevo::ThreadItem;
+use psychevo::application::Message;
+use psychevo::tool_argument_display::{
+    write_argument_preview_from_args, write_argument_preview_from_json,
+};
+use psychevo::tool_result_display::decode_persisted_tool_result_for_display;
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptToolResult,
+};
+
+use super::agent_edges::enrich_committed_agent_metadata;
+use super::{compact_text, ensure_json_object_field, metadata_object};
+
+pub(super) fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[ThreadItem]) {
     let mut tool_blocks = BTreeMap::<String, (usize, usize)>::new();
     for (entry_index, entry) in entries.iter().enumerate() {
         for (block_index, block) in entry.blocks.iter().enumerate() {
@@ -140,7 +158,9 @@ struct GeneratedImageMetadata {
     prompt: Option<String>,
 }
 
-fn generated_image_metadata(metadata: &serde_json::Map<String, Value>) -> Option<GeneratedImageMetadata> {
+fn generated_image_metadata(
+    metadata: &serde_json::Map<String, Value>,
+) -> Option<GeneratedImageMetadata> {
     let result = metadata.get("result")?;
     let media_kind = result
         .get("mediaKind")
@@ -210,7 +230,7 @@ fn exec_result_value_running(result: &Value) -> bool {
         && result.get("exit_code").is_none_or(Value::is_null)
 }
 
-fn entry_status_for_tool_result(
+pub(super) fn entry_status_for_tool_result(
     blocks: &[TranscriptBlock],
     fallback: TranscriptBlockStatus,
 ) -> TranscriptBlockStatus {
@@ -247,7 +267,7 @@ fn entry_status_for_tool_result(
     fallback
 }
 
-fn merge_write_stdin_blocks(entries: &mut [TranscriptEntry]) {
+pub(super) fn merge_write_stdin_blocks(entries: &mut [TranscriptEntry]) {
     let mut exec_blocks = BTreeMap::<u64, (usize, usize)>::new();
     let mut hidden_blocks = Vec::<(usize, usize)>::new();
 

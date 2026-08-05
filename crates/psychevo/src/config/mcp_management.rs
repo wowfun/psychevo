@@ -1,9 +1,100 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::config_cli_views::config_show_value;
+use super::config_custom_provider::ensure_json_object;
+use super::config_file_env::{
+    CONFIG_FILE_NAME, load_toml_config_file, resolve_psychevo_home, write_toml_config_file,
+};
+use super::config_parse::parse_run_config;
+use crate::types::{ConfigScope, McpServerInput, McpTransportInput, RunOptions};
+use crate::{Error, Result};
+
 pub const MCP_OAUTH_KEYRING_SERVICE: &str = "psychevo-mcp-oauth";
+
+/// Persistence boundary for profile-scoped MCP OAuth access tokens.
+///
+/// First-party product builds use [`SystemMcpOAuthCredentialStore`] with the
+/// `native-keyring` feature. Tests and embedding hosts can inject an
+/// instance-local implementation without replacing keyring-rs's process-global
+/// default credential builder or compiling a native credential backend.
+pub trait McpOAuthCredentialStore: Send + Sync {
+    fn load_access_token(&self, account: &str) -> Result<Option<String>>;
+    fn save_access_token(&self, account: &str, access_token: &str) -> Result<()>;
+    fn clear_access_token(&self, account: &str) -> Result<bool>;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemMcpOAuthCredentialStore;
+
+impl SystemMcpOAuthCredentialStore {
+    #[cfg(feature = "native-keyring")]
+    fn entry(account: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, account)
+            .map_err(|err| Error::Config(format!("keyring entry failed: {err}")))
+    }
+
+    #[cfg(not(feature = "native-keyring"))]
+    fn unavailable() -> Error {
+        Error::Config(
+            "the system MCP OAuth credential store requires the `native-keyring` feature; enable it or inject a McpOAuthCredentialStore"
+                .to_string(),
+        )
+    }
+}
+
+impl McpOAuthCredentialStore for SystemMcpOAuthCredentialStore {
+    fn load_access_token(&self, account: &str) -> Result<Option<String>> {
+        #[cfg(feature = "native-keyring")]
+        {
+            match Self::entry(account)?.get_password() {
+                Ok(token) => Ok(Some(token)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(err) => Err(Error::Config(format!("keyring read failed: {err}"))),
+            }
+        }
+        #[cfg(not(feature = "native-keyring"))]
+        {
+            let _ = account;
+            Err(Self::unavailable())
+        }
+    }
+
+    fn save_access_token(&self, account: &str, access_token: &str) -> Result<()> {
+        #[cfg(feature = "native-keyring")]
+        {
+            Self::entry(account)?
+                .set_password(access_token)
+                .map_err(|err| Error::Config(format!("keyring write failed: {err}")))
+        }
+        #[cfg(not(feature = "native-keyring"))]
+        {
+            let _ = (account, access_token);
+            Err(Self::unavailable())
+        }
+    }
+
+    fn clear_access_token(&self, account: &str) -> Result<bool> {
+        #[cfg(feature = "native-keyring")]
+        {
+            match Self::entry(account)?.delete_credential() {
+                Ok(()) => Ok(true),
+                Err(keyring::Error::NoEntry) => Ok(false),
+                Err(err) => Err(Error::Config(format!("keyring delete failed: {err}"))),
+            }
+        }
+        #[cfg(not(feature = "native-keyring"))]
+        {
+            let _ = account;
+            Err(Self::unavailable())
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServerConfigInput {
@@ -35,6 +126,14 @@ pub struct McpToolPolicyInput {
 }
 
 pub fn mcp_servers_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
+    mcp_servers_value_with_store(options, scope, &SystemMcpOAuthCredentialStore)
+}
+
+pub(crate) fn mcp_servers_value_with_store(
+    options: &RunOptions,
+    scope: ConfigScope,
+    credential_store: &dyn McpOAuthCredentialStore,
+) -> Result<Value> {
     let document = config_show_value(options, scope)?;
     let value = document.get("value").cloned().unwrap_or_else(|| json!({}));
     let config = parse_run_config(value)?;
@@ -52,7 +151,7 @@ pub fn mcp_servers_value(options: &RunOptions, scope: ConfigScope) -> Result<Val
     let servers = config
         .mcp_servers
         .iter()
-        .map(|server| mcp_server_view(&home, server))
+        .map(|server| mcp_server_view(&home, server, credential_store))
         .collect::<Vec<_>>();
     Ok(json!({
         "scope": document.get("scope").cloned().unwrap_or(Value::String("effective".to_string())),
@@ -64,7 +163,15 @@ pub fn mcp_servers_value(options: &RunOptions, scope: ConfigScope) -> Result<Val
 }
 
 pub fn mcp_server_value(options: &RunOptions, name: &str) -> Result<Value> {
-    let document = mcp_servers_value(options, ConfigScope::Effective)?;
+    mcp_server_value_with_store(options, name, &SystemMcpOAuthCredentialStore)
+}
+
+pub(crate) fn mcp_server_value_with_store(
+    options: &RunOptions,
+    name: &str,
+    credential_store: &dyn McpOAuthCredentialStore,
+) -> Result<Value> {
+    let document = mcp_servers_value_with_store(options, ConfigScope::Effective, credential_store)?;
     let servers = document
         .get("servers")
         .and_then(Value::as_array)
@@ -185,14 +292,22 @@ pub fn load_mcp_oauth_access_token(
     server_name: &str,
     url: &str,
 ) -> Result<Option<String>> {
+    load_mcp_oauth_access_token_with_store(
+        &SystemMcpOAuthCredentialStore,
+        profile_home,
+        server_name,
+        url,
+    )
+}
+
+pub fn load_mcp_oauth_access_token_with_store(
+    credential_store: &dyn McpOAuthCredentialStore,
+    profile_home: &Path,
+    server_name: &str,
+    url: &str,
+) -> Result<Option<String>> {
     let account = mcp_oauth_keyring_account(profile_home, server_name, url);
-    let entry = keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, &account)
-        .map_err(|err| Error::Config(format!("keyring entry failed: {err}")))?;
-    match entry.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(Error::Config(format!("keyring read failed: {err}"))),
-    }
+    credential_store.load_access_token(&account)
 }
 
 pub fn save_mcp_oauth_access_token(
@@ -201,12 +316,24 @@ pub fn save_mcp_oauth_access_token(
     url: &str,
     access_token: &str,
 ) -> Result<()> {
+    save_mcp_oauth_access_token_with_store(
+        &SystemMcpOAuthCredentialStore,
+        profile_home,
+        server_name,
+        url,
+        access_token,
+    )
+}
+
+pub fn save_mcp_oauth_access_token_with_store(
+    credential_store: &dyn McpOAuthCredentialStore,
+    profile_home: &Path,
+    server_name: &str,
+    url: &str,
+    access_token: &str,
+) -> Result<()> {
     let account = mcp_oauth_keyring_account(profile_home, server_name, url);
-    let entry = keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, &account)
-        .map_err(|err| Error::Config(format!("keyring entry failed: {err}")))?;
-    entry
-        .set_password(access_token)
-        .map_err(|err| Error::Config(format!("keyring write failed: {err}")))
+    credential_store.save_access_token(&account, access_token)
 }
 
 pub fn clear_mcp_oauth_access_token(
@@ -214,14 +341,22 @@ pub fn clear_mcp_oauth_access_token(
     server_name: &str,
     url: &str,
 ) -> Result<bool> {
+    clear_mcp_oauth_access_token_with_store(
+        &SystemMcpOAuthCredentialStore,
+        profile_home,
+        server_name,
+        url,
+    )
+}
+
+pub fn clear_mcp_oauth_access_token_with_store(
+    credential_store: &dyn McpOAuthCredentialStore,
+    profile_home: &Path,
+    server_name: &str,
+    url: &str,
+) -> Result<bool> {
     let account = mcp_oauth_keyring_account(profile_home, server_name, url);
-    let entry = keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, &account)
-        .map_err(|err| Error::Config(format!("keyring entry failed: {err}")))?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(true),
-        Err(keyring::Error::NoEntry) => Ok(false),
-        Err(err) => Err(Error::Config(format!("keyring delete failed: {err}"))),
-    }
+    credential_store.clear_access_token(&account)
 }
 
 fn update_mcp_server_document<F>(config_dir: PathBuf, name: &str, mutate: F) -> Result<Value>
@@ -386,7 +521,11 @@ fn string_array_value(values: Vec<String>) -> Value {
     Value::Array(values.into_iter().map(Value::String).collect())
 }
 
-fn mcp_server_view(profile_home: &Path, server: &McpServerInput) -> Value {
+fn mcp_server_view(
+    profile_home: &Path,
+    server: &McpServerInput,
+    credential_store: &dyn McpOAuthCredentialStore,
+) -> Value {
     let transport = match &server.transport {
         McpTransportInput::Stdio {
             command,
@@ -408,7 +547,14 @@ fn mcp_server_view(profile_home: &Path, server: &McpServerInput) -> Value {
             oauth_resource,
             oauth_client_id,
         } => {
-            let stored_oauth_token = load_mcp_oauth_access_token(profile_home, &server.name, url)
+            let oauth_configured = oauth_client_id.is_some() || oauth_resource.is_some();
+            let stored_oauth_token = oauth_configured
+                && load_mcp_oauth_access_token_with_store(
+                    credential_store,
+                    profile_home,
+                    &server.name,
+                    url,
+                )
                 .ok()
                 .flatten()
                 .is_some();
@@ -421,7 +567,7 @@ fn mcp_server_view(profile_home: &Path, server: &McpServerInput) -> Value {
                     "scopes": scopes,
                     "oauthResource": oauth_resource,
                     "oauthClientId": oauth_client_id,
-                    "oauthConfigured": oauth_client_id.is_some() || oauth_resource.is_some(),
+                    "oauthConfigured": oauth_configured,
                     "storedOAuthToken": stored_oauth_token,
                 }
             })

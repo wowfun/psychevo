@@ -1,6 +1,21 @@
 #[cfg(feature = "native-channels")]
+use std::sync::Arc;
+
+use psychevo::{Error, config::ChannelRuntimeConnection};
+
+use crate::im::ChannelGateway;
+#[cfg(feature = "native-channels")]
+use crate::im::adapters::{
+    FeishuLarkDomain, FeishuLarkLongConnectionAdapter, FeishuLarkLongConnectionConfig,
+    TelegramPollingAdapter, TelegramPollingConfig, WECHAT_ILINK_BASE_URL, WechatIlinkAdapter,
+    WechatIlinkConfig,
+};
+#[cfg(feature = "native-channels")]
+use crate::im::{ChannelAdapterBinding, ChannelAllowlist};
+
+use super::super::binding::WebState;
+#[cfg(feature = "native-channels")]
 use super::paths::wechat_context_store_path;
-use super::*;
 
 pub(super) async fn build_channel_gateway(
     state: &WebState,

@@ -1,3 +1,8 @@
+use crate::tui::{
+    Clear, Frame, FullscreenUi, Line, Modifier, Paragraph, Rect, SelectableRegion, Span, Style,
+    UnicodeWidthStr, Wrap, sidebar_heading, tui_theme,
+};
+
 pub(crate) fn bottom_status_session_usage_segments(ui: &FullscreenUi<'_>) -> Vec<String> {
     let Some(summary) = ui.session_usage_summary.as_ref() else {
         return Vec::new();

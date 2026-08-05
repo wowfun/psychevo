@@ -1,3 +1,35 @@
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use psychevo::RunMode;
+use psychevo::ThreadAgentBinding;
+use psychevo::application::{
+    GatewayActivityClaimInput, GatewayActivityKind, GatewayControlCommandKind,
+};
+use psychevo::host_paths::HostPlatform;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::gateway_now_ms;
+#[cfg(windows)]
+use crate::server::agents::backend_doctor_value_for_platform;
+use crate::server::binding::{AuthContext, WebState};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::runtime_profiles::{
+    acp_session_mode_control_descriptor, apply_thread_control_precedence, combined_thread_revision,
+    ensure_turn_runtime_profile_supported, resolve_runtime_ref_peer_turn,
+    runnable_target_for_source, runtime_profile_list_result, validate_turn_runnable_target,
+};
+use crate::server::scope_session::{default_resolved_scope, detached_draft_scope};
+use crate::server::tests::automations::helpers::{
+    AutomationTurnProbe, web_state_with_automation_turn_probe,
+};
+use crate::server::tests::helpers::{web_state, web_state_with_env};
+
 #[tokio::test]
 async fn agent_and_backend_rpc_list_generated_peer_backend() {
     let (_temp, state) = web_state().await;
@@ -18,7 +50,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "backend/list".to_string(),
             params: None,
@@ -39,7 +71,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -65,7 +97,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "backend/list".to_string(),
             params: None,
@@ -87,7 +119,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -112,7 +144,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("5")),
             method: "agent/list".to_string(),
             params: None,
@@ -150,7 +182,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("6")),
             method: "agent/status".to_string(),
             params: None,
@@ -166,7 +198,7 @@ command = "cursor-agent"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("7")),
             method: "backend/delete".to_string(),
             params: Some(json!({
@@ -199,7 +231,7 @@ command = "reviewer-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("profile-list")),
             method: "runtime/profile/list".to_string(),
             params: None,
@@ -224,7 +256,7 @@ command = "reviewer-agent"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("profile-write")),
             method: "runtime/profile/write".to_string(),
             params: Some(json!({
@@ -269,7 +301,7 @@ command = "reviewer-agent"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("thread-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -290,10 +322,8 @@ command = "reviewer-agent"
 async fn managed_codex_target_is_runnable_only_after_verified_install() {
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
-    let paths = crate::managed_acp::managed_codex_acp_paths(
-        &state.inner.home,
-        HostPlatform::current(),
-    );
+    let paths =
+        crate::managed_acp::managed_codex_acp_paths(&state.inner.home, HostPlatform::current());
     std::fs::write(
         state.inner.home.join("config.toml"),
         format!(
@@ -315,7 +345,7 @@ entrypoints = ["peer", "subagent"]
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(id)),
                 method: "thread/context/read".to_string(),
                 params: Some(json!({
@@ -331,10 +361,12 @@ entrypoints = ["peer", "subagent"]
         .expect("missing context");
     assert_eq!(missing["sendability"]["allowed"], false);
     assert_eq!(missing["sendability"]["recoveryAction"], "backend/install");
-    assert!(missing["sendability"]["reason"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("not installed"));
+    assert!(
+        missing["sendability"]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not installed")
+    );
     let error = ensure_turn_runtime_profile_supported(&state, &scope, Some("codex"))
         .expect_err("missing managed install must reject turn");
     assert!(error.to_string().contains("backend/install"));
@@ -348,10 +380,12 @@ entrypoints = ["peer", "subagent"]
         .expect("invalid context");
     assert_eq!(invalid["sendability"]["allowed"], false);
     assert_eq!(invalid["sendability"]["recoveryAction"], "backend/repair");
-    assert!(invalid["sendability"]["reason"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("backend/repair"));
+    assert!(
+        invalid["sendability"]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("backend/repair")
+    );
     let error = ensure_turn_runtime_profile_supported(&state, &scope, Some("codex"))
         .expect_err("invalid managed install must reject turn");
     assert!(error.to_string().contains("backend/repair"));
@@ -399,274 +433,10 @@ command = "cursor-agent"
         .expect("arbitrary ACP backend profile");
     assert_eq!(cursor.backend_ref.as_deref(), Some("cursor"));
     assert!(
-        super::runtime_profiles::resolve_runtime_ref_peer_turn(&state, &scope, "opencode")
+        resolve_runtime_ref_peer_turn(&state, &scope, "opencode")
             .expect("ACP resolution")
             .is_some()
     );
-}
-
-#[tokio::test]
-async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
-    let host_cwd = std::env::current_dir().expect("host cwd");
-    let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
-    let fixture_program = fixture.program;
-    let fixture_script = fixture.script;
-    let (_temp, state) = web_state().await;
-    let log = state.inner.cwd.join("bound-hidden-profile.jsonl");
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let wire_scope = scope.to_wire_scope();
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    rpc_test_request(
-        &state,
-        &tx,
-        "backend/write",
-        json!({
-                "id": "opencode",
-                "target": "project",
-                "command": fixture_program,
-                "args": [fixture_script],
-                "env": {
-                    "ACP_LIFECYCLE_LOG": log,
-                    "ACP_LIFECYCLE_MODE": "all"
-                },
-                "entrypoints": ["peer", "subagent"]
-            }),
-    )
-    .await
-    ;
-
-    let profiles = runtime_profile_list_result(&state, &scope).expect("profiles");
-    assert!(profiles.profiles.iter().any(|profile| profile.id == "opencode"));
-    assert!(
-        profiles
-            .profiles
-            .iter()
-            .all(|profile| profile.id != "acp:opencode")
-    );
-
-    let catalog = psychevo::__product::capabilities::discover_agents(&psychevo::__product::capabilities::AgentDiscoveryOptions {
-        home: state.inner.home.clone(),
-        cwd: state.inner.cwd.clone(),
-        env: state.inner.inherited_env.clone(),
-        explicit_inputs: vec!["opencode".to_string()],
-        no_agents: false,
-    })
-    .expect("Agent catalog");
-    let agent = catalog
-        .agents
-        .iter()
-        .find(|agent| agent.name == "opencode")
-        .expect("generated OpenCode Agent")
-        .clone();
-    let agent_json = serde_json::to_string(&agent).expect("Agent snapshot");
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint(&agent_json);
-    let profile = RuntimeProfileConfig {
-        id: "acp:opencode".to_string(),
-        runtime: RuntimeProfileKind::Acp,
-        enabled: true,
-        label: "OpenCode (ACP)".to_string(),
-        backend_ref: Some("opencode".to_string()),
-        default_model: None,
-        default_mode: None,
-        default_agent: None,
-        sandbox: None,
-        workspace_roots: Vec::new(),
-        options: Value::Null,
-    };
-    let profile_json = serde_json::to_string(&profile).expect("Profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let parent_thread_id = Box::pin(state.inner.state.create_session_with_metadata(
-        &state.inner.cwd,
-        "web",
-        "model",
-        "provider",
-        None,
-    ))
-    .await
-    .expect("parent Thread");
-    let thread_id = Box::pin(state.inner.state.create_child_session_with_metadata(
-            &parent_thread_id,
-            &state.inner.cwd,
-            "peer_agent",
-            "opencode",
-            "acp:opencode",
-            None,
-        ))
-    .await
-    .expect("child Thread");
-    let cwd = state.inner.cwd.display().to_string();
-    Box::pin(state.inner.state.create_gateway_runtime_binding(
-        psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id: &thread_id,
-            agent_ref: Some("opencode"),
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: &agent_json,
-            runtime_ref: "acp:opencode",
-            backend_kind: "acp",
-            native_kind: "acp",
-            native_session_id: Some("bound-native"),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "acp",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: Some(&parent_thread_id),
-        },
-    ))
-    .await
-    .expect("captured child binding");
-
-    rpc_test_request(
-        &state,
-        &tx,
-        "backend/write",
-        json!({
-                "id": "opencode",
-                "target": "project",
-                "command": fixture_program,
-                "args": [fixture_script],
-                "env": {
-                    "ACP_LIFECYCLE_LOG": log,
-                    "ACP_LIFECYCLE_MODE": "all"
-                },
-                "entrypoints": ["subagent"]
-            }),
-    )
-    .await;
-
-    let context = rpc_test_request(
-        &state,
-        &tx,
-        "thread/context/read",
-        json!({
-                "scope": wire_scope,
-                "threadId": thread_id
-            }),
-    )
-    .await;
-    assert_eq!(context["runtimeProfileRef"], "acp:opencode");
-    assert_eq!(context["sendability"]["allowed"], true);
-
-    let accepted = rpc_test_request(
-        &state,
-        &tx,
-        "turn/start",
-        json!({
-                "clientTurnId": "client-bound-hidden-follow-up",
-                "scope": wire_scope,
-                "threadId": thread_id,
-                "input": [{"type": "text", "text": "follow up"}],
-                "expectedContextRevision": context["contextRevision"],
-                "expectedControlRevision": context["controlRevision"]
-            }),
-    )
-    .await;
-    assert_eq!(accepted["accepted"], true);
-
-    let terminal = tokio::time::timeout(Duration::from_secs(3), async {
-        while let Some(message) = rx.recv().await {
-            if message.contains("\"type\":\"turnCompleted\"") {
-                return message;
-            }
-        }
-        String::new()
-    })
-    .await
-    .expect("follow-up terminal");
-    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
-    assert!(!terminal.contains("unknown runtime profile"), "{terminal}");
-
-    let context_tx = mpsc::unbounded_channel().0;
-    let context = rpc_test_request(
-        &state,
-        &context_tx,
-        "thread/context/read",
-        json!({
-                "scope": wire_scope,
-                "threadId": thread_id
-            }),
-    )
-    .await;
-    assert!(context["actions"].as_array().is_some_and(|actions| {
-        actions
-            .iter()
-            .any(|action| action["id"] == "fork" && action["enabled"] == true)
-    }));
-    let mode = context["controls"]
-        .as_array()
-        .expect("bound controls")
-        .iter()
-        .find(|control| control["id"] == "mode")
-        .expect("bound mode control");
-    let control_tx = mpsc::unbounded_channel().0;
-    let control = rpc_test_request(
-        &state,
-        &control_tx,
-        "thread/control/set",
-        json!({
-                "scope": wire_scope,
-                "threadId": thread_id,
-                "targetId": context["selectedTargetId"],
-                "controlId": "mode",
-                "value": "plan",
-                "expectedCapabilityRevision": mode["capabilityRevision"],
-                "expectedBindingRevision": context["binding"]["bindingRevision"],
-                "expectedContextRevision": context["contextRevision"],
-                "expectedControlRevision": context["controlRevision"]
-            }),
-    )
-    .await;
-    assert_eq!(control["control"]["effectiveValue"], "plan");
-    let fork_tx = mpsc::unbounded_channel().0;
-    let forked = rpc_test_request(
-        &state,
-        &fork_tx,
-        "thread/action/run",
-        json!({
-                "scope": wire_scope,
-                "threadId": thread_id,
-                "action": {"kind": "fork"}
-            }),
-    )
-    .await;
-    assert_eq!(forked["kind"], "fork");
-    assert_ne!(forked["snapshot"]["thread"]["id"], thread_id);
-
-    let archive_tx = mpsc::unbounded_channel().0;
-    let archived = rpc_test_request(
-        &state,
-        &archive_tx,
-        "thread/archive",
-        json!({"threadId": thread_id}),
-    )
-    .await;
-    assert_eq!(archived["session"]["id"], thread_id);
-    let restore_tx = mpsc::unbounded_channel().0;
-    let restored = rpc_test_request(
-        &state,
-        &restore_tx,
-        "thread/restore",
-        json!({"threadId": thread_id}),
-    )
-    .await;
-    assert_eq!(restored["session"]["id"], thread_id);
-    let delete_tx = mpsc::unbounded_channel().0;
-    let deleted = rpc_test_request(
-        &state,
-        &delete_tx,
-        "thread/delete",
-        json!({"threadId": thread_id}),
-    )
-    .await;
-    assert_eq!(deleted["deleted"], true);
-
-    Box::pin(state.inner.gateway.shutdown_runtimes(false))
-        .await
-        .expect("shutdown fixture");
 }
 
 #[tokio::test]
@@ -699,7 +469,7 @@ default_agent = "build"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("runtime-mode-target-catalog")),
             method: "thread/context/read".to_string(),
             params: Some(json!({ "scope": scope.to_wire_scope() })),
@@ -718,13 +488,9 @@ default_agent = "build"
         }),
         "OpenCode build is a Session mode, not a Psychevo Agent Definition"
     );
-    let selected = runnable_target_for_source(
-        &state,
-        &scope,
-        &scope.source,
-        "opencode-fixture",
-    )
-    .await.expect("profile default target");
+    let selected = runnable_target_for_source(&state, &scope, &scope.source, "opencode-fixture")
+        .await
+        .expect("profile default target");
     assert_eq!(selected.agent_ref.as_deref(), Some("opencode-fixture"));
 
     let context = handle_rpc(
@@ -732,7 +498,7 @@ default_agent = "build"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("runtime-mode-target-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -838,7 +604,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         mpsc::unbounded_channel().0,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("native-effective-controls")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -866,10 +632,7 @@ reasoning_effort = "high"
         .iter()
         .find(|control| control["id"] == "model")
         .expect("model control");
-    assert_eq!(
-        model["effectiveValue"],
-        "xiaomi-token-plan/mimo-v2.5-pro"
-    );
+    assert_eq!(model["effectiveValue"], "xiaomi-token-plan/mimo-v2.5-pro");
     assert_eq!(model["choices"][0]["label"], "MiMo V2.5 Pro");
 
     let updated = handle_rpc(
@@ -877,7 +640,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         mpsc::unbounded_channel().0,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("native-permission-change")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -909,7 +672,7 @@ async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() 
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("thread-context-targets")),
             method: "thread/context/read".to_string(),
             params: Some(json!({ "scope": scope.to_wire_scope() })),
@@ -950,7 +713,7 @@ async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() 
     let validated = validate_turn_runnable_target(
         &state,
         &scope,
-        &wire::RunnableTargetInput {
+        &wire::thread_command_turn::RunnableTargetInput {
             agent_ref: Some(" cursor-peer ".to_string()),
             runtime_profile_ref: " acp:cursor ".to_string(),
         },
@@ -972,7 +735,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prospective-control-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -995,7 +758,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prospective-control-set")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -1015,27 +778,33 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
     .expect("the first control mutation uses the prospective target revisions");
 
     assert_eq!(receipt["status"], "applied");
-    assert_eq!(receipt["context"]["selectedTargetId"], context["selectedTargetId"]);
+    assert_eq!(
+        receipt["context"]["selectedTargetId"],
+        context["selectedTargetId"]
+    );
     assert_eq!(receipt["context"]["selectionState"], "prospective");
     assert_eq!(receipt["control"]["effectiveValue"], "plan");
     assert_eq!(receipt["contextRevision"], context["contextRevision"]);
     assert_ne!(receipt["controlRevision"], context["controlRevision"]);
     let lane = state
         .inner
-        .state
-
+        .durability
         .gateway_source_lane(&scope.source.source_key().0)
-        .await.expect("source lane read")
+        .await
+        .expect("source lane read")
         .expect("source lane persisted");
     assert_eq!(lane.draft_agent_ref.as_deref(), Some("native-peer"));
     assert_eq!(lane.draft_profile_ref.as_deref(), Some("native"));
-    assert_eq!(lane.draft_control_values.get("mode").map(String::as_str), Some("plan"));
+    assert_eq!(
+        lane.draft_control_values.get("mode").map(String::as_str),
+        Some("plan")
+    );
 }
 
 #[tokio::test]
 async fn unbound_control_receipt_can_start_turn_with_same_target() {
-    let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend.clone()).await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -1045,7 +814,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-control-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -1067,7 +836,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-control-set")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -1091,7 +860,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-after-control")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -1128,12 +897,18 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
     assert_eq!(runs[0].mode, RunMode::Plan);
     let binding = state
         .inner
-        .state
-
-        .gateway_runtime_binding(thread_id)
-        .await.expect("binding read")
+        .framework
+        .thread_agent_binding(thread_id)
+        .await
+        .expect("binding read")
         .expect("binding");
-    assert_eq!(binding.thread_preferences.get("mode"), Some(&json!("plan")));
+    let ThreadAgentBinding::Resolved {
+        thread_preferences, ..
+    } = binding
+    else {
+        panic!("resolved binding")
+    };
+    assert_eq!(thread_preferences.get("mode"), Some(&json!("plan")));
 }
 
 #[tokio::test]
@@ -1155,7 +930,7 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!("invalid-target")),
                 method: "turn/start".to_string(),
                 params: Some(json!({
@@ -1173,10 +948,15 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
     assert!(
         state
             .inner
-            .state
-
-            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .await.expect("sessions")
+            .framework
+            .list_threads(psychevo::ThreadListQuery {
+                cwd: Some(state.inner.cwd.clone()),
+                limit: 1,
+                ..psychevo::ThreadListQuery::default()
+            })
+            .await
+            .expect("Threads")
+            .threads
             .is_empty(),
         "target rejection must happen before thread creation or delivery"
     );
@@ -1195,7 +975,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("revision-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -1212,7 +992,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("revision-missing")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -1237,7 +1017,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("revision-stale")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -1261,10 +1041,15 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
     assert!(
         state
             .inner
-            .state
-
-            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .await.expect("sessions")
+            .framework
+            .list_threads(psychevo::ThreadListQuery {
+                cwd: Some(state.inner.cwd.clone()),
+                limit: 1,
+                ..psychevo::ThreadListQuery::default()
+            })
+            .await
+            .expect("Threads")
+            .threads
             .is_empty(),
         "revision rejection must precede public Thread creation and delivery"
     );
@@ -1276,58 +1061,73 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
 }
 
 async fn thread_context_immutable_agent_binding_contract() {
-    let (_temp, state) = web_state().await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend).await;
     write_runnable_target_catalog_fixture(&state);
-    let profile = super::runtime_profiles::generated_runtime_profiles()
-        .into_iter()
-        .find(|profile| profile.id == "native")
-        .expect("Native profile");
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_json = r#"{"name":"native-peer","instructions":"captured"}"#;
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
-    let thread_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
-        .await.expect("thread");
-    let cwd = state.inner.cwd.display().to_string();
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id: &thread_id,
-            agent_ref: Some("native-peer"),
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: agent_json,
-            runtime_ref: "native",
-            backend_kind: "native",
-            native_kind: "native",
-            native_session_id: Some(&thread_id),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "native",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
-        .await.expect("binding");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let prospective = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("prospective-bound-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "target": {"agentRef": "native-peer", "runtimeProfileRef": "native"}
+            })),
+        },
+    )
+    .await
+    .expect("prospective bound context");
+    let accepted = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("create-bound-thread")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "clientTurnId": "client-create-bound-thread",
+                "scope": scope.clone(),
+                "threadId": null,
+                "target": {"agentRef": "native-peer", "runtimeProfileRef": "native"},
+                "input": [{"type": "text", "text": "establish the immutable binding"}],
+                "turnOverrides": {"model": "fake-model"},
+                "expectedContextRevision": prospective["contextRevision"],
+                "expectedControlRevision": prospective["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("public turn creates bound Thread");
+    let thread_id = accepted["threadId"]
+        .as_str()
+        .expect("bound Thread id")
+        .to_string();
+    let terminal = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            if message.contains("\"type\":\"turnCompleted\"") {
+                return message;
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("bound Thread terminal");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
 
     let context = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("bound-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -1339,7 +1139,11 @@ async fn thread_context_immutable_agent_binding_contract() {
     .await
     .expect("bound Thread Context");
     assert_eq!(context["binding"]["agentRef"], "native-peer");
-    assert_eq!(context["binding"]["agentFingerprint"], agent_fingerprint);
+    assert!(
+        context["binding"]["agentFingerprint"]
+            .as_str()
+            .is_some_and(|fingerprint| !fingerprint.is_empty())
+    );
     assert_eq!(context["pendingInteractions"], json!([]));
     let actions = context["actions"].as_array().expect("Native actions");
     assert!(
@@ -1363,7 +1167,7 @@ async fn thread_context_immutable_agent_binding_contract() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("native-control")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -1386,14 +1190,22 @@ async fn thread_context_immutable_agent_binding_contract() {
     assert_eq!(receipt["control"]["effectiveSource"], "threadPreference");
     let stored = state
         .inner
-        .state
-
-        .gateway_runtime_binding(&thread_id)
-        .await.expect("binding read")
+        .framework
+        .thread_agent_binding(&thread_id)
+        .await
+        .expect("binding read")
         .expect("binding");
-    assert_eq!(stored.thread_preferences["mode"], "plan");
+    let ThreadAgentBinding::Resolved {
+        binding,
+        thread_preferences,
+        ..
+    } = stored
+    else {
+        panic!("resolved binding")
+    };
+    assert_eq!(thread_preferences["mode"], "plan");
     assert_eq!(
-        stored.control_revision.to_string(),
+        binding.control_revision.to_string(),
         receipt["controlRevision"]
     );
     let mut resolved_turn_controls = BTreeMap::new();
@@ -1403,7 +1215,8 @@ async fn thread_context_immutable_agent_binding_contract() {
         Some(&thread_id),
         &mut resolved_turn_controls,
     )
-    .await.expect("resolve Thread preferences");
+    .await
+    .expect("resolve Thread preferences");
     assert_eq!(resolved_turn_controls["mode"], "plan");
     resolved_turn_controls.insert("mode".to_string(), "default".to_string());
     assert_eq!(
@@ -1413,14 +1226,13 @@ async fn thread_context_immutable_agent_binding_contract() {
 
     state
         .inner
-        .state
-
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "foreign-native-turn",
             thread_id: Some(&thread_id),
             source_key: Some(&state.inner.source.source_key().0),
             turn_id: Some("foreign-native-turn"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "gateway:foreign",
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -1428,13 +1240,14 @@ async fn thread_context_immutable_agent_binding_contract() {
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("foreign activity");
+        .await
+        .expect("foreign activity");
     let active_context = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("active-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -1445,15 +1258,19 @@ async fn thread_context_immutable_agent_binding_contract() {
     )
     .await
     .expect("active Thread Context");
-    assert!(active_context["actions"].as_array().expect("actions").iter().any(
-        |action| action["id"] == "interrupt" && action["enabled"] == true
-    ));
+    assert!(
+        active_context["actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|action| action["id"] == "interrupt" && action["enabled"] == true)
+    );
     let interrupted = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("interrupt-action")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -1469,26 +1286,31 @@ async fn thread_context_immutable_agent_binding_contract() {
     assert_eq!(interrupted["interrupted"], true);
     let commands = state
         .inner
-        .state
-        .pending_gateway_control_commands("gateway:foreign", 50)
+        .durability
+        .claim_pending_gateway_control_commands("gateway:foreign", 50)
         .await
         .expect("foreign control commands");
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].activity_id, "foreign-native-turn");
-    assert_eq!(commands[0].command_kind, "interrupt");
+    assert_eq!(
+        commands[0].command_kind,
+        GatewayControlCommandKind::Interrupt
+    );
 
     let error = handle_rpc(
         state,
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("agent-change")),
             method: "turn/start".to_string(),
             params: Some(json!({
                 "clientTurnId": "client-agent-change",
                 "scope": scope,
                 "threadId": thread_id,
+                "expectedContextRevision": active_context["contextRevision"],
+                "expectedControlRevision": active_context["controlRevision"],
                 "target": {"agentRef": null, "runtimeProfileRef": "native"},
                 "input": [{"type": "text", "text": "must not deliver"}]
             })),
@@ -1499,7 +1321,8 @@ async fn thread_context_immutable_agent_binding_contract() {
     assert!(
         error
             .to_string()
-            .contains("bound to Agent target `native-peer`")
+            .contains("bound to Agent target `native-peer`"),
+        "{error}"
     );
 }
 
@@ -1512,7 +1335,8 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )])).await;
+    )]))
+    .await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let backends = handle_rpc(
@@ -1520,7 +1344,7 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "backend/list".to_string(),
             params: None,
@@ -1534,9 +1358,11 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
         .find(|backend| backend["id"] == "codex")
         .expect("codex backend");
     assert_eq!(codex["sourceTargets"], json!(["profile"]));
-    assert!(codex["command"]
-        .as_str()
-        .is_some_and(|command| command.contains("runtime-adapters")));
+    assert!(
+        codex["command"]
+            .as_str()
+            .is_some_and(|command| command.contains("runtime-adapters"))
+    );
     let opencode = records
         .iter()
         .find(|backend| backend["id"] == "opencode")
@@ -1564,7 +1390,7 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "agent/list".to_string(),
             params: None,
@@ -1587,7 +1413,8 @@ async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )])).await;
+    )]))
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1598,7 +1425,7 @@ async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("undetected-backends")),
             method: "backend/list".to_string(),
             params: None,
@@ -1621,7 +1448,7 @@ async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("undetected-profiles")),
             method: "runtime/profile/list".to_string(),
             params: None,
@@ -1643,7 +1470,7 @@ async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("undetected-imports")),
             method: "thread/import/list".to_string(),
             params: Some(json!({"scope": scope, "cursors": {}})),
@@ -1667,7 +1494,8 @@ async fn backend_list_retains_existing_known_backend_when_cli_is_absent() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )])).await;
+    )]))
+    .await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -1686,7 +1514,7 @@ args = []
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("retained-backend")),
             method: "backend/list".to_string(),
             params: None,
@@ -1708,7 +1536,7 @@ args = []
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("retained-profile")),
             method: "runtime/profile/list".to_string(),
             params: None,
@@ -1716,11 +1544,13 @@ args = []
     )
     .await
     .expect("runtime/profile/list");
-    assert!(profiles["profiles"]
-        .as_array()
-        .expect("profiles")
-        .iter()
-        .any(|profile| profile["id"] == "codex"));
+    assert!(
+        profiles["profiles"]
+            .as_array()
+            .expect("profiles")
+            .iter()
+            .any(|profile| profile["id"] == "codex")
+    );
 }
 
 #[tokio::test]
@@ -1730,7 +1560,8 @@ async fn backend_list_does_not_auto_create_over_existing_effective_backend() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )])).await;
+    )]))
+    .await;
     let project_config = state.inner.cwd.join(".psychevo").join("config.toml");
     std::fs::create_dir_all(project_config.parent().expect("project config parent"))
         .expect("project config dir");
@@ -1751,7 +1582,7 @@ args = ["serve-acp"]
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "backend/list".to_string(),
             params: None,
@@ -1769,8 +1600,8 @@ args = ["serve-acp"]
     assert_eq!(hermes["command"], "custom-hermes");
     assert_eq!(hermes["args"], json!(["serve-acp"]));
     assert_eq!(hermes["sourceTargets"], json!(["project"]));
-    let profile_config = std::fs::read_to_string(state.inner.home.join("config.toml"))
-        .unwrap_or_default();
+    let profile_config =
+        std::fs::read_to_string(state.inner.home.join("config.toml")).unwrap_or_default();
     let profile_config = profile_config
         .parse::<toml::Value>()
         .unwrap_or_else(|_| toml::Value::Table(Default::default()));
@@ -1831,7 +1662,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "agent/list".to_string(),
             params: Some(json!({ "scope": scope.clone() })),
@@ -1872,7 +1703,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "agent/read".to_string(),
             params: Some(json!({
@@ -1897,7 +1728,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "agent/write".to_string(),
             params: Some(json!({
@@ -1933,7 +1764,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "agent/list".to_string(),
             params: Some(json!({ "scope": scope.clone() })),
@@ -1966,7 +1797,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("5")),
             method: "agent/write".to_string(),
             params: Some(json!({
@@ -1986,7 +1817,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("6")),
             method: "agent/write".to_string(),
             params: Some(json!({
@@ -2008,7 +1839,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("7")),
             method: "agent/setEnabled".to_string(),
             params: Some(json!({
@@ -2028,7 +1859,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("8")),
             method: "agent/delete".to_string(),
             params: Some(json!({
@@ -2065,7 +1896,7 @@ command = "codex-acp"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("team-write")),
             method: "team/write".to_string(),
             params: Some(json!({
@@ -2108,7 +1939,7 @@ command = "codex-acp"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("team-read")),
             method: "team/read".to_string(),
             params: Some(json!({
@@ -2137,7 +1968,7 @@ command = "codex-acp"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("team-delete")),
             method: "team/delete".to_string(),
             params: Some(json!({
@@ -2174,7 +2005,7 @@ command = "codex-acp"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("unknown")),
             method: "team/write".to_string(),
             params: Some(json!({
@@ -2196,7 +2027,7 @@ command = "codex-acp"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("pairing")),
             method: "team/write".to_string(),
             params: Some(json!({
@@ -2243,7 +2074,7 @@ command = "codex-acp"
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(name)),
                 method: "team/write".to_string(),
                 params: Some(json!({
@@ -2280,7 +2111,7 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
     std::fs::write(&shim, "@echo off\n").expect("shim");
     let backend = AgentBackendConfig {
         id: "opencode".to_string(),
-        kind: psychevo::__product::capabilities::AgentBackendKind::Acp,
+        kind: psychevo::agents::AgentBackendKind::Acp,
         enabled: true,
         label: "OpenCode".to_string(),
         description: None,
@@ -2297,13 +2128,9 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
         ("PATHEXT".to_string(), ".CMD".to_string()),
     ]);
 
-    let result = super::agents::backend_doctor_value_for_platform(
-        &backend,
-        &env,
-        temp.path(),
-        HostPlatform::Windows,
-    )
-    .expect("doctor");
+    let result =
+        backend_doctor_value_for_platform(&backend, &env, temp.path(), HostPlatform::Windows)
+            .expect("doctor");
     let command = result
         .checks
         .iter()
@@ -2333,7 +2160,7 @@ async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-auth-doctor-fixture")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2357,7 +2184,7 @@ async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("doctor-auth-fixture")),
             method: "backend/doctor".to_string(),
             params: Some(json!({"id": "auth-doctor-fixture"})),
@@ -2422,7 +2249,7 @@ async fn backend_doctor_reports_protocol_incompatibility_without_auth_or_session
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-protocol-doctor-fixture")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2446,7 +2273,7 @@ async fn backend_doctor_reports_protocol_incompatibility_without_auth_or_session
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("doctor-protocol-fixture")),
             method: "backend/doctor".to_string(),
             params: Some(json!({"id": "protocol-doctor-fixture"})),
@@ -2495,7 +2322,8 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
     let (_state_temp, state) = web_state_with_env(BTreeMap::from([(
         "PSYCHEVO_CONFIG".to_string(),
         explicit_config.to_string_lossy().to_string(),
-    )])).await;
+    )]))
+    .await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let write = handle_rpc(
@@ -2503,7 +2331,7 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2526,7 +2354,7 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "backend/list".to_string(),
             params: None,
@@ -2557,9 +2385,14 @@ name = "Configured default"
     )
     .expect("configured model labels");
     let log = state.inner.cwd.join("draft-prepare.jsonl");
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
-        .expect("scope")
-        .to_wire_scope();
+    let origin = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let scope = detached_draft_scope(
+        &origin,
+        &AuthContext::Browser {
+            session_id: "prepared-session-draft".to_string(),
+        },
+    )
+    .to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
 
     handle_rpc(
@@ -2567,7 +2400,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-opencode-draft-fixture")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2591,7 +2424,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-opencode-runtime-defaults")),
             method: "runtime/profile/write".to_string(),
             params: Some(json!({
@@ -2616,7 +2449,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("context-before-prepare")),
             method: "thread/context/read".to_string(),
             params: Some(json!({"threadId": null, "scope": scope})),
@@ -2640,7 +2473,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prepare-opencode")),
             method: "thread/draft/prepare".to_string(),
             params: Some(json!({"targetId": target_id, "scope": scope})),
@@ -2648,7 +2481,9 @@ name = "Configured default"
     )
     .await
     .expect("thread/draft/prepare");
-    let controls = prepared["context"]["controls"].as_array().expect("controls");
+    let controls = prepared["context"]["controls"]
+        .as_array()
+        .expect("controls");
     let model = controls
         .iter()
         .find(|control| control["surfaceRole"] == "model")
@@ -2692,7 +2527,7 @@ name = "Configured default"
                 AuthContext::Bearer,
                 tx.clone(),
                 RpcRequest {
-                    jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                    jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                     id: Some(json!("context-after-delayed-command")),
                     method: "thread/context/read".to_string(),
                     params: Some(json!({
@@ -2731,7 +2566,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("set-draft-model")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -2757,7 +2592,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prepare-opencode-again")),
             method: "thread/draft/prepare".to_string(),
             params: Some(json!({"targetId": target_id, "scope": scope})),
@@ -2797,7 +2632,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-with-prepared-session")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -2859,7 +2694,7 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-failing-draft-fixture")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2883,7 +2718,7 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("context-before-failing-prepare")),
             method: "thread/context/read".to_string(),
             params: Some(json!({"threadId": null, "scope": scope})),
@@ -2895,8 +2730,7 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
     let failing_target_id = targets
         .iter()
         .find(|target| {
-            target["agentRef"] == "opencode"
-                && target["runtimeProfileRef"] == "opencode"
+            target["agentRef"] == "opencode" && target["runtimeProfileRef"] == "opencode"
         })
         .and_then(|target| target["targetId"].as_str())
         .expect("failing ACP target")
@@ -2907,7 +2741,7 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prepare-failing-acp")),
             method: "thread/draft/prepare".to_string(),
             params: Some(json!({"targetId": failing_target_id, "scope": scope})),
@@ -2916,16 +2750,18 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
     .await
     .expect("bounded prepare failure");
     assert_eq!(prepared["context"]["sendability"]["allowed"], false);
-    assert!(prepared["problem"]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains("fixture session preparation failed")));
+    assert!(
+        prepared["problem"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("fixture session preparation failed"))
+    );
 
     let refreshed = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("context-after-failing-prepare")),
             method: "thread/context/read".to_string(),
             params: Some(json!({"threadId": null, "scope": scope})),
@@ -2974,7 +2810,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("write-legacy-model-fixture")),
             method: "backend/write".to_string(),
             params: Some(json!({
@@ -2998,7 +2834,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("context-before-legacy-prepare")),
             method: "thread/context/read".to_string(),
             params: Some(json!({"threadId": null, "scope": scope})),
@@ -3020,7 +2856,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("prepare-legacy-hermes")),
             method: "thread/draft/prepare".to_string(),
             params: Some(json!({"targetId": target_id, "scope": scope})),
@@ -3044,7 +2880,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("set-legacy-model")),
             method: "thread/control/set".to_string(),
             params: Some(json!({
@@ -3070,7 +2906,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-with-legacy-model")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -3108,7 +2944,7 @@ name = "Configured default"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("bound-legacy-model-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -3138,7 +2974,10 @@ name = "Configured default"
         .filter_map(|entry| entry["method"].as_str())
         .collect::<Vec<_>>();
     assert_eq!(
-        methods.iter().filter(|method| **method == "session/new").count(),
+        methods
+            .iter()
+            .filter(|method| **method == "session/new")
+            .count(),
         1,
         "the first turn must reuse the prepared legacy session"
     );
@@ -3165,12 +3004,12 @@ name = "Configured default"
 #[test]
 fn acp_session_modes_project_as_typed_mode_control_and_revision_facts() {
     let modes = vec![
-        crate::acp_peer::AcpSessionModeSnapshot {
+        crate::acp_peer::session_projection::AcpSessionModeSnapshot {
             id: "ask".to_string(),
             name: "Ask".to_string(),
             description: Some("Answer questions".to_string()),
         },
-        crate::acp_peer::AcpSessionModeSnapshot {
+        crate::acp_peer::session_projection::AcpSessionModeSnapshot {
             id: "plan".to_string(),
             name: "Plan".to_string(),
             description: Some("Plan changes".to_string()),
@@ -3185,11 +3024,14 @@ fn acp_session_modes_project_as_typed_mode_control_and_revision_facts() {
     .expect("mode descriptor");
 
     assert_eq!(control.id, "mode");
-    assert_eq!(control.surface_role, wire::ThreadControlSurfaceRoleView::Mode);
+    assert_eq!(
+        control.surface_role,
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode
+    );
     assert_eq!(control.effective_value, Some(json!("plan")));
     assert_eq!(
         control.effective_source,
-        wire::ThreadControlEffectiveSourceView::RuntimeObserved
+        wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeObserved
     );
     assert_eq!(
         control

@@ -15,11 +15,9 @@ use psychevo_ai::{
 };
 use serde_json::{Value, json};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum RawStreamEvent {
     Text(String),
-    Reasoning(String),
     ToolStart {
         content_index: usize,
         call_index: usize,
@@ -35,7 +33,7 @@ pub(crate) enum RawStreamEvent {
         content_index: usize,
         call_index: usize,
     },
-    Done(Outcome),
+    Done,
 }
 
 #[derive(Clone, Default)]
@@ -195,15 +193,11 @@ fn normalize_raw_events(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent
     let mut normalized = Vec::new();
     let mut next_content_index = 0;
     let mut text_index = None;
-    let mut reasoning_index = None;
     let mut tool_arguments = BTreeMap::<(usize, usize), String>::new();
 
     for event in events {
         match event {
             RawStreamEvent::Text(text) => {
-                if let Some(content_index) = reasoning_index.take() {
-                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
-                }
                 let content_index = *text_index.get_or_insert_with(|| {
                     let content_index = next_content_index;
                     next_content_index += 1;
@@ -215,22 +209,6 @@ fn normalize_raw_events(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent
                     delta: text,
                 });
             }
-            RawStreamEvent::Reasoning(text) => {
-                if let Some(content_index) = text_index.take() {
-                    normalized.push(LanguageAdapterEvent::TextEnd { content_index });
-                }
-                let content_index = *reasoning_index.get_or_insert_with(|| {
-                    let content_index = next_content_index;
-                    next_content_index += 1;
-                    normalized.push(LanguageAdapterEvent::ReasoningStart { content_index });
-                    content_index
-                });
-                normalized.push(LanguageAdapterEvent::ReasoningDelta {
-                    content_index,
-                    delta: text,
-                    provider_evidence: None,
-                });
-            }
             RawStreamEvent::ToolStart {
                 content_index,
                 call_index,
@@ -239,9 +217,6 @@ fn normalize_raw_events(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent
             } => {
                 if let Some(content_index) = text_index.take() {
                     normalized.push(LanguageAdapterEvent::TextEnd { content_index });
-                }
-                if let Some(content_index) = reasoning_index.take() {
-                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
                 }
                 tool_arguments.insert((content_index, call_index), String::new());
                 normalized.push(LanguageAdapterEvent::ToolCallStart {
@@ -274,12 +249,9 @@ fn normalize_raw_events(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent
                     .remove(&(content_index, call_index))
                     .expect("tool end after start"),
             }),
-            RawStreamEvent::Done(_) => {
+            RawStreamEvent::Done => {
                 if let Some(content_index) = text_index.take() {
                     normalized.push(LanguageAdapterEvent::TextEnd { content_index });
-                }
-                if let Some(content_index) = reasoning_index.take() {
-                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
                 }
                 normalized.push(LanguageAdapterEvent::Finish {
                     finish_reason: None,
@@ -323,11 +295,11 @@ pub(crate) fn tool_script() -> Vec<Vec<RawStreamEvent>> {
                 content_index: 1,
                 call_index: 1,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("done".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]
 }
@@ -351,11 +323,11 @@ pub(crate) async fn injected_user_shell_context_reaches_next_provider_request() 
                 content_index: 0,
                 call_index: 0,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("done".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]);
     let requests = Arc::clone(&provider.requests);
@@ -425,11 +397,11 @@ pub(crate) async fn steered_user_message_reaches_next_provider_request_and_compl
                 content_index: 0,
                 call_index: 0,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("done".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]);
     let requests = Arc::clone(&provider.requests);
@@ -634,11 +606,11 @@ pub(crate) async fn tool_execution_events_include_timing_fields() {
                 content_index: 0,
                 call_index: 0,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("done".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]);
     let sink = RecordingSink::default();
@@ -825,11 +797,11 @@ pub(crate) async fn invalid_tool_json_becomes_error_tool_result() {
                 content_index: 0,
                 call_index: 0,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("recovered".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]);
     let (_control, receivers) = ControlHandle::new();
@@ -887,11 +859,11 @@ pub(crate) async fn non_object_tool_json_becomes_error_tool_result_without_execu
                 content_index: 0,
                 call_index: 0,
             },
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
         vec![
             RawStreamEvent::Text("recovered".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
+            RawStreamEvent::Done,
         ],
     ]);
     let (_control, receivers) = ControlHandle::new();
@@ -952,7 +924,7 @@ pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
             content_index: 0,
             call_index: 0,
         },
-        RawStreamEvent::Done(Outcome::Normal),
+        RawStreamEvent::Done,
     ]]);
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
@@ -1004,7 +976,7 @@ pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
 pub(crate) async fn graceful_stop_finishes_current_turn() {
     let provider = fake_model(vec![vec![
         RawStreamEvent::Text("one turn".to_string()),
-        RawStreamEvent::Done(Outcome::Normal),
+        RawStreamEvent::Done,
     ]]);
     let (control, receivers) = ControlHandle::new();
     control.stop();
@@ -1037,7 +1009,7 @@ pub(crate) async fn graceful_stop_finishes_current_turn() {
 pub(crate) async fn abort_before_generation_returns_aborted() {
     let provider = fake_model(vec![vec![
         RawStreamEvent::Text("unused".to_string()),
-        RawStreamEvent::Done(Outcome::Normal),
+        RawStreamEvent::Done,
     ]]);
     let (control, receivers) = ControlHandle::new();
     control.abort();
@@ -1071,7 +1043,7 @@ pub(crate) async fn abort_before_generation_returns_aborted() {
 pub(crate) async fn event_sink_failure_fails_invocation() {
     let provider = fake_model(vec![vec![
         RawStreamEvent::Text("hello".to_string()),
-        RawStreamEvent::Done(Outcome::Normal),
+        RawStreamEvent::Done,
     ]]);
     let (_control, receivers) = ControlHandle::new();
     let err = run_agent_loop(

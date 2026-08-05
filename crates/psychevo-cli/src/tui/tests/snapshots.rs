@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    FixtureKind, assert_tui_snapshot, attach_background_agent_running, attach_no_steer_running,
+    fixture_ui, stable_archived_session_bottom_panel, stable_session_bottom_panel, test_app,
+};
+use crate::tui::tests::test_app_with_models;
+use crate::tui::{
+    BottomPanel, BottomSelectionValue, FileSearchMatch, FileSearchMatchKind, FileSearchPopupState,
+    FullscreenUi, ModelPanel, ModelTab, TurnEvent, textarea_with_text,
+};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn tui_snapshot_wide_idle_minimal_chrome() {
     let temp = tempdir().expect("temp");
@@ -121,7 +130,7 @@ pub(crate) async fn tui_snapshot_session_bottom_panel_background_running() {
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.running_elapsed_override = Some(Duration::from_secs(12));
-    attach_background_agent_running(&mut ui, "session-b");
+    attach_background_agent_running(&app, &mut ui, "session-b");
     ui.bottom_panel = Some(BottomPanel::Sessions(stable_session_bottom_panel()));
     assert_tui_snapshot("session_bottom_panel_background_running", 120, 24, &app, ui);
 }
@@ -142,7 +151,7 @@ pub(crate) async fn tui_snapshot_running_turn_with_visible_thinking() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::RunningThinking);
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("running_turn_with_visible_thinking", 120, 24, &app, ui);
 }
 
@@ -207,7 +216,7 @@ pub(crate) async fn tui_snapshot_active_write_after_visible_answer() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveWriteAfterAnswer);
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("active_write_after_visible_answer", 120, 24, &app, ui);
 }
 
@@ -216,7 +225,7 @@ pub(crate) async fn tui_snapshot_active_visible_write_preamble() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveVisibleWritePreamble);
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("active_visible_write_preamble", 120, 24, &app, ui);
 }
 
@@ -327,7 +336,7 @@ pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
             );
         }
     }
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("active_write_suppresses_failure_meta", 120, 18, &app, ui);
 }
 
@@ -357,14 +366,14 @@ pub(crate) async fn tui_snapshot_reasoning_suppresses_failure_meta() {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "The current time is approximately 15:20 UTC. Let me compose the full report now. I have all 10 stories and their comments.\n\nLet me compose this carefully.".to_string(),
             },
         true,
         false,
     );
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("reasoning_suppresses_failure_meta", 120, 18, &app, ui);
 }
 
@@ -373,7 +382,7 @@ pub(crate) async fn tui_snapshot_active_reasoning_write() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveReasoningWrite);
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
     assert_tui_snapshot("active_reasoning_write", 120, 24, &app, ui);
 }
 

@@ -1,8 +1,20 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
-#[allow(unused_imports)]
-use serde_json::json;
+use serde_json::{Value, json};
+
+use super::sessions::completion::session_completed;
+use super::sessions::session_manager::{
+    EXEC_SESSIONS, ExecInvocation, ExecSession, ExecSessionRegistry,
+};
+use crate::error::{Error, Result};
+use crate::tools::{
+    DEFAULT_MAX_OUTPUT_TOKENS, EXEC_DETACHED_SESSION_TTL, EXEC_STDIN_EVENT_MAX_CHARS,
+    MAX_EXEC_SESSIONS,
+};
 
 struct ExecSessionReaper {
     sender: std::sync::mpsc::Sender<ExecSessionReapRequest>,
@@ -446,16 +458,6 @@ pub(crate) fn set_parent_death_signal(parent_pid: libc::pid_t) -> std::io::Resul
         }
     }
     Ok(())
-}
-
-#[cfg(unix)]
-pub(crate) fn terminate_std_child_tree(child: &mut std::process::Child) {
-    crate::process_env::terminate_std_child_process_group(child);
-}
-
-#[cfg(not(unix))]
-pub(crate) fn terminate_std_child_tree(child: &mut std::process::Child) {
-    crate::process_env::terminate_std_child_process_group(child);
 }
 
 #[cfg(test)]

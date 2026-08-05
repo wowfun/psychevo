@@ -650,7 +650,7 @@ fn inspect_record(record: &PluginInstallRecord) -> Result<super::types::PluginIn
         source_kind: record.source_kind,
         npm_registry: record.npm_registry.clone(),
         resolved_revision: record.resolved_revision.clone(),
-        temp_dir: None,
+        _temp_dir: None,
     };
     inspect_materialized_source(&materialized)
 }

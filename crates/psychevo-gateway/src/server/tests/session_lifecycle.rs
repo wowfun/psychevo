@@ -1,3 +1,15 @@
+use std::time::Duration;
+
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{rpc_test_request, web_state};
+
 #[tokio::test]
 async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated() {
     let host_cwd = std::env::current_dir().expect("host cwd");
@@ -61,15 +73,13 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
     )
     .await;
 
-    let ordinary = rpc_test_request(
-        &state,
-        &tx,
-        "thread/list",
-        json!({"cwd": state.inner.cwd}),
-    )
-    .await;
+    let ordinary =
+        rpc_test_request(&state, &tx, "thread/list", json!({"cwd": state.inner.cwd})).await;
     assert_eq!(ordinary["sessions"], json!([]));
-    assert!(!log.exists(), "ordinary Session reads must not initialize ACP");
+    assert!(
+        !log.exists(),
+        "ordinary Session reads must not initialize ACP"
+    );
 
     let listed = rpc_test_request(
         &state,
@@ -130,10 +140,16 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
     assert_eq!(imported["snapshot"]["history"]["fidelity"], "full");
     assert_eq!(imported_entries.len(), 3, "{imported:#}");
     assert_eq!(imported_entries[0]["role"], "user");
-    assert_eq!(imported_entries[0]["blocks"][0]["body"], "Imported user question");
+    assert_eq!(
+        imported_entries[0]["blocks"][0]["body"],
+        "Imported user question"
+    );
     assert_eq!(imported_entries[1]["role"], "assistant");
     assert_eq!(imported_entries[1]["blocks"][0]["kind"], "reasoning");
-    assert_eq!(imported_entries[1]["blocks"][0]["body"], "Imported reasoning");
+    assert_eq!(
+        imported_entries[1]["blocks"][0]["body"],
+        "Imported reasoning"
+    );
     assert_eq!(
         imported_entries[1]["blocks"][1]["body"],
         "Imported assistant answer"
@@ -145,8 +161,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         "imported tool output\n"
     );
     assert_eq!(
-        imported_entries[2]["blocks"][0]["kind"],
-        "status",
+        imported_entries[2]["blocks"][0]["kind"], "status",
         "{imported:#}"
     );
     assert_eq!(imported_entries[2]["blocks"][0]["title"], "Plan");
@@ -177,22 +192,24 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         .expect("published imported Thread summary");
     assert!(imported_summary["archivedAtMs"].is_number());
     assert_eq!(
-        imported_summary["title"],
-        "Listed fixture",
+        imported_summary["title"], "Listed fixture",
         "the published Thread must preserve the Agent-owned session title"
     );
-    assert_eq!(
-        state
-            .inner
-            .state
-
-            .gateway_runtime_binding(&imported_thread_id)
-            .await.expect("binding")
-            .expect("imported binding")
-            .native_session_id
-            .as_deref(),
-        Some("listed-native")
-    );
+    let imported_binding = state
+        .inner
+        .framework
+        .resume_thread(&imported_thread_id)
+        .await
+        .expect("imported Thread")
+        .agent_binding()
+        .await
+        .expect("binding")
+        .expect("imported binding");
+    let psychevo::application::ThreadAgentBinding::Resolved { binding, .. } = imported_binding
+    else {
+        panic!("imported Agent binding must be resolved");
+    };
+    assert_eq!(binding.native_session_id.as_deref(), Some("listed-native"));
 
     let restored = rpc_test_request(
         &state,
@@ -247,10 +264,10 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
     assert!(
         state
             .inner
-            .state
-
-            .session_summary(&imported_thread_id)
-            .await.expect("deleted lookup")
+            .framework
+            .human_thread_summary(&imported_thread_id)
+            .await
+            .expect("deleted lookup")
             .is_none()
     );
 
@@ -273,7 +290,10 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         "session/fork",
         "session/delete",
     ] {
-        assert!(methods.iter().any(|method| method == expected), "missing {expected}: {methods:?}");
+        assert!(
+            methods.iter().any(|method| method == expected),
+            "missing {expected}: {methods:?}"
+        );
     }
     let load_index = methods
         .iter()
@@ -289,7 +309,10 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
             .all(|method| method != "session/resume"),
         "import must use session/load; session/resume is reserved for restore: {methods:?}"
     );
-    assert!(load_index < close_index, "import load must precede lifecycle restore: {methods:?}");
+    assert!(
+        load_index < close_index,
+        "import load must precede lifecycle restore: {methods:?}"
+    );
 }
 
 #[tokio::test]
@@ -393,7 +416,10 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
         .as_array()
         .expect("imported entries");
     assert_eq!(entries.len(), 5, "{imported:#}");
-    assert_eq!(entries[0]["blocks"][0]["body"], "Reliable imported question");
+    assert_eq!(
+        entries[0]["blocks"][0]["body"],
+        "Reliable imported question"
+    );
     assert_eq!(
         entries[1]["blocks"][0]["body"],
         "Unidentified imported question"
@@ -431,13 +457,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
     assert!(!imported.to_string().contains("Inspect replay"));
     assert!(!imported.to_string().contains("Implement replay"));
 
-    let reread = rpc_test_request(
-        &state,
-        &tx,
-        "thread/read",
-        json!({"threadId": thread_id}),
-    )
-    .await;
+    let reread = rpc_test_request(&state, &tx, "thread/read", json!({"threadId": thread_id})).await;
     assert_eq!(reread["entries"], imported["snapshot"]["entries"]);
 
     state
@@ -459,7 +479,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-review-follow-up")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -493,7 +513,9 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
         json!({"threadId": thread_id}),
     )
     .await;
-    let after_entries = after["entries"].as_array().expect("entries after repeated load");
+    let after_entries = after["entries"]
+        .as_array()
+        .expect("entries after repeated load");
     assert_eq!(
         after_entries
             .iter()
@@ -611,7 +633,7 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("resume-only-import")),
             method: "thread/import".to_string(),
             params: Some(json!({
@@ -624,24 +646,21 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
     .await
     .expect_err("resume-only Agent must not publish an empty import");
     assert!(
-        error.to_string().contains("does not advertise session/load"),
+        error
+            .to_string()
+            .contains("does not advertise session/load"),
         "unexpected import error: {error}"
     );
-    let sessions = rpc_test_request(
-        &state,
-        &tx,
-        "thread/list",
-        json!({"cwd": state.inner.cwd}),
-    )
-    .await;
+    let sessions =
+        rpc_test_request(&state, &tx, "thread/list", json!({"cwd": state.inner.cwd})).await;
     assert_eq!(sessions["sessions"], json!([]));
     assert!(
         state
             .inner
-            .state
-
-            .gateway_runtime_binding_by_native_session("resume-only-fixture", "listed-native")
-            .await.expect("binding lookup")
+            .framework
+            .agent_thread_by_native_session("resume-only-fixture", "listed-native")
+            .await
+            .expect("binding lookup")
             .is_none()
     );
 
@@ -677,7 +696,10 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
         let fixture_program = fixture.program;
         let fixture_script = fixture.script;
         let (_temp, state) = web_state().await;
-        let log = state.inner.cwd.join(format!("agent-session-delete-{mode}.jsonl"));
+        let log = state
+            .inner
+            .cwd
+            .join(format!("agent-session-delete-{mode}.jsonl"));
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let wire_scope = scope.to_wire_scope();
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -758,13 +780,8 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
             .as_str()
             .expect("imported Thread")
             .to_string();
-        let sessions = rpc_test_request(
-            &state,
-            &tx,
-            "thread/list",
-            json!({"cwd": state.inner.cwd}),
-        )
-        .await;
+        let sessions =
+            rpc_test_request(&state, &tx, "thread/list", json!({"cwd": state.inner.cwd})).await;
         let summary = sessions["sessions"]
             .as_array()
             .expect("session summaries")
@@ -791,7 +808,7 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(format!("delete-{mode}"))),
                 method: "thread/delete".to_string(),
                 params: Some(json!({"threadId": thread_id})),
@@ -803,44 +820,46 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
             error.to_string().contains(expected_error),
             "unexpected {mode} delete error: {error}"
         );
-        assert!(
-            state
-                .inner
-                .state
-
-                .session_summary(&thread_id)
-                .await.expect("local Thread lookup")
-                .is_some(),
-            "{mode} must preserve local history when remote deletion is not acknowledged"
-        );
+        let preserved = state
+            .inner
+            .framework
+            .human_thread_summary(&thread_id)
+            .await
+            .expect("local Thread lookup")
+            .expect("failed remote deletion must preserve the local Thread");
+        if mode == "delete-fails" {
+            assert_eq!(
+                preserved.lifecycle.delete.unavailable_reason.as_deref(),
+                Some("Remote deletion is pending reconciliation."),
+                "Framework must retain the pending remote-delete UX after Adapter failure"
+            );
+        } else {
+            assert!(
+                preserved
+                    .lifecycle
+                    .delete
+                    .unavailable_reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("did not advertise")),
+                "unsupported remote delete must preserve the advertised capability UX"
+            );
+        }
         state
             .inner
             .gateway
             .shutdown_runtimes(false)
             .await
             .expect("shutdown lifecycle fixture");
+        let remote_delete_requests = std::fs::read_to_string(&log)
+            .expect("delete lifecycle log")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|entry| entry["method"] == "session/delete")
+            .count();
+        assert_eq!(
+            remote_delete_requests,
+            if expected_enabled { 1 } else { 0 },
+            "typed preparation must deliver at most one remote-delete request"
+        );
     }
-}
-
-fn rpc_test_request<'a>(
-    state: &'a WebState,
-    tx: &'a mpsc::UnboundedSender<String>,
-    method: &'a str,
-    params: Value,
-) -> futures::future::BoxFuture<'a, Value> {
-    Box::pin(async move {
-        handle_rpc(
-            state.clone(),
-            AuthContext::Bearer,
-            tx.clone(),
-            RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
-                id: Some(json!(format!("test-{method}"))),
-                method: method.to_string(),
-                params: Some(params),
-            },
-        )
-        .await
-        .unwrap_or_else(|error| panic!("{method} failed: {error}"))
-    })
 }

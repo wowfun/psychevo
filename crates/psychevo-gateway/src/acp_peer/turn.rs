@@ -1,21 +1,65 @@
-const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use psychevo::application::{
+    ImageInput, Message, Outcome, ResolvedMcpServerInput, RunStreamSink, SelectedAgent,
+    UserContentBlock, WorkspaceMutationSink, suggested_thread_title,
+};
+use psychevo::skills::resolve_skills_home;
+use serde_json::{Value, json};
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+use crate::{ACP_PEER_METADATA_KEY, gateway_now_ms};
+use psychevo_gateway_protocol as wire;
+
+use super::metadata_permissions::{emit_runtime_event, peer_session_metadata, prompt_history_text};
+use super::process_pool::{AcpProcessPool, AcpSessionReadyCallback};
+use super::stdio_turn::{
+    AcpBeforePromptCallback, AcpPeerTurnContext, is_acp_peer_abort_error, run_acp_stdio_turn,
+};
+use super::stream_state::{
+    AcpHistoryReplayEntry, AcpHistoryReplayProjection, AcpPeerPlanProjection,
+    persisted_assistant_content, persisted_tool_result_messages_at,
+    replay_entry_delivery_message_ids, replay_entry_identity,
+};
+
+pub(super) const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
 
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
-    pub(crate) run: RunResult,
+    pub(crate) turn: psychevo::TurnResult,
+}
+
+pub(crate) struct AcpPeerTurnRequest {
+    pub(crate) thread: psychevo::ThreadExecutionContext,
+    pub(crate) history: psychevo::HistoryReader,
+    pub(crate) turn_id: String,
+    pub(crate) native_session_id: Option<String>,
+    pub(crate) input: Vec<wire::source::GatewayInputPart>,
+    pub(crate) prompt: String,
+    pub(crate) images: Vec<ImageInput>,
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) runtime_options: BTreeMap<String, String>,
+    pub(crate) mcp_servers: Vec<ResolvedMcpServerInput>,
+    pub(crate) stream: Option<RunStreamSink>,
+    pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
+    pub(crate) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(crate) control: psychevo::TurnControl,
+    pub(crate) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
 }
 
 #[derive(Clone)]
-struct AcpClientContext {
-    cwd: PathBuf,
-    fs_read: bool,
-    fs_write: bool,
-    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
-    clarify_control: Option<RunControlHandle>,
-    terminal: bool,
-    terminal_env: BTreeMap<String, String>,
-    stream: Option<RunStreamSink>,
-    abort: Option<AbortSignal>,
+pub(super) struct AcpClientContext {
+    pub(super) cwd: PathBuf,
+    pub(super) fs_read: bool,
+    pub(super) fs_write: bool,
+    pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(super) turn_control: Option<psychevo::TurnControl>,
+    pub(super) terminal: bool,
+    pub(super) terminal_env: BTreeMap<String, String>,
 }
 
 fn acp_message_ids(metadata: Option<&Value>) -> Vec<String> {
@@ -87,32 +131,110 @@ struct PreviousAcpPromptUsage {
     native_session_id: Option<String>,
 }
 
+#[derive(Clone)]
+struct AcpHistoryJournal {
+    history: psychevo::HistoryReader,
+    persistence: Arc<dyn psychevo::AgentTurnPersistence>,
+}
+
+impl AcpHistoryJournal {
+    async fn for_each_message(
+        &self,
+        mut visit: impl FnMut(&psychevo::application::Message, Option<&Value>),
+    ) -> psychevo::Result<()> {
+        let mut after = None;
+        loop {
+            let page = self.history.replay_after(after, Some(200)).await?;
+            if let Some(warning) = page.warnings.first() {
+                return Err(psychevo::Error::Message(format!(
+                    "persisted ACP history is invalid at message {} ({:?})",
+                    warning.session_seq, warning.kind
+                )));
+            }
+            for item in page.items {
+                if let psychevo::application::HistoryReplayItem::Available { item } = item {
+                    visit(&item.message, item.metadata.as_ref());
+                }
+            }
+            let Some(next_after) = page.next_after else {
+                return Ok(());
+            };
+            after = Some(next_after);
+        }
+    }
+
+    async fn latest_prompt_usage(&self) -> psychevo::Result<Option<PreviousAcpPromptUsage>> {
+        let mut before = None;
+        loop {
+            let page = self.history.before(before, Some(200)).await?;
+            let previous = page.items.into_iter().rev().find_map(|item| {
+                if !matches!(
+                    item.message,
+                    psychevo::application::Message::Assistant { .. }
+                ) {
+                    return None;
+                }
+                let metadata = item.metadata?;
+                let cumulative = metadata.pointer("/acp/promptUsageCumulative")?.clone();
+                let native_session_id = metadata
+                    .pointer("/acp/promptUsageNativeSessionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                Some(PreviousAcpPromptUsage {
+                    cumulative,
+                    native_session_id,
+                })
+            });
+            if previous.is_some() {
+                return Ok(previous);
+            }
+            let Some(next_before) = page.next_before else {
+                return Ok(None);
+            };
+            before = Some(next_before);
+        }
+    }
+
+    async fn prior_unknown_delivery(&self) -> psychevo::Result<Option<String>> {
+        Ok(self
+            .persistence
+            .prior_unknown_delivery()
+            .await?
+            .map(|delivery| delivery.turn_id))
+    }
+
+    async fn append_message(&self, message: Message) -> psychevo::Result<()> {
+        self.persistence.append_message(message).await
+    }
+
+    async fn append_message_with_metrics(
+        &self,
+        message: Message,
+        usage: Option<Value>,
+        metadata: Option<Value>,
+    ) -> psychevo::Result<()> {
+        self.persistence
+            .append_message_with_metrics(message, usage, metadata)
+            .await
+    }
+
+    async fn reconcile_unknown_delivery(
+        &self,
+        turn_id: &str,
+        metadata: Value,
+    ) -> psychevo::Result<bool> {
+        self.persistence
+            .reconcile_unknown_delivery(turn_id.to_string(), metadata)
+            .await
+    }
+}
+
 async fn acp_prompt_usage_delta(
-    store: &psychevo::__product::persistence::StateRuntime,
-    session_id: &str,
+    journal: &AcpHistoryJournal,
     native_session_id: &str,
     cumulative: &Value,
 ) -> psychevo::Result<(Value, bool)> {
-    let previous = store
-        .load_tui_message_summaries(session_id)
-        .await?
-        .into_iter()
-        .rev()
-        .filter(|summary| {
-            matches!(summary.message, psychevo::__agent_core::Message::Assistant { .. })
-        })
-        .find_map(|summary| {
-            let metadata = summary.metadata?;
-            let cumulative = metadata.pointer("/acp/promptUsageCumulative")?.clone();
-            let native_session_id = metadata
-                .pointer("/acp/promptUsageNativeSessionId")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            Some(PreviousAcpPromptUsage {
-                cumulative,
-                native_session_id,
-            })
-        });
+    let previous = journal.latest_prompt_usage().await?;
     let Some(previous) = previous else {
         return Ok((cumulative.clone(), false));
     };
@@ -155,8 +277,8 @@ fn acp_live_message_metadata(
     let Some(prompt_usage_cumulative) = prompt_usage_cumulative else {
         return metadata;
     };
-    let metadata = metadata
-        .get_or_insert_with(|| json!({ "acp": { "messageIds": [], "origin": "live" } }));
+    let metadata =
+        metadata.get_or_insert_with(|| json!({ "acp": { "messageIds": [], "origin": "live" } }));
     let acp = metadata
         .get_mut("acp")
         .and_then(Value::as_object_mut)
@@ -188,169 +310,186 @@ fn acp_history_message_metadata(
     let mut metadata = acp_message_metadata(message_ids, "history", turn_id, plan)
         .unwrap_or_else(|| json!({"acp": {"messageIds": [], "origin": "history"}}));
     if let Some(acp) = metadata.get_mut("acp").and_then(Value::as_object_mut) {
-        acp.insert(
-            "replayId".to_string(),
-            Value::String(replay_id.to_string()),
-        );
+        acp.insert("replayId".to_string(), Value::String(replay_id.to_string()));
     }
     metadata
 }
 
-async fn commit_acp_replay_and_current_input(
-    state: &psychevo::__product::persistence::StateRuntime,
+#[derive(Debug, Clone)]
+struct ProjectedAcpHistoryEntry {
+    replay_id: String,
+    delivery_message_ids: Vec<String>,
+    reconciles_delivery: bool,
+    messages: Vec<psychevo::AgentImportedMessage>,
+}
+
+fn project_acp_history_replay(
     peer: &ResolvedPeerTurn,
-    session_id: &str,
-    current_turn_id: &str,
+    replay: &AcpHistoryReplayProjection,
+    timestamp_ms: i64,
+    turn_id: Option<&str>,
+) -> Vec<ProjectedAcpHistoryEntry> {
+    replay
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let replay_id = replay_entry_identity(entry).to_string();
+            let delivery_message_ids = replay_entry_delivery_message_ids(entry);
+            let replay_turn_id = turn_id.or(Some(replay_id.as_str()));
+            let (reconciles_delivery, messages) = match entry {
+                AcpHistoryReplayEntry::User { text, .. } => {
+                    if text.trim().is_empty() {
+                        return None;
+                    }
+                    (
+                        false,
+                        vec![psychevo::AgentImportedMessage {
+                            message: Message::User {
+                                content: vec![UserContentBlock::text(text.clone())],
+                                timestamp_ms,
+                            },
+                            usage: None,
+                            metadata: Some(acp_history_message_metadata(
+                                &replay_id,
+                                &delivery_message_ids,
+                                replay_turn_id,
+                                None,
+                            )),
+                        }],
+                    )
+                }
+                AcpHistoryReplayEntry::Assistant {
+                    content_slots,
+                    tools,
+                    plan,
+                    ..
+                } => {
+                    let content = persisted_assistant_content(content_slots, tools);
+                    if content.is_empty() && plan.is_none() {
+                        return None;
+                    }
+                    let mut messages = vec![psychevo::AgentImportedMessage {
+                        message: Message::Assistant {
+                            content,
+                            timestamp_ms,
+                            finish_reason: Some("end_turn".to_string()),
+                            outcome: Outcome::Normal,
+                            model: Some(peer.agent.name.clone()),
+                            provider: Some(format!("acp:{}", peer.backend.id)),
+                        },
+                        usage: None,
+                        metadata: Some(acp_history_message_metadata(
+                            &replay_id,
+                            &delivery_message_ids,
+                            replay_turn_id,
+                            plan.as_ref(),
+                        )),
+                    }];
+                    messages.extend(
+                        persisted_tool_result_messages_at(content_slots, tools, timestamp_ms)
+                            .into_iter()
+                            .map(|message| psychevo::AgentImportedMessage {
+                                message,
+                                usage: None,
+                                metadata: None,
+                            }),
+                    );
+                    (true, messages)
+                }
+            };
+            Some(ProjectedAcpHistoryEntry {
+                replay_id,
+                delivery_message_ids,
+                reconciles_delivery,
+                messages,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn project_imported_acp_replay(
+    peer: &ResolvedPeerTurn,
+    replay: &AcpHistoryReplayProjection,
+) -> Vec<psychevo::AgentImportedMessage> {
+    project_acp_history_replay(peer, replay, gateway_now_ms(), None)
+        .into_iter()
+        .flat_map(|entry| entry.messages)
+        .collect()
+}
+
+async fn commit_acp_replay_and_current_input(
+    journal: &AcpHistoryJournal,
+    peer: &ResolvedPeerTurn,
     replay: &AcpHistoryReplayProjection,
     current_user_text: &str,
 ) -> psychevo::Result<()> {
-    commit_acp_replay(
-        state,
-        peer,
-        session_id,
-        Some(current_turn_id),
-        replay,
-    )
-    .await?;
-    state.append_message(
-        session_id,
-        &Message::User {
+    commit_acp_replay(journal, peer, replay).await?;
+    journal
+        .append_message(Message::User {
             content: vec![UserContentBlock::text(current_user_text.to_string())],
             timestamp_ms: gateway_now_ms(),
-        },
-    )
-    .await
-}
-
-pub(crate) async fn commit_imported_acp_replay(
-    state: &psychevo::__product::persistence::StateRuntime,
-    peer: &ResolvedPeerTurn,
-    session_id: &str,
-    replay: &AcpHistoryReplayProjection,
-) -> psychevo::Result<()> {
-    commit_acp_replay(state, peer, session_id, None, replay).await
+        })
+        .await
 }
 
 async fn commit_acp_replay(
-    state: &psychevo::__product::persistence::StateRuntime,
+    journal: &AcpHistoryJournal,
     peer: &ResolvedPeerTurn,
-    session_id: &str,
-    current_turn_id: Option<&str>,
     replay: &AcpHistoryReplayProjection,
 ) -> psychevo::Result<()> {
-    let store = state.clone();
-    let unknown = match current_turn_id {
-        Some(current_turn_id) => {
-            store
-                .unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)
-                .await?
-        }
-        None => Vec::new(),
-    };
-    if unknown.len() > 1 {
-        return Err(crate::agent_session_error(
-            "multiple_unknown_deliveries",
-            crate::AgentErrorStage::History,
-            "never",
-            "not_delivered",
-            "A Thread has multiple unresolved unknown deliveries; Agent history cannot be assigned unambiguously.",
-            Some(format!("thread:{session_id}")),
-        ));
-    }
-    let prior_unknown = unknown.first();
-    let replay_message_ids = replay
-        .entries
+    let prior_unknown = journal.prior_unknown_delivery().await?;
+    let projection =
+        project_acp_history_replay(peer, replay, gateway_now_ms(), prior_unknown.as_deref());
+    let replay_message_ids = projection
         .iter()
-        .filter(|entry| matches!(entry, AcpHistoryReplayEntry::Assistant { .. }))
-        .flat_map(replay_entry_delivery_message_ids)
+        .filter(|entry| entry.reconciles_delivery)
+        .flat_map(|entry| entry.delivery_message_ids.iter().cloned())
         .collect::<BTreeSet<_>>();
-    let existing = store.load_tui_message_summaries(session_id).await?;
+    let projected_replay_ids = projection
+        .iter()
+        .map(|entry| entry.replay_id.clone())
+        .collect::<BTreeSet<_>>();
     let mut existing_replay_ids = BTreeSet::new();
     let mut reconciliation_evidence = BTreeSet::new();
-    for summary in &existing {
-        let ids = acp_message_ids(summary.metadata.as_ref());
-        if let Some(replay_id) = acp_replay_id(summary.metadata.as_ref()) {
-            existing_replay_ids.insert(replay_id.to_string());
-        } else {
-            existing_replay_ids.extend(ids.iter().cloned());
-        }
-        if prior_unknown.is_some_and(|unknown| {
-            acp_message_turn_id(summary.metadata.as_ref()) == Some(unknown.turn_id.as_str())
-        }) {
-            reconciliation_evidence.extend(
-                ids.into_iter()
-                    .filter(|message_id| replay_message_ids.contains(message_id)),
-            );
-        }
-    }
+    journal
+        .for_each_message(|_, metadata| {
+            let ids = acp_message_ids(metadata);
+            if let Some(replay_id) = acp_replay_id(metadata) {
+                if projected_replay_ids.contains(replay_id) {
+                    existing_replay_ids.insert(replay_id.to_string());
+                }
+            } else {
+                existing_replay_ids.extend(
+                    ids.iter()
+                        .filter(|message_id| projected_replay_ids.contains(*message_id))
+                        .cloned(),
+                );
+            }
+            if prior_unknown
+                .as_ref()
+                .is_some_and(|unknown| acp_message_turn_id(metadata) == Some(unknown.as_str()))
+            {
+                reconciliation_evidence.extend(
+                    ids.into_iter()
+                        .filter(|message_id| replay_message_ids.contains(message_id)),
+                );
+            }
+        })
+        .await?;
 
-    for entry in &replay.entries {
-        let replay_id = replay_entry_identity(entry);
-        if existing_replay_ids.contains(replay_id) {
+    for entry in projection {
+        if existing_replay_ids.contains(&entry.replay_id) {
             continue;
         }
-        let delivery_message_ids = replay_entry_delivery_message_ids(entry);
-        let turn_id = prior_unknown.map(|unknown| unknown.turn_id.as_str());
-        let replay_turn_id = turn_id.or(Some(replay_id));
-        match entry {
-            AcpHistoryReplayEntry::User { text, .. } => {
-                if text.trim().is_empty() {
-                    continue;
-                }
-                store.append_message_with_metrics(
-                    session_id,
-                    &Message::User {
-                        content: vec![UserContentBlock::text(text.clone())],
-                        timestamp_ms: gateway_now_ms(),
-                    },
-                    None,
-                    Some(acp_history_message_metadata(
-                        replay_id,
-                        &delivery_message_ids,
-                        replay_turn_id,
-                        None,
-                    )),
-                )
+        for message in entry.messages {
+            journal
+                .append_message_with_metrics(message.message, message.usage, message.metadata)
                 .await?;
-            }
-            AcpHistoryReplayEntry::Assistant {
-                content_slots,
-                tools,
-                plan,
-                ..
-            } => {
-                let content = persisted_assistant_content(content_slots, tools);
-                if content.is_empty() && plan.is_none() {
-                    continue;
-                }
-                store.append_message_with_metrics(
-                    session_id,
-                    &Message::Assistant {
-                        content,
-                        timestamp_ms: gateway_now_ms(),
-                        finish_reason: Some("end_turn".to_string()),
-                        outcome: Outcome::Normal,
-                        model: Some(peer.agent.name.clone()),
-                        provider: Some(format!("acp:{}", peer.backend.id)),
-                    },
-                    None,
-                    Some(acp_history_message_metadata(
-                        replay_id,
-                        &delivery_message_ids,
-                        replay_turn_id,
-                        plan.as_ref(),
-                    )),
-                )
-                .await?;
-                for message in persisted_tool_result_messages(content_slots, tools) {
-                    store.append_message(session_id, &message).await?;
-                }
-                if prior_unknown.is_some() {
-                    reconciliation_evidence.extend(delivery_message_ids.iter().cloned());
-                }
-            }
         }
-        existing_replay_ids.insert(replay_id.to_string());
+        if prior_unknown.is_some() && entry.reconciles_delivery {
+            reconciliation_evidence.extend(entry.delivery_message_ids.iter().cloned());
+        }
+        existing_replay_ids.insert(entry.replay_id);
     }
 
     if let Some(prior_unknown) = prior_unknown
@@ -361,20 +500,17 @@ async fn commit_acp_replay(
             "reconciledFrom": "agent_history",
             "replayMessageIds": evidence_ids,
         });
-        if !store.reconcile_unknown_gateway_turn_delivery(
-            &prior_unknown.turn_id,
-            session_id,
-            Some(&metadata),
-        )
-        .await?
+        if !journal
+            .reconcile_unknown_delivery(&prior_unknown, metadata)
+            .await?
         {
-            return Err(crate::agent_session_error(
+            return Err(agent_session_error(
                 "unknown_delivery_reconciliation_race",
-                crate::AgentErrorStage::History,
+                AgentErrorStage::History,
                 "safe_retry",
                 "not_delivered",
                 "The prior unknown delivery changed while Agent history was being committed.",
-                Some(format!("turn:{}", prior_unknown.turn_id)),
+                Some(format!("turn:{prior_unknown}")),
             ));
         }
     }
@@ -385,84 +521,63 @@ async fn commit_acp_replay(
 pub(crate) async fn run_acp_peer_turn(
     pool: &AcpProcessPool,
     peer: ResolvedPeerTurn,
-    profile: &psychevo::__product::configuration::RuntimeProfileConfig,
-    request: BackendTurnRequest,
-    turn_id: String,
+    profile: &psychevo::config::RuntimeProfileConfig,
+    request: AcpPeerTurnRequest,
     session_ready: AcpSessionReadyCallback,
-    delivery_observer: crate::AgentDeliveryObserver,
 ) -> psychevo::Result<AcpPeerTurnResult> {
-    let clarify_control = request.control.as_ref().map(|control| control.handle());
-    let abort = request
-        .control
-        .as_ref()
-        .map(|control| control.abort_signal());
-    let input = request.input;
-    let options = request.options;
-    let state = options.state.clone();
-    let store = state.clone();
-    let local_session = ensure_local_session(&peer, &options).await?;
-    let session_id = local_session.session_id;
-    let auto_title_new_session = local_session.created;
-    let existing_native_id = local_session
-        .native_session_id
-        .or(options.runtime_session_id.clone());
+    let session_id = request.thread.id.clone();
+    let auto_title_new_session = request.history.latest(Some(1)).await?.items.is_empty();
+    let existing_native_id = request.native_session_id.clone();
     let is_new_native_session = existing_native_id.is_none();
-    let is_first_gateway_turn = store
-        .list_gateway_turn_terminals_for_thread(&session_id)
-        .await?
-        .is_empty();
-    let mcp_servers = resolve_peer_mcp_server_handoffs(&peer, &options).await?;
-    let (peer_model, peer_reasoning_effort, peer_runtime_options) =
-        acp_peer_turn_controls(&options, profile, is_new_native_session);
+    let is_first_gateway_turn = !request.persistence.has_prior_terminal().await?;
+    let (peer_model, peer_reasoning_effort, peer_runtime_options) = acp_peer_turn_controls(
+        request.model.clone(),
+        request.reasoning_effort.clone(),
+        request.runtime_options.clone(),
+        profile,
+        is_new_native_session,
+    );
     let native_session_slot = Arc::new(std::sync::Mutex::new(existing_native_id.clone()));
-    let prompt_for_history = prompt_history_text(&options.prompt, &options.image_inputs);
-    let before_prompt_state = state.clone();
+    let prompt_for_history = prompt_history_text(&request.prompt, &request.images);
+    let journal = AcpHistoryJournal {
+        history: request.history.clone(),
+        persistence: request.persistence.clone(),
+    };
+    let before_prompt_journal = journal.clone();
     let before_prompt_peer = peer.clone();
-    let before_prompt_session_id = session_id.clone();
-    let before_prompt_turn_id = turn_id.clone();
     let before_prompt_user_text = prompt_for_history.clone();
     let before_prompt: AcpBeforePromptCallback = Arc::new(move |replay| {
-        let state = before_prompt_state.clone();
+        let journal = before_prompt_journal.clone();
         let peer = before_prompt_peer.clone();
-        let session_id = before_prompt_session_id.clone();
-        let turn_id = before_prompt_turn_id.clone();
         let user_text = before_prompt_user_text.clone();
         Box::pin(async move {
-            commit_acp_replay_and_current_input(
-                &state,
-                &peer,
-                &session_id,
-                &turn_id,
-                &replay,
-                &user_text,
-            )
-            .await
+            commit_acp_replay_and_current_input(&journal, &peer, &replay, &user_text).await
         })
     });
-    let home = resolve_skills_home(&peer.env, &options.cwd)?;
+    let cwd = PathBuf::from(&request.thread.cwd);
+    let home = resolve_skills_home(&peer.env, &cwd)?;
     let acp_context = AcpPeerTurnContext {
-        cwd: options.cwd.clone(),
+        cwd,
         home,
         local_session_id: session_id.clone(),
         native_session_id: existing_native_id,
         native_session_slot: Arc::clone(&native_session_slot),
-        input,
-        prompt: options.prompt.clone(),
-        images: options.image_inputs.clone(),
+        input: request.input,
+        prompt: request.prompt.clone(),
+        images: request.images,
         instructions: (is_new_native_session || is_first_gateway_turn)
             .then(|| peer.agent.instructions.clone())
             .filter(|instructions| !instructions.trim().is_empty()),
         peer_model,
         peer_reasoning_effort,
         peer_runtime_options,
-        mcp_servers,
+        mcp_servers: request.mcp_servers,
         stream: request.stream.clone(),
-        workspace_mutations: options.workspace_mutations.clone(),
-        approval_handler: options.approval_handler.clone(),
-        clarify_control,
-        abort,
+        workspace_mutations: request.workspace_mutations,
+        approval_handler: request.approval_handler,
+        turn_control: request.control,
         before_prompt,
-        delivery_observer,
+        persistence: request.persistence.clone(),
     };
 
     emit_runtime_event(
@@ -480,7 +595,7 @@ pub(crate) async fn run_acp_peer_turn(
         Ok(acp) => acp,
         Err(err) if is_acp_peer_abort_error(&err) => {
             emit_runtime_event(
-                &request.stream,
+                &acp_context.stream,
                 json!({
                     "type": "turn_complete",
                     "session_id": session_id.clone(),
@@ -488,18 +603,14 @@ pub(crate) async fn run_acp_peer_turn(
                     "outcome": "aborted",
                 }),
             );
-            let run = RunResult {
-                session_id: session_id.clone(),
-                outcome: Outcome::Aborted,
+            let turn = psychevo::TurnResult {
+                thread_id: session_id.clone(),
+                outcome: psychevo::TurnOutcome::Interrupted,
                 terminal_reason: None,
                 final_answer: String::new(),
-                db_path: state.db_path().to_path_buf(),
-                cwd: options.cwd,
                 provider: format!("acp:{}", peer.backend.id),
                 model: peer.agent.name.clone(),
-                base_url: String::new(),
-                api_key_env: None,
-                reasoning_effort: options.reasoning_effort,
+                reasoning_effort: request.reasoning_effort,
                 context_limit: None,
                 tool_failures: 0,
                 selected_agent: Some(SelectedAgent {
@@ -510,14 +621,13 @@ pub(crate) async fn run_acp_peer_turn(
                 selected_skills: Vec::new(),
                 context_snapshot: None,
                 terminal_error: None,
-                events: Vec::new(),
                 warnings: Vec::new(),
             };
-            return Ok(AcpPeerTurnResult { run });
+            return Ok(AcpPeerTurnResult { turn });
         }
         Err(err) => {
             emit_runtime_event(
-                &request.stream,
+                &acp_context.stream,
                 json!({
                     "type": "turn_complete",
                     "session_id": session_id.clone(),
@@ -530,68 +640,67 @@ pub(crate) async fn run_acp_peer_turn(
         }
     };
 
-    store.set_session_metadata_field(
-        &session_id,
-        ACP_PEER_METADATA_KEY,
-        Some(peer_session_metadata(
-            &peer,
-            Some(&acp.native_session_id),
-            acp.usage_update.as_ref(),
-            &options.runtime_options,
-            Some(&acp.session_snapshot),
-        )),
-    )
-    .await?;
+    request
+        .persistence
+        .set_metadata_field(
+            ACP_PEER_METADATA_KEY.to_string(),
+            Some(peer_session_metadata(
+                &peer,
+                Some(&acp.native_session_id),
+                acp.usage_update.as_ref(),
+                &request.runtime_options,
+                Some(&acp.session_snapshot),
+            )),
+        )
+        .await?;
     if let Some(title) = acp.session_title.as_deref() {
-        set_session_title_if_empty(&store, &session_id, title).await;
+        let _ = request
+            .persistence
+            .set_visible_title_if_empty(title.to_string())
+            .await;
     } else if auto_title_new_session {
-        let title = fallback_visible_session_title(&prompt_for_history);
-        set_session_title_if_empty(&store, &session_id, &title).await;
+        let title = suggested_thread_title(&prompt_for_history);
+        let _ = request.persistence.set_visible_title_if_empty(title).await;
     }
     let assistant_content = acp.persisted_assistant_content();
     let prompt_usage_cumulative = acp.prompt_usage.clone();
     let (prompt_usage, usage_counter_reset) = match prompt_usage_cumulative.as_ref() {
         Some(cumulative) => {
-            let (delta, reset) = acp_prompt_usage_delta(
-                &store,
-                &session_id,
-                &acp.native_session_id,
-                cumulative,
-            )
-            .await?;
+            let (delta, reset) =
+                acp_prompt_usage_delta(&journal, &acp.native_session_id, cumulative).await?;
             (Some(delta), reset)
         }
         None => (None, false),
     };
     if !assistant_content.is_empty() || acp.latest_plan.is_some() || acp.prompt_usage.is_some() {
         let message_ids = acp.persisted_assistant_message_ids();
-        store.append_message_with_metrics(
-            &session_id,
-            &Message::Assistant {
-                content: assistant_content,
-                timestamp_ms: gateway_now_ms(),
-                finish_reason: Some("end_turn".to_string()),
-                outcome: Outcome::Normal,
-                model: Some(peer.agent.name.clone()),
-                provider: Some(format!("acp:{}", peer.backend.id)),
-            },
-            prompt_usage.clone(),
-            acp_live_message_metadata(
-                &message_ids,
-                &turn_id,
-                acp.latest_plan.as_ref(),
-                prompt_usage_cumulative.as_ref(),
-                &acp.native_session_id,
-                usage_counter_reset,
-            ),
-        )
-        .await?;
+        journal
+            .append_message_with_metrics(
+                Message::Assistant {
+                    content: assistant_content,
+                    timestamp_ms: gateway_now_ms(),
+                    finish_reason: Some("end_turn".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some(peer.agent.name.clone()),
+                    provider: Some(format!("acp:{}", peer.backend.id)),
+                },
+                prompt_usage.clone(),
+                acp_live_message_metadata(
+                    &message_ids,
+                    &request.turn_id,
+                    acp.latest_plan.as_ref(),
+                    prompt_usage_cumulative.as_ref(),
+                    &acp.native_session_id,
+                    usage_counter_reset,
+                ),
+            )
+            .await?;
     }
     for message in acp.persisted_tool_result_messages() {
-        store.append_message(&session_id, &message).await?;
+        journal.append_message(message).await?;
     }
     emit_runtime_event(
-        &request.stream,
+        &acp_context.stream,
         json!({
             "type": "message_end",
             "session_id": session_id.clone(),
@@ -603,7 +712,7 @@ pub(crate) async fn run_acp_peer_turn(
         }),
     );
     emit_runtime_event(
-        &request.stream,
+        &acp_context.stream,
         json!({
             "type": "turn_complete",
             "session_id": session_id.clone(),
@@ -612,18 +721,14 @@ pub(crate) async fn run_acp_peer_turn(
         }),
     );
 
-    let run = RunResult {
-        session_id: session_id.clone(),
-        outcome: Outcome::Normal,
+    let turn = psychevo::TurnResult {
+        thread_id: session_id.clone(),
+        outcome: psychevo::TurnOutcome::Completed,
         terminal_reason: None,
         final_answer: acp.final_answer,
-        db_path: state.db_path().to_path_buf(),
-        cwd: options.cwd,
         provider: format!("acp:{}", peer.backend.id),
         model: peer.agent.name.clone(),
-        base_url: String::new(),
-        api_key_env: None,
-        reasoning_effort: options.reasoning_effort,
+        reasoning_effort: request.reasoning_effort,
         context_limit: None,
         tool_failures: 0,
         selected_agent: Some(SelectedAgent {
@@ -634,26 +739,27 @@ pub(crate) async fn run_acp_peer_turn(
         selected_skills: Vec::new(),
         context_snapshot: None,
         terminal_error: None,
-        events: acp.events,
         warnings: Vec::new(),
     };
-    Ok(AcpPeerTurnResult { run })
+    Ok(AcpPeerTurnResult { turn })
 }
 
 fn acp_peer_turn_controls(
-    options: &psychevo::__product::runtime::RunOptions,
-    profile: &psychevo::__product::configuration::RuntimeProfileConfig,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    mut runtime_options: BTreeMap<String, String>,
+    profile: &psychevo::config::RuntimeProfileConfig,
     is_new_native_session: bool,
 ) -> (Option<String>, Option<String>, BTreeMap<String, String>) {
-    let mut runtime_options = options.runtime_options.clone();
-    let peer_model = runtime_options
-        .remove("model")
-        .or_else(|| options.model.clone())
-        .or_else(|| is_new_native_session.then(|| profile.default_model.clone()).flatten());
+    let peer_model = runtime_options.remove("model").or(model).or_else(|| {
+        is_new_native_session
+            .then(|| profile.default_model.clone())
+            .flatten()
+    });
     let peer_reasoning_effort = runtime_options
         .remove("effort")
         .or_else(|| runtime_options.remove("reasoning"))
-        .or_else(|| options.reasoning_effort.clone());
+        .or(reasoning_effort);
     if is_new_native_session
         && !runtime_options.contains_key("mode")
         && let Some(default_mode) = profile.default_mode.clone()
@@ -663,27 +769,11 @@ fn acp_peer_turn_controls(
     (peer_model, peer_reasoning_effort, runtime_options)
 }
 
-async fn set_session_title_if_empty(
-    store: &psychevo::__product::persistence::StateRuntime,
-    session_id: &str,
-    title: &str,
-) {
-    if store
-        .session_summary(session_id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|summary| summary.title)
-        .is_some_and(|title| !title.trim().is_empty())
-    {
-        return;
-    }
-    let _ = store.set_session_title(session_id, title).await;
-}
-
 #[cfg(test)]
 mod prompt_usage_tests {
-    use super::*;
+    use serde_json::json;
+
+    use super::cumulative_usage_delta;
 
     #[test]
     fn cumulative_prompt_usage_becomes_a_non_double_counted_turn_delta() {

@@ -59,6 +59,12 @@ classification, interactions, and durable projection. Gateway owns only
 transport connection and wire projection concerns. ACP is external at the
 Adapter seam and is not Gateway's internal application Interface.
 
+Gateway activity, control-command, delivery, terminal, interaction, and
+channel-outbox persistence follows the closed-domain typing rule in
+[001 Architecture](../001-architecture/spec.md). Gateway receives typed facts
+from Framework durability and converts them to strings only when projecting an
+external protocol.
+
 `Thread::start_turn` returns a `TurnHandle` with the public Thread and Turn
 identity and accepted client receipt. The accepted Turn is owned by Application
 supervision. Dropping the handle or a transport connection cannot cancel it;
@@ -91,6 +97,40 @@ Turn and Compact serialization. Gateway owns local Shell serialization and
 transport producers. Queue advancement never creates a detached execution
 task.
 
+Merging the bounded Framework activity snapshot with Gateway activity reads
+the participating Thread summaries in one bounded Framework batch. Parent /
+delegated-child classification must not issue one Store query per active
+Thread, and the typed batch must not expose persistence rows.
+
+Gateway supervises local Shell work as `activity`, never as a Framework
+`turn`. It admits at most 64 running-or-queued Shell activities process-wide
+and, by default, at most 32 queued Shell activities for one source or Thread
+lane. Both ceilings are independently configurable positive composition
+limits. A Shell receives its stable activity id before either admission check.
+Limit rejection precedes a durable activity claim and carries structured data
+`{kind:"gateway_overloaded",scope:"activity"|"source",limit,occupancy,retryable:true,oldestQueuedAgeMs,activityId,threadId,sourceKey,activeActivityId,turnId:null}`.
+`activityId` identifies the rejected Shell; the Thread, source, and active
+activity fields are nullable when that identity is not present or cannot be
+resolved from already-owned state. `turnId` is always null because Shell is not
+a Framework Turn. For `activity` saturation, `oldestQueuedAgeMs` is the oldest
+queued Shell across all lanes; for `source` saturation, it is the oldest queued
+Shell in that lane; it is zero when the constrained scope has no queued work.
+Callers therefore retain a precise, non-fabricated identity and may retry the
+input.
+
+The Gateway Shell request carries only source/binding identity, command/cwd,
+continuation intent, model/mode/environment intent, and presentation sinks.
+Gateway resolves the active Thread and constructs the public Framework
+`ShellCommandRequest`; no raw state handle, `RunOptions`, or legacy User Shell
+context bag crosses this boundary.
+
+The process-level Shell control/lease coordinator remains parked while it owns
+no tracked Shell activity. Control-poll and lease-heartbeat ticks in that state
+perform no persistence operation. Registering a tracked activity wakes the
+coordinator immediately, so a pending foreign-owner control command does not
+wait for the 500 ms fallback poll; removing the last tracked activity returns
+the coordinator to its zero-storage idle state.
+
 `ApplicationRuntime` is the only owner of Framework admission, accepted task
 tracking, and FIFO lanes. It admits at most 64 executing-or-queued Framework
 operations across the Application and at most 32 per Thread. `start_thread`
@@ -121,9 +161,16 @@ failures after completing every cleanup scope. Force shutdown aborts tracked
 tasks, stages interrupted terminals where required, and leaves neither a
 compaction checkpoint nor a FIFO permit owned by an aborted operation. A child
 task remains local to the narrowest owner that can cancel and await it.
-Gateway supervision retains only the total panic count and the first
-`{name,scope}` panic context; it does not retain task ids, successful task
-history, or cancellation history. Gateway shutdown drains producers, Turns,
+Gateway-local Shell execution crosses exactly one panic boundary in the
+Gateway supervisor. That boundary reports completion, forced cancellation, or
+panic to a non-cancellable finalizer which owns the durable terminal, queue
+advance, caller response, and admission permit release; Shell execution does
+not add a nested `catch_unwind`.
+Gateway supervision retains only the total panic count and the first bounded
+`{name,scope,message,recoveryBacktrace}` panic context; it does not retain task
+ids, successful task history, or cancellation history. The backtrace is
+captured at the recovery boundary and does not claim to identify the original
+panic site. Gateway shutdown drains producers, local activities,
 infrastructure, and Agent Session adapters before returning one combined error
 for every observed cleanup failure.
 
@@ -136,8 +183,9 @@ cannot bypass the Thread FIFO.
 
 The Gateway transport supervisor retains no completed-task history or
 monotonic task id. It keeps only the total panic count and the first panic's
-task name and scope. Normal completion and cancellation leave no report entry.
-Shutdown drains every producer, Turn, and infrastructure scope even after a
+task name, scope, bounded payload, and bounded recovery backtrace. Normal
+completion and cancellation leave no report entry. Shutdown drains every
+producer, local activity, and infrastructure scope even after a
 panic, then combines that bounded panic summary with any Application terminal
 flush failure instead of returning early and detaching later cleanup.
 
@@ -191,6 +239,13 @@ must not publish a second `ActionRequested`, `ActionResolved`, or
 `ActionCancelled`. This keeps every interaction id and Channel reply token
 single-use without invalidating a still-visible token.
 
+Gateway's Framework live projector consumes the typed `TurnEvent` stream
+directly. It must not reconstruct runtime-internal `RunStreamEvent` or Session
+Event values as an intermediate representation. Typed message, Tool, warning,
+runtime-extension, scope, lifecycle, activity, and interaction variants retain
+their existing wire and transcript projection semantics; Adapter- or
+Shell-owned raw streams remain confined to those non-Framework boundaries.
+
 Framework activity is a revisioned full-state projection, not an aggregate
 derived from lifecycle notifications. Gateway forwards each Application-owned
 activity revision as `activityChanged` and stamps the same
@@ -216,18 +271,76 @@ through `TurnCompleted.turn`; the Web/Desktop protocol has no parallel
 `GatewayEventEmitter.try_emit` performs bounded in-memory admission and returns
 a typed overload result; it never performs database, filesystem, Git, Review,
 network, or auxiliary projection I/O. Its internal application event carries
-the Thread, Turn, activity, pending-interaction, and Review context required by
-downstream projection, so consumers do not rediscover that context from state.
+the explicit Thread, Turn, pending-interaction, and Review identities required
+to select authoritative durable context; projection never infers an identity
+from the currently selected UI activity.
+Retained-live preprocessing is part of the durable operation, not a best-effort
+decoration step. Resolving an event's effective durable activity and public
+action provenance returns the same typed persistence result as the final write:
+a Store or Framework read error is propagated, never converted to a missing
+record. An event whose explicit Thread cannot be matched to its root activity,
+Turn activity, or active Thread activity fails rather than falling back to the
+root. Initial binding is limited to an unbound root's own lifecycle event: a
+Framework Turn accepts `TurnStarted`, while a Gateway-local Shell accepts its
+first `EntryStarted`, and in either case the event identity must equal the root
+activity or Turn identity. That event persists the root's Thread binding before
+later events are attributed. An action without a resolved immutable runtime
+binding likewise fails rather than manufacturing `native` provenance.
+Independent binding and Agent relationship reads run concurrently, but either
+error fails the envelope.
+
+The Gateway composition owner configures process bounds through one typed
+`GatewayLimits`: positive event-ingress, Shell-activity, and per-lane
+Shell-queue ceilings, positive Application total/per-Thread operation
+ceilings, and a positive SQLite connection ceiling. Defaults remain 512
+ingress envelopes, 64 Shell activities, 32 queued Shell activities per lane,
+64/32 Application operations, and five database connections. The composition
+passes those exact values to the owners that enforce them rather than retaining
+hard-coded deployment limits behind the public composition seam. Ingress
+admission counts both queued and currently persisted envelopes. An overload result is
+retryable and reports the current occupancy, configured limit, and the oldest
+accepted envelope's bounded age plus activity/Turn/event identity. A read-only
+diagnostic snapshot exposes the same live occupancy facts together with the
+cumulative accepted, committed, failed, rejected, and processed counters.
 
 The lane reduces the in-memory projection, publishes to the local Event Hub,
-and then performs asynchronous durable writes. It may coalesce only replaceable
-entry updates and never drops or reorders lifecycle, action, entry-completed,
-or terminal events. Admission saturation cancels the affected Turn with an
-explicit overload failure. The application-owned terminal path awaits capacity,
-emits exactly one terminal, and waits for that exact terminal envelope to be
-durably processed before completion is reported. A lifecycle emitter records
-and propagates ingress rejection even when an Adapter callback cannot return
-the error directly; the Turn cannot subsequently report successful completion.
+and then performs asynchronous retained-live writes. It may coalesce only
+replaceable entry updates and never reorders accepted envelopes. An admitted
+replaceable update remains part of ingress occupancy until one committed
+snapshot upsert covers it; a coalesced in-memory mutation is not counted as a
+durable commit. Each successful retained-live write returns bounded commit
+evidence: the stable ingress idempotency key plus either the inserted live-event
+sequence, the snapshot key and content fingerprint, or the already-committed
+Framework terminal identity. The worker uses the same idempotency key for every
+bounded retry, so replaying an admitted envelope cannot append a second live
+event. Diagnostics distinguish processed, retried, durably committed, rejected,
+and permanently failed envelopes and retain only bounded failure/commit
+evidence.
+Fault coverage closes the real Framework Store pool after admission and proves
+that preprocessing fails the next fence without committing an event through a
+root or runtime-provenance fallback.
+
+The one ingress worker owns the replaceable-snapshot flush deadline. It flushes
+dirty snapshots after the coalescing interval, before a fence, and while
+draining shutdown; there is no timer or polling task per activity. A missing
+base snapshot for a text delta is a persistence error rather than a successful
+no-op. Deadline regressions use paused simulated time and a test-only worker
+barrier at the exact processed-envelope count, so scheduler overhead cannot
+silently move the clock across the boundary under instrumentation. Framework's
+transactional Turn terminal and durable Thread snapshot are authoritative;
+Gateway retained-live storage is a cross-process presentation buffer and is
+never a precondition for Framework completion. Retained-live serialization or
+storage failures return a typed internal result and increment bounded ingress
+failure diagnostics. No API may acknowledge an envelope as durably processed
+after such a failure. Clients recover presentation state from the authoritative
+Framework snapshot.
+Before a Gateway-local Shell finalizer clears retained snapshots, it awaits an
+in-order ingress fence placed after that Shell's last accepted envelope. The
+fence succeeds only when every envelope accepted before it completed its
+retained-live write; a failed write is returned as a typed fence error rather
+than being relabelled as committed. This ordering prevents an already
+accepted transcript update from recreating a live snapshot after terminal
+cleanup.
 The Web server owns one process-level Event Hub per `WebState`, not one durable
 store tailer per WebSocket. Locally produced `gateway/event` notifications are
 recorded into pending-interaction and Review projections and published to that
@@ -369,10 +482,45 @@ provenance-blind fan-out, short-circuit fallback, or “interrupt all” route.
 Permission and Clarify responses use their durable interaction routing context,
 not the currently selected activity as a fallback.
 
+One process-level Shell control dispatcher serves all Gateway-owned Shell
+activities. Local command admission wakes it immediately; a single bounded
+500 ms database poll remains only for commands written by another process. A
+dispatcher atomically claims each command `pending -> applying` before any
+non-idempotent control side effect. An `applying` command left by process loss
+is indeterminate and is never automatically replayed. Capacity saturation
+before dispatch may return the claimed command to `pending`; once a side effect
+may have occurred, the command settles only to `applied` or `failed`.
+
+The same process-level runtime refreshes all locally owned Shell leases in one
+transaction every five seconds. A heartbeat error or an owner/generation/status
+mismatch cancels the affected runner before it may perform another side effect.
+Its bounded diagnostics expose admitted/running/queued/rejected counts, the
+actual dispatcher task count, heartbeat transaction count, and control
+dispatch-latency p50/p95/p99. StateRuntime operation, failure, busy, acquisition,
+and execution counters are the SQLite contention and commit-throughput evidence;
+Gateway does not maintain a second database metrics taxonomy.
+The queued diagnostic is derived from the authoritative in-memory Shell lanes;
+Gateway does not maintain a shadow queue counter that can drift during queue
+clear or shutdown.
+Every path after a durable claim, including setup, runtime, source binding,
+projection, cancellation, and lease loss, passes through one completion funnel
+that attempts exactly one generation-guarded final state transition. Failure to
+persist that final transition is returned to the Shell caller and reported by
+shutdown; it is never swallowed. The 30-second lease remains recovery evidence,
+not a substitute for same-process finalization.
+The durable terminal follows the Shell's actual outcome: `Normal` is
+`completed`, `Failed` is `failed`, and `Stopped` or `Aborted` is `interrupted`.
+An execution error without an outcome is `failed`; lease loss and forced
+shutdown are `interrupted`.
+
 Starting a new thread or resuming a history thread rebinds the source key
 without archiving, ending, or deleting the previously bound thread. Historical
 threads remain visible in the ordinary active history list unless the user
 explicitly archives or deletes them.
+Source rebinding is not a Thread restore operation: it must not invoke the
+Agent Session Adapter lifecycle or alter archive state. Restoring an archived
+Thread remains an explicit `thread/restore` operation completed before that
+Thread is rebound.
 
 Live turn projection is thread-scoped. A transport that accepts a prompt while
 no source thread is bound must first create or select a concrete thread id, then
@@ -433,6 +581,15 @@ They must filter events by thread/activity identity, skip observations owned by
 their own Gateway process, and use durable activity leases to decide whether an
 unfinished history tool call is still live or should be rendered as an
 interrupted orphan.
+All first-party retained-live consumers use Gateway's typed replay/poll
+interface rather than reading persistence records. Gateway advances the event
+cursor across every inspected record, including self-owned or malformed records,
+resolves missing Thread identity from the typed event and then its durable
+activity, and exposes only foreign typed observations. Snapshot replay validates
+that its activity is running or queued under a non-expired lease before the
+observation is returned. Consumers retain only presentation state and snapshot
+revision cursors; they do not deserialize storage payloads or reinterpret lease
+rules.
 
 Assistant messages whose runtime finish reason is `tool_calls`, or whose
 content includes tool-call blocks, are tool-call preambles rather than final
@@ -685,8 +842,14 @@ value is `undefined` has the same absent-property semantics as AJV; a required
 property with `undefined` remains missing.
 
 The Python SDK remains an ergonomic hand-owned interface rather than a complete
-raw Rust-to-Python protocol generator. It synchronizes the public typed
-approval and result shapes it exposes.
+raw Rust-to-Python protocol generator. Every hand-owned tagged union is closed
+over the Rust discriminator set, and every signed or unsigned numeric field
+enforces the same JSON-safe and domain bounds as the Rust wire type. Shared
+valid and invalid fixtures for every public Python `from_wire` decoder run
+through Rust Serde, generated TypeScript schema validation, and Python
+decoding. Each accepted fixture has one canonical normalized JSON value, so a
+hand-written decoder cannot silently accept, reject, or remap a value
+differently from the protocol owner.
 
 `thread/draft/open` atomically opens an unbound source draft, resolves either an
 explicit opaque target or the Gateway default into an exact selection, prepares
@@ -696,9 +859,14 @@ or preparation failures return the same snapshot and a blocked context with a
 typed `RuntimeErrorView`; malformed, unauthorized, or storage-failed requests
 remain RPC errors.
 `turn/start` against an unbound thread supplies one Gateway-validated
-`RunnableTarget`; Gateway captures the Agent Definition and Runtime Profile,
-persists the immutable binding, attaches the Native or ACP Agent, and only then
-delivers the prompt. Direct backend-id task starts are not supported.
+`RunnableTarget`. Gateway lowers that target and the semantic Agent/Profile and
+control selections into a typed `TurnRequest`; it does not construct
+`RunOptions`, read or write `StateRuntime`, or retain a hidden preparation
+reservation on the Turn path. Framework resolves the request, calls the
+`AgentSessionAdapter` preparation boundary exactly once, and persists the
+returned immutable binding as part of its owned durable admission before
+invoking the prepared Native or ACP Adapter. Direct backend-id task starts are
+not supported.
 
 `thread/import/list` is the only public discovery entrypoint for Agent-owned
 sessions. It accepts a normal Gateway scope, probes enabled ACP Runtime Profiles
@@ -740,7 +908,9 @@ that submission across an unknown response; it does not make the request
 replayable or idempotent. Gateway persists a bounded receipt mapping the
 `clientTurnId` to its Gateway-allocated `turnId` before reporting acceptance,
 and `thread/read` and `thread/resume` include the retained receipts in the
-authoritative Thread snapshot. `turn/start` returns whether Gateway accepted
+authoritative Thread snapshot. The identifier is a non-whitespace opaque value:
+Gateway and Framework preserve it byte-for-byte in the request, acceptance
+receipt, durable delivery hash, and retained mapping. `turn/start` returns whether Gateway accepted
 the turn plus the required Gateway-allocated `turnId`, materialized thread id,
 and authoritative Thread.
 The materialized id is non-null and must equal the authoritative Thread's id;
@@ -752,9 +922,9 @@ subsequent events and follow-up turns without first opening a separate draft.
 
 `thread/action/run` steering includes `expectedTurnId` and is rejected when the
 supplied id does not match the active turn. Durable activity takeover remains
-an internal Gateway ownership mechanism: it may supersede stale activity or
-record a cooperative command for a still-leased foreign owner, but it is not a
-public client RPC. `thread/resume`
+an internal Shell claim rule rather than a control command: a new claim may
+supersede an expired lease by advancing its generation, while a still-leased
+foreign owner cannot be forced or released. `thread/resume`
 may resolve by source instead of by thread id; reconnecting clients use it to
 recover the current Gateway-owned snapshot after WebSocket reconnection. The
 snapshot is a transport projection of the current thread transcript, its
@@ -864,11 +1034,30 @@ transcript.
 
 `thread/read`, `thread/resume`, and the initial `ThreadSnapshot` return the
 latest transcript tail first. The default page is 100 entries and the hard
-maximum is 200. `before` is an opaque cursor derived from the oldest stable
-entry id in the returned page; an unknown or cross-Thread cursor fails closed.
+maximum is 200. `before` is an opaque composite position derived from the
+oldest stable entry in the returned page; it orders message and structural
+entries together, including multiple structural entries committed at the same
+message boundary. Gateway validates the decoded position against an indexed
+entry identity owned by that Thread, including its stable kind, boundary,
+ordering timestamp, and id; caller-supplied position fields are never
+authority. An unknown, forged, or cross-Thread cursor fails closed. Store
+applies revert and hidden-message visibility predicates before ordering and
+`LIMIT`, so an arbitrarily long hidden run neither consumes the bounded page
+nor truncates access to older visible history.
+Compactions and non-success Turn terminals at or after a staged revert boundary
+remain durable evidence but are outside the current transcript projection.
+Structural history reads exclude them before ordering and `LIMIT`, and cursors
+that identify those reverted entries fail closed until the revert is cleared.
 `thread/history/read` loads strictly older entries and preserves canonical
-order in each page. Its Store query cost and returned allocation are bounded by
-the requested page, not the Thread's total message count. Linked entry updates
+order in each page without gaps or duplicates, including structural-only pages.
+Every durable non-success Framework Turn terminal stores its committed-message
+boundary as a typed indexed fact at terminal commit; projection and pagination
+must not infer that authority from open metadata keys or from messages written
+by later Turns. Application freezes that boundary when it stages the
+`PendingTerminal`; the first persistence attempt and every resume/retry reuse
+the same value even after the Thread lane is released. Its Store query cost and
+returned allocation are bounded by the
+requested page, not the Thread's total message count. Linked entry updates
 needed to render a returned Tool or Agent block may be included only within a
 documented bounded expansion.
 
@@ -1103,7 +1292,10 @@ Thread Context. Repeating the same source/target/cwd/fingerprint is idempotent;
 preparing a different target replaces and releases the prior draft. The native
 draft session id is process-local, is never persisted or exposed, and is
 promoted into the immutable binding by the first accepted `turn/start` without
-a second `session/new`. If ACP preparation fails after selecting the draft
+a second `session/new`. Admission passes the detached draft source key as the
+execution-only Thread context while atomically binding the new Thread to the
+canonical source; substituting the canonical source key before Adapter
+promotion is invalid. If ACP preparation fails after selecting the draft
 target, Gateway persists that blocking problem on the source lane. Subsequent
 cache-only context reads keep sendability false with the same problem until an
 explicit prepare retry or target replacement clears it.

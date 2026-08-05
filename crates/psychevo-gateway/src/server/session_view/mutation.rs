@@ -1,4 +1,11 @@
-async fn guard_session_mutation(
+use psychevo::Error;
+use serde_json::Value;
+
+use super::super::binding::{AuthContext, WebState};
+use super::super::scope_session::default_resolved_scope;
+use super::summary::session_summary_value;
+
+pub(in super::super) async fn guard_session_mutation(
     state: &WebState,
     auth: &AuthContext,
     session_id: &str,
@@ -13,19 +20,16 @@ async fn guard_session_mutation(
     Ok(())
 }
 
-async fn session_summary_by_id(
+pub(in super::super) async fn session_summary_by_id(
     state: &WebState,
     session_id: &str,
 ) -> psychevo::Result<Value> {
-    let projection = state
+    let presentation = state
         .inner
-        .state
-
-        .session_list_projection(session_id)
+        .framework
+        .human_thread_summary(session_id)
         .await?
         .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
-    let activity = state
-        .activity(&state.inner.source, Some(session_id))
-        .await;
-    Ok(session_summary_value(projection, activity))
+    let activity = state.activity(&state.inner.source, Some(session_id)).await;
+    Ok(session_summary_value(presentation, activity))
 }

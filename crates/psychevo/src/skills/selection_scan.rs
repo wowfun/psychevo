@@ -3,9 +3,7 @@ use super::catalog::{
     SelectedSkill, Skill, SkillCatalog, SkillDiagnostic, SkillFrontmatter, SkillSettings,
     SkillSource,
 };
-use super::{
-    BTreeMap, BTreeSet, Component, Error, Path, PathBuf, Result, Value, fs, json,
-};
+use super::{BTreeMap, BTreeSet, Component, Error, Path, PathBuf, Result, Value, fs, json};
 use std::process::Command;
 
 pub(crate) fn add_skill(

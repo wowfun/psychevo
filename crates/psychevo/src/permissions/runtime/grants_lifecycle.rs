@@ -1,11 +1,20 @@
+use super::actions::PermissionAction;
+use super::state::{
+    ApprovalLifecycleEvent, PendingApprovalGuard, PermissionRuntime, PersistentPermissionGrant,
+    SandboxWriteGrantRequest,
+};
+use super::tool::ActionPolicyEvaluation;
+use crate::config::{
+    append_local_exec_policy_rule, append_local_filesystem_grant_with_extends,
+    append_local_network_grant_with_extends, append_local_skill_grant_with_extends,
+};
+use crate::types::{FilesystemApprovalScope, PermissionApprovalOutcome, PermissionApprovalRequest};
+
 impl PermissionRuntime {
-    // PermissionRuntime's public decision path owns ToolOutput by value; keep
-    // that established error ABI instead of boxing only this private helper.
-    #[allow(clippy::result_large_err)]
-    fn sandbox_write_grant_request(
+    pub(super) fn sandbox_write_grant_request(
         &self,
         action: &PermissionAction,
-    ) -> std::result::Result<Option<SandboxWriteGrantRequest>, ToolOutput> {
+    ) -> std::result::Result<Option<SandboxWriteGrantRequest>, String> {
         let PermissionAction::File {
             paths,
             mutating: true,
@@ -22,7 +31,7 @@ impl PermissionRuntime {
                 .inner
                 .sandbox_policy
                 .write_decision(&target.absolute)
-                .map_err(|err| ToolOutput::error(err.to_string()))?
+                .map_err(|err| err.to_string())?
             {
                 crate::sandbox::SandboxWriteDecision::Allowed => {}
                 crate::sandbox::SandboxWriteDecision::Grantable { path, reason } => {
@@ -32,9 +41,7 @@ impl PermissionRuntime {
                     }
                 }
                 crate::sandbox::SandboxWriteDecision::Denied { reason } => {
-                    return Err(ToolOutput::error(format!(
-                        "denied by sandbox policy: {reason}"
-                    )));
+                    return Err(format!("denied by sandbox policy: {reason}"));
                 }
             }
         }
@@ -49,7 +56,7 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn persist_permission_grants(&self, grants: &[PersistentPermissionGrant]) {
+    pub(super) fn persist_permission_grants(&self, grants: &[PersistentPermissionGrant]) {
         let fallback_extends = self.local_profile_fallback_extends();
         for grant in grants {
             let result = match grant {
@@ -102,7 +109,7 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn local_profile_fallback_extends(&self) -> String {
+    fn local_profile_fallback_extends(&self) -> String {
         if self.inner.config.default_permissions == "local" {
             ":workspace".to_string()
         } else {
@@ -116,14 +123,14 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn remember_filesystem_scope(
+    pub(super) fn remember_filesystem_scope(
         &self,
         scope: &FilesystemApprovalScope,
     ) -> crate::error::Result<()> {
         self.inner.sandbox_grants.grant_scope(scope)
     }
 
-    pub(crate) fn has_filesystem_scope_grant(&self, action: &PermissionAction) -> bool {
+    pub(super) fn has_filesystem_scope_grant(&self, action: &PermissionAction) -> bool {
         let PermissionAction::File {
             tool,
             paths,
@@ -158,7 +165,7 @@ impl PermissionRuntime {
         used_scope
     }
 
-    pub(crate) fn start_pending_approval(
+    pub(super) fn start_pending_approval(
         &self,
         request: &PermissionApprovalRequest,
     ) -> PendingApprovalGuard {
@@ -178,7 +185,7 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn finish_pending_approval(
+    pub(super) fn finish_pending_approval(
         &self,
         tool_call_id: &str,
         outcome: Option<PermissionApprovalOutcome>,
@@ -201,21 +208,6 @@ impl PermissionRuntime {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn clear_pending_approval_state(&self) {
-        let pending = self
-            .inner
-            .pending_approvals
-            .lock()
-            .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
-            .unwrap_or_default();
-        if let Ok(mut events) = self.inner.approval_events.lock() {
-            for tool_call_id in pending {
-                events.push(ApprovalLifecycleEvent::Aborted { tool_call_id });
-            }
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn approval_lifecycle_events(&self) -> Vec<ApprovalLifecycleEvent> {
         self.inner
@@ -225,7 +217,7 @@ impl PermissionRuntime {
             .unwrap_or_default()
     }
 
-    pub(crate) fn has_session_grant(&self, key: &str) -> bool {
+    pub(super) fn has_session_grant(&self, key: &str) -> bool {
         self.inner
             .session_grants
             .lock()

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use psychevo_agent_core::now_ms;
 use serde_json::Value;
@@ -7,11 +7,14 @@ use sqlx::{Arguments, Row, Sqlite, Transaction};
 use crate::error::{Error, Result};
 
 use super::{
-    GatewayActivityClaimInput, GatewayActivityRecord, GatewayTurnStartReceiptRecord, StateRuntime,
+    GatewayActivityClaimInput, GatewayActivityKind, GatewayActivityRecord, GatewayActivityState,
+    GatewayActivityTerminalStatus, GatewayTurnStartReceiptRecord, StateRuntime,
+    invalid_persisted_domain_value,
 };
 
 const TURN_START_RECEIPTS_METADATA_KEY: &str = "gatewayTurnStartReceipts";
 const MAX_TURN_START_RECEIPTS: usize = 32;
+const MAX_GATEWAY_ACTIVITY_BATCH_IDS: usize = 1_500;
 
 impl StateRuntime {
     pub async fn record_gateway_turn_start_receipt(
@@ -22,38 +25,48 @@ impl StateRuntime {
     ) -> Result<()> {
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
-            record_gateway_turn_start_receipt_in_tx(
-                &mut tx,
-                thread_id,
-                client_turn_id,
-                turn_id,
-            )
-            .await?;
+            record_gateway_turn_start_receipt_in_tx(&mut tx, thread_id, client_turn_id, turn_id)
+                .await?;
             tx.commit().await?;
             Ok(())
         })
         .await
     }
 
-    pub async fn gateway_turn_start_receipts(
+    pub(crate) async fn gateway_turn_start_receipts(
         &self,
         thread_id: &str,
     ) -> Result<Vec<GatewayTurnStartReceiptRecord>> {
         let Some(metadata) = self.session_metadata(thread_id).await? else {
             return Ok(Vec::new());
         };
-        Ok(metadata
-            .get(TURN_START_RECEIPTS_METADATA_KEY)
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|receipt| {
-                Some(GatewayTurnStartReceiptRecord {
-                    client_turn_id: receipt.get("clientTurnId")?.as_str()?.to_string(),
-                    turn_id: receipt.get("turnId")?.as_str()?.to_string(),
+        let metadata = metadata
+            .as_object()
+            .ok_or_else(|| corrupt_turn_start_receipts(thread_id))?;
+        let Some(receipts) = metadata.get(TURN_START_RECEIPTS_METADATA_KEY) else {
+            return Ok(Vec::new());
+        };
+        let receipts = receipts
+            .as_array()
+            .filter(|receipts| receipts.len() <= MAX_TURN_START_RECEIPTS)
+            .ok_or_else(|| corrupt_turn_start_receipts(thread_id))?;
+        receipts
+            .iter()
+            .map(|receipt| {
+                let client_turn_id = receipt
+                    .get("clientTurnId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| corrupt_turn_start_receipts(thread_id))?;
+                let turn_id = receipt
+                    .get("turnId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| corrupt_turn_start_receipts(thread_id))?;
+                Ok(GatewayTurnStartReceiptRecord {
+                    client_turn_id: client_turn_id.to_string(),
+                    turn_id: turn_id.to_string(),
                 })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn claim_gateway_activity(
@@ -142,7 +155,7 @@ impl StateRuntime {
                 .bind(input.thread_id)
                 .bind(input.source_key)
                 .bind(input.turn_id)
-                .bind(input.kind)
+                .bind(input.kind.as_str())
                 .bind(input.owner_id)
                 .bind(input.owner_surface)
                 .bind(generation)
@@ -183,6 +196,50 @@ impl StateRuntime {
             .await
     }
 
+    pub async fn gateway_activities_by_id(
+        &self,
+        activity_ids: &[String],
+    ) -> Result<HashMap<String, GatewayActivityRecord>> {
+        let mut activity_ids = activity_ids
+            .iter()
+            .filter(|activity_id| !activity_id.is_empty())
+            .cloned()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if activity_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        if activity_ids.len() > MAX_GATEWAY_ACTIVITY_BATCH_IDS {
+            return Err(Error::Message(format!(
+                "gateway activity batch exceeds {MAX_GATEWAY_ACTIVITY_BATCH_IDS} ids"
+            )));
+        }
+        activity_ids.sort();
+        let placeholders = (1..=activity_ids.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = gateway_activity_select_sql(&format!(
+            "WHERE activity_id IN ({placeholders}) ORDER BY activity_id ASC"
+        ));
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+            for activity_id in activity_ids {
+                query = query.bind(activity_id);
+            }
+            let rows = query.fetch_all(&mut *conn).await?;
+            rows.into_iter()
+                .map(|row| {
+                    let activity = gateway_activity_from_row(&row)?;
+                    Ok((activity.activity_id.clone(), activity))
+                })
+                .collect()
+        })
+        .await
+    }
+
     pub async fn active_gateway_activity_for_thread(
         &self,
         thread_id: &str,
@@ -208,6 +265,21 @@ impl StateRuntime {
             .map_err(|error| Error::Message(error.to_string()))?;
         self.gateway_activity_optional(
             "WHERE source_key = ?1 AND status IN ('running', 'queued') ORDER BY generation DESC, updated_at_ms DESC LIMIT 1",
+            arguments,
+        )
+        .await
+    }
+
+    pub async fn latest_gateway_activity_for_source(
+        &self,
+        source_key: &str,
+    ) -> Result<Option<GatewayActivityRecord>> {
+        let mut arguments = sqlx::sqlite::SqliteArguments::default();
+        arguments
+            .add(source_key)
+            .map_err(|error| Error::Message(error.to_string()))?;
+        self.gateway_activity_optional(
+            "WHERE source_key = ?1 ORDER BY generation DESC, updated_at_ms DESC LIMIT 1",
             arguments,
         )
         .await
@@ -266,30 +338,45 @@ impl StateRuntime {
         .await
     }
 
-    pub async fn heartbeat_gateway_activity(
+    pub async fn heartbeat_gateway_activities(
         &self,
-        activity_id: &str,
         owner_id: &str,
-        generation: i64,
+        activities: &[(String, i64)],
         lease_expires_at_ms: i64,
-    ) -> Result<bool> {
-        self.gateway_activity_update(
-            sqlx::query(
-                r#"
-                UPDATE gateway_activities
-                SET updated_at_ms = ?4, lease_expires_at_ms = ?5
-                WHERE activity_id = ?1
-                  AND owner_id = ?2
-                  AND generation = ?3
-                  AND status IN ('running', 'queued')
-                "#,
-            )
-            .bind(activity_id)
-            .bind(owner_id)
-            .bind(generation)
-            .bind(now_ms())
-            .bind(lease_expires_at_ms),
-        )
+    ) -> Result<Vec<String>> {
+        if activities.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let updated_at_ms = now_ms();
+            let mut refreshed = Vec::with_capacity(activities.len());
+            for (activity_id, generation) in activities {
+                let changed = sqlx::query(
+                    r#"
+                    UPDATE gateway_activities
+                    SET updated_at_ms = ?4, lease_expires_at_ms = ?5
+                    WHERE activity_id = ?1
+                      AND owner_id = ?2
+                      AND generation = ?3
+                      AND status IN ('running', 'queued')
+                    "#,
+                )
+                .bind(activity_id)
+                .bind(owner_id)
+                .bind(generation)
+                .bind(updated_at_ms)
+                .bind(lease_expires_at_ms)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+                if changed == 1 {
+                    refreshed.push(activity_id.clone());
+                }
+            }
+            tx.commit().await?;
+            Ok(refreshed)
+        })
         .await
     }
 
@@ -318,7 +405,7 @@ impl StateRuntime {
         activity_id: &str,
         owner_id: &str,
         generation: i64,
-        status: &str,
+        status: GatewayActivityTerminalStatus,
     ) -> Result<bool> {
         let now = now_ms();
         self.gateway_activity_update(
@@ -330,38 +417,13 @@ impl StateRuntime {
                     lease_expires_at_ms = ?5,
                     queued_turns = 0
                 WHERE activity_id = ?1 AND owner_id = ?2 AND generation = ?3
+                  AND status IN ('running', 'queued')
                 "#,
             )
             .bind(activity_id)
             .bind(owner_id)
             .bind(generation)
-            .bind(status)
-            .bind(now),
-        )
-        .await
-    }
-
-    pub async fn supersede_stale_gateway_activity(
-        &self,
-        activity_id: &str,
-        superseded_by_activity_id: &str,
-    ) -> Result<bool> {
-        let now = now_ms();
-        self.gateway_activity_update(
-            sqlx::query(
-                r#"
-                UPDATE gateway_activities
-                SET status = 'superseded',
-                    updated_at_ms = ?3,
-                    lease_expires_at_ms = ?3,
-                    superseded_activity_id = ?2
-                WHERE activity_id = ?1
-                  AND status IN ('running', 'queued')
-                  AND lease_expires_at_ms < ?3
-                "#,
-            )
-            .bind(activity_id)
-            .bind(superseded_by_activity_id)
+            .bind(status.as_str())
             .bind(now),
         )
         .await
@@ -396,6 +458,16 @@ impl StateRuntime {
         })
         .await
     }
+}
+
+fn corrupt_turn_start_receipts(thread_id: &str) -> Error {
+    Error::structured(
+        "Persisted Thread Turn-start receipts are invalid.",
+        serde_json::json!({
+            "kind": "corrupt_thread_turn_start_receipts",
+            "threadId": thread_id,
+        }),
+    )
 }
 
 pub(super) async fn record_gateway_turn_start_receipt_in_tx(
@@ -458,13 +530,18 @@ fn gateway_activity_select_sql(where_clause: &str) -> String {
 fn gateway_activity_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<GatewayActivityRecord> {
     let intent_json: Option<String> = row.try_get(14)?;
     let queued_turns: i64 = row.try_get(12)?;
+    let kind: String = row.try_get(4)?;
+    let status: String = row.try_get(5)?;
     Ok(GatewayActivityRecord {
         activity_id: row.try_get(0)?,
         thread_id: row.try_get(1)?,
         source_key: row.try_get(2)?,
         turn_id: row.try_get(3)?,
-        kind: row.try_get(4)?,
-        status: row.try_get(5)?,
+        kind: GatewayActivityKind::parse(&kind)
+            .ok_or_else(|| invalid_persisted_domain_value("gateway_activities", "kind", &kind))?,
+        status: GatewayActivityState::parse(&status).ok_or_else(|| {
+            invalid_persisted_domain_value("gateway_activities", "status", &status)
+        })?,
         owner_id: row.try_get(6)?,
         owner_surface: row.try_get(7)?,
         generation: row.try_get(8)?,

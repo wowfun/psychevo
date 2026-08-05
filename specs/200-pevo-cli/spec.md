@@ -200,8 +200,12 @@ tools for that invocation. Agent definition behavior is defined by
 `pevo agent list` lists discoverable agent definitions. Runtime instances are
 listed through `pevo agent status`, which defaults to the current/root session
 tree and accepts `--all` for every durable or live child-agent session.
-`pevo agent inspect`, `wait`, `send`, `close`, `resume`, `attach`, and `logs`
-operate on agent ids or task names returned by `Agent` spawn and status output.
+`pevo agent inspect`, `send`, `close`, `resume`, `attach`, and `logs` operate on
+agent ids or task names returned by `Agent` spawn and status output. `pevo agent
+wait` instead observes the latest unarchived `run` thread's parent mailbox for up
+to its configured timeout. It reports readiness without claiming, consuming,
+or projecting mailbox content; a zero timeout still checks already-pending
+mail before reporting a timeout.
 `inspect` is a local, read-only peek into a child-agent session: it resolves the
 durable parent/child edge, reports the agent record plus parent and child
 session summaries, and includes a bounded recent transcript projection. It must

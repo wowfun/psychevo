@@ -140,25 +140,29 @@ impl HookRuntime {
 
     pub async fn run_session_start(&self, payload: &Value) -> HookLifecycleOutcome {
         HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::SessionStart, payload).await,
+            self.run_event_name(HookEventName::SessionStart, payload)
+                .await,
         )
     }
 
     pub async fn run_session_end(&self, payload: &Value) -> HookReadOnlyOutcome {
         HookReadOnlyOutcome::from_response(
-            self.run_event_name(HookEventName::SessionEnd, payload).await,
+            self.run_event_name(HookEventName::SessionEnd, payload)
+                .await,
         )
     }
 
     pub async fn run_subagent_start(&self, payload: &Value) -> HookLifecycleOutcome {
         HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::SubagentStart, payload).await,
+            self.run_event_name(HookEventName::SubagentStart, payload)
+                .await,
         )
     }
 
     pub async fn run_subagent_stop(&self, payload: &Value) -> HookStopOutcome {
         HookStopOutcome::from_response(
-            self.run_event_name(HookEventName::SubagentStop, payload).await,
+            self.run_event_name(HookEventName::SubagentStop, payload)
+                .await,
         )
     }
 
@@ -171,7 +175,8 @@ impl HookRuntime {
 
     pub async fn run_pre_tool_use(&self, payload: &Value) -> HookPreToolUseOutcome {
         HookPreToolUseOutcome::from_response(
-            self.run_event_name(HookEventName::PreToolUse, payload).await,
+            self.run_event_name(HookEventName::PreToolUse, payload)
+                .await,
         )
     }
 
@@ -184,7 +189,8 @@ impl HookRuntime {
 
     pub async fn run_post_tool_use(&self, payload: &Value) -> HookPostToolUseOutcome {
         HookPostToolUseOutcome::from_response(
-            self.run_event_name(HookEventName::PostToolUse, payload).await,
+            self.run_event_name(HookEventName::PostToolUse, payload)
+                .await,
         )
     }
 
@@ -197,19 +203,22 @@ impl HookRuntime {
 
     pub async fn run_pre_compact(&self, payload: &Value) -> HookLifecycleOutcome {
         HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::PreCompact, payload).await,
+            self.run_event_name(HookEventName::PreCompact, payload)
+                .await,
         )
     }
 
     pub async fn run_post_compact(&self, payload: &Value) -> HookReadOnlyOutcome {
         HookReadOnlyOutcome::from_response(
-            self.run_event_name(HookEventName::PostCompact, payload).await,
+            self.run_event_name(HookEventName::PostCompact, payload)
+                .await,
         )
     }
 
     pub async fn run_notification(&self, payload: &Value) -> HookReadOnlyOutcome {
         HookReadOnlyOutcome::from_response(
-            self.run_event_name(HookEventName::Notification, payload).await,
+            self.run_event_name(HookEventName::Notification, payload)
+                .await,
         )
     }
 
@@ -556,8 +565,7 @@ fn completed_summary(hook: &ConfiguredHook, elapsed_ms: u128) -> HookRunSummary 
 }
 
 fn fold_summary(event: HookEventName, response: &mut HookResponse, summary: HookRunSummary) {
-    if summary.status == HookRunStatus::Blocked && response.blocked_reason.is_none()
-    {
+    if summary.status == HookRunStatus::Blocked && response.blocked_reason.is_none() {
         response.blocked_reason = Some(block_reason(&summary.stdout, &summary.stderr));
     }
     if event == HookEventName::PermissionRequest
@@ -590,11 +598,7 @@ fn fold_summary(event: HookEventName, response: &mut HookResponse, summary: Hook
     response.summaries.push(summary);
 }
 
-fn diagnose_invalid_json(
-    stdout: &str,
-    parsed: Option<&Value>,
-    diagnostics: &mut Vec<String>,
-) {
+fn diagnose_invalid_json(stdout: &str, parsed: Option<&Value>, diagnostics: &mut Vec<String>) {
     let trimmed = stdout.trim();
     if parsed.is_none() && (trimmed.starts_with('{') || trimmed.starts_with('[')) {
         diagnostics.push("hook output was not valid JSON".to_string());

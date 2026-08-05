@@ -8,14 +8,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    __product::runtime::ApprovalHandler, __product::runtime::PermissionApprovalDecision,
-    __product::runtime::PermissionApprovalRequest, __product::runtime::PermissionMode,
-    __product::runtime::ProjectContextInstructionMode, __product::runtime::RunMode, Application,
+    Application, ApprovalHandler, PermissionMode, ProjectContextInstructionMode, RunMode,
     StartThreadRequest, ThreadListQuery, TurnEvent, TurnOutcome, TurnRequest,
+    application::PermissionApprovalDecision, application::PermissionApprovalRequest,
 };
-use psychevo_gateway::{
+use psychevo_gateway::gateway_event_from_turn_event;
+use psychevo_gateway_protocol::events_transcript::{
     GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole, gateway_event_from_run_stream,
+    TranscriptEntryRole,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -259,6 +259,35 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
 
 fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<serde_json::Value> {
     match event {
+        TurnEvent::Scoped {
+            thread_id,
+            turn_id,
+            event,
+        } => json_turn_event(
+            &psychevo::TurnReceipt {
+                accepted: true,
+                thread_id,
+                turn_id,
+                client_turn_id: None,
+            },
+            *event,
+        ),
+        TurnEvent::Runtime { data } => {
+            let projected =
+                gateway_event_from_turn_event(&receipt.turn_id, &TurnEvent::Runtime { data })?;
+            match projected {
+                GatewayEvent::EntryStarted { entry, .. } => {
+                    typed_item_event(receipt, psychevo::ItemStage::Started, entry)
+                }
+                GatewayEvent::EntryUpdated { entry, .. } => {
+                    typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+                }
+                GatewayEvent::EntryCompleted { entry, .. } => {
+                    typed_item_event(receipt, psychevo::ItemStage::Completed, entry)
+                }
+                _ => None,
+            }
+        }
         TurnEvent::Message {
             stage,
             message,
@@ -266,30 +295,15 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             metadata,
             accounting,
         } => {
-            let mut runtime = serde_json::Map::new();
-            runtime.insert(
-                "type".to_string(),
-                serde_json::json!(if stage == psychevo::ItemStage::Completed {
-                    "message_end"
-                } else {
-                    "message_update"
-                }),
-            );
-            runtime.insert("message".to_string(), message);
-            if let Some(value) = usage.clone() {
-                runtime.insert("usage".to_string(), value);
-            }
-            if let Some(value) = metadata.clone() {
-                runtime.insert("metadata".to_string(), value);
-            }
-            if let Some(value) = accounting.clone() {
-                runtime.insert("accounting".to_string(), value);
-            }
             let mut entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::__product::runtime::RunStreamEvent::value(serde_json::Value::Object(
-                    runtime,
-                )),
+                &TurnEvent::Message {
+                    stage,
+                    message,
+                    usage: usage.clone(),
+                    metadata: metadata.clone(),
+                    accounting: accounting.clone(),
+                },
             )?;
             entry.metadata = metadata;
             entry.usage = usage;
@@ -297,30 +311,21 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             typed_item_event(receipt, stage, entry)
         }
         TurnEvent::MessageDelta { text } => {
-            let entry = projected_entry(
-                &receipt.turn_id,
-                psychevo::__product::runtime::RunStreamEvent::AssistantTextDelta { text },
-            )?;
+            let entry = projected_entry(&receipt.turn_id, &TurnEvent::MessageDelta { text })?;
             typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
         }
         TurnEvent::Tool { stage, data } => {
-            let entry = projected_entry(
-                &receipt.turn_id,
-                psychevo::__product::runtime::RunStreamEvent::value(data),
-            )?;
+            let entry = projected_entry(&receipt.turn_id, &TurnEvent::Tool { stage, data })?;
             typed_item_event(receipt, stage, entry)
         }
         TurnEvent::ReasoningDelta { text } => {
-            let entry = projected_entry(
-                &receipt.turn_id,
-                psychevo::__product::runtime::RunStreamEvent::ReasoningDelta { text },
-            )?;
+            let entry = projected_entry(&receipt.turn_id, &TurnEvent::ReasoningDelta { text })?;
             typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
         }
         TurnEvent::ReasoningCompleted { text } => {
             let mut entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::__product::runtime::RunStreamEvent::ReasoningDelta {
+                &TurnEvent::ReasoningDelta {
                     text: text.unwrap_or_default(),
                 },
             )?;
@@ -410,11 +415,8 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
     }
 }
 
-fn projected_entry(
-    turn_id: &str,
-    event: psychevo::__product::runtime::RunStreamEvent,
-) -> Option<TranscriptEntry> {
-    match gateway_event_from_run_stream(turn_id, &event)? {
+fn projected_entry(turn_id: &str, event: &TurnEvent) -> Option<TranscriptEntry> {
+    match gateway_event_from_turn_event(turn_id, event)? {
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }
         | GatewayEvent::EntryCompleted { entry, .. } => Some(entry),

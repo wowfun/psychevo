@@ -1,3 +1,21 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use serde_json::Value;
+
+use super::super::validation::{
+    optional_bool_field, optional_string_alias_field, optional_string_field, optional_u64_field,
+    parse_string_array_value, string_array_field, string_map_field,
+};
+use crate::config::{
+    AgentBackendConfig, AgentBackendKind, AgentEntrypoint, CustomToolsetConfig, Error,
+    McpServerInput, McpServerPolicy, McpTransportInput, ProjectContextConfig,
+    ProjectContextInstructionMode, Result, RuntimeProfileConfig, RuntimeProfileKind, SandboxConfig,
+    SandboxMode, ToolModeConfig, ToolSearchConfig, ToolSelectionConfig, WorkspacesConfig,
+    default_peer_agent_entrypoints, default_peer_client_capabilities, valid_agent_name,
+    validate_runtime_profile_backend_ref,
+};
+
 pub(crate) fn parse_workspaces_config(value: &Value) -> Result<WorkspacesConfig> {
     let object = value
         .as_object()
@@ -229,10 +247,10 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
         )?;
         out.push(
             McpServerInput::with_source(
-            trimmed_name.to_string(),
-            transport_input,
-            format!("profile:mcp:{trimmed_name}"),
-            "profile",
+                trimmed_name.to_string(),
+                transport_input,
+                format!("profile:mcp:{trimmed_name}"),
+                "profile",
             )
             .with_policy(policy),
         );
@@ -240,10 +258,7 @@ pub(crate) fn parse_profile_mcp_servers(value: &Value) -> Result<Vec<McpServerIn
     Ok(out)
 }
 
-fn reject_stdio_mcp_auth_fields(
-    server: &serde_json::Map<String, Value>,
-    path: &str,
-) -> Result<()> {
+fn reject_stdio_mcp_auth_fields(server: &serde_json::Map<String, Value>, path: &str) -> Result<()> {
     for key in ["bearer_token_env_var", "scopes", "oauth_resource", "oauth"] {
         if server.contains_key(key) {
             return Err(Error::Config(format!(

@@ -1,5 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomRowStyle, BottomSelectionRow, ConfiguredModel, HelpPanel, HelpTab, ModelRowSource,
+    ProviderWizardField, ProviderWizardPanel, Value, activity_spinner_frame,
+    truncate_display_width, tui_theme,
+};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Paragraph, Wrap},
+};
+use std::time::Duration;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn model_detail_capabilities(model: &ConfiguredModel) -> Vec<String> {
     let caps = &model.metadata.capabilities;

@@ -6,6 +6,8 @@ use std::task::{Context, Poll};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+use crate::control::abort_pair;
+use crate::generation::{LanguageInvocationTarget, merge_safe_headers, start_generation};
 use crate::{
     AbortHandle, AbortSignal, AdapterCall, AdapterContext, Capability, CredentialBindings,
     CredentialRequest, CredentialResolver, EmptyCredentialResolver, ErrorKind, ErrorPhase,
@@ -13,12 +15,9 @@ use crate::{
     LanguageAdapter, LanguageRequest, ModelDescriptor, ModelProfile, ProviderError,
     RealtimeAdapter, RealtimeConnectRequest, RequestHeaders, SpeechAdapter, SpeechOutput,
     SpeechRequest, TimeoutPolicy, TranscriptionAdapter, TranscriptionOutput, TranscriptionRequest,
-    Warning, abort_pair,
+    Warning,
 };
-use crate::{
-    ImageAdapterOutput, LanguageInvocationTarget, SpeechAdapterOutput, TranscriptionAdapterOutput,
-    start_generation,
-};
+use crate::{ImageAdapterOutput, SpeechAdapterOutput, TranscriptionAdapterOutput};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeploymentConfig {
@@ -570,7 +569,7 @@ impl RealtimeModel {
     }
 
     pub fn connect(&self, request: RealtimeConnectRequest) -> Invocation<crate::RealtimeSession> {
-        crate::start_realtime_connect(self.target.clone(), self.adapter.clone(), request)
+        crate::realtime::start_realtime_connect(self.target.clone(), self.adapter.clone(), request)
     }
 }
 
@@ -710,7 +709,7 @@ pub(crate) async fn prepare_adapter_context(
     abort: AbortSignal,
     total_deadline: Option<tokio::time::Instant>,
 ) -> Result<AdapterContext, ProviderError> {
-    let headers = crate::merge_safe_headers(&target.deployment_headers, invocation_headers)?;
+    let headers = merge_safe_headers(&target.deployment_headers, invocation_headers)?;
     let credentials = guarded_adapter_call(
         target.resolver.resolve(CredentialRequest {
             deployment_id: target.descriptor.deployment_id.clone(),
@@ -958,7 +957,7 @@ fn validate_deployment_config(config: &DeploymentConfig) -> Result<(), ProviderE
             "default language protocol must not be empty",
         ));
     }
-    crate::merge_safe_headers(&RequestHeaders::new(), &config.headers)?;
+    merge_safe_headers(&RequestHeaders::new(), &config.headers)?;
     for (slot, credential_ref) in &config.credentials.0 {
         if slot.0.trim().is_empty() || credential_ref.0.trim().is_empty() {
             return Err(ProviderError::configuration(

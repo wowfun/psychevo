@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::state::StateRuntime;
+use crate::tests::home_dir;
+use crate::tests::modes_shell_tools::tool_modes::{assert_event_type, wait_for_event_type};
+use crate::types::{RunMode, UserShellContextOptions};
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    fs,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tempfile::tempdir;
 
 #[cfg(unix)]
 #[tokio::test]
@@ -18,7 +28,7 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
         crate::tools::ToolRuntimeContext {
             task_id: "exec-lifecycle-test".to_string(),
             lsp: crate::config::LspConfig::default(),
-            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: Some(stream),
             env: BTreeMap::new(),
@@ -71,7 +81,7 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
     assert_eq!(finished["interrupted"], false);
 
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let _ = crate::tools::write_stdin_tool_impl(
+    let _ = crate::tools::exec_command::sessions::session_manager::write_stdin_tool_impl(
         json!({"session_id": session_id, "yield_time_ms": 5000}),
         receivers.abort_signal(),
     )
@@ -82,7 +92,9 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
 fn completed_tasks_without_exec_sessions_do_not_start_detach_workers() {
     for index in 0..1_000 {
         assert!(
-            !crate::tools::detach_exec_sessions_for_task(format!("no-exec-session-{index}")),
+            !crate::tools::exec_command::process::detach_exec_sessions_for_task(format!(
+                "no-exec-session-{index}"
+            )),
             "task without an exec session must take the allocation-free cleanup path"
         );
     }
@@ -102,7 +114,7 @@ pub(crate) async fn detached_exec_sessions_share_one_reaper_worker() {
             crate::tools::ToolRuntimeContext {
                 task_id: task_id.to_string(),
                 lsp: crate::config::LspConfig::default(),
-                lsp_manager: crate::tools::write_support::default_lsp_manager(),
+                lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
                 allow_login_shell: false,
                 env: BTreeMap::new(),
                 path_prefixes: Vec::new(),
@@ -125,17 +137,16 @@ pub(crate) async fn detached_exec_sessions_share_one_reaper_worker() {
             .await;
         assert!(!result.is_error, "{:?}", result.json);
         session_ids.push(result.json["session_id"].as_u64().expect("session id"));
-        assert!(crate::tools::detach_exec_sessions_for_task(
-            task_id.to_string()
-        ));
+        assert!(
+            crate::tools::exec_command::process::detach_exec_sessions_for_task(task_id.to_string())
+        );
     }
 
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            if session_ids
-                .iter()
-                .all(|session_id| crate::tools::get_exec_session(*session_id).is_none())
-            {
+            if session_ids.iter().all(|session_id| {
+                crate::tools::exec_command::process::get_exec_session(*session_id).is_none()
+            }) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -144,7 +155,7 @@ pub(crate) async fn detached_exec_sessions_share_one_reaper_worker() {
     .await
     .expect("shared reaper cleanup");
     assert_eq!(
-        crate::tools::exec_session_reaper_start_count(),
+        crate::tools::exec_command::process::exec_session_reaper_start_count(),
         1,
         "all detached sessions must use the same process worker"
     );
@@ -167,7 +178,7 @@ pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() 
         crate::tools::ToolRuntimeContext {
             task_id: "exec-interrupt-test".to_string(),
             lsp: crate::config::LspConfig::default(),
-            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: Some(stream),
             env: BTreeMap::new(),
@@ -193,7 +204,7 @@ pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() 
 
     assert!(!result.is_error, "{:?}", result.json);
     let session_id = result.json["session_id"].as_u64().expect("session id");
-    crate::tools::interrupt_exec_sessions_for_task("exec-interrupt-test");
+    crate::tools::exec_command::process::interrupt_exec_sessions_for_task("exec-interrupt-test");
     let finished = wait_for_event_type(&events, "exec_session_finished").await;
     assert_eq!(finished["session_id"], session_id);
     assert_eq!(finished["interrupted"], true);
@@ -207,7 +218,7 @@ pub(crate) async fn exec_command_rejects_shell_background_wrappers() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let err = crate::tools::exec_command_tool_impl(
+    let err = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({"cmd": "sleep 30 &"}),
@@ -227,7 +238,7 @@ pub(crate) async fn exec_command_allows_foreground_heredoc_with_ampersand_conten
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let result = crate::tools::exec_command_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd.clone(),
         false,
         json!({
@@ -274,7 +285,7 @@ pub(crate) async fn plan_exec_command_landlock_blocks_create_and_truncate() {
         crate::tools::ToolRuntimeContext {
             task_id: "plan-landlock-write-test".to_string(),
             lsp: crate::config::LspConfig::default(),
-            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
             allow_login_shell: false,
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
@@ -319,7 +330,7 @@ pub(crate) async fn exec_command_pipe_stdin_is_closed_for_prompt_style_commands(
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let result = crate::tools::exec_command_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({
@@ -340,7 +351,7 @@ pub(crate) async fn exec_command_nonzero_exit_is_successful_result() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let result = crate::tools::exec_command_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({"cmd": "exit 7", "yield_time_ms": 250}),
@@ -361,7 +372,7 @@ pub(crate) async fn exec_command_token_truncates_output() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let result = crate::tools::exec_command_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({
@@ -385,7 +396,7 @@ pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let start = crate::tools::exec_command_tool_impl(
+    let start = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({
@@ -402,7 +413,7 @@ pub(crate) async fn write_stdin_polls_and_writes_to_tty_or_fallback_session() {
         .unwrap_or_else(|| panic!("interactive exec did not yield a session: {start}"));
 
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let result = crate::tools::write_stdin_tool_impl(
+    let result = crate::tools::exec_command::sessions::session_manager::write_stdin_tool_impl(
         json!({
             "session_id": session_id,
             "chars": "hello\n",
@@ -429,7 +440,7 @@ pub(crate) async fn write_stdin_rejects_non_tty_pipe_session_input() {
     fs::create_dir_all(&cwd).expect("cwd");
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
 
-    let start = crate::tools::exec_command_tool_impl(
+    let start = crate::tools::exec_command::sessions::session_manager::exec_command_tool_impl(
         cwd,
         false,
         json!({"cmd": "sleep 1", "yield_time_ms": 250}),
@@ -440,7 +451,7 @@ pub(crate) async fn write_stdin_rejects_non_tty_pipe_session_input() {
     let session_id = start["session_id"].as_u64().expect("session_id");
 
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let err = crate::tools::write_stdin_tool_impl(
+    let err = crate::tools::exec_command::sessions::session_manager::write_stdin_tool_impl(
         json!({"session_id": session_id, "chars": "hello\n"}),
         receivers.abort_signal(),
     )
@@ -449,7 +460,7 @@ pub(crate) async fn write_stdin_rejects_non_tty_pipe_session_input() {
     assert!(err.to_string().contains("stdin is closed"));
 
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let _ = crate::tools::write_stdin_tool_impl(
+    let _ = crate::tools::exec_command::sessions::session_manager::write_stdin_tool_impl(
         json!({"session_id": session_id, "chars": "", "yield_time_ms": 5000}),
         receivers.abort_signal(),
     )
@@ -459,7 +470,7 @@ pub(crate) async fn write_stdin_rejects_non_tty_pipe_session_input() {
 #[tokio::test]
 pub(crate) async fn write_stdin_unknown_session_fails() {
     let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
-    let err = crate::tools::write_stdin_tool_impl(
+    let err = crate::tools::exec_command::sessions::session_manager::write_stdin_tool_impl(
         json!({"session_id": 999_999_u64}),
         receivers.abort_signal(),
     )
@@ -517,7 +528,7 @@ pub(crate) async fn write_stdin_rejects_session_owned_by_another_task() {
             receivers.abort_signal(),
         )
         .await;
-    crate::tools::interrupt_exec_sessions_for_task("exec-owner-a");
+    crate::tools::exec_command::process::interrupt_exec_sessions_for_task("exec-owner-a");
 
     assert!(result.is_error, "{:?}", result.json);
     assert_eq!(
@@ -606,7 +617,7 @@ pub(crate) async fn plan_write_stdin_cannot_mutate_a_default_turn_session() {
             receivers.abort_signal(),
         )
         .await;
-    crate::tools::interrupt_exec_sessions_for_task(task_id);
+    crate::tools::exec_command::process::interrupt_exec_sessions_for_task(task_id);
 
     assert!(!poll.is_error, "{:?}", poll.json);
     assert!(
@@ -642,17 +653,22 @@ model = "lmstudio/test-model"
         model: None,
         reasoning_effort: None,
         mode: RunMode::Default,
-        inherited_env: Some(BTreeMap::from([
-            (
-                "HOME".to_string(),
-                temp.path().to_string_lossy().to_string(),
-            ),
-            (
-                "PSYCHEVO_HOME".to_string(),
-                home.to_string_lossy().to_string(),
-            ),
-        ])),
     }
+}
+
+pub(crate) fn configured_user_shell_environment(
+    temp: &tempfile::TempDir,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        ),
+        (
+            "PSYCHEVO_HOME".to_string(),
+            home_dir(temp).to_string_lossy().to_string(),
+        ),
+    ])
 }
 
 #[cfg(unix)]

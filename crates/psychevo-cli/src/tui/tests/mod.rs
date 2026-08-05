@@ -1,19 +1,29 @@
-pub(crate) use super::*;
-pub(crate) use psychevo::{
-    __product::usage::ContextCategory, __product::usage::ContextScope,
-    __product::usage::ContextTokenizer, __product::usage::ContextTotal,
+use self::fixtures::test_app;
+use super::{
+    Line, StartThreadRequest, ThreadModelSelection, ThreadSummary, TuiApp, TurnEvent, Value,
 };
-pub(crate) use psychevo_gateway::{GatewayTurn, GatewayTurnStatus};
-pub(crate) use ratatui::backend::{Backend, TestBackend};
-pub(crate) use ratatui::layout::Position;
-pub(crate) use std::fs;
-pub(crate) use std::io::{Read, Write};
-pub(crate) use std::net::TcpListener;
-pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use std::thread;
-pub(crate) use std::time::{Duration, Instant};
-pub(crate) use tempfile::tempdir;
+use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+pub(crate) fn runtime_turn_event(data: Value) -> TurnEvent {
+    TurnEvent::Runtime { data }
+}
+
+pub(crate) fn reasoning_completed_turn_event() -> TurnEvent {
+    TurnEvent::ReasoningCompleted { text: None }
+}
+
+pub(crate) fn scoped_turn_event(thread_id: impl Into<String>, event: TurnEvent) -> TurnEvent {
+    TurnEvent::Scoped {
+        thread_id: thread_id.into(),
+        turn_id: "test-turn".to_string(),
+        event: Box::new(event),
+    }
+}
 
 pub(crate) fn line_text(line: &Line<'_>) -> String {
     line.spans
@@ -22,11 +32,11 @@ pub(crate) fn line_text(line: &Line<'_>) -> String {
         .collect()
 }
 
-pub(crate) fn summary(id: &str) -> SessionSummary {
-    SessionSummary {
+pub(crate) fn summary(id: &str) -> ThreadSummary {
+    ThreadSummary {
         id: id.to_string(),
         source: "tui".to_string(),
-        parent_session_id: None,
+        parent_thread_id: None,
         cwd: "/repo".to_string(),
         model: "model".to_string(),
         provider: "provider".to_string(),
@@ -35,8 +45,11 @@ pub(crate) fn summary(id: &str) -> SessionSummary {
         ended_at_ms: None,
         end_reason: None,
         archived_at_ms: None,
+        forked_from_thread_id: None,
+        archived: false,
         message_count: 0,
         tool_call_count: 0,
+        active_turn_id: None,
         title: None,
     }
 }
@@ -136,9 +149,50 @@ pub(crate) fn insert_tui_message_with_metadata(
     .expect("insert tui message");
 }
 
+pub(crate) async fn start_thread_fixture(
+    app: &TuiApp,
+    cwd: &Path,
+    source: &str,
+    model: &str,
+    provider: &str,
+    metadata: Option<Value>,
+) -> String {
+    let mut request = StartThreadRequest::new(cwd);
+    request.source = source.to_string();
+    request.metadata = metadata;
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(request)
+        .await
+        .expect("test Thread");
+    thread
+        .set_model_selection(ThreadModelSelection {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            reasoning_effort: None,
+        })
+        .await
+        .expect("test Thread model selection");
+    thread.id().to_string()
+}
+
+pub(crate) async fn materialize_current_thread_fixture(app: &mut TuiApp) -> String {
+    let mut request = StartThreadRequest::new(app.cwd.clone());
+    request.source = "tui".to_string();
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(request)
+        .await
+        .expect("current test Thread");
+    let thread_id = thread.id().to_string();
+    app.current_session = Some(thread_id.clone());
+    thread_id
+}
+
 pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
-    let workspace_id =
-        psychevo::__product::platform::workspace_snapshot_id(&app.cwd).expect("workspace id");
+    let workspace_id = psychevo::paths::workspace_snapshot_id(&app.cwd).expect("workspace id");
     let git_dir = app
         .home
         .join("snapshots")
@@ -222,74 +276,37 @@ reasoning_effort = "high"
     path
 }
 
+pub(crate) fn install_tui_test_config(app: &mut TuiApp, config_path: &Path) {
+    let local_config_dir = app.cwd.join(".psychevo");
+    std::fs::create_dir_all(&local_config_dir).expect("local config dir");
+    std::fs::copy(config_path, local_config_dir.join("config.toml")).expect("local config");
+    app.config_path = Some(config_path.to_path_buf());
+}
+
 pub(crate) async fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
     let mut app = test_app(temp).await;
     app.env_map
         .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
     let config_path = write_tui_model_config(temp);
-    std::fs::create_dir_all(app.cwd.join(".psychevo")).expect("local config dir");
-    std::fs::copy(&config_path, app.cwd.join(".psychevo/config.toml")).expect("local config");
-    app.config_path = Some(config_path);
+    install_tui_test_config(&mut app, &config_path);
     app.current_model = Some("mock/mock-model".to_string());
     app.current_variant = None;
     app.refresh_selected_model();
     app
 }
 
-// Test chunks stay in this module so existing helpers remain shared.
-#[path = "core.rs"]
-pub(crate) mod core;
-#[allow(unused_imports)]
-use core::*;
-#[path = "clarify.rs"]
-pub(crate) mod clarify;
-#[allow(unused_imports)]
-use clarify::*;
-#[path = "snapshots.rs"]
-pub(crate) mod snapshots;
-#[allow(unused_imports)]
-use snapshots::*;
-#[path = "transcript_files.rs"]
-pub(crate) mod transcript_files;
-#[allow(unused_imports)]
-use transcript_files::*;
-#[path = "input_popups.rs"]
-pub(crate) mod input_popups;
-#[allow(unused_imports)]
-use input_popups::*;
-#[path = "agents_panel.rs"]
-pub(crate) mod agents_panel;
-#[allow(unused_imports)]
-use agents_panel::*;
-#[path = "commands.rs"]
-pub(crate) mod commands;
-#[allow(unused_imports)]
-use commands::*;
-#[path = "models.rs"]
-pub(crate) mod models;
-#[allow(unused_imports)]
-use models::*;
-#[path = "runtime_sessions.rs"]
-pub(crate) mod runtime_sessions;
-#[allow(unused_imports)]
-use runtime_sessions::*;
-#[path = "rendering_history.rs"]
-pub(crate) mod rendering_history;
-#[allow(unused_imports)]
-use rendering_history::*;
-#[path = "shell_history.rs"]
-pub(crate) mod shell_history;
-#[allow(unused_imports)]
-use shell_history::*;
-#[path = "selection_clipboard.rs"]
-pub(crate) mod selection_clipboard;
-#[allow(unused_imports)]
-use selection_clipboard::*;
-#[path = "adaptive_rendering.rs"]
+// Test scenarios are ordinary modules; shared fixtures stay in their owning module.
 pub(crate) mod adaptive_rendering;
-#[allow(unused_imports)]
-use adaptive_rendering::*;
-#[path = "fixtures.rs"]
+pub(crate) mod agents_panel;
+pub(crate) mod clarify;
+pub(crate) mod commands;
+pub(crate) mod core;
 pub(crate) mod fixtures;
-#[allow(unused_imports)]
-use fixtures::*;
+pub(crate) mod input_popups;
+pub(crate) mod models;
+pub(crate) mod rendering_history;
+pub(crate) mod runtime_sessions;
+pub(crate) mod selection_clipboard;
+pub(crate) mod shell_history;
+pub(crate) mod snapshots;
+pub(crate) mod transcript_files;

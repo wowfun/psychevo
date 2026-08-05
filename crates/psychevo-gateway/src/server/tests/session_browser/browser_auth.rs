@@ -1,15 +1,31 @@
+use psychevo::host_paths::normalized_native_path;
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::{RpcRequest, cwd_source};
+use crate::server::scope_session::ResolvedScope;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connection() {
     let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
+    let mut start = psychevo::StartThreadRequest::new(&other_cwd);
+    start.source = "web".to_string();
     let session_id = state
         .inner
-        .state
-
-        .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("thread")
+        .id()
+        .to_string();
     let browser_session_id = "browser-session".to_string();
     state
         .inner
@@ -33,7 +49,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/resume".to_string(),
             params: Some(json!({ "threadId": session_id })),
@@ -57,7 +73,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
         auth,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": other_cwd })),
@@ -100,7 +116,7 @@ async fn browser_session_profile_auth_allows_global_settings_for_other_cwd() {
         },
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": other_cwd })),
@@ -121,12 +137,14 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
+    let mut start = psychevo::StartThreadRequest::new(&other_cwd);
+    start.source = "web".to_string();
     state
         .inner
-        .state
-
-        .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("existing project session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("existing project thread");
     let browser_session_id = "browser-session".to_string();
     state
         .inner
@@ -155,7 +173,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
@@ -186,7 +204,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
         auth,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": other_cwd })),
@@ -236,7 +254,7 @@ root = "~/workspaces"
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "workspace/create".to_string(),
             params: Some(json!({ "name": "Notes" })),
@@ -280,7 +298,7 @@ root = "~/workspaces"
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "workspace/create".to_string(),
             params: Some(json!({
@@ -297,7 +315,10 @@ root = "~/workspaces"
             .canonicalize()
             .expect("created outside cwd"),
     );
-    assert_eq!(outside_created["cwd"].as_str(), Some(outside_cwd.to_string_lossy().as_ref()));
+    assert_eq!(
+        outside_created["cwd"].as_str(),
+        Some(outside_cwd.to_string_lossy().as_ref())
+    );
 
     let missing_parent = temp.path().join("missing-parent");
     let missing_error = handle_rpc(
@@ -305,7 +326,7 @@ root = "~/workspaces"
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(3)),
             method: "workspace/create".to_string(),
             params: Some(json!({ "name": "child", "parent": missing_parent })),
@@ -321,7 +342,7 @@ root = "~/workspaces"
         auth,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(4)),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": cwd_string.clone() })),

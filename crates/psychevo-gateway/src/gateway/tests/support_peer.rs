@@ -1,134 +1,147 @@
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
-    use psychevo::__ai::Outcome;
-    use psychevo::{__product::runtime::PermissionMode, __product::runtime::RunMode, __product::runtime::UserShellContextOptions};
-    use psychevo::__agent_core::{AssistantBlock, Message, UserContentBlock};
-    use tokio::sync::{Notify, mpsc};
+use psychevo::application::{
+    AssistantBlock, Message, Outcome, PermissionApprovalRequest, RunStreamEvent, UserContentBlock,
+};
+use psychevo::{Application, PermissionMode, RunMode};
+use serde_json::json;
+use tokio::sync::{Notify, oneshot};
+use uuid::Uuid;
 
-    #[derive(Debug, Clone)]
-    struct FakeRun {
-        prompt: String,
-        session: Option<String>,
-        cwd: PathBuf,
-        model: Option<String>,
-        reasoning_effort: Option<String>,
-        mode: RunMode,
-        permission_mode: Option<PermissionMode>,
-        runtime_options: BTreeMap<String, String>,
+use super::super::Gateway;
+use super::super::activity::{
+    SendTurnRequest, ThreadCallerContext, ThreadSurface, ThreadTurnIntent, ThreadTurnPolicy,
+};
+use super::super::results::GatewayTurnResult;
+use crate::composition::GatewayApplication;
+use crate::{FrameworkNativeTestExecutor, gateway_now_ms};
+use psychevo_gateway_protocol::source::{
+    BackendKind, GatewayBackendInfo, GatewayInputPart, GatewaySource, GatewaySourceLifetime,
+    GatewayThread, GatewayTurn, GatewayTurnStatus,
+};
+
+#[derive(Debug, Clone)]
+pub(super) struct FakeRun {
+    pub(super) prompt: String,
+    pub(super) session: Option<String>,
+    pub(super) cwd: PathBuf,
+    pub(super) model: Option<String>,
+    pub(super) reasoning_effort: Option<String>,
+    pub(super) mode: RunMode,
+    pub(super) permission_mode: Option<PermissionMode>,
+    pub(super) runtime_options: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct WaitFirst {
+    run_number: usize,
+    pub(super) started: Arc<Notify>,
+    pub(super) release: Arc<Notify>,
+}
+
+#[derive(Default)]
+struct FrameworkNativeProbeInner {
+    runs: Mutex<Vec<FakeRun>>,
+    binding_before_run: Mutex<Vec<bool>>,
+    next_run: AtomicUsize,
+    wait_first: Mutex<Option<WaitFirst>>,
+    request_permission: AtomicBool,
+    emit_stream_terminal: AtomicBool,
+    persist_history: AtomicBool,
+    fail_next: AtomicBool,
+    hidden_messages_next: AtomicUsize,
+    context_snapshot: Mutex<Option<psychevo::context_usage::ContextSnapshot>>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct FrameworkNativeProbe {
+    inner: Arc<FrameworkNativeProbeInner>,
+}
+
+impl FrameworkNativeProbe {
+    pub(super) fn runs(&self) -> Vec<FakeRun> {
+        self.inner
+            .runs
+            .lock()
+            .expect("fake run lock poisoned")
+            .clone()
     }
 
-    #[derive(Debug, Clone)]
-    struct WaitFirst {
-        run_number: usize,
-        started: Arc<Notify>,
-        release: Arc<Notify>,
+    pub(super) fn binding_before_run(&self) -> Vec<bool> {
+        self.inner
+            .binding_before_run
+            .lock()
+            .expect("fake binding observation lock poisoned")
+            .clone()
     }
 
-    #[derive(Default)]
-    struct FakeBackendInner {
-        runs: Mutex<Vec<FakeRun>>,
-        binding_before_run: Mutex<Vec<bool>>,
-        next_run: AtomicUsize,
-        wait_first: Mutex<Option<WaitFirst>>,
-        request_permission: AtomicBool,
-        emit_stream_terminal: AtomicBool,
-        persist_history: AtomicBool,
-        context_snapshot: Mutex<Option<psychevo::__product::usage::ContextSnapshot>>,
+    pub(super) fn wait_on_first_run(&self) -> WaitFirst {
+        self.wait_on_next_run()
     }
 
-    #[derive(Clone, Default)]
-    struct FakeBackend {
-        inner: Arc<FakeBackendInner>,
+    pub(super) fn wait_on_next_run(&self) -> WaitFirst {
+        let run_number = self.inner.next_run.load(Ordering::SeqCst) + 1;
+        let wait = WaitFirst {
+            run_number,
+            started: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        };
+        *self
+            .inner
+            .wait_first
+            .lock()
+            .expect("fake wait lock poisoned") = Some(wait.clone());
+        wait
     }
 
-    impl FakeBackend {
-        fn runs(&self) -> Vec<FakeRun> {
-            self.inner
-                .runs
-                .lock()
-                .expect("fake run lock poisoned")
-                .clone()
-        }
-
-        fn binding_before_run(&self) -> Vec<bool> {
-            self.inner
-                .binding_before_run
-                .lock()
-                .expect("fake binding observation lock poisoned")
-                .clone()
-        }
-
-        fn wait_on_first_run(&self) -> WaitFirst {
-            self.wait_on_next_run()
-        }
-
-        fn wait_on_next_run(&self) -> WaitFirst {
-            let run_number = self.inner.next_run.load(Ordering::SeqCst) + 1;
-            let wait = WaitFirst {
-                run_number,
-                started: Arc::new(Notify::new()),
-                release: Arc::new(Notify::new()),
-            };
-            *self
-                .inner
-                .wait_first
-                .lock()
-                .expect("fake wait lock poisoned") = Some(wait.clone());
-            wait
-        }
-
-        fn request_permission(&self) {
-            self.inner.request_permission.store(true, Ordering::SeqCst);
-        }
-
-        fn emit_stream_terminal(&self) {
-            self.inner
-                .emit_stream_terminal
-                .store(true, Ordering::SeqCst);
-        }
-
-        fn persist_history(&self) {
-            self.inner.persist_history.store(true, Ordering::SeqCst);
-        }
-
+    pub(super) fn request_permission(&self) {
+        self.inner.request_permission.store(true, Ordering::SeqCst);
     }
 
-    impl fmt::Debug for FakeBackend {
-        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("FakeBackend")
-        }
+    pub(super) fn emit_stream_terminal(&self) {
+        self.inner
+            .emit_stream_terminal
+            .store(true, Ordering::SeqCst);
     }
 
-    impl GatewayBackend for FakeBackend {
-        fn kind(&self) -> BackendKind {
-            BackendKind::Native
-        }
+    pub(super) fn persist_history(&self) {
+        self.inner.persist_history.store(true, Ordering::SeqCst);
+    }
 
-        fn run_turn(
-            &self,
-            request: BackendTurnRequest,
-        ) -> BoxFuture<'static, psychevo::Result<RunResult>> {
-            let inner = Arc::clone(&self.inner);
+    pub(super) fn fail_next(&self) {
+        self.inner.fail_next.store(true, Ordering::SeqCst);
+    }
+
+    pub(super) fn append_hidden_messages_on_next(&self, count: usize) {
+        self.inner
+            .hidden_messages_next
+            .store(count, Ordering::SeqCst);
+    }
+}
+
+impl fmt::Debug for FrameworkNativeProbe {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FrameworkNativeProbe")
+    }
+}
+
+impl FrameworkNativeProbe {
+    pub(super) fn executor(&self) -> FrameworkNativeTestExecutor {
+        let inner = Arc::clone(&self.inner);
+        Arc::new(move |invocation| {
+            let inner = Arc::clone(&inner);
             Box::pin(async move {
+                invocation.persistence.confirm_delivery().await?;
                 let run_number = inner.next_run.fetch_add(1, Ordering::SeqCst) + 1;
-                let binding_before_run = if let Some(thread_id) =
-                    request.options.session.as_deref()
-                {
-                    request
-                        .options
-                        .state
-                        .gateway_runtime_binding(thread_id)
-                        .await
-                        .ok()
-                        .flatten()
-                } else {
-                    None
-                }
-                    .is_some_and(|binding| {
-                        binding.status == GatewayRuntimeBindingStatus::Resolved
-                            && binding.runtime_ref.as_deref() == Some("native")
-                            && binding.native_session_id.as_deref()
-                                == request.options.session.as_deref()
-                    });
+                let session_id = invocation.receipt.thread_id.clone();
+                let binding_before_run = invocation.binding.as_ref().is_some_and(|binding| {
+                    binding.runtime_ref == "native"
+                        && binding.native_session_id.as_deref() == Some(session_id.as_str())
+                });
                 inner
                     .binding_before_run
                     .lock()
@@ -137,14 +150,14 @@
                 {
                     let mut runs = inner.runs.lock().expect("fake run lock poisoned");
                     runs.push(FakeRun {
-                        prompt: request.options.prompt.clone(),
-                        session: request.options.session.clone(),
-                        cwd: request.options.cwd.clone(),
-                        model: request.options.model.clone(),
-                        reasoning_effort: request.options.reasoning_effort.clone(),
-                        mode: request.options.mode,
-                        permission_mode: request.options.permission_mode,
-                        runtime_options: request.options.runtime_options.clone(),
+                        prompt: invocation.input.prompt.clone(),
+                        session: Some(session_id.clone()),
+                        cwd: PathBuf::from(&invocation.thread.cwd),
+                        model: invocation.model.model.clone(),
+                        reasoning_effort: invocation.model.reasoning_effort.clone(),
+                        mode: invocation.execution.mode,
+                        permission_mode: invocation.execution.permission_mode,
+                        runtime_options: invocation.target.runtime_options.clone(),
                     });
                 }
 
@@ -158,23 +171,15 @@
                     && run_number == wait.run_number
                 {
                     wait.started.notify_one();
-                    if let Some(mut abort) = request
-                        .control
-                        .as_ref()
-                        .map(psychevo::__product::runtime::RunControl::abort_signal)
-                    {
-                        tokio::select! {
-                            _ = wait.release.notified() => {}
-                            _ = abort.wait_for_abort() => aborted = true,
-                        }
-                    } else {
-                        wait.release.notified().await;
+                    tokio::select! {
+                        _ = wait.release.notified() => {}
+                        _ = invocation.control.wait_for_interrupt() => aborted = true,
                     }
                 }
 
                 if !aborted
                     && inner.request_permission.swap(false, Ordering::SeqCst)
-                    && let Some(handler) = request.options.approval_handler.clone()
+                    && let Some(handler) = invocation.execution.approval_handler.clone()
                 {
                     let _decision = handler
                         .request_permission(PermissionApprovalRequest {
@@ -192,83 +197,83 @@
                         .await;
                 }
 
-                let session_id = if let Some(session_id) = request.options.session.clone() {
-                    request.options.state.resume_session(&session_id).await?;
-                    session_id
-                } else {
-                    request
-                        .options
-                        .state
-                        .create_session_with_metadata(
-                            &request.options.cwd,
-                            &request.runtime_source,
-                            "fake-model",
-                            "fake-provider",
-                            None,
-                        )
-                        .await?
-                };
                 let outcome = if aborted {
                     Outcome::Aborted
                 } else {
                     Outcome::Normal
                 };
+                if inner.fail_next.swap(false, Ordering::SeqCst) {
+                    return Err(psychevo::Error::Message(
+                        "injected transcript pagination failure".to_string(),
+                    ));
+                }
                 let final_answer = format!("answer {run_number}");
-                if outcome == Outcome::Normal && inner.persist_history.load(Ordering::SeqCst) {
+                let hidden_message_count = inner.hidden_messages_next.swap(0, Ordering::SeqCst);
+                if outcome == Outcome::Normal && hidden_message_count > 0 {
                     let timestamp_ms = crate::gateway_now_ms();
-                    request
-                        .options
-                        .state
-                        .append_message(
-                            &session_id,
-                            &Message::User {
-                                content: vec![UserContentBlock::text(
-                                    request.options.prompt.clone(),
-                                )],
-                                timestamp_ms,
-                            },
-                        )
+                    for index in 0..hidden_message_count {
+                        invocation
+                            .persistence
+                            .append_message_with_metrics(
+                                Message::User {
+                                    content: vec![UserContentBlock::text(format!(
+                                        "hidden context {index}"
+                                    ))],
+                                    timestamp_ms: timestamp_ms.saturating_add(index as i64),
+                                },
+                                None,
+                                Some(json!({
+                                    "side_inherited": {"hidden": true}
+                                })),
+                            )
+                            .await?;
+                    }
+                } else if outcome == Outcome::Normal && inner.persist_history.load(Ordering::SeqCst)
+                {
+                    let timestamp_ms = crate::gateway_now_ms();
+                    invocation
+                        .persistence
+                        .append_message(Message::User {
+                            content: vec![UserContentBlock::text(invocation.input.prompt.clone())],
+                            timestamp_ms,
+                        })
                         .await?;
-                    request
-                        .options
-                        .state
-                        .append_message(
-                            &session_id,
-                            &Message::Assistant {
-                                content: vec![AssistantBlock::Text {
-                                    text: final_answer.clone(),
-                                }],
-                                timestamp_ms: timestamp_ms.saturating_add(1),
-                                finish_reason: Some("stop".to_string()),
-                                outcome,
-                                model: Some("fake-model".to_string()),
-                                provider: Some("fake-provider".to_string()),
-                            },
-                        )
+                    invocation
+                        .persistence
+                        .append_message(Message::Assistant {
+                            content: vec![AssistantBlock::Text {
+                                text: final_answer.clone(),
+                            }],
+                            timestamp_ms: timestamp_ms.saturating_add(1),
+                            finish_reason: Some("stop".to_string()),
+                            outcome,
+                            model: Some("fake-model".to_string()),
+                            provider: Some("fake-provider".to_string()),
+                        })
                         .await?;
                 }
-                if inner.emit_stream_terminal.load(Ordering::SeqCst)
-                    && let Some(stream) = request.stream.as_ref()
-                {
-                    stream(RunStreamEvent::value(json!({
-                        "type": "turn_complete",
-                        "session_id": session_id.clone(),
-                        "source": "native_conformance_fake",
-                        "outcome": outcome.as_str(),
-                    })));
+                if inner.emit_stream_terminal.load(Ordering::SeqCst) {
+                    invocation
+                        .events
+                        .emit_agent_event(RunStreamEvent::value(json!({
+                            "type": "turn_complete",
+                            "session_id": session_id.clone(),
+                            "source": "native_conformance_fake",
+                            "outcome": outcome.as_str(),
+                        })));
                 }
 
-                Ok(RunResult {
-                    session_id,
-                    outcome,
+                Ok(psychevo::TurnResult {
+                    thread_id: session_id,
+                    outcome: if aborted {
+                        psychevo::TurnOutcome::Interrupted
+                    } else {
+                        psychevo::TurnOutcome::Completed
+                    },
                     terminal_reason: None,
                     final_answer,
-                    db_path: request.options.state.db_path().to_path_buf(),
-                    cwd: request.options.cwd,
                     provider: "fake-provider".to_string(),
                     model: "fake-model".to_string(),
-                    base_url: String::new(),
-                    api_key_env: None,
                     reasoning_effort: None,
                     context_limit: None,
                     tool_failures: 0,
@@ -280,452 +285,328 @@
                         .expect("fake context snapshot lock poisoned")
                         .clone(),
                     terminal_error: None,
-                    events: Vec::new(),
                     warnings: Vec::new(),
                 })
             })
-        }
+        })
+    }
+}
+
+pub(super) struct Harness {
+    pub(super) _temp: tempfile::TempDir,
+    pub(super) cwd: PathBuf,
+    pub(super) db_path: PathBuf,
+    pub(super) durability: psychevo::application::GatewayDurability,
+    pub(super) gateway: Gateway,
+    pub(super) _application: Application,
+}
+
+impl Harness {
+    pub(super) async fn send(
+        &self,
+        request: SendTurnRequest,
+    ) -> psychevo::Result<GatewayTurnResult> {
+        send_framework_turn(self._application.clone(), self.gateway.clone(), request).await
     }
 
-    struct Harness {
-        _temp: tempfile::TempDir,
-        cwd: PathBuf,
-        state: StateRuntime,
-        gateway: Gateway,
-        _application: Application,
+    pub(super) fn runner(&self) -> (Application, Gateway) {
+        (self._application.clone(), self.gateway.clone())
     }
+}
 
-    impl Harness {
-        async fn send(&self, request: SendTurnRequest) -> psychevo::Result<GatewayTurnResult> {
-            send_framework_turn(
-                self._application.clone(),
-                self.gateway.clone(),
-                request,
+pub(super) async fn harness(backend: Arc<FrameworkNativeProbe>) -> Harness {
+    harness_with_native_test_executor(Some(backend.executor())).await
+}
+
+pub(super) async fn native_provider_harness() -> Harness {
+    harness_with_native_test_executor(None).await
+}
+
+async fn harness_with_native_test_executor(
+    native_test_executor: Option<FrameworkNativeTestExecutor>,
+) -> Harness {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let db_path = temp.path().join("state.db");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).expect("home");
+    let inherited_env = if native_test_executor.is_some() {
+        BTreeMap::new()
+    } else {
+        BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            ),
+        ])
+    };
+    let runtime = match native_test_executor {
+        Some(executor) => {
+            GatewayApplication::open_with_native_test_executor(
+                home.clone(),
+                db_path.clone(),
+                None,
+                inherited_env,
+                executor,
             )
             .await
         }
-
-        fn runner(&self) -> (Application, Gateway) {
-            (self._application.clone(), self.gateway.clone())
-        }
+        None => GatewayApplication::open(home.clone(), db_path.clone(), None, inherited_env).await,
     }
-
-    async fn harness(backend: Arc<FakeBackend>) -> Harness {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let cwd = temp.path().join("work");
-        std::fs::create_dir_all(&cwd).expect("cwd");
-        let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state runtime");
-        let gateway = Gateway::with_backend(state.clone(), backend);
-        let application = Application::__from_open_state(
-            temp.path().join("home"),
-            None,
-            state.clone(),
-            Arc::new(GatewayAgentSessionAdapter::new(gateway.clone())),
-        );
-        gateway
-            .attach_framework_application(application.clone())
-            .expect("attach Framework Application");
-        Harness {
-            _temp: temp,
-            cwd,
-            state,
-            gateway,
-            _application: application,
-        }
+    .expect("test composition");
+    let application = runtime.application().clone();
+    let durability = application.gateway_durability();
+    let gateway = runtime.gateway().clone();
+    Harness {
+        _temp: temp,
+        cwd,
+        db_path,
+        durability,
+        gateway,
+        _application: application,
     }
+}
 
-    async fn send_framework_turn(
-        application: Application,
-        gateway: Gateway,
-        request: SendTurnRequest,
-    ) -> psychevo::Result<GatewayTurnResult> {
-        send_framework_turn_inner(application, gateway, request, None).await
-    }
+pub(super) async fn send_framework_turn(
+    application: Application,
+    gateway: Gateway,
+    request: SendTurnRequest,
+) -> psychevo::Result<GatewayTurnResult> {
+    send_framework_turn_inner(application, gateway, request, None, None).await
+}
 
-    async fn send_framework_turn_with_id(
-        application: Application,
-        gateway: Gateway,
-        request: SendTurnRequest,
-        turn_id: String,
-    ) -> psychevo::Result<GatewayTurnResult> {
-        send_framework_turn_inner(application, gateway, request, Some(turn_id)).await
-    }
+pub(super) async fn send_framework_turn_with_id(
+    application: Application,
+    gateway: Gateway,
+    request: SendTurnRequest,
+    turn_id: String,
+) -> psychevo::Result<GatewayTurnResult> {
+    send_framework_turn_inner(application, gateway, request, Some(turn_id), None).await
+}
 
-    async fn send_framework_turn_inner(
-        application: Application,
-        gateway: Gateway,
-        mut request: SendTurnRequest,
-        turn_id: Option<String>,
-    ) -> psychevo::Result<GatewayTurnResult> {
-        let client = application.client();
-        let explicit_thread_id = request
-            .thread_id
-            .clone()
-            .or_else(|| request.options.session.clone());
-        let mapped_thread_id = if explicit_thread_id.is_none()
-            && !request.reset_source_binding
-            && let Some(source) = request.source.as_ref()
-        {
-            gateway.resolve_source_thread(source).await?
-        } else {
-            None
-        };
-        let continued_thread_id = if explicit_thread_id.is_none()
-            && mapped_thread_id.is_none()
-            && request.options.continue_latest
-        {
-            let continue_sources = if request.continue_sources.is_empty() {
-                vec![
-                    request
-                        .runtime_source
-                        .as_deref()
-                        .unwrap_or("test"),
-                ]
-            } else {
-                request
-                    .continue_sources
-                    .iter()
-                    .map(String::as_str)
-                    .collect()
-            };
-            gateway
-                .state
-                .latest_session_for_cwd_with_sources(&request.options.cwd, &continue_sources)
-                .await?
-        } else {
-            None
-        };
-        let thread =
-            if let Some(thread_id) = explicit_thread_id.or(mapped_thread_id).or(continued_thread_id)
-        {
-            client.resume_thread(&thread_id).await?
-        } else {
-            let mut start = psychevo::StartThreadRequest::new(&request.options.cwd);
-            start.source = request
-                .runtime_source
-                .clone()
-                .unwrap_or_else(|| "test".to_string());
-            start.metadata = request.lineage.clone();
-            let thread = client.start_thread(start).await?;
-            if let Some(source) = request.bind_source.as_ref().or(request.source.as_ref())
-                && source.lifetime != GatewaySourceLifetime::Invocation
-            {
-                gateway
-                    .bind_source_thread(
-                        source,
-                        thread.id(),
-                        &GatewayBackendInfo {
-                            kind: BackendKind::Native,
-                            runtime_ref: request.options.runtime_ref.clone(),
-                            native_id: None,
-                        },
-                        request.lineage.clone(),
-                    )
-                    .await?;
-            }
-            thread
-        };
+pub(super) async fn send_framework_turn_with_handle(
+    application: Application,
+    gateway: Gateway,
+    request: SendTurnRequest,
+    accepted_handle: oneshot::Sender<psychevo::TurnHandle>,
+) -> psychevo::Result<GatewayTurnResult> {
+    send_framework_turn_inner(application, gateway, request, None, Some(accepted_handle)).await
+}
 
-        let input = if request.input.is_empty() {
-            let mut input = vec![GatewayInputPart::Text {
-                text: request.options.prompt.clone(),
-            }];
-            input.extend(request.options.image_inputs.iter().cloned().map(|image| {
-                GatewayInputPart::Image {
-                    input: match image {
-                        ImageInput::LocalPath(path) => {
-                            GatewayImageInput::LocalPath {
-                                path: path.display().to_string(),
-                            }
-                        }
-                        ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
-                    },
-                }
-            }));
-            input
+async fn send_framework_turn_inner(
+    application: Application,
+    gateway: Gateway,
+    mut request: SendTurnRequest,
+    turn_id: Option<String>,
+    accepted_handle: Option<oneshot::Sender<psychevo::TurnHandle>>,
+) -> psychevo::Result<GatewayTurnResult> {
+    let client = application.client();
+    let explicit_thread_id = request.thread_id.clone();
+    let mapped_thread_id = if explicit_thread_id.is_none()
+        && !request.reset_source_binding
+        && let Some(source) = request.source.as_ref()
+    {
+        gateway.resolve_source_thread(source).await?
+    } else {
+        None
+    };
+    let continued_thread_id = if explicit_thread_id.is_none()
+        && mapped_thread_id.is_none()
+        && request.policy.continue_latest
+    {
+        let continue_sources = if request.continue_sources.is_empty() {
+            vec![request.runtime_source.as_deref().unwrap_or("test")]
         } else {
-            std::mem::take(&mut request.input)
+            request
+                .continue_sources
+                .iter()
+                .map(String::as_str)
+                .collect()
         };
-        let mut caller = ThreadCallerContext::new(
-            ThreadSurface::Other("conformance".to_string()),
-            request.options.cwd.clone(),
-        );
-        caller.runtime_source = request
+        client
+            .list_threads(psychevo::ThreadListQuery {
+                cwd: Some(request.cwd.clone()),
+                archived: false,
+                sources: continue_sources.into_iter().map(str::to_string).collect(),
+                cursor: None,
+                limit: 1,
+            })
+            .await?
+            .threads
+            .into_iter()
+            .next()
+            .map(|thread| thread.id)
+    } else {
+        None
+    };
+    let thread = if let Some(thread_id) = explicit_thread_id
+        .or(mapped_thread_id)
+        .or(continued_thread_id)
+    {
+        client.resume_thread(&thread_id).await?
+    } else {
+        let mut start = psychevo::StartThreadRequest::new(&request.cwd);
+        start.source = request
             .runtime_source
-            .take()
+            .clone()
             .unwrap_or_else(|| "test".to_string());
-        caller.continue_sources = std::mem::take(&mut request.continue_sources);
-        caller.stream_observer = request.stream.take();
-        caller.event_observer = request.event_sink.take();
-        caller.workspace_mutations = request.options.workspace_mutations.take();
-        caller.runtime_tools = std::mem::take(&mut request.options.runtime_tools);
-        if let (Some(handle), Some(control)) =
-            (request.control_handle.take(), request.control.take())
+        start.metadata = request.lineage.clone();
+        let thread = client.start_thread(start).await?;
+        if let Some(source) = request.bind_source.as_ref().or(request.source.as_ref())
+            && source.lifetime != GatewaySourceLifetime::Invocation
         {
-            caller.set_control(handle, control);
+            gateway
+                .bind_source_thread(
+                    source,
+                    thread.id(),
+                    &GatewayBackendInfo {
+                        kind: BackendKind::Native,
+                        runtime_ref: request.policy.runtime_profile_ref.clone(),
+                        native_id: None,
+                    },
+                    request.lineage.clone(),
+                )
+                .await?;
         }
+        thread
+    };
 
-        let mut intent = ThreadTurnIntent::new(input);
-        intent.thread_id = Some(thread.id().to_string());
-        intent.source = request.source;
-        intent.bind_source = request.bind_source;
-        intent.reset_source_binding = request.reset_source_binding;
-        intent.lineage = request.lineage;
-        intent.turn_id = Some(turn_id.unwrap_or_else(|| Uuid::now_v7().to_string()));
-        intent.policy = ThreadTurnPolicy {
-            snapshot_root: request.options.snapshot_root,
-            continue_latest: false,
-            extract_prompt_image_sources: request.options.extract_prompt_image_sources,
-            prompt_display: request.options.prompt_display,
-            max_context_messages: request.options.max_context_messages,
-            config_path: request.options.config_path,
-            project_context_override: request.options.project_context_override,
-            sandbox_override: request.options.sandbox_override,
-            model: request.options.model,
-            reasoning_effort: request.options.reasoning_effort,
-            runtime_profile_ref: request.options.runtime_ref,
-            control_values: request.options.runtime_options,
-            initial_thread_preferences: request.initial_thread_preferences,
-            include_reasoning: request.options.include_reasoning,
-            mode: request.options.mode,
-            permission_mode: request.options.permission_mode,
-            approval_handler: request.options.approval_handler,
-            clarify_enabled: request.options.clarify_enabled,
-            inherited_env: request.options.inherited_env,
-            agent_ref: request.options.agent,
-            no_agents: request.options.no_agents,
-            no_skills: request.options.no_skills,
-            selected_capability_roots: request.options.selected_capability_roots,
-            skill_inputs: request.options.skill_inputs,
-            mcp_servers: request.options.mcp_servers,
-        };
-        let submission = intent.into_framework_request(caller)?;
-        let handle = thread.start_turn(submission.request).await?;
-        let receipt = handle.receipt().clone();
-        let result = handle.wait().await?;
-        let outcome = match result.outcome {
-            psychevo::TurnOutcome::Completed => Outcome::Normal,
-            psychevo::TurnOutcome::Stopped => Outcome::Stopped,
-            psychevo::TurnOutcome::Failed => Outcome::Failed,
-            psychevo::TurnOutcome::Interrupted => Outcome::Aborted,
-        };
-        let status = match outcome {
-            Outcome::Normal => GatewayTurnStatus::Completed,
-            Outcome::Stopped | Outcome::Aborted => GatewayTurnStatus::Interrupted,
-            Outcome::Failed => GatewayTurnStatus::Failed,
-        };
-        let committed_entries = gateway.thread_transcript(&receipt.thread_id).await?;
-        Ok(GatewayTurnResult {
-            thread: GatewayThread {
-                id: receipt.thread_id.clone(),
-                backend: GatewayBackendInfo {
-                    kind: BackendKind::Native,
-                    runtime_ref: None,
-                    native_id: None,
-                },
-                source_key: None,
-                forked_from_thread_id: None,
+    let input = std::mem::take(&mut request.input);
+    let mut caller = ThreadCallerContext::new(
+        ThreadSurface::Other("conformance".to_string()),
+        request.cwd.clone(),
+    );
+    caller.runtime_source = request
+        .runtime_source
+        .take()
+        .unwrap_or_else(|| "test".to_string());
+    caller.continue_sources = std::mem::take(&mut request.continue_sources);
+    if let Some(observer) = request.turn_events.take() {
+        caller.set_turn_event_observer(observer);
+    }
+    if let Some(event_sink) = request.event_sink.take() {
+        caller.set_event_observer(event_sink);
+    }
+    if let Some(workspace_mutations) = request.workspace_mutations.take() {
+        caller.set_workspace_mutations(workspace_mutations);
+    }
+    caller.set_runtime_tools(std::mem::take(&mut request.runtime_tools));
+    let mut intent = ThreadTurnIntent::new(input);
+    intent.thread_id = Some(thread.id().to_string());
+    intent.source = request.source;
+    intent.turn_id = Some(turn_id.unwrap_or_else(|| Uuid::now_v7().to_string()));
+    request.policy.continue_latest = false;
+    intent.policy = request.policy;
+    let submission = intent.into_framework_request(caller)?;
+    let observers = submission.observers;
+    let handle = thread.start_turn(submission.request).await?;
+    observers.attach(&gateway, handle.clone());
+    if let Some(accepted_handle) = accepted_handle {
+        let _ = accepted_handle.send(handle.clone());
+    }
+    let receipt = handle.receipt().clone();
+    let result = handle.wait().await?;
+    let outcome = match result.outcome {
+        psychevo::TurnOutcome::Completed => Outcome::Normal,
+        psychevo::TurnOutcome::Stopped => Outcome::Stopped,
+        psychevo::TurnOutcome::Failed => Outcome::Failed,
+        psychevo::TurnOutcome::Interrupted => Outcome::Aborted,
+    };
+    let status = match outcome {
+        Outcome::Normal => GatewayTurnStatus::Completed,
+        Outcome::Stopped | Outcome::Aborted => GatewayTurnStatus::Interrupted,
+        Outcome::Failed => GatewayTurnStatus::Failed,
+    };
+    let committed_entries = gateway.thread_transcript(&receipt.thread_id).await?;
+    Ok(GatewayTurnResult {
+        thread: GatewayThread {
+            id: receipt.thread_id.clone(),
+            backend: GatewayBackendInfo {
+                kind: BackendKind::Native,
+                runtime_ref: None,
+                native_id: None,
             },
-            turn: GatewayTurn {
-                id: receipt.turn_id,
-                thread_id: Some(receipt.thread_id.clone()),
-                status,
-                outcome: Some(outcome.as_str().to_string()),
-                error: None,
-                started_at_ms: None,
-                completed_at_ms: Some(gateway_now_ms()),
-            },
-            result: RunResult {
-                session_id: result.thread_id,
-                outcome,
-                terminal_reason: result.terminal_reason,
-                final_answer: result.final_answer,
-                db_path: gateway.state.db_path().to_path_buf(),
-                cwd: request.options.cwd,
-                provider: result.provider,
-                model: result.model,
-                base_url: String::new(),
-                api_key_env: None,
-                reasoning_effort: result.reasoning_effort,
-                context_limit: result.context_limit,
-                tool_failures: result.tool_failures,
-                selected_agent: result.selected_agent,
-                selected_skills: result.selected_skills,
-                context_snapshot: result.context_snapshot,
-                terminal_error: result.terminal_error,
-                events: Vec::new(),
-                warnings: result.warnings,
-            },
-            committed_entries,
-        })
-    }
+            source_key: None,
+            forked_from_thread_id: None,
+        },
+        turn: GatewayTurn {
+            id: receipt.turn_id,
+            thread_id: Some(receipt.thread_id.clone()),
+            status,
+            outcome: Some(outcome.as_str().to_string()),
+            error: None,
+            started_at_ms: None,
+            completed_at_ms: Some(gateway_now_ms()),
+        },
+        result,
+        committed_entries,
+    })
+}
 
-    fn attach_test_application(harness: &Harness, gateway: &Gateway) -> Application {
-        let application = Application::__from_open_state(
-            harness._temp.path().join("home"),
-            None,
-            harness.state.clone(),
-            Arc::new(GatewayAgentSessionAdapter::new(gateway.clone())),
-        );
-        gateway
-            .attach_framework_application(application.clone())
-            .expect("attach test Framework Application");
-        application
-    }
+pub(super) async fn compose_test_application(
+    harness: &Harness,
+    executor: FrameworkNativeTestExecutor,
+) -> (Application, Gateway) {
+    let home = harness._temp.path().join("home");
+    let runtime = GatewayApplication::open_with_native_test_executor(
+        home.clone(),
+        harness.db_path.clone(),
+        None,
+        BTreeMap::new(),
+        executor,
+    )
+    .await
+    .expect("test composition");
+    (runtime.application().clone(), runtime.gateway().clone())
+}
 
-    fn test_acp_command_toml(cwd: &std::path::Path) -> String {
-        let fixture = crate::test_support::acp_fixture(cwd, "fake_acp_lifecycle");
-        crate::test_support::toml_path(&fixture.program)
-    }
+pub(super) fn test_acp_command_toml(cwd: &std::path::Path) -> String {
+    let fixture = crate::test_support::acp_fixture(cwd, "fake_acp_lifecycle");
+    crate::test_support::toml_path(&fixture.program)
+}
 
-    fn copied_acp_fixture(
-        cwd: &std::path::Path,
-        directory: &std::path::Path,
-        name: &str,
-        target_stem: &str,
-    ) -> crate::test_support::AcpFixture {
-        let fixture = crate::test_support::acp_fixture(cwd, name);
-        let target = directory.join(target_stem).with_extension(
-            fixture
-                .script
-                .extension()
-                .expect("ACP fixture extension"),
-        );
-        std::fs::copy(&fixture.script, &target).expect("copy ACP test fixture");
-        crate::test_support::AcpFixture {
-            program: fixture.program,
-            script: target,
-        }
+pub(super) fn copied_acp_fixture(
+    cwd: &std::path::Path,
+    directory: &std::path::Path,
+    name: &str,
+    target_stem: &str,
+) -> crate::test_support::AcpFixture {
+    let fixture = crate::test_support::acp_fixture(cwd, name);
+    let target = directory
+        .join(target_stem)
+        .with_extension(fixture.script.extension().expect("ACP fixture extension"));
+    std::fs::copy(&fixture.script, &target).expect("copy ACP test fixture");
+    crate::test_support::AcpFixture {
+        program: fixture.program,
+        script: target,
     }
+}
 
-    fn run_options(harness: &Harness, prompt: &str) -> RunOptions {
-        RunOptions {
-            state: harness.state.clone(),
-            cwd: harness.cwd.clone(),
-            snapshot_root: None,
-            session: None,
-            continue_latest: false,
-            prompt: prompt.to_string(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: false,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: None,
-            project_context_override: None,
-            sandbox_override: None,
-            model: None,
-            reasoning_effort: None,
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            include_reasoning: false,
-            mode: RunMode::Default,
+pub(super) fn request(harness: &Harness, source: GatewaySource, prompt: &str) -> SendTurnRequest {
+    SendTurnRequest {
+        thread_id: None,
+        source: Some(source),
+        bind_source: None,
+        reset_source_binding: false,
+        input: vec![GatewayInputPart::Text {
+            text: prompt.to_string(),
+        }],
+        cwd: harness.cwd.clone(),
+        policy: ThreadTurnPolicy {
             permission_mode: Some(PermissionMode::Default),
-            approval_handler: None,
-            clarify_enabled: false,
-            inherited_env: None,
-            agent: None,
-            external_agent_delegate: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
-        }
+            ..ThreadTurnPolicy::default()
+        },
+        workspace_mutations: None,
+        runtime_tools: Vec::new(),
+        runtime_source: Some("test".to_string()),
+        continue_sources: vec!["test".to_string()],
+        turn_events: None,
+        event_sink: None,
+        lineage: None,
     }
-
-    fn request(harness: &Harness, source: GatewaySource, prompt: &str) -> SendTurnRequest {
-        SendTurnRequest {
-            thread_id: None,
-            explicit_thread: false,
-            source: Some(source),
-            bind_source: None,
-            reset_source_binding: false,
-            input: Vec::new(),
-            initial_thread_preferences: BTreeMap::new(),
-            options: run_options(harness, prompt),
-            runtime_source: Some("test".to_string()),
-            continue_sources: vec!["test".to_string()],
-            stream: None,
-            event_sink: None,
-            control_handle: None,
-            control: None,
-            lineage: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn peer_delegate_resolver_accepts_subagent_only_backend_agent() {
-        let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend).await;
-        let home = harness._temp.path().join("home");
-        std::fs::create_dir_all(&home).expect("home");
-        std::fs::write(
-            home.join("config.toml"),
-            format!(
-                r#"[agents.backends.fake]
-kind = "acp"
-description = "Fake ACP agent."
-command = {}
-args = ["fake_acp.py"]
-entrypoints = ["subagent"]
-"#,
-                test_acp_command_toml(&harness.cwd),
-            ),
-        )
-        .expect("config");
-        let agents_dir = harness.cwd.join(".psychevo").join("agents");
-        std::fs::create_dir_all(&agents_dir).expect("agents dir");
-        std::fs::write(
-            agents_dir.join("opencode.md"),
-            r#"---
-name: opencode
-description: Delegate to fake ACP.
-backend:
-  ref: fake
-entrypoints: [subagent]
----
-Delegate.
-"#,
-        )
-        .expect("agent");
-        let mut options = run_options(&harness, "@opencode list tools");
-        options.inherited_env = Some(BTreeMap::from([
-            (
-                "HOME".to_string(),
-                harness._temp.path().display().to_string(),
-            ),
-            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
-        ]));
-
-        let peer = resolve_peer_delegate(
-            &options,
-            &ExternalAgentDelegateRequest {
-                run_id: "run-1".to_string(),
-                parent_session_id: "parent".to_string(),
-                child_session_id: "child".to_string(),
-                agent_name: "opencode".to_string(),
-                agent_description: "Delegate to fake ACP.".to_string(),
-                runtime_ref: "acp:fake".to_string(),
-                backend_ref: Some("fake".to_string()),
-                instructions: Some("Delegate.".to_string()),
-                prompt: "list tools".to_string(),
-                task_name: "opencode-run".to_string(),
-                model: None,
-                runtime_options: BTreeMap::new(),
-                expected_runtime_profile_revision: None,
-                abort: {
-                    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-                    AbortSignal::new(abort_rx)
-                },
-            },
-            "test-profile-fingerprint",
-        )
-        .expect("delegate peer");
-        assert_eq!(peer.backend.id, "fake");
-        assert!(peer.agent.supports_entrypoint(AgentEntrypoint::Subagent));
-        assert!(!peer.agent.supports_entrypoint(AgentEntrypoint::Peer));
-    }
+}

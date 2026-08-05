@@ -3,8 +3,8 @@ use super::paths::{deep_merge, env_path};
 use super::selection_scan::{
     ancestor_agents_skill_dirs, available_files, escape_xml, existing_input_path,
     explicit_path_selects_skill, finalize_skill_catalog, find_skill, find_skill_by_path,
-    linked_files, looks_like_existing_path, resolve_configured_path, resolve_skill_relative_path,
-    preprocess_skill_content, select_skills, selected_skill, skill_mentions,
+    linked_files, looks_like_existing_path, preprocess_skill_content, resolve_configured_path,
+    resolve_skill_relative_path, select_skills, selected_skill, skill_mentions,
     skill_prompt_visible_for_activation, strip_frontmatter, truncate_description, valid_env_name,
 };
 use super::{
@@ -1056,8 +1056,10 @@ pub fn skill_context_messages(
     session_id: &str,
     settings: &SkillSettings,
 ) -> Result<Vec<String>> {
-    Ok(skill_context_fragments(skills, catalog, session_id, settings)?
-        .into_iter()
-        .map(|fragment| fragment.content)
-        .collect())
+    Ok(
+        skill_context_fragments(skills, catalog, session_id, settings)?
+            .into_iter()
+            .map(|fragment| fragment.content)
+            .collect(),
+    )
 }

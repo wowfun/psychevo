@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use super::*;
+use crate::server::rpc_json::cwd_source;
 
 #[derive(Default)]
 struct FakeLauncher {
@@ -27,10 +28,10 @@ impl WorkspaceExternalLauncher for FakeLauncher {
 }
 
 fn test_scope(root: &Path) -> ResolvedScope {
-    let root = psychevo::__product::platform::normalized_native_path(root);
+    let root = psychevo::host_paths::normalized_native_path(root);
     ResolvedScope {
         cwd: root.clone(),
-        source: super::super::cwd_source(&root),
+        source: cwd_source(&root),
     }
 }
 
@@ -41,25 +42,25 @@ fn classification_preserves_category_precedence_and_text_like_overlap() {
         (
             "index.HTML",
             b"<main>Hello</main>".as_slice(),
-            wire::WorkspaceExternalFileCategory::Webpage,
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Webpage,
             true,
         ),
         (
             "icon.svg",
             b"<svg></svg>".as_slice(),
-            wire::WorkspaceExternalFileCategory::Image,
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Image,
             true,
         ),
         (
             "table.csv",
             b"a,b\n1,2\n".as_slice(),
-            wire::WorkspaceExternalFileCategory::Office,
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Office,
             true,
         ),
         (
             "photo.png",
             b"\x89PNG\r\n".as_slice(),
-            wire::WorkspaceExternalFileCategory::Image,
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Image,
             false,
         ),
     ] {
@@ -91,7 +92,7 @@ fn classification_probes_utf8_utf16_and_unknown_binary_files() {
         assert_eq!(
             classify_external_file(path).expect("text classification"),
             ExternalFileClassification {
-                category: wire::WorkspaceExternalFileCategory::Text,
+                category: wire::settings_workspace_context::WorkspaceExternalFileCategory::Text,
                 text_like: true,
             }
         );
@@ -99,7 +100,7 @@ fn classification_probes_utf8_utf16_and_unknown_binary_files() {
     assert_eq!(
         classify_external_file(&binary).expect("binary classification"),
         ExternalFileClassification {
-            category: wire::WorkspaceExternalFileCategory::Other,
+            category: wire::settings_workspace_context::WorkspaceExternalFileCategory::Other,
             text_like: false,
         }
     );
@@ -114,7 +115,7 @@ fn unreadable_unknown_content_probe_falls_back_to_other() {
     assert_eq!(
         classification,
         ExternalFileClassification {
-            category: wire::WorkspaceExternalFileCategory::Other,
+            category: wire::settings_workspace_context::WorkspaceExternalFileCategory::Other,
             text_like: false,
         }
     );
@@ -128,7 +129,7 @@ async fn fake_launcher_receives_canonical_workspace_and_file_without_real_proces
     std::fs::write(root.join("src/lib.rs"), "fn main() {}\n").expect("file");
     let fake = Arc::new(FakeLauncher::default());
     let state = WorkspaceExternalState::for_test(
-        wire::WorkspaceExternalHostPlatform::Linux,
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux,
         Some(PathBuf::from("/opt/code/bin/code")),
         fake.clone(),
     );
@@ -145,10 +146,10 @@ async fn fake_launcher_receives_canonical_workspace_and_file_without_real_proces
     let opened = workspace_file_open_external_value(
         &state,
         &scope,
-        wire::WorkspaceFileOpenExternalParams {
+        wire::settings_workspace_context::WorkspaceFileOpenExternalParams {
             scope: scope.to_wire_scope(),
             path: "src/lib.rs".to_string(),
-            action: wire::WorkspaceExternalFileAction::Vscode,
+            action: wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode,
         },
     )
     .await
@@ -157,7 +158,7 @@ async fn fake_launcher_receives_canonical_workspace_and_file_without_real_proces
     assert_eq!(
         *fake.requests.lock().expect("requests"),
         vec![WorkspaceExternalLaunchRequest {
-            action: wire::WorkspaceExternalFileAction::Vscode,
+            action: wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode,
             workspace_root: scope.cwd.clone(),
             file: scope.cwd.join("src/lib.rs"),
             vscode_launcher: Some(PathBuf::from("/opt/code/bin/code")),
@@ -173,7 +174,7 @@ async fn unavailable_vscode_action_is_rejected_before_launcher_invocation() {
     std::fs::write(root.join("README.md"), "hello\n").expect("file");
     let fake = Arc::new(FakeLauncher::default());
     let state = WorkspaceExternalState::for_test(
-        wire::WorkspaceExternalHostPlatform::Linux,
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux,
         None,
         fake.clone(),
     );
@@ -182,10 +183,10 @@ async fn unavailable_vscode_action_is_rejected_before_launcher_invocation() {
     let error = workspace_file_open_external_value(
         &state,
         &scope,
-        wire::WorkspaceFileOpenExternalParams {
+        wire::settings_workspace_context::WorkspaceFileOpenExternalParams {
             scope: scope.to_wire_scope(),
             path: "README.md".to_string(),
-            action: wire::WorkspaceExternalFileAction::Vscode,
+            action: wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode,
         },
     )
     .await
@@ -252,7 +253,7 @@ async fn launcher_failures_surface_without_falling_back_to_another_action() {
         error: Some("launcher exploded".to_string()),
     });
     let state = WorkspaceExternalState::for_test(
-        wire::WorkspaceExternalHostPlatform::Linux,
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux,
         Some(PathBuf::from("/opt/code/bin/code")),
         fake.clone(),
     );
@@ -261,10 +262,10 @@ async fn launcher_failures_surface_without_falling_back_to_another_action() {
     let error = workspace_file_open_external_value(
         &state,
         &scope,
-        wire::WorkspaceFileOpenExternalParams {
+        wire::settings_workspace_context::WorkspaceFileOpenExternalParams {
             scope: scope.to_wire_scope(),
             path: "README.md".to_string(),
-            action: wire::WorkspaceExternalFileAction::Vscode,
+            action: wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode,
         },
     )
     .await
@@ -299,7 +300,7 @@ fn vscode_detection_uses_the_effective_path_without_starting_it() {
 
     assert_eq!(
         detect_vscode_launcher(
-            wire::WorkspaceExternalHostPlatform::Linux,
+            wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux,
             &environment,
             temp.path(),
         ),
@@ -313,8 +314,10 @@ fn windows_well_known_locations_prefer_code_exe_before_command_shims() {
         "LOCALAPPDATA".to_string(),
         r"C:\Users\Ada\AppData\Local".to_string(),
     )]);
-    let candidates =
-        vscode_well_known_paths(wire::WorkspaceExternalHostPlatform::Windows, &environment);
+    let candidates = vscode_well_known_paths(
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows,
+        &environment,
+    );
 
     assert!(candidates[0].ends_with("Code.exe"));
     assert!(candidates[1].ends_with(r"bin\code.cmd"));

@@ -336,14 +336,21 @@ matching in-memory filesystem scope; a cwd target must not invalidate a scope
 that covers a different external target in the same operation. Any hard or
 explicit deny on any target still denies the whole operation.
 
-The runtime keeps an in-process FIFO of pending approval requests. Approval
+The runtime keeps an in-process FIFO of pending approval requests. A TUI that
+multiplexes foreground and auxiliary receivers assigns the global presentation
+sequence and enqueues its request or cancellation as one atomic sequencer
+operation; no allocated-but-not-enqueued sequence may let a later receiver
+overtake it. Approval
 request and response hooks may observe a request before it is shown and after
 it resolves; hooks must not be required for the approval result and must not
 write durable transcript events. Session cleanup, TUI exit, and abort paths
 must release all pending approvals with deny/abort semantics and wake suspended
 calls. [035 Event Stream](../035-event-stream/spec.md) defines the shared
-blocking-action projection lifecycle used by public streams.
-tool calls.
+blocking-action projection lifecycle used by public streams and tool calls.
+The permission runtime owns its timeout and abort race. If either wins, it
+invokes the handler cancellation hook before returning, so a durable approval
+cannot remain pending merely because its convenience response future was
+dropped.
 
 Turn grants are shared by permission runtimes participating in the active root
 turn, including child agents, and are cleared when that turn completes or is

@@ -1,6 +1,42 @@
+use std::path::PathBuf;
+
+use psychevo::command_registry::{
+    CommandCapability, SlashCommandAction, SlashCommandEffect, SlashCommandParse,
+    SlashCommandSurface, available_slash_commands_for_surface, dynamic_slash_command_effect,
+    parse_slash_command_line, slash_invocation_effect,
+};
+use psychevo::{
+    ConfigurationQuery, Error, RunMode, StartThreadRequest, agents::AgentEntrypoint,
+    config::ChannelRuntimeConnection,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::Value;
+use tokio::sync::mpsc;
+
+use crate::im::ImInboundMessage;
+use psychevo_gateway_protocol::events_transcript::{GatewayActionKind, PermissionDecision};
+use psychevo_gateway_protocol::source::GatewaySource;
+
+use super::super::binding::WebState;
+use super::super::runtime_profiles::{
+    runnable_target_for_source, runnable_target_for_source_profile, runtime_profile_list_result,
+    selected_context_target_id, thread_context_read_result_for_target_id,
+    thread_control_set_result,
+};
+use super::super::scope_session::{ResolvedScope, bind_source_to_thread};
+use super::super::settings_observability::{discover_gateway_agents, dynamic_slash_commands};
+use super::super::thread_application::{
+    respond_to_routed_interaction as thread_routed_interaction_respond,
+    run_routed_action as run_routed_thread_action,
+};
+use super::super::voice::{update_voice_policy_for_source, voice_policy_for_source};
 use super::paths::channel_cwd;
-use super::state::ChannelInteractionKind;
-use super::*;
+use super::paths::redact_channel_error;
+use super::state::{ChannelInteractionKind, ChannelRuntimeState};
+use super::{
+    channel_bind_target_draft, channel_draft_agent_ref, channel_effective_profile_ref,
+    channel_multi_question_guidance,
+};
 use crate::server::commands::record_gateway_mission_metadata_for_parent;
 
 pub(super) enum ChannelCommandAction {
@@ -41,11 +77,11 @@ pub(super) async fn route_channel_command(
                 runtime,
                 connection,
                 source,
-                wire::ThreadActionInput::Interrupt,
+                wire::thread_command_turn::ThreadActionInput::Interrupt,
             )
             .await
             {
-                Ok(wire::ThreadActionRunResult::Interrupt {
+                Ok(wire::thread_command_turn::ThreadActionRunResult::Interrupt {
                     interrupted,
                     cleared,
                     ..
@@ -101,7 +137,7 @@ pub(super) async fn route_channel_command(
                     source,
                     &route,
                     GatewayActionKind::Clarify,
-                    wire::ThreadInteractionResponse::Clarify {
+                    wire::thread_command_turn::ThreadInteractionResponse::Clarify {
                         answers: vec![vec![answer.to_string()]],
                     },
                 )
@@ -139,7 +175,7 @@ pub(super) async fn route_channel_command(
                     source,
                     &route,
                     GatewayActionKind::Clarify,
-                    wire::ThreadInteractionResponse::CancelClarify,
+                    wire::thread_command_turn::ThreadInteractionResponse::CancelClarify,
                 )
                 .await
                 {
@@ -191,7 +227,7 @@ async fn channel_permission_reply(
     ) else {
         return Ok("No matching permission request token.".to_string());
     };
-    let response = wire::ThreadInteractionResponse::Permission {
+    let response = wire::thread_command_turn::ThreadInteractionResponse::Permission {
         decision,
         directory: None,
     };
@@ -242,7 +278,7 @@ async fn submit_channel_interaction(
     source: &GatewaySource,
     route: &super::state::ChannelInteractionRoute,
     expected_kind: GatewayActionKind,
-    response: wire::ThreadInteractionResponse,
+    response: wire::thread_command_turn::ThreadInteractionResponse,
 ) -> psychevo::Result<bool> {
     let thread_id = channel_interaction_thread_id(state, route, source).await?;
     thread_routed_interaction_respond(state, &thread_id, &route.action_id, expected_kind, response)
@@ -384,13 +420,16 @@ async fn channel_command_action_from_effect(
                         context.runtime,
                         context.connection,
                         context.source,
-                        wire::ThreadActionInput::Steer {
+                        wire::thread_command_turn::ThreadActionInput::Steer {
                             expected_turn_id,
                             text,
                         },
                     )
                     .await,
-                    Ok(wire::ThreadActionRunResult::Steer { accepted: true, .. })
+                    Ok(wire::thread_command_turn::ThreadActionRunResult::Steer {
+                        accepted: true,
+                        ..
+                    })
                 )
             } else {
                 false
@@ -407,11 +446,11 @@ async fn channel_command_action_from_effect(
                 context.runtime,
                 context.connection,
                 context.source,
-                wire::ThreadActionInput::Interrupt,
+                wire::thread_command_turn::ThreadActionInput::Interrupt,
             )
             .await
             {
-                Ok(wire::ThreadActionRunResult::Interrupt {
+                Ok(wire::thread_command_turn::ThreadActionRunResult::Interrupt {
                     interrupted,
                     cleared,
                     ..
@@ -427,19 +466,16 @@ async fn channel_command_action_from_effect(
             ChannelCommandAction::Reply(channel_voice_reply(context.state, context.source, &mode)?)
         }
         SlashCommandEffect::SandboxShow => {
-            let thread_id = context
-                .state
-                .inner
-                .gateway
-                .resolve_source_thread(context.source)
-                .await?;
-            let options = context
-                .state
-                .run_options(context.scope.cwd.clone(), thread_id);
-            ChannelCommandAction::Reply(psychevo::__product::platform::sandbox_status_text(
-                &options,
-                RunMode::Default,
-            )?)
+            let mut query = ConfigurationQuery::new(&context.scope.cwd);
+            query.inherited_env = Some(context.state.inner.inherited_env.clone());
+            ChannelCommandAction::Reply(
+                context
+                    .state
+                    .inner
+                    .framework
+                    .configuration(query)?
+                    .sandbox_status_text(RunMode::Default)?,
+            )
         }
         SlashCommandEffect::Skills { .. } => {
             ChannelCommandAction::Reply(channel_skills_text(context.state, context.scope)?)
@@ -448,20 +484,24 @@ async fn channel_command_action_from_effect(
             ChannelCommandAction::Reply(channel_agents_text(context.state, context.scope)?)
         }
         SlashCommandEffect::ShowModel => ChannelCommandAction::Reply(
-            channel_runtime_control_reply(context, wire::ThreadControlSurfaceRoleView::Model, None)
-                .await?,
+            channel_runtime_control_reply(
+                context,
+                wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model,
+                None,
+            )
+            .await?,
         ),
         SlashCommandEffect::SetModel { model, variant } => {
             let mut reply = channel_runtime_control_reply(
                 context,
-                wire::ThreadControlSurfaceRoleView::Model,
+                wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model,
                 Some(&model),
             )
             .await?;
             if let Some(variant) = variant {
                 let variant_reply = channel_runtime_control_reply(
                     context,
-                    wire::ThreadControlSurfaceRoleView::Reasoning,
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning,
                     Some(&variant),
                 )
                 .await?;
@@ -473,7 +513,7 @@ async fn channel_command_action_from_effect(
         SlashCommandEffect::SetVariant(variant) => ChannelCommandAction::Reply(
             channel_runtime_control_reply(
                 context,
-                wire::ThreadControlSurfaceRoleView::Reasoning,
+                wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning,
                 Some(&variant),
             )
             .await?,
@@ -481,7 +521,7 @@ async fn channel_command_action_from_effect(
         SlashCommandEffect::SetMode(mode) => ChannelCommandAction::Reply(
             channel_runtime_control_reply(
                 context,
-                wire::ThreadControlSurfaceRoleView::Mode,
+                wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode,
                 Some(&mode),
             )
             .await?,
@@ -512,7 +552,7 @@ async fn channel_command_action_from_effect(
 
 async fn channel_runtime_control_reply(
     context: &ChannelCommandContext<'_>,
-    role: wire::ThreadControlSurfaceRoleView,
+    role: wire::agents_backend_rpc::ThreadControlSurfaceRoleView,
     requested: Option<&str>,
 ) -> psychevo::Result<String> {
     let (runtime_ref, runtime_context) =
@@ -526,7 +566,7 @@ async fn channel_runtime_control_reply(
     let target_id = selected_context_target_id(&runtime_context)?.to_string();
     let Some(control) = runtime_context.controls.into_iter().find(|control| {
         control.surface_role == role
-            && control.stability == wire::RuntimeStabilityView::Stable
+            && control.stability == wire::agents_backend_rpc::RuntimeStabilityView::Stable
             && control.channel_safe
     }) else {
         return Ok(format!(
@@ -557,7 +597,7 @@ async fn channel_runtime_control_reply(
         ));
     };
 
-    if control.mutability != wire::ThreadControlMutabilityView::Selectable {
+    if control.mutability != wire::agents_backend_rpc::ThreadControlMutabilityView::Selectable {
         return Ok(format!(
             "{} is read-only for this runtime session. Send /new, then set it before the next prompt.",
             control.label
@@ -585,13 +625,15 @@ async fn channel_runtime_control_reply(
         .expect("channel runtime controls only expose string choices");
     let binding = runtime_context.binding;
     if binding.is_some() {
-        if control.apply_scope != wire::ThreadControlApplyScopeView::Session {
+        if control.apply_scope != wire::agents_backend_rpc::ThreadControlApplyScopeView::Session {
             return Ok(format!(
                 "{} applies when a thread starts. Send /new, set it, then send the next prompt.",
                 control.label
             ));
         }
-    } else if control.apply_scope != wire::ThreadControlApplyScopeView::TurnDraft {
+    } else if control.apply_scope
+        != wire::agents_backend_rpc::ThreadControlApplyScopeView::TurnDraft
+    {
         return Ok(format!(
             "{} requires a bound runtime session; send a prompt first, then retry.",
             control.label
@@ -600,7 +642,7 @@ async fn channel_runtime_control_reply(
     let result = thread_control_set_result(
         context.state,
         context.scope,
-        wire::ThreadControlSetParams {
+        wire::agents_backend_rpc::ThreadControlSetParams {
             thread_id: binding.as_ref().map(|binding| binding.thread_id.clone()),
             target_id,
             control_id: control.id.clone(),
@@ -632,7 +674,7 @@ async fn channel_runtime_control_reply(
 
 async fn channel_runtime_context(
     context: &ChannelCommandContext<'_>,
-) -> psychevo::Result<(String, wire::ThreadContextReadResult)> {
+) -> psychevo::Result<(String, wire::agents_backend_rpc::ThreadContextReadResult)> {
     let default_runtime_ref = context
         .connection
         .runtime_ref
@@ -669,8 +711,8 @@ pub(super) async fn run_channel_thread_action(
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
-    action: wire::ThreadActionInput,
-) -> psychevo::Result<wire::ThreadActionRunResult> {
+    action: wire::thread_command_turn::ThreadActionInput,
+) -> psychevo::Result<wire::thread_command_turn::ThreadActionRunResult> {
     let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
     let thread_id = if thread_id.is_some() {
         thread_id
@@ -689,7 +731,7 @@ pub(super) async fn run_channel_thread_action(
     run_routed_thread_action(
         state,
         &scope,
-        wire::ThreadActionRunParams {
+        wire::thread_command_turn::ThreadActionRunParams {
             scope: scope.to_wire_scope(),
             thread_id,
             action,
@@ -699,23 +741,25 @@ pub(super) async fn run_channel_thread_action(
     .await
 }
 
-fn channel_runtime_control_role_label(role: wire::ThreadControlSurfaceRoleView) -> &'static str {
+fn channel_runtime_control_role_label(
+    role: wire::agents_backend_rpc::ThreadControlSurfaceRoleView,
+) -> &'static str {
     match role {
-        wire::ThreadControlSurfaceRoleView::Mode => "mode",
-        wire::ThreadControlSurfaceRoleView::Model => "model",
-        wire::ThreadControlSurfaceRoleView::Reasoning => "reasoning variant",
-        wire::ThreadControlSurfaceRoleView::Advanced => "advanced",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode => "mode",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model => "model",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning => "reasoning variant",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Advanced => "advanced",
     }
 }
 
 fn channel_runtime_control_command_role_label(
-    role: wire::ThreadControlSurfaceRoleView,
+    role: wire::agents_backend_rpc::ThreadControlSurfaceRoleView,
 ) -> &'static str {
     match role {
-        wire::ThreadControlSurfaceRoleView::Mode => "mode",
-        wire::ThreadControlSurfaceRoleView::Model => "model",
-        wire::ThreadControlSurfaceRoleView::Reasoning => "variant",
-        wire::ThreadControlSurfaceRoleView::Advanced => "advanced",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode => "mode",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model => "model",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning => "variant",
+        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Advanced => "advanced",
     }
 }
 
@@ -731,12 +775,10 @@ async fn ensure_channel_mission_thread(
     {
         return Ok(thread_id);
     }
-    let thread_id = context
-        .state
-        .inner
-        .state
-        .create_session_with_metadata(&context.scope.cwd, "channel", "pending", "pending", None)
-        .await?;
+    let mut start = StartThreadRequest::new(&context.scope.cwd);
+    start.source = "channel".to_string();
+    let thread = context.state.inner.framework.start_thread(start).await?;
+    let thread_id = thread.id().to_string();
     bind_source_to_thread(context.state, context.scope, &thread_id).await?;
     Ok(thread_id)
 }
@@ -794,13 +836,13 @@ async fn channel_help_text(context: &ChannelCommandContext<'_>) -> psychevo::Res
         .controls
         .into_iter()
         .filter(|control| {
-            control.stability == wire::RuntimeStabilityView::Stable
+            control.stability == wire::agents_backend_rpc::RuntimeStabilityView::Stable
                 && control.channel_safe
                 && matches!(
                     control.surface_role,
-                    wire::ThreadControlSurfaceRoleView::Model
-                        | wire::ThreadControlSurfaceRoleView::Reasoning
-                        | wire::ThreadControlSurfaceRoleView::Mode
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model
+                        | wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning
+                        | wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode
                 )
         })
         .map(|control| control.surface_role)
@@ -824,13 +866,17 @@ async fn channel_help_text(context: &ChannelCommandContext<'_>) -> psychevo::Res
         ));
     }
     let mut controls = Vec::new();
-    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Model) {
+    if stable_channel_roles.contains(&wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model)
+    {
         controls.push("/model");
     }
-    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Reasoning) {
+    if stable_channel_roles
+        .contains(&wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning)
+    {
         controls.push("/variant <value>");
     }
-    if stable_channel_roles.contains(&wire::ThreadControlSurfaceRoleView::Mode) {
+    if stable_channel_roles.contains(&wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode)
+    {
         controls.push("/mode <value>");
     }
     controls.extend([
@@ -857,15 +903,21 @@ async fn channel_help_text(context: &ChannelCommandContext<'_>) -> psychevo::Res
 
 fn channel_help_action_visible(
     action: SlashCommandAction,
-    stable_channel_roles: &[wire::ThreadControlSurfaceRoleView],
+    stable_channel_roles: &[wire::agents_backend_rpc::ThreadControlSurfaceRoleView],
 ) -> bool {
     if !channel_action_visible(action) {
         return false;
     }
     let required_role = match action {
-        SlashCommandAction::ModelShow => Some(wire::ThreadControlSurfaceRoleView::Model),
-        SlashCommandAction::VariantSet => Some(wire::ThreadControlSurfaceRoleView::Reasoning),
-        SlashCommandAction::ModeSet => Some(wire::ThreadControlSurfaceRoleView::Mode),
+        SlashCommandAction::ModelShow => {
+            Some(wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model)
+        }
+        SlashCommandAction::VariantSet => {
+            Some(wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning)
+        }
+        SlashCommandAction::ModeSet => {
+            Some(wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode)
+        }
         _ => None,
     };
     required_role.is_none_or(|role| stable_channel_roles.contains(&role))
@@ -879,16 +931,16 @@ fn channel_voice_reply(
     let mode = match mode {
         "status" => voice_policy_for_source(state, source),
         "on" => {
-            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::VoiceOnly);
-            wire::VoicePolicyMode::VoiceOnly
+            update_voice_policy_for_source(state, source, wire::voice::VoicePolicyMode::VoiceOnly);
+            wire::voice::VoicePolicyMode::VoiceOnly
         }
         "tts" => {
-            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::All);
-            wire::VoicePolicyMode::All
+            update_voice_policy_for_source(state, source, wire::voice::VoicePolicyMode::All);
+            wire::voice::VoicePolicyMode::All
         }
         "off" => {
-            update_voice_policy_for_source(state, source, wire::VoicePolicyMode::Off);
-            wire::VoicePolicyMode::Off
+            update_voice_policy_for_source(state, source, wire::voice::VoicePolicyMode::Off);
+            wire::voice::VoicePolicyMode::Off
         }
         _ => {
             return Err(Error::Message(
@@ -897,11 +949,11 @@ fn channel_voice_reply(
         }
     };
     Ok(match mode {
-        wire::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
-        wire::VoicePolicyMode::VoiceOnly => {
+        wire::voice::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
+        wire::voice::VoicePolicyMode::VoiceOnly => {
             "Voice replies will follow voice inputs. Text fallback remains active.".to_string()
         }
-        wire::VoicePolicyMode::All => {
+        wire::voice::VoicePolicyMode::All => {
             "Voice replies are on for all replies. Text fallback remains active.".to_string()
         }
     })
@@ -1227,13 +1279,13 @@ pub(super) async fn channel_resolved_scope(
     source: &GatewaySource,
 ) -> psychevo::Result<ResolvedScope> {
     let cwd = match state.inner.gateway.resolve_source_thread(source).await? {
-        Some(thread_id) => state
-            .inner
-            .state
-            .session_summary(&thread_id)
-            .await?
-            .map(|summary| PathBuf::from(summary.cwd))
-            .unwrap_or_else(|| channel_cwd(&state.inner.cwd, connection)),
+        Some(thread_id) => match state.inner.framework.resume_thread(thread_id.clone()).await {
+            Ok(thread) => PathBuf::from(thread.summary().await?.cwd),
+            Err(Error::Message(message)) if message == format!("thread not found: {thread_id}") => {
+                channel_cwd(&state.inner.cwd, connection)
+            }
+            Err(error) => return Err(error),
+        },
         None => channel_cwd(&state.inner.cwd, connection),
     };
     Ok(ResolvedScope {

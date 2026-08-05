@@ -1,3 +1,16 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde_json::Value;
+
+use super::super::validation::{
+    optional_bool_field, optional_string_alias_field, optional_string_field, string_array_field,
+};
+use crate::config::{
+    BuiltinPluginPolicyConfig, ChannelConnectionConfig, ChannelPlatform, ChannelTransport,
+    ChannelsConfig, CodexPluginsConfig, Error, PluginPolicyConfig, PluginPolicyEntry, Result,
+    valid_env_name,
+};
+
 pub(crate) fn parse_codex_plugins_config(value: &Value) -> Result<CodexPluginsConfig> {
     let object = value
         .as_object()
@@ -174,13 +187,13 @@ pub(crate) fn parse_channel_connection(
         .unwrap_or_else(|| platform.default_label().to_string());
     let credential_env = optional_string_field(object, "credential_env")?
         .or_else(|| Some(platform.default_credential_env().to_string()));
-    let app_id_env =
-        optional_string_field(object, "app_id_env")?.or_else(|| platform.default_app_id_env().map(str::to_string));
+    let app_id_env = optional_string_field(object, "app_id_env")?
+        .or_else(|| platform.default_app_id_env().map(str::to_string));
     let app_secret_env = optional_string_field(object, "app_secret_env")?;
-    let account_env =
-        optional_string_field(object, "account_env")?.or_else(|| platform.default_account_env().map(str::to_string));
-    let base_url_env =
-        optional_string_field(object, "base_url_env")?.or_else(|| platform.default_base_url_env().map(str::to_string));
+    let account_env = optional_string_field(object, "account_env")?
+        .or_else(|| platform.default_account_env().map(str::to_string));
+    let base_url_env = optional_string_field(object, "base_url_env")?
+        .or_else(|| platform.default_base_url_env().map(str::to_string));
     for (field, env) in [
         ("credential_env", credential_env.as_deref()),
         ("app_id_env", app_id_env.as_deref()),
@@ -239,7 +252,10 @@ fn validate_channel_transport(
     let valid = match platform {
         ChannelPlatform::Wechat => matches!(transport, ChannelTransport::Polling),
         ChannelPlatform::Telegram => {
-            matches!(transport, ChannelTransport::Polling | ChannelTransport::Webhook)
+            matches!(
+                transport,
+                ChannelTransport::Polling | ChannelTransport::Webhook
+            )
         }
         ChannelPlatform::Feishu | ChannelPlatform::Lark => {
             matches!(transport, ChannelTransport::LongConnection)

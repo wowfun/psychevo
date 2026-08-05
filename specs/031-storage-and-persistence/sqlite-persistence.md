@@ -26,14 +26,16 @@ Out of scope:
 
 ## Runtime Interface
 
-Production persistence is owned by the asynchronous
-`psychevo::state::StateRuntime` Module. It owns one SQLx SQLite pool for
-the one Psychevo state database. Callers await semantic operations and cannot
-borrow connections, select pool members, or implement retry. The migration does
-not add a repository family, read pool, actor, second database, or compatibility
-facade.
+Production persistence is a private part of the asynchronous Framework
+Application. Its storage Module owns one SQLx SQLite pool for the one Psychevo
+state database. Callers await semantic Application/Client operations and cannot
+obtain the runtime, borrow connections, select pool members, or implement
+retry. The implementation does not add a repository family, read pool, actor,
+second database, or compatibility facade.
 
-File-backed pools use at most five connections. In-memory test databases use
+File-backed pools default to at most five connections. The owning
+`ApplicationBuilder` may set one validated positive connection limit; callers
+still cannot select or borrow connections. In-memory test databases always use
 one connection so every operation observes the same database. File-backed
 database initialization establishes SQLite's persistent WAL journal mode once,
 before pool creation, with bounded retry and backoff for the exclusive
@@ -53,20 +55,21 @@ remain synchronous. Closing the runtime rejects new work, waits for checked-out
 connections, and closes the pool only after Gateway has stopped all state
 consumers.
 
-The runtime exposes a content-free diagnostic snapshot for tests and local
-diagnostics: pool size, idle and in-flight operations, completed and failed
-operations, busy/locked outcomes, and acquire and execute latency. This
-snapshot is not a new public Gateway protocol or product UI.
+`Application::operational_snapshot` includes a content-free storage diagnostic
+snapshot for tests and local diagnostics: configured connection limit, pool
+size, idle and in-flight operations, completed and failed operations,
+busy/locked outcomes, and acquire and execute latency. This snapshot is not a
+new public Gateway protocol or product UI.
 
 ## Schema Migration
 
 SQLx migrations are the canonical schema entry point. The first migration is an
-idempotent v28 baseline; v29 adds durable Framework pending-interaction facts.
-`PRAGMA user_version` remains the compatibility marker. A fresh version-zero
-database runs both migrations and is initialized to v29. Because Psychevo is
-pre-release and the Framework changes the authority boundary, an existing
-nonzero version other than v29 is rejected with explicit reset/new-database
-guidance before ordinary queries.
+idempotent v28 baseline; v29 adds durable Framework pending-interaction facts;
+v30 adds expression indexes for bounded Agent relationship lookup by Agent id
+or task name. `PRAGMA user_version` remains the compatibility marker. A fresh
+version-zero database runs all migrations and is initialized to v30. Because
+Psychevo is pre-release, versions older than v29 and versions newer than v30
+are rejected with explicit reset/new-database guidance before ordinary queries.
 
 Concurrent first open is serialized by SQLite and must produce one valid
 migration history. Because SQLite's busy handler does not wait for the
@@ -337,8 +340,8 @@ The first implementation slice stores these automation columns:
 `automation_runs` stores bounded run coordination and result projection for one
 attempt to run a task. Required semantics include:
 - durable relationship to one automation task
-- status sufficient to distinguish running, completed, failed, skipped, and
-  interrupted
+- status sufficient to distinguish running, completed, failed, and interrupted;
+  a rejected overlapping claim does not create a run row
 - trigger source such as schedule or manual run
 - started/completed timestamps
 - target thread/source details when known
@@ -545,7 +548,7 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 29`, a bounded-backoff
+The current implementation uses `PRAGMA user_version = 30`, a bounded-backoff
 persistent-WAL bootstrap, foreign keys, short busy timeouts,
 `BEGIN IMMEDIATE`, and SQLite's connection-native PASSIVE auto-checkpoint.
 Semantic write completion never starts a second Psychevo-owned checkpoint

@@ -1,5 +1,20 @@
+use std::time::Duration;
+
+use psychevo_agent_core::ToolOutput;
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+use tokio::time;
+
+use super::super::rules::{action_summary, permission_error};
+use super::actions::PermissionAction;
+use super::state::{ApprovalDecisionRequest, PermissionRuntime, SandboxWriteGrantRequest};
+use crate::types::{
+    ApprovalPolicy, ApprovalsReviewer, FilesystemApprovalLifetime, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionMode,
+};
+
 impl PermissionRuntime {
-    async fn authorize_sandbox_write_grant(
+    pub(super) async fn authorize_sandbox_write_grant(
         &self,
         tool_call_id: &str,
         tool_name: &str,
@@ -98,7 +113,7 @@ impl PermissionRuntime {
         }
     }
 
-    async fn request_approval_decision(
+    pub(super) async fn request_approval_decision(
         &self,
         request: ApprovalDecisionRequest<'_>,
     ) -> std::result::Result<crate::types::PermissionApprovalDecision, ToolOutput> {
@@ -129,8 +144,8 @@ impl PermissionRuntime {
             ));
         }
         if let Some(hook_runtime) = &self.inner.hook_runtime {
-            let hook_outcome = hook_runtime.run_permission_request(
-                &json!({
+            let hook_outcome = hook_runtime
+                .run_permission_request(&json!({
                     "tool": tool_name,
                     "tool_call_id": tool_call_id,
                     "arguments": args,
@@ -140,9 +155,8 @@ impl PermissionRuntime {
                     "allow_always": false,
                     "filesystem": filesystem.clone(),
                     "mcp_startup": mcp_startup.clone(),
-                }),
-            )
-            .await;
+                }))
+                .await;
             if let Some(decision) = hook_outcome.approval_decision() {
                 if decision.outcome == PermissionApprovalOutcome::Deny {
                     let hook_reason = hook_outcome
@@ -199,29 +213,55 @@ impl PermissionRuntime {
             Some(mut abort) if timeout_secs == 0 => {
                 tokio::select! {
                     biased;
-                    _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                    _ = abort.wait_for_abort() => {
+                        handler
+                            .cancel_permission_with_reason(tool_call_id, "aborted")
+                            .await;
+                        return Err(ToolOutput::error("aborted"));
+                    },
                     decision = handler.request_permission(request.clone()) => decision,
                 }
             }
             Some(mut abort) => {
                 tokio::select! {
                     biased;
-                    _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
+                    _ = abort.wait_for_abort() => {
+                        handler
+                            .cancel_permission_with_reason(tool_call_id, "aborted")
+                            .await;
+                        return Err(ToolOutput::error("aborted"));
+                    },
                     decision = time::timeout(
                         Duration::from_secs(timeout_secs),
                         handler.request_permission(request.clone()),
                     ) => {
-                        decision.unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
+                        match decision {
+                            Ok(decision) => decision,
+                            Err(_) => {
+                                handler
+                                    .cancel_permission_with_reason(tool_call_id, "timed_out")
+                                    .await;
+                                crate::types::PermissionApprovalDecision::deny()
+                            }
+                        }
                     }
                 }
             }
             None if timeout_secs == 0 => handler.request_permission(request.clone()).await,
-            None => time::timeout(
+            None => match time::timeout(
                 Duration::from_secs(timeout_secs),
                 handler.request_permission(request.clone()),
             )
             .await
-            .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
+            {
+                Ok(decision) => decision,
+                Err(_) => {
+                    handler
+                        .cancel_permission_with_reason(tool_call_id, "timed_out")
+                        .await;
+                    crate::types::PermissionApprovalDecision::deny()
+                }
+            },
         };
         let decision = validate_approval_decision(&request, decision);
         pending_approval.finish(decision.outcome);
@@ -281,8 +321,6 @@ fn validate_approval_decision(
                 crate::types::PermissionApprovalDecision::deny()
             }
         }
-        PermissionApprovalOutcome::AllowAlways => {
-            crate::types::PermissionApprovalDecision::deny()
-        }
+        PermissionApprovalOutcome::AllowAlways => crate::types::PermissionApprovalDecision::deny(),
     }
 }

@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
-use psychevo::__product::persistence::StateRuntime;
+use psychevo::Application;
 
 use crate::args::InitArgs;
 use crate::commands::gateway::stop_managed_for_home;
@@ -50,8 +50,12 @@ pub(crate) async fn run_init_command(args: InitArgs) -> Result<ExitCode> {
         let _ = stop_managed_for_home(&home).await?;
         backup_state_files(&home, &state)?;
     }
-    let state_runtime = StateRuntime::open(&state).await?;
-    state_runtime.close().await;
+    let application = Application::builder()
+        .home(&home)
+        .database_path(&state)
+        .build()
+        .await?;
+    application.shutdown().await?.require_clean()?;
 
     println!("home: {}", home.display());
     println!("config: {}", config.display());

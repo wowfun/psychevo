@@ -1,3 +1,11 @@
+use psychevo::application::RunStreamEvent;
+use serde_json::json;
+
+use crate::projection::GatewayLiveProjector;
+use psychevo_gateway_protocol::events_transcript::{GatewayEvent, TranscriptBlockStatus};
+
+use super::hidden_helpers::assert_exec_event;
+
 #[test]
 fn live_projector_merges_write_stdin_polls_into_yielded_exec_command() {
     let mut projector = GatewayLiveProjector::default();

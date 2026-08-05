@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::time::Duration;
+
+use ratatui::style::{Color, Modifier, Style};
+
+use crate::tui::{
+    support_terminal_probe::query_terminal_default_colors,
+    ui_types::{
+        TUI_ROLE_ACCENT, TUI_ROLE_DANGER, TUI_ROLE_DIM, TUI_ROLE_IDENTITY, TUI_ROLE_SELECTION_BG,
+        TUI_ROLE_SURFACE_BG, TUI_ROLE_THINKING,
+    },
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalColorLevel {
     TrueColor,

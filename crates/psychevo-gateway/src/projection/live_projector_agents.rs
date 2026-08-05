@@ -1,5 +1,13 @@
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{GatewayEvent, TranscriptBlockStatus};
+
+use super::live_helpers::live_tool_block_id;
+use super::tool_helpers::{compact_text, set_metadata_field, set_metadata_result_field};
+use super::{GatewayLiveProjector, LiveToolBlockBuild};
+
 impl GatewayLiveProjector {
-    fn project_agent_session_start(
+    pub(super) fn project_agent_session_start(
         &mut self,
         turn_id: &str,
         value: &Value,
@@ -42,7 +50,7 @@ impl GatewayLiveProjector {
         Some(self.emit_entry_event(turn_id, segment, false, false))
     }
 
-    fn enrich_agent_metadata_from_existing(
+    pub(super) fn enrich_agent_metadata_from_existing(
         &self,
         turn_id: &str,
         segment: usize,
@@ -120,18 +128,10 @@ fn agent_session_start_metadata(
     metadata
 }
 
-fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
+pub(super) fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
     if let Some(child_session_id) = agent_child_session_id(metadata).map(ToString::to_string) {
-        set_metadata_field(
-            metadata,
-            "child_thread_id",
-            json!(child_session_id.clone()),
-        );
-        set_metadata_result_field(
-            metadata,
-            "child_thread_id",
-            json!(child_session_id.clone()),
-        );
+        set_metadata_field(metadata, "child_thread_id", json!(child_session_id.clone()));
+        set_metadata_result_field(metadata, "child_thread_id", json!(child_session_id.clone()));
         set_metadata_field(
             metadata,
             "child_session_id",
@@ -180,13 +180,20 @@ fn enrich_agent_metadata_from_fields(metadata: &mut Value) {
         set_metadata_field(metadata, "task", json!(prompt.clone()));
         set_metadata_result_field(metadata, "task", json!(prompt));
     }
-    if let Some(parent_session_id) =
-        agent_metadata_string(metadata, "parent_thread_id")
-            .or_else(|| agent_metadata_string(metadata, "parent_session_id"))
-            .map(ToString::to_string)
+    if let Some(parent_session_id) = agent_metadata_string(metadata, "parent_thread_id")
+        .or_else(|| agent_metadata_string(metadata, "parent_session_id"))
+        .map(ToString::to_string)
     {
-        set_metadata_field(metadata, "parent_thread_id", json!(parent_session_id.clone()));
-        set_metadata_result_field(metadata, "parent_thread_id", json!(parent_session_id.clone()));
+        set_metadata_field(
+            metadata,
+            "parent_thread_id",
+            json!(parent_session_id.clone()),
+        );
+        set_metadata_result_field(
+            metadata,
+            "parent_thread_id",
+            json!(parent_session_id.clone()),
+        );
         set_metadata_result_field(metadata, "parent_session_id", json!(parent_session_id));
     }
 }
@@ -218,7 +225,7 @@ fn agent_child_session_id(metadata: &Value) -> Option<&str> {
         .or_else(|| agent_metadata_string(metadata, "session_id"))
 }
 
-fn agent_metadata_string<'a>(metadata: &'a Value, key: &str) -> Option<&'a str> {
+pub(super) fn agent_metadata_string<'a>(metadata: &'a Value, key: &str) -> Option<&'a str> {
     metadata
         .get(key)
         .and_then(Value::as_str)

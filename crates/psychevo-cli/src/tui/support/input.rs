@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo::{
+    command_registry::slash_command_spec, prompt_image::prompt_starts_with_supported_image_path,
+};
+
+use crate::tui::slash::{SlashMenuItem, slash_menu_items_from, slash_prefix_menu_items_from};
+
 #[cfg(test)]
 pub(crate) fn slash_completion(input: &str) -> Option<String> {
     slash_completion_with_items(input, &crate::tui::slash::base_slash_menu_items())
@@ -54,8 +58,7 @@ pub(crate) fn selected_slash_menu_command_with_items(
 
 pub(crate) fn should_submit_typed_slash(input: &str) -> bool {
     let trimmed = input.trim();
-    matches!(trimmed, "/session" | "/thinking")
-        || crate::command_registry::slash_command_spec(trimmed).is_some()
+    matches!(trimmed, "/session" | "/thinking") || slash_command_spec(trimmed).is_some()
 }
 
 pub(crate) fn should_parse_slash_command_input(input: &str) -> bool {

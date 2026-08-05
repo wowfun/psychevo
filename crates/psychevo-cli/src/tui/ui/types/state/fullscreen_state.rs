@@ -1,3 +1,18 @@
+use super::panel_state::{BottomPanel, BottomSelectionRow};
+use super::transcript_state::{
+    FocusMode, HistoryMessageEdit, PendingInputAction, PendingInputEdit, PendingInputRef,
+    TranscriptHitTarget, TranscriptLayoutCache, TranscriptRow,
+};
+use crate::tui::{
+    AgentSearchState, AuxiliaryAgentTask, AuxiliaryShellTask, BTreeMap, BTreeSet,
+    CompletionPopupTarget, ContextSnapshot, FileSearchState, ForeignGatewayActivity, Line, Outcome,
+    PathBuf, PendingAuxiliaryShellCommand, PendingImageAttachment, PendingSteerInput,
+    PermissionApprovalDecision, QueuedInput, Rect, RunningTurn, SkillSearchState, StartingTurn,
+    StartingTurnCleanup, TextArea, ThreadUsageSummary, TuiApprovalEvent, TuiApprovalRequest,
+    TuiLiveEvent, TurnEvent, Value, VecDeque, WriteArgumentPreviewTracker, mpsc, oneshot,
+};
+use std::time::{Duration, Instant};
+
 pub(crate) struct FullscreenUi<'a> {
     pub(crate) textarea: TextArea<'a>,
     pub(crate) cwd: PathBuf,
@@ -35,19 +50,22 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) turn_terminal_message: Option<String>,
     pub(crate) turn_had_reasoning: bool,
     pub(crate) turn_terminal_visible_answer: bool,
+    pub(crate) turn_projection_invalid: bool,
     pub(crate) history_prompt_started_ms: Option<i64>,
     pub(crate) loaded_session_message_count: usize,
     pub(crate) thinking_visible: bool,
     pub(crate) raw_visible: bool,
+    pub(crate) starting_turn: Option<StartingTurn>,
+    pub(crate) starting_turn_cleanups: Vec<StartingTurnCleanup>,
     pub(crate) running: Option<RunningTurn>,
     pub(crate) foreign_gateway_activities: BTreeMap<String, ForeignGatewayActivity>,
     pub(crate) applied_gateway_live_event_seqs: BTreeSet<i64>,
     pub(crate) auxiliary_agent_tasks: Vec<AuxiliaryAgentTask>,
-    pub(crate) agent_child_event_backlog: BTreeMap<String, Vec<RunStreamEvent>>,
+    pub(crate) agent_child_event_backlog: BTreeMap<String, Vec<TurnEvent>>,
     pub(crate) session_live_event_backlog: BTreeMap<String, Vec<TuiLiveEvent>>,
     pub(crate) auxiliary_shell_tasks: Vec<AuxiliaryShellTask>,
-    pub(crate) pending_auxiliary_shell_commands: VecDeque<String>,
-    pub(crate) approval_rx: Option<mpsc::UnboundedReceiver<TuiApprovalRequest>>,
+    pub(crate) pending_auxiliary_shell_commands: VecDeque<PendingAuxiliaryShellCommand>,
+    pub(crate) approval_rx: Option<mpsc::UnboundedReceiver<TuiApprovalEvent>>,
     pub(crate) pending_permission_approvals: VecDeque<TuiApprovalRequest>,
     pub(crate) active_permission_approval: Option<oneshot::Sender<PermissionApprovalDecision>>,
     pub(crate) visible_turn_started: Option<Instant>,
@@ -82,7 +100,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) sidebar_context_limit: Option<u64>,
     pub(crate) last_context_snapshot: Option<ContextSnapshot>,
     pub(crate) sidebar_cost_nanodollars: Option<i64>,
-    pub(crate) session_usage_summary: Option<SessionUsageSummary>,
+    pub(crate) session_usage_summary: Option<ThreadUsageSummary>,
     pub(crate) history: Vec<String>,
     pub(crate) history_kinds: Vec<ComposerHistoryKind>,
     pub(crate) history_index: Option<usize>,

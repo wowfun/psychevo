@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-use super::*;
 pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     let object = value
         .as_object()
@@ -103,8 +101,35 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     Ok(config)
 }
 
-include!("document/plugins_channels.rs");
-include!("document/workspace_tools_agents.rs");
-include!("document/models_lsp.rs");
-include!("document/permissions.rs");
-include!("document/exec_policy.rs");
+#[path = "document/exec_policy.rs"]
+mod exec_policy;
+#[path = "document/models_lsp.rs"]
+mod models_lsp;
+#[path = "document/permissions.rs"]
+mod permissions;
+#[path = "document/plugins_channels.rs"]
+mod plugins_channels;
+#[path = "document/workspace_tools_agents.rs"]
+mod workspace_tools_agents;
+
+use std::collections::HashSet;
+
+use serde_json::Value;
+
+use super::validation::{parse_config_provider_entry, parse_model_selection};
+use crate::config::{
+    Error, Result, RunConfig, normalize_provider_id, parse_image_generation_config,
+    parse_voice_config, parse_web_config,
+};
+
+pub(crate) use models_lsp::{parse_auxiliary_config, parse_compression_config, parse_lsp_config};
+pub(crate) use permissions::parse_permission_config;
+pub(crate) use plugins_channels::{
+    parse_builtin_plugin_policy_config, parse_channels_config, parse_codex_plugins_config,
+    parse_plugin_policy_config, validate_channel_id,
+};
+pub(crate) use workspace_tools_agents::{
+    parse_agent_backend_configs, parse_custom_toolsets, parse_profile_mcp_servers,
+    parse_project_context_config, parse_runtime_profile_configs, parse_sandbox_config,
+    parse_tool_selection_config, parse_workspaces_config,
+};

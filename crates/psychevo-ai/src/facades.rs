@@ -356,7 +356,8 @@ impl AnthropicBuilder {
 
 #[cfg(all(test, feature = "anthropic"))]
 mod tests {
-    use super::*;
+    use super::Anthropic;
+    use crate::{AnthropicAuth, DeploymentConfig, SecretValue};
 
     fn config() -> DeploymentConfig {
         DeploymentConfig::new("anthropic", "anthropic", "https://api.anthropic.com")

@@ -13,6 +13,8 @@ use futures::{StreamExt, future::join_all, stream};
 use psychevo_ai::Anthropic;
 #[cfg(feature = "openai")]
 use psychevo_ai::OpenAi;
+#[cfg(any(feature = "openai", feature = "anthropic", feature = "xiaomi"))]
+use psychevo_ai::ProviderRuntime;
 #[cfg(feature = "xiaomi")]
 use psychevo_ai::Xiaomi;
 use psychevo_ai::{
@@ -20,7 +22,7 @@ use psychevo_ai::{
     ErrorKind, ErrorPhase, Fake, FakeLanguageAdapter, GeneratedImage, GenerationEvent,
     GenerationOutcome, ImageAdapter, ImageAdapterOutput, ImageRequest, LanguageAdapter,
     LanguageAdapterEvent, LanguageRequest, Media, Message, ModelProfile, Provider, ProviderError,
-    ProviderRuntime, Registry, TimeoutPolicy, ToolArgumentErrorKind, TranscriptionAdapter,
+    Registry, TimeoutPolicy, ToolArgumentErrorKind, TranscriptionAdapter,
     TranscriptionAdapterOutput, TranscriptionRequest, TranscriptionSegment,
 };
 use psychevo_ai::{
@@ -235,6 +237,101 @@ async fn invalid_final_tool_arguments_are_successful_and_lossless() {
         Some(&ToolArgumentErrorKind::InvalidJson)
     );
     assert!(call.arguments.is_none());
+}
+
+#[tokio::test]
+async fn tool_argument_fragmentation_boundary_matrix_is_lossless() {
+    let cases = [
+        ("", Some(ToolArgumentErrorKind::InvalidJson)),
+        ("{}", None),
+        ("[]", Some(ToolArgumentErrorKind::NotAnObject)),
+        (r#"{"path":"中.txt"}"#, None),
+        (r#"{"path":"#, Some(ToolArgumentErrorKind::InvalidJson)),
+    ];
+
+    for (arguments_raw, expected_error) in cases {
+        let mut partitions = vec![vec![arguments_raw.to_string()]];
+        let boundaries = arguments_raw
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain(std::iter::once(arguments_raw.len()))
+            .filter(|index| *index > 0 && *index < arguments_raw.len())
+            .collect::<Vec<_>>();
+        for boundary in boundaries {
+            partitions.push(vec![
+                arguments_raw[..boundary].to_string(),
+                arguments_raw[boundary..].to_string(),
+            ]);
+        }
+        if !arguments_raw.is_empty() {
+            partitions.push(arguments_raw.chars().map(String::from).collect());
+        }
+
+        for fragments in partitions {
+            let mut script = vec![LanguageAdapterEvent::ToolCallStart {
+                content_index: 0,
+                id: "call-1".to_string(),
+                name: "read".to_string(),
+            }];
+            script.extend(fragments.into_iter().map(|delta| {
+                LanguageAdapterEvent::ToolCallArgumentsDelta {
+                    content_index: 0,
+                    delta,
+                }
+            }));
+            script.extend([
+                LanguageAdapterEvent::ToolCallEnd {
+                    content_index: 0,
+                    arguments_raw: arguments_raw.to_string(),
+                },
+                LanguageAdapterEvent::Finish {
+                    finish_reason: None,
+                },
+            ]);
+
+            let fake = Fake::with_language(FakeLanguageAdapter::single(script)).expect("fake");
+            let model = fake
+                .provider()
+                .language_model("tool-fragmentation")
+                .expect("model");
+            let mut generation = model.stream(LanguageRequest::default());
+            let mut streamed_arguments = String::new();
+            let mut tool_terminations = 0;
+            let mut generation_terminals = 0;
+            while let Some(event) = generation.next_event().await {
+                match event.expect("finite well-ordered fragments") {
+                    GenerationEvent::ToolCallArgumentsDelta { delta, .. } => {
+                        streamed_arguments.push_str(&delta);
+                    }
+                    GenerationEvent::ToolCallEnd {
+                        arguments_raw: terminal_arguments,
+                        ..
+                    } => {
+                        assert_eq!(terminal_arguments, arguments_raw);
+                        tool_terminations += 1;
+                    }
+                    GenerationEvent::Finish { .. } => {
+                        generation_terminals += 1;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let output = generation.finish().await.expect("generation output");
+            assert_eq!(streamed_arguments, arguments_raw);
+            assert_eq!(tool_terminations, 1);
+            assert_eq!(generation_terminals, 1);
+            assert_eq!(output.outcome, GenerationOutcome::Completed);
+            let AssistantContent::ToolCall(call) = &output.snapshot.assistant.content[0] else {
+                panic!("tool call")
+            };
+            assert_eq!(call.arguments_raw, arguments_raw);
+            assert_eq!(
+                call.argument_error.as_ref().map(|error| &error.kind),
+                expected_error.as_ref()
+            );
+        }
+    }
 }
 
 #[tokio::test]

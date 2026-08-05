@@ -5,8 +5,8 @@ use std::process::Stdio;
 use std::time::Duration;
 
 #[cfg(unix)]
-use psychevo::__product::platform::ProcessIdentityError;
-use psychevo::__product::platform::{
+use psychevo::host_process::ProcessIdentityError;
+use psychevo::host_process::{
     InstanceLease, ManagedProcess, atomic_replace, instance_lease_is_held,
 };
 
@@ -110,7 +110,7 @@ fn windows_managed_job_helper() {
     let descendant_pid = std::path::PathBuf::from(
         std::env::var_os("PSYCHEVO_TEST_JOB_DESCENDANT_PID").expect("descendant pid path"),
     );
-    let _guard = psychevo::__product::platform::enter_managed_process_tree(&instance_id)
+    let _guard = psychevo::host_process::enter_managed_process_tree(&instance_id)
         .expect("enter managed Job Object");
     let script = format!(
         "$PID | Set-Content -NoNewline -Path '{}'; Start-Sleep -Seconds 60",

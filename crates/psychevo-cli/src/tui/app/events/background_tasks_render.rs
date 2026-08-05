@@ -1,3 +1,17 @@
+use super::helpers::buffer_session_live_event;
+use crate::tui::app_commands::format_compaction_result;
+use crate::tui::render_helpers::bottom_panel_height;
+use crate::tui::support_composer::composer_input_width;
+use crate::tui::{
+    AutoCompactionRequest, BottomPanel, COMPLETION_POPUP_MAX_ROWS, CompactionReason, Constraint,
+    DiffOverlay, Direction, Frame, FullscreenUi, Layout, ShellCommandOutcome, TuiApp, VecDeque,
+    composer_height, diff_overlay_from_workspace_diff, pending_input_preview_height,
+    render_active_selection, render_bottom_panel, render_completion_popup, render_composer,
+    render_diff_overlay, render_pending_input_preview, render_sidebar, render_slash_menu,
+    render_status, render_transcript, textarea_text,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) async fn drain_compaction_task(
         &mut self,
@@ -58,7 +72,7 @@ impl TuiApp {
             }
         }
         ui.refresh_sidebar(self);
-        self.start_next_queued_input(ui)?;
+        self.start_next_queued_input(ui).await?;
         Ok(true)
     }
 
@@ -85,13 +99,13 @@ impl TuiApp {
         Ok(true)
     }
 
-    pub(crate) fn maybe_start_auto_compaction(
+    pub(crate) async fn maybe_start_auto_compaction(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         if self.in_side_conversation()
             || self.current_session.is_none()
-            || ui.running.is_some()
+            || ui.foreground_turn_active()
             || self.compaction_task.is_some()
         {
             return Ok(false);
@@ -105,16 +119,19 @@ impl TuiApp {
             return Ok(false);
         };
         let session = self.current_session.clone().expect("checked session");
-        let options = AutoCompactionCheckOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            session,
-            config_path: self.config_path.clone(),
-            model: self.current_model.clone(),
-            reasoning_effort: self.current_variant.clone(),
-            inherited_env: Some(self.env_map.clone()),
-        };
-        if !auto_compaction_due_for_snapshot(&options, &snapshot)? {
+        if !self
+            .runtime
+            .client()
+            .resume_thread(session)
+            .await?
+            .auto_compaction_due(AutoCompactionRequest {
+                snapshot,
+                model: self.current_model.clone(),
+                reasoning_effort: self.current_variant.clone(),
+                inherited_env: Some(self.env_map.clone()),
+            })
+            .await?
+        {
             return Ok(false);
         }
         self.start_compaction_task(
@@ -136,7 +153,7 @@ impl TuiApp {
         let mut pending = Vec::new();
         for mut agent in std::mem::take(&mut ui.auxiliary_agent_tasks) {
             let mut events = VecDeque::new();
-            while let Ok(event) = agent.events.try_recv() {
+            while let Some(event) = agent.events.try_recv() {
                 events.push_back(event);
             }
             let had_pending =
@@ -148,8 +165,12 @@ impl TuiApp {
             }
 
             if agent.task.is_finished() {
+                ui.take_pending_auxiliary_shell_commands_for_owner(
+                    agent.session_id.as_deref(),
+                    agent.turn_id.as_deref(),
+                );
                 let mut events = VecDeque::new();
-                while let Ok(event) = agent.events.try_recv() {
+                while let Some(event) = agent.events.try_recv() {
                     events.push_back(event);
                 }
                 let had_pending =
@@ -161,15 +182,16 @@ impl TuiApp {
                 let pending_unowned_live_events =
                     std::mem::take(&mut agent.pending_unowned_live_events);
                 if let Ok(Ok(result)) = agent.task.await {
+                    let thread_id = result.thread_id;
                     self.last_context_snapshot = result.context_snapshot.clone();
                     ui.last_context_snapshot = result.context_snapshot;
                     let session_id = agent_session_id
-                        .get_or_insert_with(|| result.session_id.clone())
+                        .get_or_insert_with(|| thread_id.clone())
                         .clone();
                     for event in pending_unowned_live_events {
                         buffer_session_live_event(ui, &session_id, event);
                     }
-                    ui.session_live_event_backlog.remove(&result.session_id);
+                    ui.session_live_event_backlog.remove(&thread_id);
                 }
                 self.refresh_current_session_title().await?;
                 ui.refresh_sidebar(self);
@@ -227,16 +249,17 @@ impl TuiApp {
 
                 match shell.task.await {
                     Ok(Ok(result)) => {
-                        let interrupted =
-                            ui.interrupt_requested && result.outcome == Outcome::Aborted;
-                        if let Some(session_id) = result.session_id {
+                        let interrupted = ui.interrupt_requested
+                            && result.outcome == ShellCommandOutcome::Interrupted;
+                        if let Some(session_id) = result.thread_id {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
                                 self.refresh_current_session_title().await?;
                                 self.clear_new_session_draft();
                             }
                         }
-                        if (result.outcome != Outcome::Normal || result.tool_failures > 0)
+                        if (result.outcome != ShellCommandOutcome::Completed
+                            || result.tool_failures > 0)
                             && !interrupted
                         {
                             self.had_error = true;
@@ -346,9 +369,7 @@ impl TuiApp {
         ui.clamp_completion_popup_selection();
         let completion_popup_height = ui.completion_popup_height();
         let composer_text = textarea_text(&ui.textarea);
-        let slash_items = if !ui.textarea.is_selecting()
-            && completion_popup_height == 0
-        {
+        let slash_items = if !ui.textarea.is_selecting() && completion_popup_height == 0 {
             if ui.slash_menu_dismissed(&composer_text) {
                 Vec::new()
             } else {
@@ -368,8 +389,7 @@ impl TuiApp {
         let slash_height = if slash_items.is_empty() {
             0
         } else {
-            (slash_items.len().saturating_add(1) as u16)
-                .min(COMPLETION_POPUP_MAX_ROWS as u16)
+            (slash_items.len().saturating_add(1) as u16).min(COMPLETION_POPUP_MAX_ROWS as u16)
         };
         let popup_height = completion_popup_height.max(slash_height);
         let vertical = if popup_height == 0 {

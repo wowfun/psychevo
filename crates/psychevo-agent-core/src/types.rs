@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use futures::future::BoxFuture;
+use psychevo_ai::{AbortSignal, AssistantSource, Outcome};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use thiserror::Error;
+
+use crate::support::now_ms;
+use crate::tool_router::ToolRouterError;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("provider failed: {0}")]
@@ -226,7 +232,9 @@ pub enum AssistantBlock {
     },
     ToolCall(ToolCallBlock),
     ProviderTool(ProviderToolBlock),
-    Source(AssistantSource),
+    Source {
+        source: AssistantSource,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

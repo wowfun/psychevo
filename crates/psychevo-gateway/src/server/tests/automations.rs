@@ -1,6 +1,6 @@
-include!("automations/rpc_lifecycle.rs");
-include!("automations/runtime_tool.rs");
-include!("automations/runs.rs");
-include!("automations/draft.rs");
-include!("automations/live.rs");
-include!("automations/helpers.rs");
+mod draft;
+pub(in crate::server::tests) mod helpers;
+mod live;
+mod rpc_lifecycle;
+mod runs;
+mod runtime_tool;

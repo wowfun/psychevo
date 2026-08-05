@@ -1,5 +1,29 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::PathBuf;
+
+use futures::future::BoxFuture;
+use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+
+use super::ToolRuntimeContext;
+use super::args::{optional_bool, required_string};
+use super::cwd::CwdTool;
+use super::file_mutation::{
+    FileMutationBackend, FileVersion, LOCAL_FILE_MUTATION, MutationConflict, acquire_path_locks,
+    record_written_file, require_fresh_read,
+};
+use super::truncation::normalize_lf;
+use super::write_support::patch_lsp::{
+    apply_v4a_update_hunks, parse_v4a_patch, snapshot_lsp_baseline, v4a_add_content,
+};
+use super::write_support::text_edit::{
+    EditSuccess, TextFile, V4aOperation, V4aOperationKind, edit_success_value,
+    fuzzy_find_and_replace, git_patch_add, git_patch_delete, git_patch_update, post_write_feedback,
+    read_text_snapshot, restore_text_file, result_output,
+};
+use crate::error::{Error, Result};
+use crate::types::WorkspaceMutation;
+
 pub(crate) struct EditTool(CwdTool);
 
 impl EditTool {
@@ -446,7 +470,19 @@ pub(crate) fn apply_v4a_plan_with_backend(
 
 #[cfg(test)]
 pub(crate) mod edit_tool_tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
     pub(crate) use super::*;
+    use crate::config::LspConfig;
+    use crate::sandbox::SandboxPolicy;
+    use crate::tools::file_mutation::{FileSnapshot, MutationResult};
+    use crate::tools::read::read_tool_impl;
+    use crate::tools::write_support::patch_lsp::default_lsp_manager;
+    use crate::tools::write_support::text_edit::partial_patch_failure_model_content;
+    use crate::types::{RunMode, WorkspaceMutationSink};
 
     fn cwd_tool(path: &Path) -> CwdTool {
         CwdTool::with_context(

@@ -1,21 +1,22 @@
 use super::*;
+use crate::composition::GatewayApplication;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
-use psychevo::__ai::Outcome;
-use psychevo::__product::persistence::StateRuntime;
-use psychevo::{__product::runtime::PermissionApprovalOutcome, __product::runtime::RunResult};
+use psychevo::Error;
+use psychevo::application::{GatewayChannelOutboxInput, PermissionApprovalOutcome};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug, Default)]
-struct TestBackend {
+struct ChannelTurnProbe {
     prompts: Arc<Mutex<Vec<String>>>,
     runs: AtomicUsize,
     request_permission: AtomicBool,
 }
 
-impl TestBackend {
+impl ChannelTurnProbe {
     fn request_permission(&self) {
         self.request_permission.store(true, Ordering::SeqCst);
     }
@@ -23,6 +24,82 @@ impl TestBackend {
     fn stop_requesting_permission(&self) {
         self.request_permission.store(false, Ordering::SeqCst);
     }
+
+    fn executor(self: &Arc<Self>) -> crate::FrameworkNativeTestExecutor {
+        let backend = Arc::clone(self);
+        Arc::new(move |invocation| {
+            let backend = Arc::clone(&backend);
+            Box::pin(async move { backend.execute(invocation).await })
+        })
+    }
+
+    async fn execute(
+        &self,
+        invocation: psychevo::AgentTurnInvocation,
+    ) -> psychevo::Result<psychevo::TurnResult> {
+        invocation.persistence.confirm_delivery().await?;
+        let run_number = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.request_permission.load(Ordering::SeqCst) {
+            let Some(handler) = invocation.execution.approval_handler.clone() else {
+                return Err(Error::Message("approval handler missing".to_string()));
+            };
+            let decision = handler
+                .request_permission(psychevo::application::PermissionApprovalRequest {
+                    tool_call_id: "permission-1".to_string(),
+                    tool_name: "fake_tool".to_string(),
+                    summary: "fake permission".to_string(),
+                    reason: "test permission".to_string(),
+                    matched_rule: None,
+                    suggested_rule: None,
+                    allow_always: false,
+                    filesystem: None,
+                    mcp_startup: None,
+                    timeout_secs: 300,
+                })
+                .await;
+            if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
+                return Err(Error::Message("permission denied".to_string()));
+            }
+        }
+        self.prompts
+            .lock()
+            .expect("prompts poisoned")
+            .push(invocation.input.prompt);
+        Ok(psychevo::TurnResult {
+            thread_id: invocation.receipt.thread_id,
+            outcome: psychevo::TurnOutcome::Completed,
+            terminal_reason: None,
+            final_answer: format!("answer {run_number}"),
+            provider: "fake-provider".to_string(),
+            model: "fake-model".to_string(),
+            reasoning_effort: None,
+            context_limit: None,
+            tool_failures: 0,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+            context_snapshot: None,
+            terminal_error: None,
+            warnings: Vec::new(),
+        })
+    }
+}
+
+async fn gateway_with_turn_probe(
+    database_path: PathBuf,
+    home: PathBuf,
+    inherited_env: BTreeMap<String, String>,
+    backend: Arc<ChannelTurnProbe>,
+) -> GatewayApplication {
+    std::fs::create_dir_all(&home).expect("home");
+    GatewayApplication::open_with_native_test_executor(
+        home,
+        database_path,
+        None,
+        inherited_env,
+        backend.executor(),
+    )
+    .await
+    .expect("test composition")
 }
 
 #[derive(Debug)]
@@ -108,85 +185,6 @@ impl crate::im::ImAdapter for ErrorImAdapter {
     }
 }
 
-impl crate::GatewayBackend for TestBackend {
-    fn kind(&self) -> BackendKind {
-        BackendKind::Native
-    }
-
-    fn run_turn(
-        &self,
-        request: crate::BackendTurnRequest,
-    ) -> BoxFuture<'static, psychevo::Result<RunResult>> {
-        let prompts = Arc::clone(&self.prompts);
-        let run_number = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
-        let request_permission = self.request_permission.load(Ordering::SeqCst);
-        Box::pin(async move {
-            if request_permission {
-                let Some(handler) = request.options.approval_handler.clone() else {
-                    return Err(Error::Message("approval handler missing".to_string()));
-                };
-                let decision = handler
-                    .request_permission(psychevo::__product::runtime::PermissionApprovalRequest {
-                        tool_call_id: "permission-1".to_string(),
-                        tool_name: "fake_tool".to_string(),
-                        summary: "fake permission".to_string(),
-                        reason: "test permission".to_string(),
-                        matched_rule: None,
-                        suggested_rule: None,
-                        allow_always: false,
-                        filesystem: None,
-                        mcp_startup: None,
-                        timeout_secs: 300,
-                    })
-                    .await;
-                if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
-                    return Err(Error::Message("permission denied".to_string()));
-                }
-            }
-            prompts
-                .lock()
-                .expect("prompts poisoned")
-                .push(request.options.prompt.clone());
-            let session_id = if let Some(session_id) = request.options.session.clone() {
-                session_id
-            } else {
-                request
-                    .options
-                    .state
-                    .create_session_with_metadata(
-                        &request.options.cwd,
-                        &request.runtime_source,
-                        "fake-model",
-                        "fake-provider",
-                        None,
-                    )
-                    .await?
-            };
-            Ok(RunResult {
-                session_id,
-                outcome: Outcome::Normal,
-                terminal_reason: None,
-                final_answer: format!("answer {run_number}"),
-                db_path: request.options.state.db_path().to_path_buf(),
-                cwd: request.options.cwd,
-                provider: "fake-provider".to_string(),
-                model: "fake-model".to_string(),
-                base_url: String::new(),
-                api_key_env: None,
-                reasoning_effort: None,
-                context_limit: None,
-                tool_failures: 0,
-                selected_agent: None,
-                selected_skills: Vec::new(),
-                context_snapshot: None,
-                terminal_error: None,
-                events: Vec::new(),
-                warnings: Vec::new(),
-            })
-        })
-    }
-}
-
 fn ready_wechat_connection(cwd: Option<String>) -> ChannelRuntimeConnection {
     ChannelRuntimeConnection {
         id: "wechat".to_string(),
@@ -249,18 +247,13 @@ async fn channel_message_runs_gateway_turn_and_sends_final_answer() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd.clone(),
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -294,18 +287,13 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let runs = Arc::clone(&backend);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd.clone(),
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FailOnceImAdapter::default();
@@ -318,15 +306,19 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let connection = ready_wechat_connection(None);
     let message = wechat_message("original prompt must not rerun", "wx-outbox");
     let source = gateway_source_for_im(&message);
+    let mut start = psychevo::StartThreadRequest::new(&cwd);
+    start.source = "channel".to_string();
     let thread_id = state
         .inner
-        .state
-        .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .framework
+        .start_thread(start)
         .await
-        .expect("thread");
+        .expect("thread")
+        .id()
+        .to_string();
     state
         .inner
-        .state
+        .durability
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source.source_key().0,
             source_kind: &source.kind,
@@ -344,18 +336,16 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let payload_hash = format!("{:x}", Sha256::digest(payload.as_bytes()));
     state
         .inner
-        .state
-        .upsert_gateway_channel_outbox(
-            psychevo::__product::persistence::GatewayChannelOutboxInput {
-                delivery_id: "out-retry",
-                thread_id: &thread_id,
-                turn_id: "turn-already-completed",
-                connection_id: "wechat",
-                source_key: &source.source_key().0,
-                payload_text: payload,
-                payload_hash: &payload_hash,
-            },
-        )
+        .durability
+        .upsert_gateway_channel_outbox(GatewayChannelOutboxInput {
+            delivery_id: "out-retry",
+            thread_id: &thread_id,
+            turn_id: "turn-already-completed",
+            connection_id: "wechat",
+            source_key: &source.source_key().0,
+            payload_text: payload,
+            payload_hash: &payload_hash,
+        })
         .await
         .expect("outbox");
     runner::retry_unacknowledged_channel_outbox(&state, &runtime, &connection, &channel_gateway)
@@ -363,12 +353,17 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
         .expect_err("first outbox delivery fails");
     let failed = state
         .inner
-        .state
-        .gateway_channel_outbox("out-retry")
+        .durability
+        .retryable_gateway_channel_outbox("wechat")
         .await
         .expect("failed outbox read")
+        .into_iter()
+        .find(|record| record.delivery_id == "out-retry")
         .expect("failed outbox row");
-    assert_eq!(failed.status, "failed");
+    assert_eq!(
+        failed.status,
+        psychevo::application::GatewayChannelOutboxStatus::Failed
+    );
     assert_eq!(failed.payload_text.as_deref(), Some(payload));
     assert_eq!(runs.runs.load(Ordering::SeqCst), 0);
 
@@ -391,14 +386,14 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     }
     let acknowledged = state
         .inner
-        .state
-        .gateway_channel_outbox("out-retry")
+        .durability
+        .retryable_gateway_channel_outbox("wechat")
         .await
-        .expect("outbox read")
-        .expect("outbox row");
-    assert_eq!(acknowledged.status, "acknowledged");
-    assert_eq!(acknowledged.payload_text, None);
-    assert_eq!(acknowledged.payload_hash, payload_hash);
+        .expect("outbox read");
+    assert!(
+        acknowledged.is_empty(),
+        "acknowledged delivery must leave the retry set"
+    );
 }
 
 #[tokio::test]
@@ -430,18 +425,13 @@ async fn channel_mission_records_team_metadata_before_running_prompt() {
         ),
     )
     .expect("team");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd.clone(),
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -471,20 +461,17 @@ async fn channel_mission_records_team_metadata_before_running_prompt() {
         "{:?}",
         prompt_log.as_slice()
     );
-    let team = state
+    let coordination = state
         .inner
-        .state
-        .find_active_agent_team_run(&sent[0].thread_id)
+        .framework
+        .resume_thread(&sent[0].thread_id)
         .await
-        .expect("team lookup")
-        .expect("team run");
-    let mission = state
-        .inner
-        .state
-        .find_active_agent_mission_run(&sent[0].thread_id)
+        .expect("thread")
+        .agent_coordination_status()
         .await
-        .expect("mission lookup")
-        .expect("mission run");
+        .expect("coordination");
+    let team = coordination.team.expect("team run");
+    let mission = coordination.mission.expect("mission run");
     assert_eq!(team.team_name, "release");
     assert_eq!(team.max_parallel_agents, 2);
     assert_eq!(mission.goal, "Ship it");
@@ -496,17 +483,12 @@ async fn channel_voice_command_updates_source_policy() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let backend = Arc::new(TestBackend::default());
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let backend = Arc::new(ChannelTurnProbe::default());
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -531,7 +513,7 @@ async fn channel_voice_command_updates_source_policy() {
     );
     assert_eq!(
         voice_policy_for_source(&state, &source),
-        wire::VoicePolicyMode::VoiceOnly
+        wire::voice::VoicePolicyMode::VoiceOnly
     );
 
     handle_channel_message(
@@ -547,7 +529,54 @@ async fn channel_voice_command_updates_source_policy() {
     assert_eq!(sent[1].text, "Voice replies are off.");
     assert_eq!(
         voice_policy_for_source(&state, &source),
-        wire::VoicePolicyMode::Off
+        wire::voice::VoicePolicyMode::Off
+    );
+}
+
+#[tokio::test]
+async fn channel_sandbox_command_reads_configuration_without_a_bound_thread() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&home).expect("home");
+    std::fs::write(
+        home.join("config.toml"),
+        "[sandbox]\nenabled = false\nmode = \"read-only\"\n",
+    )
+    .expect("config");
+    let backend = Arc::new(ChannelTurnProbe::default());
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
+        temp.path().join("static"),
+    ));
+    let adapter = FakeImAdapter::new("wechat");
+    let channel_gateway = ChannelGateway::new(vec![ChannelAdapterBinding::new(
+        "wechat",
+        Arc::new(adapter.clone()),
+        ChannelAllowlist::new(["wx-user".to_string()], Vec::<String>::new()),
+    )]);
+    let runtime = ChannelRuntimeState::new(temp.path());
+
+    handle_channel_message(
+        &state,
+        &runtime,
+        &ready_wechat_connection(None),
+        &channel_gateway,
+        wechat_message("/sandbox", "wx-sandbox"),
+    )
+    .await
+    .expect("sandbox handled");
+
+    let sent = wait_for_sent(&adapter, 1).await;
+    assert!(sent[0].text.contains("enabled: false"), "{}", sent[0].text);
+    assert!(
+        sent[0].text.contains("configured_mode: read-only"),
+        "{}",
+        sent[0].text
     );
 }
 
@@ -558,12 +587,8 @@ async fn channel_shared_compact_command_runs_native_compaction() {
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
     let env = BTreeMap::from([
         ("HOME".to_string(), home.to_string_lossy().to_string()),
         (
@@ -572,12 +597,10 @@ async fn channel_shared_compact_command_runs_native_compaction() {
         ),
         ("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "0".to_string()),
     ]);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime = gateway_with_turn_probe(temp.path().join("state.db"), home, env, backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        env,
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -624,19 +647,19 @@ async fn channel_compact_queues_during_active_turn_without_blocking_later_contro
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     backend.request_permission();
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend.clone());
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::new(),
+        backend.clone(),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -739,18 +762,13 @@ async fn channel_dynamic_skill_command_runs_gateway_turn() {
         "---\nname: reviewer\ndescription: Review the current change.\n---\n\nReview carefully.\n",
     )
     .expect("skill");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -807,18 +825,13 @@ entrypoints = ["peer"]
 "#,
     )
     .expect("config");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -880,10 +893,8 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
         "[agents.backends.opencode]\nkind = \"acp\"\ncommand = \"opencode\"\nentrypoints = [\"peer\", \"subagent\"]\n",
     )
     .expect("config");
-    let backend = Arc::new(TestBackend::default());
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
+    let backend = Arc::new(ChannelTurnProbe::default());
+    let database_path = temp.path().join("state.db");
     let env = BTreeMap::from([
         (
             "HOME".to_string(),
@@ -891,20 +902,13 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
         ),
         (
             "PSYCHEVO_HOME".to_string(),
-            state_runtime
-                .db_path()
-                .parent()
-                .unwrap()
-                .display()
-                .to_string(),
+            database_path.parent().unwrap().display().to_string(),
         ),
     ]);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, backend),
-        home,
+    let runtime = gateway_with_turn_probe(database_path, home, env, backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        env,
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -931,12 +935,13 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     assert_eq!(sent[0].text, "answer 1");
     let original_thread_id = state
         .inner
-        .state
-        .gateway_source_binding(&source_key)
+        .durability
+        .gateway_source_lane(&source_key)
         .await
         .expect("original binding")
         .expect("original binding exists")
-        .thread_id;
+        .thread_id
+        .expect("original bound thread");
 
     handle_channel_message(
         &state,
@@ -953,25 +958,30 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
 
     let binding = state
         .inner
-        .state
-        .gateway_source_binding(&source_key)
+        .durability
+        .gateway_source_lane(&source_key)
         .await
         .expect("binding")
         .expect("binding exists");
-    assert_ne!(binding.thread_id, original_thread_id);
-    let runtime_binding = state
+    let binding_thread_id = binding.thread_id.as_deref().expect("bound thread");
+    assert_ne!(binding_thread_id, original_thread_id.as_str());
+    let binding_thread = state
         .inner
-        .state
-        .gateway_runtime_binding(&binding.thread_id)
+        .framework
+        .resume_thread(binding_thread_id.to_string())
         .await
-        .expect("runtime binding");
+        .expect("binding thread");
     assert!(
-        runtime_binding.is_none(),
+        binding_thread
+            .agent_binding()
+            .await
+            .expect("runtime binding")
+            .is_none(),
         "selection must bind only at turn delivery"
     );
     let lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&source_key)
         .await
         .expect("source lane")
@@ -980,11 +990,13 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     assert!(
         state
             .inner
-            .state
-            .session_summary(&original_thread_id)
+            .framework
+            .resume_thread(original_thread_id.clone())
             .await
             .expect("original thread")
-            .is_some()
+            .summary()
+            .await
+            .is_ok()
     );
 
     handle_channel_message(
@@ -1008,18 +1020,19 @@ async fn channel_profile_command_rejects_unknown_pre_thread_target() {
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(home.join("config.toml"), "").expect("config");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),
         )]),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -1046,7 +1059,7 @@ async fn channel_profile_command_rejects_unknown_pre_thread_target() {
     assert_eq!(sent[0].text, "Unknown Runtime Profile `codex`.");
     let lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&source.source_key().0)
         .await
         .expect("lane");
@@ -1069,18 +1082,19 @@ async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
         "---\ndescription: Review the top-level task.\n---\n\nReview carefully.\n",
     )
     .expect("agent");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::from([(
             "HOME".to_string(),
             temp.path().to_string_lossy().to_string(),
         )]),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -1120,7 +1134,7 @@ async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
     assert!(sent[1].text.contains("top-level Agent `reviewer`"));
     let lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&source.source_key().0)
         .await
         .expect("lane")
@@ -1131,8 +1145,11 @@ async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
     assert!(
         state
             .inner
-            .state
-            .gateway_runtime_binding(lane.thread_id.as_deref().expect("draft thread"))
+            .framework
+            .resume_thread(lane.thread_id.as_deref().expect("draft thread").to_string())
+            .await
+            .expect("draft thread")
+            .agent_binding()
             .await
             .expect("runtime binding")
             .is_none(),
@@ -1148,18 +1165,12 @@ async fn channel_new_command_clears_binding_for_next_default_cwd() {
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&changed_cwd).expect("changed cwd");
-    let backend = Arc::new(TestBackend::default());
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let store_state = state_runtime.clone();
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let backend = Arc::new(ChannelTurnProbe::default());
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd.clone(),
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -1205,21 +1216,26 @@ async fn channel_new_command_clears_binding_for_next_default_cwd() {
     let sent = wait_for_sent(&adapter, 3).await;
     assert_eq!(sent.len(), 3);
     assert_ne!(sent[0].thread_id, sent[2].thread_id);
-    let active_sessions = store_state
-        .list_sessions_with_sources(&["channel/wechat"])
+    let first = state
+        .inner
+        .framework
+        .resume_thread(&sent[0].thread_id)
         .await
-        .expect("sessions");
-    let archived_sessions = store_state
-        .list_archived_sessions_with_sources(&["channel/wechat"])
+        .expect("first thread")
+        .snapshot()
         .await
-        .expect("archived sessions");
-    let cwds = active_sessions
-        .iter()
-        .chain(archived_sessions.iter())
-        .map(|session| session.cwd.as_str())
-        .collect::<BTreeSet<_>>();
-    assert!(cwds.contains(cwd.to_string_lossy().as_ref()));
-    assert!(cwds.contains(changed_cwd.to_string_lossy().as_ref()));
+        .expect("first snapshot");
+    let second = state
+        .inner
+        .framework
+        .resume_thread(&sent[2].thread_id)
+        .await
+        .expect("second thread")
+        .snapshot()
+        .await
+        .expect("second snapshot");
+    assert_eq!(first.summary.cwd, cwd.to_string_lossy().as_ref());
+    assert_eq!(second.summary.cwd, changed_cwd.to_string_lossy().as_ref());
 }
 
 #[tokio::test]
@@ -1228,18 +1244,13 @@ async fn channel_permission_request_can_be_approved_by_command() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     backend.request_permission();
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -1395,18 +1406,13 @@ async fn channel_answer_command_reports_missing_ask_request() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let backend = Arc::new(TestBackend::default());
+    let backend = Arc::new(ChannelTurnProbe::default());
     let prompts = Arc::clone(&backend.prompts);
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let gateway = Gateway::with_backend(state_runtime, backend);
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
-        home,
+    let runtime =
+        gateway_with_turn_probe(temp.path().join("state.db"), home, BTreeMap::new(), backend).await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
         cwd,
-        None,
-        BTreeMap::new(),
         temp.path().join("static"),
     ));
     let adapter = FakeImAdapter::new("wechat");
@@ -1521,15 +1527,16 @@ async fn wechat_session_timeout_blocks_runner_without_retrying() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::new(),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1586,15 +1593,16 @@ async fn wechat_session_timeout_during_login_grace_reports_pending() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::new(),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let polls = Arc::new(AtomicUsize::new(0));
@@ -1663,15 +1671,16 @@ async fn channel_runner_awaits_adapter_shutdown_before_marking_stopped() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::from([("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "off".to_string())]),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let stopped = Arc::new(AtomicBool::new(false));
@@ -1709,15 +1718,16 @@ async fn gateway_shutdown_awaits_channel_adapter_cleanup() {
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let state_runtime = StateRuntime::open(temp.path().join("state.db"))
-        .await
-        .expect("state");
-    let state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::with_backend(state_runtime, Arc::new(TestBackend::default())),
+    let runtime = gateway_with_turn_probe(
+        temp.path().join("state.db"),
         home,
-        cwd,
-        None,
         BTreeMap::from([("PSYCHEVO_CHANNEL_RUNTIME".to_string(), "off".to_string())]),
+        Arc::new(ChannelTurnProbe::default()),
+    )
+    .await;
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
         temp.path().join("static"),
     ));
     let stopped = Arc::new(AtomicBool::new(false));
@@ -1754,10 +1764,13 @@ async fn gateway_shutdown_awaits_channel_adapter_cleanup() {
     }
     assert_eq!(runtime.runner_view("wechat").state, "running");
 
-    tokio::time::timeout(Duration::from_secs(1), gateway.shutdown_application(false))
-        .await
-        .expect("Gateway shutdown deadline")
-        .expect("Gateway shutdown");
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        gateway.shutdown_activity_runtime(false),
+    )
+    .await
+    .expect("Gateway shutdown deadline")
+    .expect("Gateway shutdown");
 
     assert!(stopped.load(Ordering::SeqCst));
     assert_eq!(runtime.runner_view("wechat").state, "stopped");

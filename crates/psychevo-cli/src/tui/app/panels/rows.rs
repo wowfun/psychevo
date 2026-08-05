@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AgentAction, AgentEntrypoint, AgentSource, BottomRowStyle, BottomSelectionRow,
+    BottomSelectionValue, ConfiguredModel, TuiApp, Value, configured_model_display_label,
+};
+use std::{collections::BTreeSet, path::PathBuf};
 impl TuiApp {
     pub(crate) fn variant_line(&self) -> String {
         format!("variant: {}", self.variant_display_value())
@@ -111,7 +114,7 @@ pub(crate) fn json_array_strings(value: &Value) -> Vec<String> {
 }
 
 pub(crate) fn agent_definition_row(
-    agent: psychevo::__product::capabilities::AgentDefinition,
+    agent: psychevo::agents::AgentDefinition,
     shadowed: bool,
     current_agent: Option<&str>,
 ) -> BottomSelectionRow {
@@ -181,7 +184,7 @@ pub(crate) fn agent_definition_row(
 }
 
 pub(crate) fn agent_diagnostic_row(
-    diagnostic: psychevo::__product::capabilities::AgentDiagnostic,
+    diagnostic: psychevo::agents::AgentDiagnostic,
 ) -> BottomSelectionRow {
     let path = diagnostic
         .path

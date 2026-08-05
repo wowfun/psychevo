@@ -1056,9 +1056,15 @@ async fn read_bounded_error(response: reqwest::Response) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use serde_json::{Value, json};
+
+    use super::{
+        AnthropicMessagesAdapter, AnthropicNormalizer, AnthropicSseParser, anthropic_finish_reason,
+        anthropic_messages_endpoint,
+    };
     use crate::{
-        Capability, LanguageSettings, LanguageTool, Message, ModelDescriptor, ResponseFormat,
+        Capability, ErrorKind, ErrorPhase, FinishReason, FinishReasonKind, LanguageAdapterEvent,
+        LanguageRequest, LanguageSettings, LanguageTool, Message, ModelDescriptor, ResponseFormat,
         ToolDeclaration,
     };
 

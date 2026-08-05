@@ -1,3 +1,14 @@
+use std::collections::HashSet;
+
+use psychevo::{Error, application::GatewaySourceLaneInput};
+use serde_json::{Value, json};
+
+use super::Gateway;
+use super::stream_input::{source_key_key, thread_key};
+use psychevo_gateway_protocol::source::{
+    GatewayBackendInfo, GatewaySource, GatewaySourceLifetime, SourceKey,
+};
+
 impl Gateway {
     pub async fn reset_source(
         &self,
@@ -12,30 +23,25 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.resume_session(new_thread_id).await?;
+                self.restore_framework_thread(new_thread_id).await?;
                 let previous = self
                     .process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
                     .insert(source_key.0.clone(), new_thread_id.to_string());
                 if let Some(previous) = previous {
-                    self.state
-                        .mark_session_ended_with_reason(&previous, "gateway_reset")
+                    self.archive_framework_thread(&previous, "gateway_reset")
                         .await?;
-                    self.state.archive_session(&previous).await?;
                 }
             }
             GatewaySourceLifetime::Persistent => {
-                if let Some(previous) = self.state.gateway_source_lane(&source_key.0).await?
-                    && let Some(previous_thread_id) = previous.thread_id
-                {
-                    self.state
-                        .mark_session_ended_with_reason(&previous_thread_id, "gateway_reset")
-                        .await?;
-                    self.state.archive_session(&previous_thread_id).await?;
-                }
-                self.state
-
+                self.restore_framework_thread(new_thread_id).await?;
+                let previous_thread_id = self
+                    .durability
+                    .gateway_source_lane(&source_key.0)
+                    .await?
+                    .and_then(|previous| previous.thread_id);
+                self.durability
                     .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
@@ -48,6 +54,12 @@ impl Gateway {
                         lineage: Some(json!({"reason": "gateway_reset"})),
                     })
                     .await?;
+                if let Some(previous_thread_id) = previous_thread_id
+                    && previous_thread_id != new_thread_id
+                {
+                    self.archive_framework_thread(&previous_thread_id, "gateway_reset")
+                        .await?;
+                }
             }
         }
         self.bump_source_generation_key(&source_key);
@@ -68,11 +80,11 @@ impl Gateway {
                 .remove(&source_key.0),
             GatewaySourceLifetime::Persistent => {
                 let previous = self
-                    .state
+                    .durability
                     .gateway_source_lane(&source_key.0)
                     .await?
                     .and_then(|lane| lane.thread_id);
-                self.state
+                self.durability
                     .delete_gateway_source_binding(&source_key.0)
                     .await?;
                 previous
@@ -88,10 +100,8 @@ impl Gateway {
     ) -> psychevo::Result<Option<String>> {
         let previous = self.clear_source_binding(source).await?;
         if let Some(previous) = previous.as_deref() {
-            self.state
-                .mark_session_ended_with_reason(previous, "gateway_reset")
+            self.archive_framework_thread(previous, "gateway_reset")
                 .await?;
-            self.state.archive_session(previous).await?;
         }
         Ok(previous)
     }
@@ -101,14 +111,14 @@ impl Gateway {
         connection_id: &str,
     ) -> psychevo::Result<usize> {
         let bindings = self
-            .state
+            .durability
             .gateway_source_bindings_for_connection_id(connection_id)
             .await?;
         let mut rotated = 0usize;
         let mut archived_threads = HashSet::new();
         for binding in bindings {
             if !self
-                .state
+                .durability
                 .delete_gateway_source_binding(&binding.source_key)
                 .await?
             {
@@ -124,12 +134,8 @@ impl Gateway {
             );
 
             if archived_threads.insert(binding.thread_id.clone()) {
-                self.state.mark_session_ended_with_reason(
-                    &binding.thread_id,
-                    "channel_workspace_changed",
-                )
-                .await?;
-                self.state.archive_session(&binding.thread_id).await?;
+                self.archive_framework_thread(&binding.thread_id, "channel_workspace_changed")
+                    .await?;
             }
         }
         Ok(rotated)
@@ -150,15 +156,13 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.resume_session(thread_id).await?;
                 self.process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
                     .insert(source_key.0.clone(), thread_id.to_string());
             }
             GatewaySourceLifetime::Persistent => {
-                self.state
-
+                self.durability
                     .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
@@ -175,6 +179,26 @@ impl Gateway {
         }
         self.bump_source_generation_key(&source_key);
         Ok(())
+    }
+
+    async fn restore_framework_thread(&self, thread_id: &str) -> psychevo::Result<()> {
+        self.framework_client()
+            .resume_thread(thread_id)
+            .await?
+            .restore()
+            .await
+    }
+
+    async fn archive_framework_thread(
+        &self,
+        thread_id: &str,
+        reason: &'static str,
+    ) -> psychevo::Result<()> {
+        self.framework_client()
+            .resume_thread(thread_id)
+            .await?
+            .archive_with_reason(reason)
+            .await
     }
 }
 

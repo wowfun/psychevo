@@ -1,14 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+mod actions;
+mod approval;
+mod core;
+mod exec_matching;
+mod grants_lifecycle;
+mod policy;
+mod profiles;
+mod protected_paths;
+mod state;
+mod tool;
 
-include!("runtime/state.rs");
-include!("runtime/core.rs");
-include!("runtime/approval.rs");
-include!("runtime/grants_lifecycle.rs");
-include!("runtime/policy.rs");
-include!("runtime/tool.rs");
-include!("runtime/actions.rs");
-include!("runtime/profiles.rs");
-include!("runtime/exec_matching.rs");
-include!("runtime/protected_paths.rs");
-include!("runtime/sandbox_approval_tests.rs");
+#[cfg(test)]
+mod sandbox_approval_tests;
+
+pub(crate) use exec_matching::exec_prefix_matches;
+pub(crate) use state::PermissionRuntime;
+#[cfg(test)]
+pub(crate) use state::{ApprovalLifecycleEvent, PermissionDecisionView as PermissionDecision};

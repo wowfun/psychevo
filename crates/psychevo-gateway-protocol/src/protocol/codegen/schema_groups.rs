@@ -1,4 +1,4 @@
-fn schema_group_module(name: &str) -> &'static str {
+pub(super) fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("App") {
         return "app-server";
     }
@@ -298,7 +298,7 @@ fn schema_group_module(name: &str) -> &'static str {
     "system"
 }
 
-fn schema_group_const(module: &str) -> &'static str {
+pub(super) fn schema_group_const(module: &str) -> &'static str {
     match module {
         "app-server" => "appServerSchemas",
         "automations/definitions" => "automationDefinitionSchemas",
@@ -356,7 +356,7 @@ fn schema_group_const(module: &str) -> &'static str {
     }
 }
 
-fn schema_group_refs_const(module: &str) -> &'static str {
+pub(super) fn schema_group_refs_const(module: &str) -> &'static str {
     match module {
         "app-server" => "appServerSchemaRefs",
         "automations/definitions" => "automationDefinitionSchemaRefs",

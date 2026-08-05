@@ -109,13 +109,16 @@ pub async fn active_agent_team_context_for_session(
     store: &StateRuntime,
     parent_session_id: &str,
 ) -> Result<Option<ActiveAgentTeamContext>> {
-    let Some(team) = store.find_active_agent_team_run(parent_session_id).await? else {
+    let (team, mission) = store
+        .current_agent_coordination_runs(parent_session_id)
+        .await?;
+    let Some(team) = team.filter(|team| team.ended_at_ms.is_none()) else {
         return Ok(None);
     };
-    let mission = store
-        .find_active_agent_mission_run(parent_session_id)
-        .await?;
-    active_agent_team_context_from_runs(team, mission)
+    active_agent_team_context_from_runs(
+        team,
+        mission.filter(|mission| mission.ended_at_ms.is_none()),
+    )
 }
 
 pub fn active_agent_team_context_from_runs(

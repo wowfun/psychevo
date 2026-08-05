@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use ratatui::{
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
+
 pub(crate) fn bottom_panel_height(height: u16) -> u16 {
     16.min(height.saturating_sub(6)).max(8)
 }

@@ -1,5 +1,24 @@
+use serde_json::Value;
+
+use crate::gateway::Gateway;
+use crate::im::{ChannelGateway, ImIdentity, ImOutboundMessage};
+use crate::{GatewayEventEmitter, gateway_now_ms};
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayEvent, PendingActionView,
+};
+use psychevo_gateway_protocol::source::{GatewaySource, SourceKey};
+
+#[cfg(test)]
+use psychevo_gateway_protocol::events_transcript::{
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
+};
+
+use super::super::binding::WebState;
+use super::ChannelRuntimeState;
+use super::channel_multi_question_guidance;
+use super::paths::redact_channel_error;
 use super::state::{ChannelInteractionKind, ChannelInteractionTokenInput};
-use super::*;
 
 pub(super) async fn channel_reply_thread_id(state: &WebState, source: &GatewaySource) -> String {
     state

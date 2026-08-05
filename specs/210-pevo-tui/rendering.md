@@ -125,8 +125,10 @@ and [270 UI Interaction](../270-ui-interaction/spec.md).
 
 Deterministic TUI/VHS visual fixtures use fake providers and keep running
 agent, clarification, permission, and tool states observable long enough for
-terminal capture and screenshot I/O. Capture timing must not depend on real
-provider latency.
+terminal capture and screenshot I/O. The `/agents` Running-tab capture occurs
+before the child completion unlocks the parent's final response; the completed
+parent transcript and Available-tab evidence are captured afterward. Capture
+timing must not depend on real provider latency.
 
 ## Related Topics
 

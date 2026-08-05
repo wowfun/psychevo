@@ -1,3 +1,34 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use futures::future::BoxFuture;
+use psychevo::Error;
+use psychevo::application::AutomationTaskRecord;
+use psychevo::application::RuntimeTool;
+use psychevo::application::{AbortSignal, ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use super::rpc::{
+    automation_delete_result, automation_list_result, automation_run_result,
+    automation_set_enabled_result, automation_write_result,
+};
+use super::support::{automation_execution_from_value, automation_task_for_request};
+use crate::server::binding::{AuthContext, WebState};
+
+pub(in crate::server) fn automation_runtime_tools(
+    state: WebState,
+    cwd: PathBuf,
+    current_thread_id: Option<String>,
+) -> Vec<RuntimeTool> {
+    vec![RuntimeTool::new(Arc::new(AutomationTool {
+        state,
+        cwd,
+        current_thread_id,
+    }))]
+}
+
 #[derive(Clone)]
 struct AutomationTool {
     state: WebState,
@@ -120,7 +151,7 @@ impl AutomationTool {
                 let value = automation_run_result(
                     self.state.clone(),
                     &AuthContext::Bearer,
-                    wire::AutomationRunParams {
+                    wire::automations::AutomationRunParams {
                         automation_id,
                         trigger: Some("tool".to_string()),
                     },
@@ -134,7 +165,7 @@ impl AutomationTool {
                 let value = automation_delete_result(
                     &self.state,
                     &AuthContext::Bearer,
-                    wire::AutomationIdParams { automation_id },
+                    wire::automations::AutomationIdParams { automation_id },
                 )
                 .await?;
                 Ok(tool_result(action, value))
@@ -149,7 +180,7 @@ impl AutomationTool {
         let value = automation_list_result(
             &self.state,
             &AuthContext::Bearer,
-            wire::AutomationListParams {
+            wire::automations::AutomationListParams {
                 cwd: Some(self.cwd.display().to_string()),
             },
         )
@@ -163,9 +194,9 @@ impl AutomationTool {
         automation_id: Option<String>,
     ) -> psychevo::Result<Value> {
         let existing = match automation_id.as_deref() {
-            Some(id) => Some(
-                automation_task_for_request(&self.state, &AuthContext::Bearer, id).await?,
-            ),
+            Some(id) => {
+                Some(automation_task_for_request(&self.state, &AuthContext::Bearer, id).await?)
+            }
             None => None,
         };
         let params = self.write_params_from_args(&args, automation_id, existing.as_ref())?;
@@ -185,7 +216,7 @@ impl AutomationTool {
         let value = automation_set_enabled_result(
             &self.state,
             &AuthContext::Bearer,
-            wire::AutomationIdParams { automation_id },
+            wire::automations::AutomationIdParams { automation_id },
             enabled,
         )
         .await?;
@@ -197,7 +228,7 @@ impl AutomationTool {
         args: &Value,
         automation_id: Option<String>,
         existing: Option<&AutomationTaskRecord>,
-    ) -> psychevo::Result<wire::AutomationWriteParams> {
+    ) -> psychevo::Result<wire::automations::AutomationWriteParams> {
         let title = optional_tool_string(args, "title")
             .or_else(|| existing.map(|record| record.title.clone()))
             .ok_or_else(|| Error::Message("automation title is required".to_string()))?;
@@ -214,10 +245,12 @@ impl AutomationTool {
         let target = if args.get("target").is_some() || args.get("threadId").is_some() {
             self.target_from_args(args)?
         } else if let Some(existing) = existing {
-            match automation_kind_from_str(&existing.kind)? {
-                wire::AutomationTaskKind::Project => wire::AutomationTargetInput::Project,
-                wire::AutomationTaskKind::ThreadHeartbeat => {
-                    wire::AutomationTargetInput::ThreadHeartbeat {
+            match super::support::automation_kind_to_wire(existing.kind) {
+                wire::automations::AutomationTaskKind::Project => {
+                    wire::automations::AutomationTargetInput::Project
+                }
+                wire::automations::AutomationTaskKind::ThreadHeartbeat => {
+                    wire::automations::AutomationTargetInput::ThreadHeartbeat {
                         thread_id: existing.target_thread_id.clone().ok_or_else(|| {
                             Error::Message(
                                 "thread automation is missing a target thread".to_string(),
@@ -227,9 +260,9 @@ impl AutomationTool {
                 }
             }
         } else if let Some(thread_id) = self.current_thread_id.clone() {
-            wire::AutomationTargetInput::ThreadHeartbeat { thread_id }
+            wire::automations::AutomationTargetInput::ThreadHeartbeat { thread_id }
         } else {
-            wire::AutomationTargetInput::Project
+            wire::automations::AutomationTargetInput::Project
         };
         let execution = match args.get("execution") {
             Some(value) => Some(serde_json::from_value(value.clone())?),
@@ -237,7 +270,7 @@ impl AutomationTool {
                 .map(|record| automation_execution_from_value(record.execution.clone()))
                 .transpose()?,
         };
-        Ok(wire::AutomationWriteParams {
+        Ok(wire::automations::AutomationWriteParams {
             automation_id,
             scope: Some(self.scope()),
             target,
@@ -255,33 +288,33 @@ impl AutomationTool {
     fn target_from_args(
         &self,
         args: &Value,
-    ) -> psychevo::Result<wire::AutomationTargetInput> {
+    ) -> psychevo::Result<wire::automations::AutomationTargetInput> {
         if let Some(thread_id) = optional_tool_string(args, "threadId") {
-            return Ok(wire::AutomationTargetInput::ThreadHeartbeat { thread_id });
+            return Ok(wire::automations::AutomationTargetInput::ThreadHeartbeat { thread_id });
         }
         match args.get("target") {
             Some(Value::String(value)) if value == "project" => {
-                Ok(wire::AutomationTargetInput::Project)
+                Ok(wire::automations::AutomationTargetInput::Project)
             }
             Some(Value::String(value)) if value == "currentThread" => {
                 let thread_id = self
                     .current_thread_id
                     .clone()
                     .ok_or_else(|| Error::Message("current thread is not available".to_string()))?;
-                Ok(wire::AutomationTargetInput::ThreadHeartbeat { thread_id })
+                Ok(wire::automations::AutomationTargetInput::ThreadHeartbeat { thread_id })
             }
             Some(value) => serde_json::from_value(value.clone()).map_err(Into::into),
-            None => Ok(wire::AutomationTargetInput::Project),
+            None => Ok(wire::automations::AutomationTargetInput::Project),
         }
     }
 
-    fn scope(&self) -> wire::GatewayRequestScope {
-        wire::GatewayRequestScope {
+    fn scope(&self) -> wire::source::GatewayRequestScope {
+        wire::source::GatewayRequestScope {
             cwd: self.cwd.display().to_string(),
-            source: wire::GatewaySourceInput {
+            source: wire::source::GatewaySourceInput {
                 kind: "web".to_string(),
                 raw_id: None,
-                lifetime: Some(wire::GatewaySourceLifetime::Persistent),
+                lifetime: Some(wire::source::GatewaySourceLifetime::Persistent),
                 raw_identity: None,
                 visible_name: None,
             },
@@ -290,7 +323,7 @@ impl AutomationTool {
 }
 
 #[cfg(test)]
-pub(super) async fn automation_tool_execute_for_test(
+pub(in crate::server) async fn automation_tool_execute_for_test(
     state: WebState,
     cwd: PathBuf,
     current_thread_id: Option<String>,
@@ -306,7 +339,7 @@ pub(super) async fn automation_tool_execute_for_test(
 }
 
 #[cfg(test)]
-pub(super) fn automation_tool_declaration_for_test(
+pub(in crate::server) fn automation_tool_declaration_for_test(
     state: WebState,
     cwd: PathBuf,
     current_thread_id: Option<String>,

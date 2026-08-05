@@ -1,5 +1,18 @@
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use super::super::rules::normalize_command;
+use super::exec_matching::{command_tokens, exec_grant_prefix, permission_rule_tool};
+use super::profiles::web_fetch_host;
+use super::protected_paths::protected_write_reason;
+use super::state::PersistentPermissionGrant;
+use crate::types::{
+    ExecPolicyDecision, FilesystemApprovalRequest, FilesystemApprovalTarget, PermissionAccess,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PermissionAction {
+pub(super) enum PermissionAction {
     ExecCommand {
         command: String,
         normalized: String,
@@ -33,17 +46,17 @@ pub(crate) enum PermissionAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FileTarget {
-    pub(crate) raw: String,
-    pub(crate) requested_absolute: PathBuf,
-    pub(crate) absolute: PathBuf,
-    pub(crate) uri: String,
-    pub(crate) relative: String,
-    pub(crate) within_cwd: bool,
+pub(super) struct FileTarget {
+    pub(super) raw: String,
+    pub(super) requested_absolute: PathBuf,
+    pub(super) absolute: PathBuf,
+    pub(super) uri: String,
+    pub(super) relative: String,
+    pub(super) within_cwd: bool,
 }
 
 impl PermissionAction {
-    pub(crate) fn from_tool_call(
+    pub(super) fn from_tool_call(
         cwd: &Path,
         tool_name: &str,
         args: &Value,
@@ -54,13 +67,13 @@ impl PermissionAction {
                     return Ok(None);
                 };
                 Some(Self::ExecCommand {
-                        command: command.to_string(),
-                        normalized: normalize_command(command),
-                        cwd: match args.get("cwd").and_then(Value::as_str) {
-                            Some(path) => Some(file_target(cwd, path)?),
-                            None => None,
-                        },
-                    })
+                    command: command.to_string(),
+                    normalized: normalize_command(command),
+                    cwd: match args.get("cwd").and_then(Value::as_str) {
+                        Some(path) => Some(file_target(cwd, path)?),
+                        None => None,
+                    },
+                })
             }
             "read" => file_paths_from_args(cwd, args, &["path"])?.map(|paths| Self::File {
                 tool: "read".to_string(),
@@ -116,31 +129,32 @@ impl PermissionAction {
                 .map(|url| Self::WebFetch {
                     url: url.to_string(),
                 }),
-            "web_search" => args
-                .get("query")
-                .and_then(Value::as_str)
-                .map(|query| Self::WebSearch { query: query.to_string() }),
-            "mcp_startup" => {
-                match args.get("server").and_then(Value::as_str) {
-                    Some(server) => Some(Self::McpStartup {
-                        server: server.to_string(),
-                        source: args
-                            .get("source")
-                            .and_then(Value::as_str)
-                            .unwrap_or("unknown")
-                            .to_string(),
-                        target: serde_json::from_value(
-                            args.get("target").cloned().unwrap_or(Value::Null),
-                        )?,
-                        descriptor_fingerprint: args
-                            .get("descriptorFingerprint")
-                            .and_then(Value::as_str)
-                            .unwrap_or("missing")
-                            .to_string(),
-                    }),
-                    None => None,
-                }
+            "web_search" => {
+                args.get("query")
+                    .and_then(Value::as_str)
+                    .map(|query| Self::WebSearch {
+                        query: query.to_string(),
+                    })
             }
+            "mcp_startup" => match args.get("server").and_then(Value::as_str) {
+                Some(server) => Some(Self::McpStartup {
+                    server: server.to_string(),
+                    source: args
+                        .get("source")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    target: serde_json::from_value(
+                        args.get("target").cloned().unwrap_or(Value::Null),
+                    )?,
+                    descriptor_fingerprint: args
+                        .get("descriptorFingerprint")
+                        .and_then(Value::as_str)
+                        .unwrap_or("missing")
+                        .to_string(),
+                }),
+                None => None,
+            },
             _ => crate::mcp::mcp_utility_action(tool_name, args)
                 .or_else(|| {
                     crate::mcp::mcp_tool_name_parts(tool_name)
@@ -151,49 +165,7 @@ impl PermissionAction {
         Ok(action)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn matches_rule(&self, rule: &PermissionRule) -> bool {
-        match self {
-            Self::ExecCommand { normalized, .. } => {
-                rule.tool == "exec_command" && wildcard_match(&rule.pattern, normalized)
-            }
-            Self::File { tool, paths, .. } => {
-                rule.tool == *tool
-                    && paths.iter().any(|target| {
-                        if Path::new(&rule.pattern).is_absolute() {
-                            wildcard_match(&rule.pattern, &target.absolute.to_string_lossy())
-                        } else {
-                            wildcard_match(&rule.pattern, &target.relative)
-                        }
-                    })
-            }
-            Self::Skill { tool, action } => {
-                rule.tool == *tool && wildcard_match(&rule.pattern, action)
-            }
-            Self::McpStartup {
-                server,
-                descriptor_fingerprint,
-                ..
-            } => {
-                rule.tool == "mcp_startup"
-                    && wildcard_match(
-                        &rule.pattern,
-                        &format!("{server}@{descriptor_fingerprint}"),
-                    )
-            }
-            Self::Mcp { server, tool } => {
-                rule.tool == "mcp" && wildcard_match(&rule.pattern, &format!("{server}/{tool}"))
-            }
-            Self::WebFetch { url } => {
-                rule.tool == "web_fetch" && wildcard_match(&rule.pattern, url)
-            }
-            Self::WebSearch { query } => {
-                rule.tool == "web_search" && wildcard_match(&rule.pattern, query)
-            }
-        }
-    }
-
-    pub(crate) fn session_key(&self) -> String {
+    pub(super) fn session_key(&self) -> String {
         match self {
             Self::ExecCommand {
                 command,
@@ -222,7 +194,7 @@ impl PermissionAction {
         }
     }
 
-    pub(crate) fn suggested_rule(&self) -> Option<String> {
+    pub(super) fn suggested_rule(&self) -> Option<String> {
         match self {
             Self::ExecCommand { command, .. } => exec_grant_prefix(command)
                 .map(|prefix| format!("exec:{}", prefix.join(" ")))
@@ -235,28 +207,14 @@ impl PermissionAction {
                 server,
                 descriptor_fingerprint,
                 ..
-            } => Some(format!(
-                "McpStartup({server}@{descriptor_fingerprint})"
-            )),
+            } => Some(format!("McpStartup({server}@{descriptor_fingerprint})")),
             Self::Mcp { server, tool } => Some(format!("Mcp({server}/{tool})")),
             Self::WebFetch { url } => Some(format!("WebFetch({url})")),
             Self::WebSearch { query } => Some(format!("WebSearch({query})")),
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn allow_always(&self) -> bool {
-        matches!(
-            self,
-            Self::ExecCommand { .. }
-                | Self::Skill { .. }
-                | Self::Mcp { .. }
-                | Self::WebFetch { .. }
-                | Self::WebSearch { .. }
-        )
-    }
-
-    pub(crate) fn persistent_grants(&self) -> Vec<PersistentPermissionGrant> {
+    pub(super) fn persistent_grants(&self) -> Vec<PersistentPermissionGrant> {
         match self {
             Self::ExecCommand { command, .. } => {
                 let prefix = exec_grant_prefix(command).unwrap_or_else(|| command_tokens(command));
@@ -289,14 +247,14 @@ impl PermissionAction {
         }
     }
 
-    pub(crate) fn file_targets_all_within_cwd(&self) -> bool {
+    pub(super) fn file_targets_all_within_cwd(&self) -> bool {
         match self {
             Self::File { paths, .. } => paths.iter().all(|path| path.within_cwd),
             _ => false,
         }
     }
 
-    pub(crate) fn filesystem_identity_snapshot(&self) -> Option<Vec<PathBuf>> {
+    pub(super) fn filesystem_identity_snapshot(&self) -> Option<Vec<PathBuf>> {
         match self {
             Self::File { paths, .. } => {
                 Some(paths.iter().map(|target| target.absolute.clone()).collect())
@@ -306,7 +264,7 @@ impl PermissionAction {
         }
     }
 
-    pub(crate) fn filesystem_approval_request(&self) -> Option<FilesystemApprovalRequest> {
+    pub(super) fn filesystem_approval_request(&self) -> Option<FilesystemApprovalRequest> {
         let Self::File {
             paths,
             mutating: true,
@@ -329,7 +287,7 @@ impl PermissionAction {
         })
     }
 
-    pub(crate) fn mcp_startup_approval_request(
+    pub(super) fn mcp_startup_approval_request(
         &self,
     ) -> Option<crate::types::McpStartupApprovalRequest> {
         let Self::McpStartup {
@@ -348,7 +306,7 @@ impl PermissionAction {
         })
     }
 
-    pub(crate) fn category(&self) -> &'static str {
+    pub(super) fn category(&self) -> &'static str {
         match self {
             Self::ExecCommand { .. } => "exec",
             Self::File { .. } => "filesystem",
@@ -359,7 +317,7 @@ impl PermissionAction {
         }
     }
 
-    pub(crate) fn is_safe_file_edit(&self) -> bool {
+    pub(super) fn is_safe_file_edit(&self) -> bool {
         matches!(
             self,
             Self::File {
@@ -395,7 +353,7 @@ fn common_scope_candidates(paths: &[FileTarget]) -> Vec<String> {
     candidates
 }
 
-pub(crate) fn file_paths_from_args(
+fn file_paths_from_args(
     cwd: &Path,
     args: &Value,
     keys: &[&str],
@@ -408,10 +366,7 @@ pub(crate) fn file_paths_from_args(
     Ok((!paths.is_empty()).then_some(paths))
 }
 
-pub(crate) fn edit_paths_from_args(
-    cwd: &Path,
-    args: &Value,
-) -> crate::error::Result<Vec<FileTarget>> {
+fn edit_paths_from_args(cwd: &Path, args: &Value) -> crate::error::Result<Vec<FileTarget>> {
     if let Some(paths) = file_paths_from_args(cwd, args, &["path"])? {
         return Ok(paths);
     }
@@ -427,7 +382,7 @@ pub(crate) fn edit_paths_from_args(
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
-pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
+fn patch_file_paths(line: &str) -> Vec<String> {
     let line = line.trim();
     for marker in [
         "*** Update File:",
@@ -448,7 +403,7 @@ pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
     Vec::new()
 }
 
-pub(crate) fn file_target(cwd: &Path, raw: &str) -> crate::error::Result<FileTarget> {
+pub(super) fn file_target(cwd: &Path, raw: &str) -> crate::error::Result<FileTarget> {
     let identity = crate::filesystem_identity::resolve(raw, cwd)?;
     let cwd = crate::filesystem_identity::canonicalize_deepest_existing(cwd)?;
     let within_cwd = crate::filesystem_identity::is_within(&cwd, &identity.resolved);
@@ -497,7 +452,7 @@ fn relative_path_from(base: &Path, target: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod action_path_tests {
-    use super::*;
+    use super::file_target;
 
     #[test]
     fn file_target_relative_path_preserves_spaces() {

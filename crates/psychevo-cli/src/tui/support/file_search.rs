@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::support_composer::search_cwd_files_while;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileSearchMatch {
     pub(crate) path: String,

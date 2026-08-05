@@ -1,3 +1,17 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::v2::{Meta, SessionId, SessionUpdate, ToolCallContent};
+use agent_client_protocol::{Client, ConnectionTo};
+use psychevo::TurnEvent;
+use serde_json::{Value, json};
+
+use crate::protocol::{
+    AcpUsageAccumulator, compact_tool_result_text, runtime_event_session_update,
+};
+
+use super::slash_diff_sessions::{agent_message_update, agent_thought_update, send_session_update};
+
 #[derive(Debug, Default)]
 pub(crate) struct AcpTurnProjection {
     assistant_text: String,
@@ -161,7 +175,7 @@ fn record_completed_message_usage(
     if let Some(value) = accounting {
         runtime_event.insert("accounting".to_string(), value);
     }
-    accumulator.record_stream_event(&RunStreamEvent::value(Value::Object(runtime_event)));
+    accumulator.record_runtime_value(&Value::Object(runtime_event));
 }
 
 pub(crate) fn send_turn_event_update(
@@ -172,6 +186,14 @@ pub(crate) fn send_turn_event_update(
     projection: &mut AcpTurnProjection,
 ) {
     match event {
+        TurnEvent::Scoped { event, .. } => {
+            send_turn_event_update(cx, session_id, *event, usage, projection);
+        }
+        TurnEvent::Runtime { data } => {
+            if let Ok(mut usage) = usage.lock() {
+                usage.record_runtime_value(&data);
+            }
+        }
         TurnEvent::MessageDelta { text } => {
             if let Some(update) = projection.assistant_message_update(session_id, text) {
                 send_session_update(cx, session_id.clone(), update);
@@ -186,7 +208,7 @@ pub(crate) fn send_turn_event_update(
         }
         TurnEvent::Tool { data, .. } => {
             if let Ok(mut usage) = usage.lock() {
-                usage.record_stream_event(&RunStreamEvent::value(data.clone()));
+                usage.record_runtime_value(&data);
             }
             if let Some(update) = projection.runtime_tool_update(&data) {
                 send_session_update(cx, session_id.clone(), update);
@@ -237,7 +259,12 @@ pub(crate) fn send_turn_event_update(
 
 #[cfg(test)]
 mod live_projection_tests {
-    use super::*;
+    use agent_client_protocol::schema::v2::{SessionId, SessionUpdate, ToolCallStatus};
+    use serde_json::json;
+
+    use crate::protocol::{AcpUsageAccumulator, runtime_event_session_update};
+
+    use super::{AcpTurnProjection, record_completed_message_usage};
 
     #[test]
     fn framework_tool_event_reuses_the_acp_runtime_projection() {
@@ -272,10 +299,7 @@ mod live_projection_tests {
                 .is_some()
         );
         assert_eq!(projection.remaining_final_text("hello world"), None);
-        assert_eq!(
-            projection.remaining_final_text("hello world!"),
-            Some("!")
-        );
+        assert_eq!(projection.remaining_final_text("hello world!"), Some("!"));
     }
 
     #[test]
@@ -307,7 +331,10 @@ mod live_projection_tests {
         };
         assert_eq!(update.tool_call_id.0.as_ref(), "call-1");
         assert_eq!(update.status.value(), Some(&ToolCallStatus::InProgress));
-        assert_eq!(update.raw_output.value(), Some(&json!({"output": "first line\n"})));
+        assert_eq!(
+            update.raw_output.value(),
+            Some(&json!({"output": "first line\n"}))
+        );
     }
 
     #[test]

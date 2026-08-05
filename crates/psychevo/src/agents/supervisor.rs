@@ -308,7 +308,7 @@ impl AgentSupervisor {
         self.wait_background().await;
     }
 
-    pub(crate) fn stage_task_panic(&self, id: &str) {
+    pub(crate) fn stage_task_panic(&self, id: &str, evidence: &str) {
         self.inner.task_panics.fetch_add(1, Ordering::Relaxed);
         let mut slots = self.slots();
         let Some(state) = slots.get_mut(id) else {
@@ -323,7 +323,7 @@ impl AgentSupervisor {
         state.record.edge_status = Some(super::AgentEdgeStatus::Closed);
         state.record.ended_at_ms = Some(super::mailbox_tools::now_ms());
         state.record.outcome = Some("failed".to_string());
-        state.record.error = Some("Agent task panicked".to_string());
+        state.record.error = Some(evidence.to_string());
     }
 
     #[cfg(test)]
@@ -422,13 +422,10 @@ impl AgentSupervisor {
             .commit_agent_terminal(&child_session_id, mailbox)
             .await?;
         let mut slots = self.slots();
-        if slots
-            .get(id)
-            .is_some_and(|slot| {
-                slot.phase == AgentRunPhase::PendingTerminal
-                    && Arc::ptr_eq(&slot.terminal_commit, &terminal_commit)
-            })
-        {
+        if slots.get(id).is_some_and(|slot| {
+            slot.phase == AgentRunPhase::PendingTerminal
+                && Arc::ptr_eq(&slot.terminal_commit, &terminal_commit)
+        }) {
             slots.remove(id);
         }
         Ok(())
@@ -624,13 +621,7 @@ mod tests {
             .await
             .expect("state");
         let parent = state
-            .create_session_with_metadata(
-                temp.path(),
-                "run",
-                "parent-model",
-                "provider",
-                None,
-            )
+            .create_session_with_metadata(temp.path(), "run", "parent-model", "provider", None)
             .await
             .expect("parent");
         let child = state
@@ -895,11 +886,12 @@ mod tests {
         let supervisor = AgentSupervisor::default();
         let mut running = record("panic-agent", &parent);
         running.child_session_id = Some(child.clone());
-        supervisor
-            .register(running, None, 4)
-            .expect("active Agent");
+        supervisor.register(running, None, 4).expect("active Agent");
 
-        supervisor.stage_task_panic("panic-agent");
+        supervisor.stage_task_panic(
+            "panic-agent",
+            "Agent task panicked: fixture panic\nCaptured unwind backtrace:\nfixture",
+        );
         supervisor
             .finish(&state, "panic-agent")
             .await
@@ -919,6 +911,10 @@ mod tests {
         assert_eq!(
             mailbox[0].metadata.as_ref().expect("metadata")["status"],
             "errored"
+        );
+        assert!(
+            mailbox[0].content_text.contains("fixture panic"),
+            "the durable failed terminal must retain bounded panic evidence"
         );
         assert_eq!(
             state

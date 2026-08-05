@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::tests::{line_text, runtime_turn_event};
+use crate::tui::{
+    FocusMode, FullscreenUi, HistoryToolCall, Terminal, TranscriptKind, TranscriptRow,
+    UnicodeWidthStr, active_tool_title, tool_lines, tool_title, transcript_layout_row_key,
+};
+use ratatui::backend::TestBackend;
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
@@ -13,8 +20,8 @@ pub(crate) async fn completed_streaming_write_stdin_poll_placeholder_is_removed(
     ui.transcript.push(row);
     ui.exec_session_rows.insert(0, 0);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -37,8 +44,8 @@ pub(crate) async fn completed_streaming_write_stdin_poll_placeholder_is_removed(
             .any(|row| row.tool_name.as_deref() == Some("write_stdin"))
     );
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -77,8 +84,8 @@ pub(crate) async fn non_empty_stdin_renders_as_compact_terminal_interaction() {
     ui.transcript.push(row);
     ui.exec_session_rows.insert(7, 0);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_stdin",
             "session_id": 7,
             "tool_call_id": "call_exec",

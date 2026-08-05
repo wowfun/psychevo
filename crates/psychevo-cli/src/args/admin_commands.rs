@@ -1,2 +1,4 @@
-include!("admin_commands/profile_args.rs");
-include!("admin_commands/admin_args.rs");
+pub(in crate::args) mod profile_args;
+
+#[cfg(test)]
+mod tests;

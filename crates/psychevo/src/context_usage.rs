@@ -2,7 +2,7 @@ pub(crate) use std::collections::BTreeMap;
 pub(crate) use std::path::PathBuf;
 pub(crate) use std::sync::{Arc, Mutex};
 
-pub(crate) use psychevo_agent_core::{Message, PromptInstruction};
+pub(crate) use psychevo_agent_core::PromptInstruction;
 pub(crate) use psychevo_ai::{
     AdapterCall, AdapterFuture, AdapterStream, LanguageAdapter, LanguageAdapterEvent,
     LanguageRequest, ModelDescriptor,
@@ -28,11 +28,10 @@ pub(crate) use crate::tools::{
 };
 pub(crate) use crate::types::{RunMode, RunOptions};
 
-#[path = "context_usage/snapshot.rs"]
-mod snapshot;
 #[path = "context_usage/counting.rs"]
 mod counting;
-pub(crate) use counting::*;
+#[path = "context_usage/snapshot.rs"]
+mod snapshot;
 pub use snapshot::{
     CONTEXT_BAR_MAX_CELLS, CONTEXT_BAR_MIN_CELLS, ContextAdvice, ContextCategory,
     ContextFormatOptions, ContextOptions, ContextScope, ContextSnapshot, ContextTokenizer,

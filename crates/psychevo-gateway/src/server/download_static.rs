@@ -1,4 +1,23 @@
-async fn download_session(
+use std::path::{Path, PathBuf};
+
+use axum::body::Body;
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
+use axum::response::{IntoResponse, Json};
+use psychevo::Error;
+use psychevo::command_registry::parse_session_export_format;
+use psychevo::session_export::{
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
+};
+use serde::Deserialize;
+use serde_json::json;
+
+use super::auth_input::authorize_thread;
+use super::binding::WebState;
+use super::rpc_json::content_type_for_path;
+
+pub(super) async fn download_session(
     State(state): State<WebState>,
     headers: HeaderMap,
     AxumPath((session_id, kind)): AxumPath<(String, String)>,
@@ -24,7 +43,7 @@ async fn download_session(
     }
 }
 
-async fn read_media_artifact(
+pub(super) async fn read_media_artifact(
     State(state): State<WebState>,
     headers: HeaderMap,
     AxumPath(artifact_id): AxumPath<String>,
@@ -42,14 +61,11 @@ async fn read_media_artifact(
     }
 }
 
-fn render_media_artifact(
-    state: &WebState,
-    artifact_id: &str,
-) -> psychevo::Result<Response<Body>> {
-    psychevo::__product::platform::validate_media_artifact_id(artifact_id)?;
-    let path = psychevo::__product::platform::media_artifact_path(&state.inner.home, artifact_id)?;
+fn render_media_artifact(state: &WebState, artifact_id: &str) -> psychevo::Result<Response<Body>> {
+    psychevo::media::validate_media_artifact_id(artifact_id)?;
+    let path = psychevo::media::media_artifact_path(&state.inner.home, artifact_id)?;
     let bytes = std::fs::read(&path)?;
-    let media = psychevo::__product::platform::read_media_artifact(&state.inner.home, artifact_id)?;
+    let media = psychevo::media::read_media_artifact(&state.inner.home, artifact_id)?;
     let mut response = Response::new(Body::from(bytes));
     response.headers_mut().insert(
         CONTENT_TYPE,
@@ -108,16 +124,17 @@ async fn render_download(
         Some(value) => SessionExportIncludeSet::parse(value, artifact_kind)?,
         None => SessionExportIncludeSet::default_for(artifact_kind),
     };
-    let artifact = render_session_export(
-        &state.inner.state,
-        session_id,
-        SessionExportOptions {
+    let artifact = state
+        .inner
+        .framework
+        .resume_thread(session_id)
+        .await?
+        .render_export(SessionExportOptions {
             format,
             include,
             artifact_kind,
-        },
-    )
-    .await?;
+        })
+        .await?;
     let filename = query
         .filename
         .as_deref()
@@ -137,10 +154,10 @@ async fn render_download(
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct DownloadQuery {
-    format: Option<String>,
-    include: Option<String>,
-    filename: Option<String>,
+pub(super) struct DownloadQuery {
+    pub(super) format: Option<String>,
+    pub(super) include: Option<String>,
+    pub(super) filename: Option<String>,
 }
 
 fn content_type_for_export_format(format: SessionExportFormat) -> &'static str {
@@ -202,7 +219,7 @@ fn download_filename_with_format_extension(filename: &str, format: SessionExport
     format!("{stem}.{extension}")
 }
 
-async fn static_asset(
+pub(super) async fn static_asset(
     State(state): State<WebState>,
     headers: HeaderMap,
     uri: axum::http::Uri,
@@ -227,7 +244,8 @@ async fn static_asset(
         return StatusCode::NOT_FOUND.into_response();
     }
     let candidate_is_file = matches!(candidate, StaticFileLookup::File(_));
-    let serves_shell = request_path.is_empty() || request_path == "index.html" || !candidate_is_file;
+    let serves_shell =
+        request_path.is_empty() || request_path == "index.html" || !candidate_is_file;
     if serves_shell && state.auth_from_headers(&headers).is_none() {
         return launch_required_page().into_response();
     }
@@ -253,11 +271,13 @@ async fn static_asset(
             );
             response.headers_mut().insert(
                 CACHE_CONTROL,
-                HeaderValue::from_static(if candidate_is_file && is_fingerprinted_asset(&request_path) {
-                    "public, max-age=31536000, immutable"
-                } else {
-                    "no-store"
-                }),
+                HeaderValue::from_static(
+                    if candidate_is_file && is_fingerprinted_asset(&request_path) {
+                        "public, max-age=31536000, immutable"
+                    } else {
+                        "no-store"
+                    },
+                ),
             );
             response.into_response()
         }
@@ -368,7 +388,7 @@ fn launch_required_page() -> Response<Body> {
     response
 }
 
-fn launch_expired_page(status: StatusCode) -> Response<Body> {
+pub(super) fn launch_expired_page(status: StatusCode) -> Response<Body> {
     let body = r#"<!doctype html>
 <html lang="en">
   <head>
@@ -404,7 +424,7 @@ fn launch_expired_page(status: StatusCode) -> Response<Body> {
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
-async fn gateway_fallback(
+pub(super) async fn gateway_fallback(
     State(state): State<WebState>,
     headers: HeaderMap,
     uri: axum::http::Uri,
@@ -412,5 +432,7 @@ async fn gateway_fallback(
     if uri.path().starts_with("/_gateway/managed/") {
         return StatusCode::NOT_FOUND.into_response();
     }
-    static_asset(State(state), headers, uri).await.into_response()
+    static_asset(State(state), headers, uri)
+        .await
+        .into_response()
 }

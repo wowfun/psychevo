@@ -1,17 +1,30 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+use crate::tui::tests::fixtures::{finished_turn_result, test_app, test_shell_running_control};
+use crate::tui::tests::{insert_tui_message, runtime_turn_event, start_thread_fixture};
+use crate::tui::{
+    FullscreenUi, ImageInput, Outcome, PendingImageAttachment, QueuedInput, RunningTask,
+    RunningTurn, RunningTurnEvents, StartThreadRequest, TranscriptKind, TurnOutcome, TurnResult,
+    bottom_status_context_for_width, textarea_text, textarea_with_text,
+};
 
 #[tokio::test]
 pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    let session_id = StateRuntime::open(&app.db_path)
-        .await.expect("store")
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let mut request = StartThreadRequest::new(&app.cwd);
+    request.source = "tui".to_string();
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(request)
+        .await
+        .expect("Thread");
+    let session_id = thread.id().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "run_start",
         "session_id": session_id.clone(),
         "provider": "mock",
@@ -19,52 +32,27 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []
     })))
     .expect("send agent end");
 
-    let db_path = app.db_path.clone();
-    let cwd = app.cwd.clone();
     let task_session_id = session_id.clone();
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
-        StateRuntime::open(&db_path)
-            .await?
-            .set_session_title(&task_session_id, "X Daily")
-            .await?;
-        Ok(psychevo::__product::runtime::RunResult {
-            session_id: task_session_id,
-            outcome: Outcome::Normal,
-            terminal_reason: None,
-            final_answer: "done".to_string(),
-            db_path,
-            cwd,
-            provider: "mock".to_string(),
-            model: "mock-model".to_string(),
-            base_url: "http://127.0.0.1".to_string(),
-            api_key_env: None,
-            reasoning_effort: None,
-            context_limit: None,
-            tool_failures: 0,
-            selected_agent: None,
-            selected_skills: Vec::new(),
-            context_snapshot: None,
-            terminal_error: None,
-            events: Vec::new(),
-            warnings: Vec::new(),
-        })
+        thread.set_title("X Daily").await?;
+        Ok(finished_turn_result(task_session_id))
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -96,35 +84,19 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: "aborted-session".to_string(),
-        outcome: Outcome::Aborted,
-        terminal_reason: None,
+    let result = TurnResult {
+        outcome: TurnOutcome::Interrupted,
         final_answer: String::new(),
-        db_path: app.db_path.clone(),
-        cwd: app.cwd.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
-        tool_failures: 0,
-        selected_agent: None,
-        selected_skills: Vec::new(),
-        context_snapshot: None,
-        terminal_error: None,
-        events: Vec::new(),
-        warnings: Vec::new(),
+        ..finished_turn_result("aborted-session")
     };
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -139,6 +111,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
             placeholder: "[Image #1]".to_string(),
             image: ImageInput::ImageUrl("https://example.test/image.png".to_string()),
         }],
+        mission: None,
         sequence: prompt_sequence,
     });
     let shell_sequence = ui.next_pending_input_sequence();
@@ -149,7 +122,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
     });
     ui.textarea = textarea_with_text("draft");
 
-    app.finish_streamed_agent_turn(&mut ui);
+    app.finish_streamed_agent_turn(&mut ui).await;
 
     assert!(ui.running.is_none());
     assert!(ui.queued_inputs.is_empty());
@@ -206,7 +179,7 @@ pub(crate) async fn normal_turn_with_tool_failure_does_not_add_contradictory_err
         false,
     );
 
-    app.finish_streamed_agent_turn(&mut ui);
+    app.finish_streamed_agent_turn(&mut ui).await;
 
     assert!(app.compaction_task.is_none());
     assert!(!app.had_error);
@@ -243,7 +216,7 @@ pub(crate) async fn streamed_budget_exhaustion_renders_specific_error_row() {
         false,
     );
 
-    app.finish_streamed_agent_turn(&mut ui);
+    app.finish_streamed_agent_turn(&mut ui).await;
 
     assert!(app.compaction_task.is_none());
     assert!(app.had_error);
@@ -263,35 +236,19 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: "normal-with-tool-failure".to_string(),
-        outcome: Outcome::Normal,
-        terminal_reason: None,
+    let result = TurnResult {
         final_answer: "handled failure".to_string(),
-        db_path: app.db_path.clone(),
-        cwd: app.cwd.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
         tool_failures: 1,
-        selected_agent: None,
-        selected_skills: Vec::new(),
-        context_snapshot: None,
-        terminal_error: None,
-        events: Vec::new(),
-        warnings: Vec::new(),
+        ..finished_turn_result("normal-with-tool-failure")
     };
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -312,37 +269,22 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: "budget-exhausted".to_string(),
-        outcome: Outcome::Failed,
-        terminal_reason: Some(psychevo::__agent_core::TerminalReason::MaxTurnsExceeded {
+    let result = TurnResult {
+        outcome: TurnOutcome::Failed,
+        terminal_reason: Some(psychevo::application::TerminalReason::MaxTurnsExceeded {
             max_turns: 128,
         }),
         final_answer: String::new(),
-        db_path: app.db_path.clone(),
-        cwd: app.cwd.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
-        tool_failures: 0,
-        selected_agent: None,
-        selected_skills: Vec::new(),
-        context_snapshot: None,
-        terminal_error: None,
-        events: Vec::new(),
-        warnings: Vec::new(),
+        ..finished_turn_result("budget-exhausted")
     };
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -366,16 +308,15 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
 pub(crate) async fn fullscreen_loads_current_session_history() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mock-model",
-            "mock",
-            Some(serde_json::json!({"context_limit": 64_000})),
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mock-model",
+        "mock",
+        Some(serde_json::json!({"context_limit": 64_000})),
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -453,7 +394,9 @@ pub(crate) async fn fullscreen_loads_current_session_history() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     assert_eq!(ui.transcript[0].kind, TranscriptKind::Prompt);
     assert_eq!(ui.transcript[0].text, "hello");
@@ -494,45 +437,4 @@ pub(crate) async fn fullscreen_loads_current_session_history() {
     assert_eq!(textarea_text(&ui.textarea), "follow-up");
     ui.recall_history(1);
     assert_eq!(textarea_text(&ui.textarea), "draft");
-}
-
-fn gateway_test_entry(
-    id: &str,
-    kind: TranscriptBlockKind,
-    status: TranscriptBlockStatus,
-    title: Option<&str>,
-    text: Option<&str>,
-    metadata: Option<serde_json::Value>,
-) -> TranscriptEntry {
-    TranscriptEntry {
-        id: id.to_string(),
-        thread_id: String::new(),
-        turn_id: Some("turn-1".to_string()),
-        message_seq: None,
-        role: TranscriptEntryRole::Assistant,
-        status,
-        source: "runtime.stream".to_string(),
-        blocks: vec![TranscriptBlock {
-            id: format!("{id}:block"),
-            kind,
-            status,
-            order: 0,
-            phase_ordinal: None,
-            source: "runtime.stream".to_string(),
-            title: title.map(str::to_string),
-            body: text.map(str::to_string),
-            preview: text.map(str::to_string),
-            detail: text.map(str::to_string),
-            artifact_ids: Vec::new(),
-            metadata,
-            result: None,
-            created_at_ms: 1,
-            updated_at_ms: 1,
-        }],
-        metadata: None,
-        usage: None,
-        accounting: None,
-        created_at_ms: 1,
-        updated_at_ms: 1,
-    }
 }

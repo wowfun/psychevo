@@ -7,15 +7,17 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo::{
-    __product::platform::GitBashRuntime, __product::platform::ProcessEnvOptions,
-    __product::platform::apply_pty_process_env, __product::platform::canonicalize_cwd,
-    __product::platform::resolve_input_path, __product::platform::terminate_pty_child_tree, Error,
+    Error, host_paths::GitBashRuntime, host_paths::resolve_input_path, paths::canonicalize_cwd,
+    process_env::ProcessEnvOptions, process_env::apply_pty_process_env,
+    process_env::terminate_pty_child_tree,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
 use uuid::Uuid;
 
-use super::{ConnectionSender, ResolvedScope, rpc_notification};
+use super::event_delivery::ConnectionSender;
+use super::rpc_json::rpc_notification;
+use super::scope_session::ResolvedScope;
 
 pub(super) const MAX_TERMINAL_SESSIONS: usize = 64;
 
@@ -42,10 +44,10 @@ impl TerminalManager {
     pub(super) fn start(
         &self,
         scope: &ResolvedScope,
-        params: wire::TerminalStartParams,
+        params: wire::thread_command_turn::TerminalStartParams,
         inherited_env: &BTreeMap<String, String>,
         out_tx: ConnectionSender,
-    ) -> psychevo::Result<wire::TerminalStartResult> {
+    ) -> psychevo::Result<wire::thread_command_turn::TerminalStartResult> {
         let cwd = resolve_terminal_cwd(&scope.cwd, params.cwd.as_deref())?;
         let rows = params.rows.clamp(4, 200);
         let cols = params.cols.clamp(20, 400);
@@ -107,7 +109,7 @@ impl TerminalManager {
                 self.clone(),
                 out_tx,
             );
-            Ok(wire::TerminalStartResult {
+            Ok(wire::thread_command_turn::TerminalStartResult {
                 terminal_id: terminal_id.clone(),
                 cwd: cwd.display().to_string(),
                 pid,
@@ -122,8 +124,8 @@ impl TerminalManager {
     pub(super) fn write(
         &self,
         owner_id: &str,
-        params: wire::TerminalWriteParams,
-    ) -> psychevo::Result<wire::TerminalMutationResult> {
+        params: wire::thread_command_turn::TerminalWriteParams,
+    ) -> psychevo::Result<wire::thread_command_turn::TerminalMutationResult> {
         let bytes = BASE64_STANDARD
             .decode(params.data_base64.as_bytes())
             .map_err(|err| Error::Message(format!("invalid terminal data: {err}")))?;
@@ -134,14 +136,14 @@ impl TerminalManager {
             .map_err(|_| Error::Message("terminal writer is unavailable".to_string()))?;
         writer.write_all(&bytes)?;
         writer.flush()?;
-        Ok(wire::TerminalMutationResult { accepted: true })
+        Ok(wire::thread_command_turn::TerminalMutationResult { accepted: true })
     }
 
     pub(super) fn resize(
         &self,
         owner_id: &str,
-        params: wire::TerminalResizeParams,
-    ) -> psychevo::Result<wire::TerminalMutationResult> {
+        params: wire::thread_command_turn::TerminalResizeParams,
+    ) -> psychevo::Result<wire::thread_command_turn::TerminalMutationResult> {
         let session = self.session(owner_id, &params.terminal_id)?;
         let master = session
             .master
@@ -155,14 +157,14 @@ impl TerminalManager {
                 pixel_height: 0,
             })
             .map_err(|err| Error::Message(err.to_string()))?;
-        Ok(wire::TerminalMutationResult { accepted: true })
+        Ok(wire::thread_command_turn::TerminalMutationResult { accepted: true })
     }
 
     pub(super) fn terminate(
         &self,
-        params: wire::TerminalTerminateParams,
+        params: wire::thread_command_turn::TerminalTerminateParams,
         out_tx: ConnectionSender,
-    ) -> psychevo::Result<wire::TerminalMutationResult> {
+    ) -> psychevo::Result<wire::thread_command_turn::TerminalMutationResult> {
         let session = {
             let mut sessions = self
                 .sessions
@@ -170,25 +172,31 @@ impl TerminalManager {
                 .expect("web terminal sessions poisoned");
             match sessions.get(&params.terminal_id) {
                 Some(slot) if slot.owner_id() == out_tx.id() => {}
-                _ => return Ok(wire::TerminalMutationResult { accepted: false }),
+                _ => {
+                    return Ok(wire::thread_command_turn::TerminalMutationResult {
+                        accepted: false,
+                    });
+                }
             }
             match sessions.remove(&params.terminal_id) {
                 Some(TerminalSlot::Active(session)) => session,
                 Some(TerminalSlot::Starting { .. }) | None => {
-                    return Ok(wire::TerminalMutationResult { accepted: false });
+                    return Ok(wire::thread_command_turn::TerminalMutationResult {
+                        accepted: false,
+                    });
                 }
             }
         };
         terminate_terminal_session(&session);
         let _ = out_tx.send(rpc_notification(
             "terminal/exited",
-            serde_json::to_value(wire::TerminalExitedPayload {
+            serde_json::to_value(wire::thread_command_turn::TerminalExitedPayload {
                 terminal_id: params.terminal_id,
                 exit_code: None,
                 reason: "terminated".to_string(),
             })?,
         ));
-        Ok(wire::TerminalMutationResult { accepted: true })
+        Ok(wire::thread_command_turn::TerminalMutationResult { accepted: true })
     }
 
     pub(super) fn terminate_owner(&self, out_tx: &ConnectionSender) -> usize {
@@ -321,7 +329,7 @@ fn spawn_terminal_reader(
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let payload = wire::TerminalOutputPayload {
+                    let payload = wire::thread_command_turn::TerminalOutputPayload {
                         terminal_id: terminal_id.clone(),
                         stream: "stdout".to_string(),
                         data_base64: BASE64_STANDARD.encode(&chunk[..n]),
@@ -438,7 +446,7 @@ fn terminal_effective_env(
     inherited_env: &BTreeMap<String, String>,
     windows_utf8_defaults: bool,
 ) -> psychevo::Result<BTreeMap<String, String>> {
-    let mut env = psychevo::__product::platform::effective_process_env(
+    let mut env = psychevo::process_env::effective_process_env(
         inherited_env,
         ProcessEnvOptions::new(&[]).with_windows_utf8_defaults(windows_utf8_defaults),
     )?;

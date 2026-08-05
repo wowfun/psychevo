@@ -1,7 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::status_usage::{bottom_status_session_usage_segments, joined_segments_if_fits};
+use crate::tui::{
+    Block, CompletionPopupTarget, DisplayRow, DisplayRowTone, FILE_POPUP_MAX_ROWS,
+    FileSearchMatchKind, FocusMode, Frame, FullscreenUi, Line, Paragraph, PendingInputAction,
+    PendingInputEntry, PendingInputKind, Rect, RunMode, SlashMenuItem, Span, TuiApp, TuiRenderable,
+    TuiTheme, UiEphemeralStatus, UnicodeWidthStr, Widget, activity_spinner_frame, composer_height,
+    composer_marker_width, composer_terminal_cursor_position, directory_display_value,
+    format_context_total_value, format_context_total_value_parts,
+    format_directory_display_with_home, format_duration_compact, home_dir_for_display,
+    parse_shell_escape_input, render_display_rows, text_selection_style, textarea_text,
+    truncate_display_width, tui_theme,
+};
 
 pub(crate) fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut FullscreenUi<'_>) {
     let theme = tui_theme();
@@ -333,7 +341,7 @@ pub(crate) fn first_pending_input_preview_line(text: &str) -> String {
 pub(crate) fn render_slash_menu(
     frame: &mut Frame<'_>,
     area: Rect,
-    items: &[self::slash::SlashMenuItem],
+    items: &[SlashMenuItem],
     selected_index: usize,
     row_areas: &mut Vec<(usize, Rect)>,
 ) {
@@ -341,24 +349,21 @@ pub(crate) fn render_slash_menu(
     row_areas.clear();
     frame.render_widget(Block::default().style(theme.menu_style()), area);
     let mut rows = vec![completion_header_row("Commands")];
-    rows.extend(items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| {
-            let mut description = item.description.clone();
-            if item.upcoming {
-                description.push_str(" upcoming");
-            }
-            DisplayRow {
-                marker: "  ",
-                label: item.command.clone(),
-                description: Some(description),
-                selected: index == selected_index,
-                disabled: item.upcoming,
-                tone: DisplayRowTone::Accent,
-                ..DisplayRow::default()
-            }
-        }));
+    rows.extend(items.iter().enumerate().map(|(index, item)| {
+        let mut description = item.description.clone();
+        if item.upcoming {
+            description.push_str(" upcoming");
+        }
+        DisplayRow {
+            marker: "  ",
+            label: item.command.clone(),
+            description: Some(description),
+            selected: index == selected_index,
+            disabled: item.upcoming,
+            tone: DisplayRowTone::Accent,
+            ..DisplayRow::default()
+        }
+    }));
     let visible_item_rows = items.len().min(area.height.saturating_sub(1) as usize);
     for index in 0..visible_item_rows {
         row_areas.push((
@@ -523,10 +528,7 @@ pub(crate) fn render_completion_popup(
         }
     }
 
-    let display_rows = rows
-        .into_iter()
-        .map(|(row, _)| row)
-        .collect::<Vec<_>>();
+    let display_rows = rows.into_iter().map(|(row, _)| row).collect::<Vec<_>>();
     render_display_rows(area, frame.buffer_mut(), &display_rows);
 }
 
@@ -755,8 +757,7 @@ pub(crate) fn bottom_status_context_for_width(
         {
             return Some(value);
         }
-        if let Some(value) =
-            joined_segments_if_fits(&[context, full_cwd.as_str()], available_width)
+        if let Some(value) = joined_segments_if_fits(&[context, full_cwd.as_str()], available_width)
         {
             return Some(value);
         }
@@ -766,11 +767,7 @@ pub(crate) fn bottom_status_context_for_width(
                 .saturating_sub(context_width)
                 .saturating_sub(SEP_WIDTH);
             if cwd_width >= STATUS_CWD_MIN_WIDTH {
-                let cwd = format_directory_display_with_home(
-                    &app.cwd,
-                    home.as_deref(),
-                    cwd_width,
-                );
+                let cwd = format_directory_display_with_home(&app.cwd, home.as_deref(), cwd_width);
                 return Some(format!("{context} · {cwd}"));
             }
         }
@@ -804,11 +801,8 @@ pub(crate) fn bottom_status_context_for_width(
                 .saturating_add(usize::from(branch.is_some()).saturating_add(1) * SEP_WIDTH);
             let cwd_width = available_width.saturating_sub(fixed_width);
             if cwd_width >= STATUS_CWD_MIN_WIDTH {
-                let compact_cwd = format_directory_display_with_home(
-                    &app.cwd,
-                    home.as_deref(),
-                    cwd_width,
-                );
+                let compact_cwd =
+                    format_directory_display_with_home(&app.cwd, home.as_deref(), cwd_width);
                 if !compact_cwd.is_empty() {
                     compact_segments.push(compact_cwd.as_str());
                     if let Some(branch) = branch.as_deref() {
@@ -830,8 +824,7 @@ pub(crate) fn bottom_status_context_for_width(
     if available_width < STATUS_CWD_MIN_WIDTH {
         return None;
     }
-    let cwd =
-        format_directory_display_with_home(&app.cwd, home.as_deref(), available_width);
+    let cwd = format_directory_display_with_home(&app.cwd, home.as_deref(), available_width);
     (!cwd.is_empty()).then_some(cwd)
 }
 

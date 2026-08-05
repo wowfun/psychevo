@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
-use psychevo::__product::persistence::StateRuntime;
-use psychevo::__product::platform::canonicalize_cwd;
-use psychevo_gateway::{Gateway, GatewayWebServerConfig, bind_gateway_web_server};
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway::composition::GatewayApplication;
+use psychevo_gateway::{GatewayWebServerConfig, bind_gateway_web_server};
 use serde_json::json;
 
 use crate::args::ServeArgs;
@@ -63,10 +63,10 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
         }
     };
     let _managed_lease = if let Some((instance, lease_path)) = managed_instance {
-        let lease = psychevo::__product::platform::InstanceLease::try_acquire(lease_path)
+        let lease = psychevo::host_process::InstanceLease::try_acquire(lease_path)
             .with_context(|| format!("acquire managed instance lease {}", lease_path.display()))?
             .ok_or_else(|| anyhow!("managed instance lease is already held"))?;
-        let process_tree = psychevo::__product::platform::enter_managed_process_tree(instance)
+        let process_tree = psychevo::host_process::enter_managed_process_tree(instance)
             .context("enter managed process ownership domain")?;
         process_tree.keep_until_process_exit();
         Some(lease)
@@ -75,12 +75,12 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     };
 
     let profile_home = home.clone();
-    let state = StateRuntime::open(&db_path).await?;
-    let gateway = Gateway::new(state);
+    let runtime =
+        GatewayApplication::open(home.clone(), db_path, config_path.clone(), env_map.clone())
+            .await?;
     let profile_name = env_value(crate::profiles::PROFILE_ENV, &env_map)
         .unwrap_or_else(|| crate::profiles::DEFAULT_PROFILE.to_string());
-    let mut config =
-        GatewayWebServerConfig::headless(gateway, home, cwd, config_path, env_map, token);
+    let mut config = GatewayWebServerConfig::headless(runtime, cwd, token);
     config.bind_addr = args.bind;
     config.bind_port_fallbacks = args.bind_fallbacks;
     config.static_dir = static_dir;
@@ -151,16 +151,6 @@ fn serve_token(
         .ok_or_else(|| anyhow!("pevo serve requires PSYCHEVO_SERVE_TOKEN or --token-file"))
 }
 
-#[allow(dead_code)]
-pub(crate) fn resolve_static_dir(
-    explicit: Option<&Path>,
-    env_map: &std::collections::BTreeMap<String, String>,
-    cwd: &Path,
-) -> Result<PathBuf> {
-    Ok(resolve_static_dir_diagnostic(explicit, env_map, cwd)?.path)
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct StaticDirResolution {
     pub(crate) path: PathBuf,
@@ -174,7 +164,6 @@ impl StaticDirResolution {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn resolve_static_dir_diagnostic(
     explicit: Option<&Path>,
     env_map: &std::collections::BTreeMap<String, String>,
@@ -213,7 +202,6 @@ pub(crate) fn resolve_static_dir_diagnostic(
     })
 }
 
-#[allow(dead_code)]
 pub(crate) fn static_dir_candidates(cwd: &Path) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let mut seen = BTreeSet::new();
@@ -227,12 +215,10 @@ pub(crate) fn static_dir_candidates(cwd: &Path) -> Vec<PathBuf> {
     candidates
 }
 
-#[allow(dead_code)]
 pub(crate) fn static_dir_build_command() -> &'static str {
     "pnpm --filter @psychevo/workbench build"
 }
 
-#[allow(dead_code)]
 pub(crate) fn static_dir_install_command() -> &'static str {
     "scripts/install.sh"
 }
@@ -254,14 +240,12 @@ fn static_dir_source(candidate: &Path, cwd: &Path) -> &'static str {
     "source-checkout"
 }
 
-#[allow(dead_code)]
 pub(crate) fn static_install_share_dir() -> Option<PathBuf> {
     env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("../share/psychevo/web")))
 }
 
-#[allow(dead_code)]
 pub(crate) fn source_checkout_roots(cwd: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut seen = BTreeSet::new();

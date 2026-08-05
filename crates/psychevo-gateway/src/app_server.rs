@@ -13,14 +13,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
-use psychevo::__agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
-use psychevo::__product::runtime::{
-    ApprovalHandler, FilesystemApprovalLifetime, FilesystemApprovalScope,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
+use psychevo::application::{
+    FilesystemApprovalLifetime, FilesystemApprovalScope, PermissionApprovalDecision,
+    PermissionApprovalOutcome, PermissionApprovalRequest, ToolBinding, ToolExecutionMode,
+    ToolOutput,
 };
 use psychevo::{
-    Application, Client, CompactThreadRequest, ForkThreadRequest, InteractionResponse,
-    StartThreadRequest, Thread, ThreadListQuery, TurnEvent, TurnHandle, TurnRequest,
+    Application, ApprovalHandler, Client, CompactThreadRequest, ForkThreadRequest,
+    InteractionResponse, ItemStage, StartThreadRequest, Thread, ThreadListQuery, TurnEvent,
+    TurnHandle, TurnOutcome, TurnRequest,
 };
 use psychevo_gateway_protocol as wire;
 use serde::Deserialize;
@@ -442,7 +443,7 @@ struct ConnectionRegistrations {
 
 #[derive(Clone)]
 struct RegisteredRemoteTool {
-    definition: wire::AppToolDefinition,
+    definition: wire::app_server::AppToolDefinition,
     validator: Arc<jsonschema::Validator>,
 }
 
@@ -475,7 +476,7 @@ impl CapturedTurnContext {
 
 #[derive(Clone)]
 struct RemoteTool {
-    definition: wire::AppToolDefinition,
+    definition: wire::app_server::AppToolDefinition,
     validator: Arc<jsonschema::Validator>,
     context: CapturedTurnContext,
     callbacks: CallbackBroker,
@@ -505,8 +506,8 @@ impl ToolBinding for RemoteTool {
 
     fn execution_mode(&self) -> ToolExecutionMode {
         match self.definition.execution_mode {
-            wire::AppToolExecutionMode::Parallel => ToolExecutionMode::Parallel,
-            wire::AppToolExecutionMode::Sequential => ToolExecutionMode::Sequential,
+            wire::app_server::AppToolExecutionMode::Parallel => ToolExecutionMode::Parallel,
+            wire::app_server::AppToolExecutionMode::Sequential => ToolExecutionMode::Sequential,
         }
     }
 
@@ -514,7 +515,7 @@ impl ToolBinding for RemoteTool {
         &self,
         tool_call_id: String,
         arguments: Value,
-        mut abort: psychevo::__ai::AbortSignal,
+        mut abort: psychevo::application::AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let this = self.clone();
         Box::pin(async move {
@@ -527,7 +528,7 @@ impl ToolBinding for RemoteTool {
                 Ok(context) => context,
                 Err(error) => return ToolOutput::error(error.message),
             };
-            let params = wire::AppToolCallParams {
+            let params = wire::app_server::AppToolCallParams {
                 call_id: tool_call_id,
                 tool_name: this.definition.name.clone(),
                 arguments,
@@ -545,7 +546,7 @@ impl ToolBinding for RemoteTool {
             tokio::select! {
                 _ = abort.wait_for_abort() => ToolOutput::error("custom Tool call interrupted"),
                 result = callback => match result {
-                    Ok(value) => match serde_json::from_value::<wire::AppToolCallResult>(value) {
+                    Ok(value) => match serde_json::from_value::<wire::app_server::AppToolCallResult>(value) {
                         Ok(result) => ToolOutput {
                             json: result.result,
                             model_content: result.model_content,
@@ -585,7 +586,7 @@ impl ApprovalHandler for RemoteApprovalHandler {
             let Ok((thread_id, turn_id)) = this.context.get().await else {
                 return PermissionApprovalDecision::deny();
             };
-            let params = wire::AppApprovalRequestParams {
+            let params = wire::app_server::AppApprovalRequestParams {
                 call_id: uuid::Uuid::now_v7().to_string(),
                 thread_id,
                 turn_id,
@@ -596,22 +597,21 @@ impl ApprovalHandler for RemoteApprovalHandler {
                 matched_rule: request.matched_rule,
                 suggested_rule: request.suggested_rule,
                 allow_always: request.allow_always,
-                filesystem: request
-                    .filesystem
-                    .map(|value| wire::AppFilesystemApprovalRequest {
+                filesystem: request.filesystem.map(|value| {
+                    wire::app_server::AppFilesystemApprovalRequest {
                         targets: value
                             .targets
                             .into_iter()
-                            .map(|target| wire::AppFilesystemApprovalTarget {
+                            .map(|target| wire::app_server::AppFilesystemApprovalTarget {
                                 requested_path: target.requested_path,
                                 resolved_path: target.resolved_path,
                             })
                             .collect(),
                         scope_candidates: value.scope_candidates,
-                    }),
-                mcp_startup: request
-                    .mcp_startup
-                    .map(|value| wire::AppMcpStartupApprovalRequest {
+                    }
+                }),
+                mcp_startup: request.mcp_startup.map(|value| {
+                    wire::app_server::AppMcpStartupApprovalRequest {
                         server: value.server,
                         source: value.source,
                         target: match value.target {
@@ -620,7 +620,7 @@ impl ApprovalHandler for RemoteApprovalHandler {
                                 args,
                                 cwd,
                                 env_names,
-                            } => wire::AppMcpStartupApprovalTarget::Stdio {
+                            } => wire::app_server::AppMcpStartupApprovalTarget::Stdio {
                                 command,
                                 args,
                                 cwd,
@@ -630,13 +630,14 @@ impl ApprovalHandler for RemoteApprovalHandler {
                                 url,
                                 header_names,
                                 credential_names,
-                            } => wire::AppMcpStartupApprovalTarget::Http {
+                            } => wire::app_server::AppMcpStartupApprovalTarget::Http {
                                 url,
                                 header_names,
                                 credential_names,
                             },
                         },
-                    }),
+                    }
+                }),
             };
             let timeout = Duration::from_secs(request.timeout_secs.max(1));
             let Ok(value) = serde_json::to_value(params) else {
@@ -649,7 +650,8 @@ impl ApprovalHandler for RemoteApprovalHandler {
             else {
                 return PermissionApprovalDecision::deny();
             };
-            let Ok(result) = serde_json::from_value::<wire::AppApprovalResult>(value) else {
+            let Ok(result) = serde_json::from_value::<wire::app_server::AppApprovalResult>(value)
+            else {
                 return PermissionApprovalDecision::deny();
             };
             app_approval_decision(result.outcome, result.filesystem_directory)
@@ -658,15 +660,17 @@ impl ApprovalHandler for RemoteApprovalHandler {
 }
 
 fn app_approval_decision(
-    outcome: wire::AppApprovalOutcome,
+    outcome: wire::app_server::AppApprovalOutcome,
     filesystem_directory: Option<String>,
 ) -> PermissionApprovalDecision {
     let outcome = match outcome {
-        wire::AppApprovalOutcome::AllowOnce => PermissionApprovalOutcome::AllowOnce,
-        wire::AppApprovalOutcome::AllowTurn => PermissionApprovalOutcome::AllowTurn,
-        wire::AppApprovalOutcome::AllowSession => PermissionApprovalOutcome::AllowSession,
-        wire::AppApprovalOutcome::AllowAlways => PermissionApprovalOutcome::AllowAlways,
-        wire::AppApprovalOutcome::Deny => PermissionApprovalOutcome::Deny,
+        wire::app_server::AppApprovalOutcome::AllowOnce => PermissionApprovalOutcome::AllowOnce,
+        wire::app_server::AppApprovalOutcome::AllowTurn => PermissionApprovalOutcome::AllowTurn,
+        wire::app_server::AppApprovalOutcome::AllowSession => {
+            PermissionApprovalOutcome::AllowSession
+        }
+        wire::app_server::AppApprovalOutcome::AllowAlways => PermissionApprovalOutcome::AllowAlways,
+        wire::app_server::AppApprovalOutcome::Deny => PermissionApprovalOutcome::Deny,
     };
     let filesystem_scope = filesystem_directory.map(|directory| FilesystemApprovalScope {
         directory,
@@ -844,7 +848,8 @@ impl AppServerConnection {
 
         match request.method {
             AppMethod::ThreadStart => {
-                let params = required_params::<wire::AppThreadStartParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadStartParams>(request.params)?;
                 let mut start = StartThreadRequest::new(params.cwd);
                 if let Some(source) = params.source {
                     start.source = source;
@@ -859,7 +864,8 @@ impl AppServerConnection {
                 serde_json::to_value(snapshot).map_err(json_error)
             }
             AppMethod::ThreadResume => {
-                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadIdParams>(request.params)?;
                 let thread = self
                     .client
                     .resume_thread(params.thread_id)
@@ -869,13 +875,14 @@ impl AppServerConnection {
                 serde_json::to_value(snapshot).map_err(json_error)
             }
             AppMethod::ThreadRead => {
-                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadIdParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 serde_json::to_value(thread.snapshot().await.map_err(RpcError::application)?)
                     .map_err(json_error)
             }
             AppMethod::ThreadList => {
-                let params = params::<wire::AppThreadListParams>(request.params)?;
+                let params = params::<wire::app_server::AppThreadListParams>(request.params)?;
                 let page = self
                     .client
                     .list_threads(ThreadListQuery {
@@ -894,13 +901,15 @@ impl AppServerConnection {
                 .map_err(json_error)
             }
             AppMethod::ThreadArchive => {
-                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadIdParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 thread.archive().await.map_err(RpcError::application)?;
                 Ok(json!({ "archived": true, "threadId": params.thread_id }))
             }
             AppMethod::ThreadCompact => {
-                let params = required_params::<wire::AppThreadCompactParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadCompactParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let result = thread
                     .compact(CompactThreadRequest {
@@ -912,10 +921,11 @@ impl AppServerConnection {
                     })
                     .await
                     .map_err(RpcError::application)?;
-                serde_json::to_value(result).map_err(json_error)
+                serde_json::to_value(app_thread_compact_result(result)).map_err(json_error)
             }
             AppMethod::ThreadFork => {
-                let params = required_params::<wire::AppThreadForkParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppThreadForkParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let fork = thread
                     .fork(ForkThreadRequest {
@@ -927,7 +937,7 @@ impl AppServerConnection {
                 serde_json::to_value(snapshot).map_err(json_error)
             }
             AppMethod::ToolRegister => {
-                let params = params::<wire::AppToolRegisterParams>(request.params)?;
+                let params = params::<wire::app_server::AppToolRegisterParams>(request.params)?;
                 let tools = validate_registrations(&params)?;
                 let count = params.tools.len();
                 *self.registrations.write().await = ConnectionRegistrations {
@@ -942,7 +952,8 @@ impl AppServerConnection {
                 }))
             }
             AppMethod::TurnStart => {
-                let params = required_params::<wire::AppTurnStartParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppTurnStartParams>(request.params)?;
                 validate_caller_turn_id(&params.turn_id)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let registrations = self.registrations.read().await.clone();
@@ -966,8 +977,8 @@ impl AppServerConnection {
                     .with_model(params.model, params.reasoning_effort)
                     .with_agent(None, params.no_agents, params.no_skills)
                     .with_environment(params.inherited_env, None, None)
-                    .with_approval(approval_handler, true);
-                input.__set_turn_id(params.turn_id);
+                    .with_approval(approval_handler, true)
+                    .with_requested_turn_id(params.turn_id);
                 for registration in registrations.tools {
                     input = input.tool(Arc::new(RemoteTool {
                         definition: registration.definition,
@@ -991,7 +1002,7 @@ impl AppServerConnection {
                 serde_json::to_value(receipt).map_err(json_error)
             }
             AppMethod::TurnWait => {
-                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
+                let params = required_params::<wire::app_server::AppTurnIdParams>(request.params)?;
                 let handle = self.turn(&params.turn_id).await?;
                 let result = handle.wait().await;
                 self.turns.write().await.remove(&params.turn_id);
@@ -999,7 +1010,7 @@ impl AppServerConnection {
                 serde_json::to_value(result).map_err(json_error)
             }
             AppMethod::TurnResume => {
-                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
+                let params = required_params::<wire::app_server::AppTurnIdParams>(request.params)?;
                 let handle = self.turn(&params.turn_id).await?;
                 let receipt = handle.receipt().clone();
                 self.turns
@@ -1010,12 +1021,13 @@ impl AppServerConnection {
                 serde_json::to_value(receipt).map_err(json_error)
             }
             AppMethod::TurnInterrupt => {
-                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
+                let params = required_params::<wire::app_server::AppTurnIdParams>(request.params)?;
                 self.turn(&params.turn_id).await?.interrupt();
                 Ok(json!({ "interrupted": true, "turnId": params.turn_id }))
             }
             AppMethod::TurnSteer => {
-                let params = required_params::<wire::AppTurnSteerParams>(request.params)?;
+                let params =
+                    required_params::<wire::app_server::AppTurnSteerParams>(request.params)?;
                 let accepted = match self.turn(&params.turn_id).await?.steer(params.input) {
                     Ok(()) => true,
                     Err(psychevo::ControlInputError::Closed) => false,
@@ -1024,19 +1036,21 @@ impl AppServerConnection {
                 Ok(json!({ "accepted": accepted, "turnId": params.turn_id }))
             }
             AppMethod::InteractionRespond => {
-                let params = required_params::<wire::AppInteractionRespondParams>(request.params)?;
+                let params = required_params::<wire::app_server::AppInteractionRespondParams>(
+                    request.params,
+                )?;
                 let response = match params.response {
-                    wire::AppInteractionResponse::Permission {
+                    wire::app_server::AppInteractionResponse::Permission {
                         outcome,
                         filesystem_directory,
                     } => InteractionResponse::Permission(app_approval_decision(
                         outcome,
                         filesystem_directory,
                     )),
-                    wire::AppInteractionResponse::Clarify { answers } => {
+                    wire::app_server::AppInteractionResponse::Clarify { answers } => {
                         InteractionResponse::Clarify(answers)
                     }
-                    wire::AppInteractionResponse::Cancel => InteractionResponse::Cancel,
+                    wire::app_server::AppInteractionResponse::Cancel => InteractionResponse::Cancel,
                 };
                 let accepted = self
                     .turn(&params.turn_id)
@@ -1072,7 +1086,7 @@ impl AppServerConnection {
                 "initialize must be a request with an id",
             ));
         }
-        let params = required_params::<wire::AppInitializeParams>(request.params)?;
+        let params = required_params::<wire::app_server::AppInitializeParams>(request.params)?;
         let mut phase = self.phase.lock().await;
         if *phase != ConnectionPhase::New {
             return Err(RpcError::protocol("initialize may be sent only once", None));
@@ -1094,15 +1108,15 @@ impl AppServerConnection {
             ));
         }
         *phase = ConnectionPhase::Initialized;
-        serde_json::to_value(wire::AppInitializeResult {
-            server: wire::AppProductInfo {
+        serde_json::to_value(wire::app_server::AppInitializeResult {
+            server: wire::app_server::AppProductInfo {
                 name: "psychevo-app-server".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
             protocol_version: PROTOCOL_VERSION,
             protocol_min: PROTOCOL_VERSION,
             protocol_max: PROTOCOL_VERSION,
-            capabilities: wire::AppServerCapabilities {
+            capabilities: wire::app_server::AppServerCapabilities {
                 threads: true,
                 turns: true,
                 event_replay: "bounded".to_string(),
@@ -1144,6 +1158,9 @@ impl AppServerConnection {
         relay_tasks.spawn(async move {
             let mut events = handle.events();
             while let Some(event) = events.next().await {
+                let Some(event) = app_turn_event(event) else {
+                    continue;
+                };
                 if output
                     .send(turn_event_notification(
                         handle.receipt().thread_id.as_str(),
@@ -1189,14 +1206,111 @@ fn error_response(id: Value, error: RpcError) -> Value {
     })
 }
 
-fn turn_event_notification(thread_id: &str, turn_id: &str, event: TurnEvent) -> Value {
+fn app_turn_event(event: TurnEvent) -> Option<wire::app_server::AppTurnEvent> {
+    use wire::app_server::{AppTurnEvent, AppTurnOutcome, AppTurnReceipt};
+
+    Some(match event {
+        TurnEvent::ActivityChanged { .. }
+        | TurnEvent::Runtime { .. }
+        | TurnEvent::Scoped { .. } => return None,
+        TurnEvent::Accepted {
+            receipt,
+            queue_position,
+        } => AppTurnEvent::Accepted {
+            receipt: AppTurnReceipt {
+                accepted: receipt.accepted,
+                thread_id: receipt.thread_id,
+                turn_id: receipt.turn_id,
+                client_turn_id: receipt.client_turn_id,
+            },
+            queue_position,
+        },
+        TurnEvent::Started { thread_id, turn_id } => AppTurnEvent::Started { thread_id, turn_id },
+        TurnEvent::Message {
+            stage,
+            message,
+            usage,
+            metadata,
+            accounting,
+        } => AppTurnEvent::Message {
+            stage: app_item_stage(stage),
+            message,
+            usage,
+            metadata,
+            accounting,
+        },
+        TurnEvent::MessageDelta { text } => AppTurnEvent::MessageDelta { text },
+        TurnEvent::ReasoningDelta { text } => AppTurnEvent::ReasoningDelta { text },
+        TurnEvent::ReasoningCompleted { text } => AppTurnEvent::ReasoningCompleted { text },
+        TurnEvent::Tool { stage, data } => AppTurnEvent::Tool {
+            stage: app_item_stage(stage),
+            data,
+        },
+        TurnEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            payload,
+        } => AppTurnEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            payload,
+        },
+        TurnEvent::InteractionResolved {
+            interaction_id,
+            kind: _,
+            reason,
+        } => AppTurnEvent::InteractionResolved {
+            interaction_id,
+            reason,
+        },
+        TurnEvent::Warning { data } => AppTurnEvent::Warning { data },
+        TurnEvent::Completed {
+            thread_id,
+            turn_id,
+            outcome,
+        } => AppTurnEvent::Completed {
+            thread_id,
+            turn_id,
+            outcome: match outcome {
+                TurnOutcome::Completed => AppTurnOutcome::Completed,
+                TurnOutcome::Stopped => AppTurnOutcome::Stopped,
+                TurnOutcome::Failed => AppTurnOutcome::Failed,
+                TurnOutcome::Interrupted => AppTurnOutcome::Interrupted,
+            },
+        },
+        TurnEvent::Failed {
+            thread_id,
+            turn_id,
+            message,
+        } => AppTurnEvent::Failed {
+            thread_id,
+            turn_id,
+            message,
+        },
+        TurnEvent::ResyncRequired { missed } => AppTurnEvent::ResyncRequired { missed },
+    })
+}
+
+fn app_item_stage(stage: ItemStage) -> wire::app_server::AppItemStage {
+    match stage {
+        ItemStage::Started => wire::app_server::AppItemStage::Started,
+        ItemStage::Updated => wire::app_server::AppItemStage::Updated,
+        ItemStage::Completed => wire::app_server::AppItemStage::Completed,
+    }
+}
+
+fn turn_event_notification(
+    thread_id: &str,
+    turn_id: &str,
+    event: wire::app_server::AppTurnEvent,
+) -> Value {
     json!({
         "jsonrpc": "2.0",
         "method": "turn/event",
-        "params": {
-            "threadId": thread_id,
-            "turnId": turn_id,
-            "event": event,
+        "params": wire::app_server::AppTurnEventNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            event,
         }
     })
 }
@@ -1281,7 +1395,7 @@ where
 }
 
 fn validate_registrations(
-    params: &wire::AppToolRegisterParams,
+    params: &wire::app_server::AppToolRegisterParams,
 ) -> Result<Vec<RegisteredRemoteTool>, RpcError> {
     let mut names = std::collections::HashSet::new();
     let mut tools = Vec::with_capacity(params.tools.len());
@@ -1499,6 +1613,37 @@ pub async fn bind_websocket(
     })
 }
 
+fn app_thread_compact_result(
+    result: psychevo::CompactionResult,
+) -> wire::app_server::AppThreadCompactResult {
+    let psychevo::CompactionResult {
+        session_id,
+        compacted,
+        reason,
+        message,
+        checkpoint_id,
+        first_kept_session_seq,
+        tokens_before,
+        tokens_after,
+        summary,
+        summary_provider,
+        summary_model,
+    } = result;
+    wire::app_server::AppThreadCompactResult {
+        thread_id: session_id,
+        compacted,
+        reason,
+        message,
+        checkpoint_id,
+        first_kept_session_seq,
+        tokens_before,
+        tokens_after,
+        summary,
+        summary_provider,
+        summary_model,
+    }
+}
+
 async fn app_websocket_upgrade(
     State(state): State<AppWebSocketState>,
     headers: HeaderMap,
@@ -1615,7 +1760,10 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
 mod tests {
     use super::*;
     use futures::future::BoxFuture;
-    use psychevo::{AgentSessionAdapter, AgentTurnRequest, TurnOutcome, TurnResult};
+    use psychevo::{
+        AgentSessionAdapter, AgentTurnInvocation, AgentTurnPreparation, PreparedAgentTurn,
+        TurnOutcome, TurnResult,
+    };
     use std::sync::atomic::{AtomicBool, Ordering};
 
     fn object_validator() -> Arc<jsonschema::Validator> {
@@ -1635,10 +1783,51 @@ mod tests {
         clarify_enabled: Arc<AtomicBool>,
     }
 
-    impl AgentSessionAdapter for ImmediateAdapter {
+    trait TestRunTurn: Send + Sync + fmt::Debug + 'static {
         fn run_turn(
             &self,
-            request: AgentTurnRequest,
+            invocation: AgentTurnInvocation,
+        ) -> BoxFuture<'static, psychevo::Result<TurnResult>>;
+    }
+
+    struct PreparedTestTurn<T: TestRunTurn>(Arc<T>);
+
+    impl<T: TestRunTurn> fmt::Debug for PreparedTestTurn<T> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("PreparedTestTurn(..)")
+        }
+    }
+
+    impl<T: TestRunTurn> PreparedAgentTurn for PreparedTestTurn<T> {
+        fn invoke(
+            self: Box<Self>,
+            invocation: AgentTurnInvocation,
+        ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
+            self.0.run_turn(invocation)
+        }
+    }
+
+    fn prepare_test_turn<T: TestRunTurn>(
+        adapter: Arc<T>,
+    ) -> BoxFuture<'static, psychevo::Result<Box<dyn PreparedAgentTurn>>> {
+        Box::pin(
+            async move { Ok(Box::new(PreparedTestTurn(adapter)) as Box<dyn PreparedAgentTurn>) },
+        )
+    }
+
+    impl AgentSessionAdapter for ImmediateAdapter {
+        fn prepare_turn(
+            self: Arc<Self>,
+            _request: AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn PreparedAgentTurn>>> {
+            prepare_test_turn(self)
+        }
+    }
+
+    impl TestRunTurn for ImmediateAdapter {
+        fn run_turn(
+            &self,
+            request: AgentTurnInvocation,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             Box::pin(async move {
                 Ok(TurnResult {
@@ -1662,13 +1851,21 @@ mod tests {
     }
 
     impl AgentSessionAdapter for BlockingAdapter {
+        fn prepare_turn(
+            self: Arc<Self>,
+            _request: AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn PreparedAgentTurn>>> {
+            prepare_test_turn(self)
+        }
+    }
+
+    impl TestRunTurn for BlockingAdapter {
         fn run_turn(
             &self,
-            mut request: AgentTurnRequest,
+            request: AgentTurnInvocation,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             let started = Arc::clone(&self.started);
             Box::pin(async move {
-                let _native_control = request.__take_native_control()?;
                 started.notify_one();
                 while !request.control.is_interrupted() {
                     tokio::task::yield_now().await;
@@ -1694,13 +1891,22 @@ mod tests {
     }
 
     impl AgentSessionAdapter for ClarifyInspectAdapter {
+        fn prepare_turn(
+            self: Arc<Self>,
+            _request: AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn PreparedAgentTurn>>> {
+            prepare_test_turn(self)
+        }
+    }
+
+    impl TestRunTurn for ClarifyInspectAdapter {
         fn run_turn(
             &self,
-            request: AgentTurnRequest,
+            request: AgentTurnInvocation,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             let clarify_enabled = Arc::clone(&self.clarify_enabled);
             Box::pin(async move {
-                clarify_enabled.store(request.input.clarify_enabled(), Ordering::SeqCst);
+                clarify_enabled.store(request.execution.clarify_enabled, Ordering::SeqCst);
                 Ok(TurnResult {
                     thread_id: request.receipt.thread_id,
                     outcome: TurnOutcome::Completed,
@@ -1831,6 +2037,48 @@ mod tests {
         assert_eq!(incompatible.data.expect("version data")["serverMax"], 1);
     }
 
+    #[test]
+    fn app_turn_event_projection_excludes_host_only_events_and_canonicalizes_public_events() {
+        for event in [
+            TurnEvent::ActivityChanged {
+                thread_id: "thread-1".to_string(),
+                activity: psychevo::ThreadActivitySnapshot {
+                    revision: 1,
+                    running: true,
+                    active_turn_id: Some("turn-1".to_string()),
+                    queued_turns: 0,
+                },
+            },
+            TurnEvent::Runtime {
+                data: json!({"type": "provider_internal"}),
+            },
+            TurnEvent::Scoped {
+                thread_id: "child-thread".to_string(),
+                turn_id: "child-turn".to_string(),
+                event: Box::new(TurnEvent::MessageDelta {
+                    text: "child output".to_string(),
+                }),
+            },
+        ] {
+            assert!(app_turn_event(event).is_none());
+        }
+
+        let projected = app_turn_event(TurnEvent::InteractionResolved {
+            interaction_id: "interaction-1".to_string(),
+            kind: "clarify".to_string(),
+            reason: "answered".to_string(),
+        })
+        .expect("public interaction event");
+        assert_eq!(
+            serde_json::to_value(projected).expect("public event JSON"),
+            json!({
+                "type": "interaction_resolved",
+                "interactionId": "interaction-1",
+                "reason": "answered",
+            })
+        );
+    }
+
     #[tokio::test]
     async fn thread_and_turn_methods_use_framework_objects_and_emit_events() {
         let (temp, connection, mut rx) = test_connection().await;
@@ -1872,14 +2120,65 @@ mod tests {
             let Some(notification) = notification else {
                 break;
             };
-            if notification["method"] == "turn/event"
-                && notification["params"]["event"]["type"] == "completed"
-            {
-                saw_completed = true;
-                break;
+            if notification["method"] == "turn/event" {
+                let params = serde_json::from_value::<wire::app_server::AppTurnEventNotification>(
+                    notification["params"].clone(),
+                )
+                .expect("protocol-owned Turn event notification");
+                if matches!(
+                    params.event,
+                    wire::app_server::AppTurnEvent::Completed { .. }
+                ) {
+                    saw_completed = true;
+                    break;
+                }
             }
         }
         assert!(saw_completed);
+    }
+
+    #[tokio::test]
+    async fn thread_compact_returns_the_protocol_owned_camel_case_result() {
+        let (temp, connection, _rx) = test_connection().await;
+        initialize(&connection).await;
+        let thread = connection
+            .dispatch(request(
+                2,
+                "thread/start",
+                json!({ "cwd": temp.path(), "source": "python" }),
+            ))
+            .await
+            .expect("thread start");
+
+        let result = connection
+            .dispatch(request(
+                3,
+                "thread/compact",
+                json!({ "threadId": thread["id"], "force": false }),
+            ))
+            .await
+            .expect("thread compact");
+
+        assert_eq!(result["threadId"], thread["id"]);
+        assert_eq!(result["compacted"], false);
+        assert_eq!(result["message"], "not enough messages to compact");
+        for key in [
+            "checkpointId",
+            "firstKeptSessionSeq",
+            "tokensBefore",
+            "tokensAfter",
+            "summary",
+            "summaryProvider",
+            "summaryModel",
+        ] {
+            assert_eq!(
+                result.get(key),
+                Some(&Value::Null),
+                "{key} must be present as null"
+            );
+        }
+        assert!(result.get("session_id").is_none());
+        assert!(result.get("checkpoint_id").is_none());
     }
 
     #[tokio::test]
@@ -2336,11 +2635,11 @@ mod tests {
             watch::channel(Some(("thread-1".to_string(), "turn-1".to_string())));
         let _context_tx = context_tx;
         let tool = RemoteTool {
-            definition: wire::AppToolDefinition {
+            definition: wire::app_server::AppToolDefinition {
                 name: "echo".to_string(),
                 description: "Echo input".to_string(),
                 parameters: json!({"type": "object"}),
-                execution_mode: wire::AppToolExecutionMode::Parallel,
+                execution_mode: wire::app_server::AppToolExecutionMode::Parallel,
                 timeout_ms: 1_000,
             },
             validator: object_validator(),
@@ -2349,11 +2648,11 @@ mod tests {
             },
             callbacks: connection.callbacks.clone(),
         };
-        let (_control, receivers) = psychevo::__agent_core::ControlHandle::new();
+        let (_abort_tx, abort_rx) = watch::channel(false);
         let execution = tokio::spawn(tool.execute(
             "call-1".to_string(),
             json!({"text": "hello"}),
-            receivers.abort_signal(),
+            psychevo::application::AbortSignal::new(abort_rx),
         ));
         let callback = rx.recv().await.expect("callback request");
         assert_eq!(callback["method"], "tool/call");
@@ -2377,12 +2676,12 @@ mod tests {
 
     #[test]
     fn custom_tool_registration_rejects_an_invalid_json_schema() {
-        let error = validate_registrations(&wire::AppToolRegisterParams {
-            tools: vec![wire::AppToolDefinition {
+        let error = validate_registrations(&wire::app_server::AppToolRegisterParams {
+            tools: vec![wire::app_server::AppToolDefinition {
                 name: "broken".to_string(),
                 description: "Broken schema".to_string(),
                 parameters: json!({"type": 7}),
-                execution_mode: wire::AppToolExecutionMode::Parallel,
+                execution_mode: wire::app_server::AppToolExecutionMode::Parallel,
                 timeout_ms: 1_000,
             }],
             approval_handler: false,
@@ -2404,11 +2703,11 @@ mod tests {
             "additionalProperties": false
         });
         let tool = RemoteTool {
-            definition: wire::AppToolDefinition {
+            definition: wire::app_server::AppToolDefinition {
                 name: "echo".to_string(),
                 description: "Echo input".to_string(),
                 parameters: schema.clone(),
-                execution_mode: wire::AppToolExecutionMode::Parallel,
+                execution_mode: wire::app_server::AppToolExecutionMode::Parallel,
                 timeout_ms: 1_000,
             },
             validator: Arc::new(jsonschema::validator_for(&schema).expect("valid schema")),
@@ -2417,12 +2716,12 @@ mod tests {
             },
             callbacks: connection.callbacks.clone(),
         };
-        let (_control, receivers) = psychevo::__agent_core::ControlHandle::new();
+        let (_abort_tx, abort_rx) = watch::channel(false);
         let output = tool
             .execute(
                 "call-invalid".to_string(),
                 json!({"text": 42}),
-                receivers.abort_signal(),
+                psychevo::application::AbortSignal::new(abort_rx),
             )
             .await;
         assert!(output.is_error);
@@ -2523,11 +2822,11 @@ mod tests {
         let (_temp, connection, mut rx) = test_connection().await;
         let (_context_tx, context_rx) =
             watch::channel(Some(("thread-1".to_string(), "turn-1".to_string())));
-        let mut definition = wire::AppToolDefinition {
+        let mut definition = wire::app_server::AppToolDefinition {
             name: "echo".to_string(),
             description: "Echo input".to_string(),
             parameters: json!({"type": "object"}),
-            execution_mode: wire::AppToolExecutionMode::Parallel,
+            execution_mode: wire::app_server::AppToolExecutionMode::Parallel,
             timeout_ms: 5,
         };
         let tool = RemoteTool {
@@ -2538,12 +2837,12 @@ mod tests {
             },
             callbacks: connection.callbacks.clone(),
         };
-        let (_control, receivers) = psychevo::__agent_core::ControlHandle::new();
+        let (_abort_tx, abort_rx) = watch::channel(false);
         let output = tool
             .execute(
                 "call-timeout".to_string(),
                 json!({}),
-                receivers.abort_signal(),
+                psychevo::application::AbortSignal::new(abort_rx),
             )
             .await;
         assert!(output.is_error);
@@ -2563,11 +2862,11 @@ mod tests {
             },
             callbacks: connection.callbacks.clone(),
         };
-        let (_control, receivers) = psychevo::__agent_core::ControlHandle::new();
+        let (_abort_tx, abort_rx) = watch::channel(false);
         let execution = tokio::spawn(tool.execute(
             "call-disconnect".to_string(),
             json!({}),
-            receivers.abort_signal(),
+            psychevo::application::AbortSignal::new(abort_rx),
         ));
         let _ = rx.recv().await.expect("disconnect callback");
         connection.callbacks.disconnect().await;

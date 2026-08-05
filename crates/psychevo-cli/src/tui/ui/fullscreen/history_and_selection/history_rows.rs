@@ -1,3 +1,21 @@
+use crate::tui::{
+    BTreeSet, FullscreenUi, HistoryToolCall, ThreadItem, TranscriptKind, TranscriptRow,
+    UserShellDisplay, Value, agent_notification_display, agent_notification_target,
+    agent_target_from_tool_event, assistant_message_keeps_tool_calls_active,
+    assistant_reasoning_from_message, assistant_text_from_message, bounded_stdin_display,
+    clarify_no_answer_result, completed_tool_title_from_active,
+    decode_persisted_tool_result_for_display, evidence_kind, exec_result_completed,
+    exec_result_running, exec_row_full_text_without_history_marker, exec_session_id_from_args,
+    exec_session_id_from_result, format_tool_summary, history_meta_text,
+    history_tool_calls_from_message, history_tool_started_instant, message_timestamp_ms,
+    metadata_elapsed_duration, reasoning_only_message_receives_meta, running_agent_tool_full_text,
+    set_exec_row_text, tool_event_interrupted, tool_id_key, tool_output_text, tool_result_output,
+    tool_title, usage_context_tokens, user_display_from_item, visible_answer_message_receives_meta,
+    with_exec_history_running_marker, write_argument_preview_from_args,
+    write_stdin_non_empty_chars,
+};
+use std::time::Duration;
+
 impl<'a> FullscreenUi<'a> {
     #[cfg(test)]
     pub(crate) fn push_history_message(
@@ -30,28 +48,32 @@ impl<'a> FullscreenUi<'a> {
         accounting: Option<&Value>,
         suppress_terminal_meta: bool,
     ) {
-        self.push_history_message_with_projection_options(
-            message,
-            usage,
-            metadata,
-            accounting,
-            suppress_terminal_meta,
-            None,
-        );
+        let Ok(message_value) = serde_json::from_value(message.clone()) else {
+            return;
+        };
+        let item = ThreadItem {
+            session_seq: 0,
+            message: message_value,
+            usage: usage.cloned(),
+            metadata: metadata.cloned(),
+            accounting: accounting.cloned(),
+        };
+        self.push_thread_item_with_projection_options(&item, message, suppress_terminal_meta, None);
     }
 
-    pub(crate) fn push_history_message_with_projection_options(
+    pub(crate) fn push_thread_item_with_projection_options(
         &mut self,
+        item: &ThreadItem,
         message: &Value,
-        usage: Option<&Value>,
-        metadata: Option<&Value>,
-        accounting: Option<&Value>,
         suppress_terminal_meta: bool,
         active_tool_call_ids: Option<&BTreeSet<String>>,
     ) {
-        if side_inherited_message(metadata) {
+        if item.is_side_inherited() {
             return;
         }
+        let usage = item.usage.as_ref();
+        let metadata = item.metadata.as_ref();
+        let accounting = item.accounting.as_ref();
         match message
             .get("role")
             .and_then(Value::as_str)
@@ -63,28 +85,26 @@ impl<'a> FullscreenUi<'a> {
                         TranscriptRow::with_title(TranscriptKind::Status, "Agent", display);
                     row.agent_target = agent_notification_target(metadata);
                     self.transcript.push(row);
-                } else if let Some(display) = user_shell_display_from_message(message, metadata) {
+                } else if let Some(display) = item.user_shell_display() {
                     self.push_history_user_shell(display);
-                } else if let Some(display) = user_display_from_message(message, metadata) {
+                } else if let Some(display) = user_display_from_item(message, item) {
                     self.push_user_with_attachment_meta(display.text, display.attachment_meta);
                     self.history_prompt_started_ms = message_timestamp_ms(message);
                 }
             }
             "assistant" => {
                 let tool_calls = history_tool_calls_from_message(message);
-                let has_reasoning =
-                    if let Some(reasoning) = assistant_reasoning_from_message(message) {
-                        let mut row = TranscriptRow::with_title(
-                            TranscriptKind::Thinking,
-                            "Thinking",
-                            reasoning,
-                        );
-                        row.collapse_thinking_details();
-                        self.transcript.push(row);
-                        true
-                    } else {
-                        false
-                    };
+                let has_reasoning = if let Some(reasoning) =
+                    assistant_reasoning_from_message(message)
+                {
+                    let mut row =
+                        TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", reasoning);
+                    row.collapse_thinking_details();
+                    self.transcript.push(row);
+                    true
+                } else {
+                    false
+                };
                 let has_answer = if let Some(text) = assistant_text_from_message(message) {
                     self.transcript.push(TranscriptRow::with_title(
                         TranscriptKind::Answer,
@@ -309,16 +329,12 @@ impl<'a> FullscreenUi<'a> {
         }
         if tool == "write" && (is_error || interrupted) {
             if row.write_argument_preview.is_none()
-                && let Some(preview) = write_argument_preview_from_args(
-                    value.get("args").unwrap_or(&Value::Null),
-                )
+                && let Some(preview) =
+                    write_argument_preview_from_args(value.get("args").unwrap_or(&Value::Null))
             {
                 row.write_argument_preview = Some(preview);
             }
-            let terminal_detail = row
-                .full_text
-                .clone()
-                .unwrap_or_else(|| row.text.clone());
+            let terminal_detail = row.full_text.clone().unwrap_or_else(|| row.text.clone());
             let phase = if interrupted { "cancelled" } else { "failed" };
             row.refresh_write_argument_preview(phase, Some(&terminal_detail));
         }

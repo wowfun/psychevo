@@ -19,11 +19,12 @@ use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
+use super::binding::WebState;
+use super::scope_session::ResolvedScope;
 use super::workspace::{
     normalized_workspace_path_identity, path_from_root, resolve_workspace_relative_path,
     workspace_file_read_result_from_file,
 };
-use super::{ResolvedScope, WebState};
 
 const PREVIEW_IDLE_TTL_MS: i64 = 30 * 60 * 1_000;
 const PREVIEW_ABSOLUTE_TTL_MS: i64 = 8 * 60 * 60 * 1_000;
@@ -542,7 +543,7 @@ pub(super) fn workspace_file_preview_open_value(
             modified_ns: modified_ns(&metadata),
         })?;
     Ok(serde_json::to_value(
-        wire::WorkspaceFilePreviewOpenResult {
+        wire::settings_workspace_context::WorkspaceFilePreviewOpenResult {
             path: read.path,
             content: read.content,
             truncated: read.truncated,
@@ -566,7 +567,7 @@ pub(super) fn workspace_file_preview_release_value(
     resource_id: &str,
 ) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(
-        wire::WorkspaceFilePreviewReleaseResult {
+        wire::settings_workspace_context::WorkspaceFilePreviewReleaseResult {
             released: state.inner.workspace_preview.release(resource_id),
         },
     )?)

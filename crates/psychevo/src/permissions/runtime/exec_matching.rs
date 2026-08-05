@@ -1,11 +1,17 @@
-pub(crate) fn command_tokens(command: &str) -> Vec<String> {
+use std::path::Path;
+
+use super::super::rules::{git_subcommand, is_inline_interpreter_tokens, is_known_safe_command};
+use super::super::shell::{shell_basename, shell_command_tokens, shell_lc_word_only_commands};
+use crate::types::{ExecPolicyHostExecutable, ExecPolicyPatternToken};
+
+pub(super) fn command_tokens(command: &str) -> Vec<String> {
     shell_command_tokens(command).unwrap_or_default()
 }
 
 pub(crate) fn exec_prefix_matches(
     prefix: &[ExecPolicyPatternToken],
     tokens: &[String],
-    host_executables: Option<&[crate::types::ExecPolicyHostExecutable]>,
+    host_executables: Option<&[ExecPolicyHostExecutable]>,
 ) -> bool {
     if prefix.len() > tokens.len() || prefix.is_empty() {
         return false;
@@ -43,7 +49,7 @@ pub(crate) fn exec_prefix_matches(
         .all(|(pattern, token)| pattern.matches(token))
 }
 
-pub(crate) fn exec_prefix_label(prefix: &[ExecPolicyPatternToken]) -> String {
+pub(super) fn exec_prefix_label(prefix: &[ExecPolicyPatternToken]) -> String {
     prefix
         .iter()
         .map(|token| match token {
@@ -54,8 +60,8 @@ pub(crate) fn exec_prefix_label(prefix: &[ExecPolicyPatternToken]) -> String {
         .join(" ")
 }
 
-pub(crate) fn host_executable_allows_path(
-    host_executables: &[crate::types::ExecPolicyHostExecutable],
+fn host_executable_allows_path(
+    host_executables: &[ExecPolicyHostExecutable],
     name: &str,
     path: &str,
 ) -> bool {
@@ -65,7 +71,7 @@ pub(crate) fn host_executable_allows_path(
     }
 }
 
-pub(crate) fn exec_grant_prefix(command: &str) -> Option<Vec<String>> {
+pub(super) fn exec_grant_prefix(command: &str) -> Option<Vec<String>> {
     let direct = command_tokens(command);
     if direct.is_empty() {
         return None;
@@ -79,7 +85,7 @@ pub(crate) fn exec_grant_prefix(command: &str) -> Option<Vec<String>> {
     risky_command_prefix(&direct)
 }
 
-pub(crate) fn risky_command_prefix(command: &[String]) -> Option<Vec<String>> {
+fn risky_command_prefix(command: &[String]) -> Option<Vec<String>> {
     if command.is_empty() {
         return None;
     }
@@ -94,7 +100,7 @@ pub(crate) fn risky_command_prefix(command: &[String]) -> Option<Vec<String>> {
     Some(command.iter().take(command.len().min(2)).cloned().collect())
 }
 
-pub(crate) fn permission_rule_tool(tool: &str) -> &str {
+pub(super) fn permission_rule_tool(tool: &str) -> &str {
     match tool {
         "skill_manage" => "SkillManage",
         "skill_hub" => "SkillHub",

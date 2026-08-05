@@ -1,3 +1,15 @@
+use std::collections::BTreeSet;
+
+use psychevo::application::RunStreamEvent;
+use serde_json::{Value, json};
+
+use crate::projection::GatewayLiveProjector;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlockStatus, TranscriptEntry,
+};
+
+use super::hidden_helpers::gateway_entry;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeLedgerBlock {
     turn_id: String,
@@ -53,8 +65,8 @@ fn runtime_ledger_from_event(event: &GatewayEvent) -> Vec<RuntimeLedgerBlock> {
 }
 
 fn assert_runtime_ledger_identity(checkpoint: &str, ledger: &[RuntimeLedgerBlock]) {
-    let mut block_ids = std::collections::BTreeSet::new();
-    let mut tool_ids = std::collections::BTreeSet::new();
+    let mut block_ids = BTreeSet::new();
+    let mut tool_ids = BTreeSet::new();
     for row in ledger {
         assert!(
             block_ids.insert((row.turn_id.clone(), row.block_id.clone())),
@@ -152,7 +164,7 @@ fn trace_replay_ledger_keeps_missing_id_tools_unique() {
     let tool_ids = second_ledger
         .iter()
         .filter_map(|row| row.tool_call_id.as_deref())
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
     assert_eq!(tool_ids.len(), 2, "{second_ledger:#?}");
 }
 

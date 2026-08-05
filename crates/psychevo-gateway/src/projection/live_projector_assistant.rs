@@ -1,5 +1,23 @@
+use std::collections::BTreeMap;
+
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+};
+
+use super::live_helpers::{
+    DEFAULT_REASONING_ORDER, DEFAULT_TEXT_ORDER, content_block_order, live_block,
+    live_reasoning_block_id, live_text_block_id, tool_message_block_metadata,
+};
+use super::tool_helpers::{
+    assistant_message_is_tool_call_turn, assistant_message_metadata, assistant_phase_metadata,
+    set_metadata_field,
+};
+use super::{AssistantContentProjection, GatewayLiveProjector, LiveToolBlockBuild};
+
 impl GatewayLiveProjector {
-    fn project_assistant_text_delta(
+    pub(super) fn project_assistant_text_delta(
         &mut self,
         turn_id: &str,
         text: &str,
@@ -25,7 +43,11 @@ impl GatewayLiveProjector {
         Some(self.append_block_text(turn_id, segment, block, text))
     }
 
-    fn project_reasoning_delta(&mut self, turn_id: &str, text: &str) -> Option<GatewayEvent> {
+    pub(super) fn project_reasoning_delta(
+        &mut self,
+        turn_id: &str,
+        text: &str,
+    ) -> Option<GatewayEvent> {
         if text.is_empty() {
             return None;
         }
@@ -47,7 +69,7 @@ impl GatewayLiveProjector {
         Some(self.append_block_text(turn_id, segment, block, text))
     }
 
-    fn project_reasoning_end(&mut self, turn_id: &str) -> Option<GatewayEvent> {
+    pub(super) fn project_reasoning_end(&mut self, turn_id: &str) -> Option<GatewayEvent> {
         let segment = self.assistant_segment;
         let block_id = live_reasoning_block_id(turn_id, segment);
         let body = self
@@ -73,7 +95,7 @@ impl GatewayLiveProjector {
         Some(self.emit_entry_event(turn_id, segment, false, false))
     }
 
-    fn project_assistant_message_event(
+    pub(super) fn project_assistant_message_event(
         &mut self,
         turn_id: &str,
         value: &Value,
@@ -227,9 +249,7 @@ impl GatewayLiveProjector {
                 if let Some(args) = metadata.get("args").cloned() {
                     self.tool_args.insert(tool_call_id.clone(), args);
                 }
-                if tool_name == "write"
-                    && !self.tool_block_is_terminal(turn_id, &tool_call_id)
-                {
+                if tool_name == "write" && !self.tool_block_is_terminal(turn_id, &tool_call_id) {
                     self.enrich_write_preview_from_metadata(
                         &tool_call_id,
                         &mut metadata,

@@ -1,54 +1,31 @@
-pub(crate) use std::collections::{BTreeMap, VecDeque};
-pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+pub mod agent;
+pub mod control;
+pub mod events;
+pub mod request;
+pub mod support;
+pub mod tool_router;
+pub mod types;
 
-pub(crate) use futures::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
-pub(crate) use psychevo_ai::{
-    AbortSignal, AssistantSource, FinishReasonKind, GenerationEvent, GenerationOutcome,
-    LanguageModel, LanguageRequest, LanguageSettings, LanguageTool, Outcome, ToolDeclaration,
-    WebSearchTool,
+pub use agent::{
+    contextual_user_message_to_ai, message_to_ai, prompt_instruction_to_ai, run_agent_loop,
 };
-pub(crate) use serde::{Deserialize, Serialize};
-pub(crate) use serde_json::{Value, json};
-pub(crate) use thiserror::Error;
-pub(crate) use tokio::sync::watch;
+pub use control::{
+    ControlHandle, ControlInputError, ControlReceivers, MAX_CONTROL_INPUT_BYTES,
+    MAX_CONTROL_INPUT_ITEMS, PendingInputId, validate_steer_message,
+};
+pub use events::{AgentEvent, EventSink};
+pub use request::{AgentCompletion, AgentLoopRequest, PromptInstruction, ToolSearchOptions};
+pub use support::{NoopEventSink, now_ms, user_text_message};
+pub use tool_router::{ToolRouter, ToolRouterError};
+pub use types::{
+    AssistantBlock, ContextualUserBlock, ContextualUserMessage, Error, ImageUrlBlock,
+    ImageUrlBlockKind, LocalImageBlock, LocalImageBlockKind, Message, ProviderToolBlock,
+    TerminalReason, TextBlock, ToolAttachment, ToolBinding, ToolCallBlock, ToolDisplayBodyPolicy,
+    ToolDisplayCategory, ToolDisplaySpec, ToolExecutionMode, ToolExposure, ToolOutput,
+    UserContentBlock,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-// Agent core is assembled from focused type, control, loop, stream, and tool files.
-#[path = "types.rs"]
-pub(crate) mod types;
-pub use types::*;
-#[path = "events.rs"]
-pub(crate) mod events;
-pub use events::*;
-#[path = "control.rs"]
-pub(crate) mod control;
-pub use control::*;
-#[path = "request.rs"]
-pub(crate) mod request;
-pub use request::*;
-#[path = "tool_router.rs"]
-pub(crate) mod tool_router;
-pub use tool_router::*;
-#[path = "agent/loop.rs"]
-pub(crate) mod agent_loop;
-pub use agent_loop::*;
-#[path = "agent/stream.rs"]
-pub(crate) mod agent_stream;
-pub use agent_stream::{contextual_user_message_to_ai, message_to_ai, prompt_instruction_to_ai};
-pub(crate) use agent_stream::{emit, stream_assistant};
-#[path = "agent/assistant.rs"]
-pub(crate) mod agent_assistant;
-#[allow(unused_imports)]
-use agent_assistant::*;
-#[path = "agent/tools.rs"]
-pub(crate) mod agent_tools;
-#[allow(unused_imports)]
-use agent_tools::*;
-#[path = "support.rs"]
-pub(crate) mod support;
-pub use support::*;
-
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;

@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, ClarifyPanel, ClarifyRequestEvent, ClarifyResolvedEvent, FullscreenUi, Value,
+    clarify_request_args_value,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn open_clarify_panel(&mut self, request: ClarifyRequestEvent) {

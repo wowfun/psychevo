@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-use super::*;
+use super::{agent_rows, assert_agent_row_target, assert_stable_agent_rows};
+use crate::tui::tests::fixtures::test_app;
+use crate::tui::{FullscreenUi, Outcome, TranscriptKind, active_tool_row};
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {

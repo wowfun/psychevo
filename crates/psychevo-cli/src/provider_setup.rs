@@ -1,12 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use psychevo::{
-    __product::configuration::custom_provider_api_key_env,
-    __product::configuration::remove_config_value, __product::configuration::set_config_value,
-};
-use serde_json::json;
+use psychevo::config::custom_provider_api_key_env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderSetupPresetId {
@@ -160,40 +155,6 @@ pub(crate) fn default_provider_setup_api_key_env(
         .map(|candidate| (*candidate).to_string())
         .or_else(|| candidates.first().map(|candidate| (*candidate).to_string()))
         .unwrap_or_else(|| custom_provider_api_key_env(provider_id))
-}
-
-pub(crate) fn upsert_provider_options(
-    config_dir: &Path,
-    provider_id: &str,
-    label: &str,
-    base_url: &str,
-    api_key_env: &str,
-) -> Result<()> {
-    let base_url = validate_base_url(base_url)?;
-    let api_key_env = validate_api_key_env(api_key_env)?;
-    let config_dir = config_dir.to_path_buf();
-    let _ = remove_config_value(config_dir.clone(), &format!("provider.{provider_id}.label"))?;
-    let _ = remove_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.options"),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.name"),
-        json!(label.trim()),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.api"),
-        json!(base_url),
-    )?;
-    set_config_value(
-        config_dir.clone(),
-        &format!("provider.{provider_id}.api_key_env"),
-        json!(api_key_env),
-    )?;
-    let _ = remove_config_value(config_dir, &format!("provider.{provider_id}.no_auth"))?;
-    Ok(())
 }
 
 pub(crate) fn validate_base_url(value: &str) -> Result<String> {

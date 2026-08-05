@@ -1,15 +1,25 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-
-use futures::StreamExt;
+use std::collections::{BTreeMap, VecDeque};
+use std::pin::Pin;
 use std::time::Duration;
 
-use crate::openai_http::{
+use futures::{StreamExt, future::BoxFuture, stream};
+use serde_json::{Value, json};
+
+use super::http::{
     GuardedHttpError, checked_response, inference_event_is_progress, response_json_guarded,
     send_guarded, wait_for_deadline,
 };
 #[cfg(test)]
-use crate::openai_http::{generation_http_client, inference_idle_timeout};
+use super::http::{generation_http_client, inference_idle_timeout};
+use super::provider::aborted_generation_stream;
+use super::request::{ImageInputTranslationMode, translate_messages};
+use crate::control::{AbortSignal, GenerationProvider};
+use crate::sdk_types::{LanguageSettings, ResponseFormat, ToolChoice};
+use crate::types::{
+    AssistantSource, Error, GenerationRequest, GenerationTool, ImageSearchSource, Outcome,
+    StreamEvent, UrlCitationSource,
+};
+use crate::{GenerationStream, Result};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiResponsesProvider {
@@ -28,7 +38,7 @@ impl OpenAiResponsesProvider {
             base_url: base_url.into(),
             api_key: api_key.into(),
             inference_idle_timeout: inference_idle_timeout(
-                crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
+                super::http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
             ),
             headers: BTreeMap::new(),
         }
@@ -932,7 +942,13 @@ impl ResponsesStreamState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use serde_json::{Value, json};
+
+    use super::{normalize_response_event, openai_responses_request_body};
+    use crate::types::{
+        AssistantSource, GenerationRequest, GenerationTool, HostedWebSearchTool, ModelTarget,
+        StreamEvent, ToolDeclaration,
+    };
 
     #[test]
     fn request_contains_function_and_hosted_tool_once() {

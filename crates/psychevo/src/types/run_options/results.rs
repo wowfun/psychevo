@@ -79,6 +79,7 @@ pub struct RunWarning {
 pub struct UserShellOptions {
     pub cwd: PathBuf,
     pub command: String,
+    pub environment: BTreeMap<String, String>,
     pub context: Option<UserShellContextOptions>,
     pub inject_into: Option<RunControlHandle>,
 }
@@ -94,7 +95,6 @@ pub struct UserShellContextOptions {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub mode: RunMode,
-    pub inherited_env: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +257,7 @@ pub struct SessionSummary {
     pub message_count: i64,
     pub tool_call_count: i64,
     pub title: Option<String>,
+    pub forked_from_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -287,3 +288,16 @@ impl ModelCatalogProvider {
         self.missing_credentials.is_none() && self.unavailable_reason.is_none()
     }
 }
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use psychevo_agent_core::TerminalReason;
+use psychevo_ai::Outcome;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::skills::SelectedSkill;
+use crate::state::StateRuntime;
+
+use super::RunMode;
+use crate::types::runtime_views::{ModelMetadata, RunControlHandle};

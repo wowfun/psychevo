@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::{
+    io::{self, Write},
+    process::{Command as StdCommand, Stdio},
+    sync::Arc,
+};
+
+use crate::tui::{render_helpers::truncate_chars, support_model_catalog::ClipboardSink};
+
 pub(crate) fn default_clipboard_sink() -> ClipboardSink {
     Arc::new(copy_text_to_clipboard)
 }

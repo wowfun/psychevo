@@ -1,2 +1,2 @@
-include!("core_commands/global_args.rs");
-include!("core_commands/command_variants.rs");
+pub(in crate::args) mod command_variants;
+pub(in crate::args) mod global_args;

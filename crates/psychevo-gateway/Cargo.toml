@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.psychevo]
+architecture-layer = 3
+
 [[bin]]
 name = "psychevo-app-server"
 path = "src/bin/psychevo-app-server.rs"
@@ -23,12 +26,11 @@ chrono.workspace = true
 feishu-sdk = { workspace = true, optional = true }
 futures.workspace = true
 getrandom.workspace = true
-http.workspace = true
 jsonschema.workspace = true
 percent-encoding.workspace = true
 portable-pty.workspace = true
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
-psychevo = { path = "../psychevo", features = ["product"] }
+psychevo = { path = "../psychevo", features = ["native-keyring"] }
 qrcode = { workspace = true, optional = true }
 reqwest.workspace = true
 regex-lite.workspace = true
@@ -47,4 +49,5 @@ windows-sys.workspace = true
 [dev-dependencies]
 rusqlite.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tungstenite = "0.28"

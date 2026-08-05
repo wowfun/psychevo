@@ -1,9 +1,33 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use psychevo::Error;
+use psychevo::agents::{
+    AgentBackendConfig, AgentCatalog, AgentControl, AgentDefinition, AgentDiagnostic,
+    AgentDiscoveryOptions, AgentEntrypoint, AgentRunRecord, AgentSource, AgentTeamCatalog,
+    AgentTeamDefinition, AgentTeamMember, AgentTeamSource, MAX_AGENT_SPAWN_DEPTH_CAP,
+    MAX_TEAM_PARALLEL_AGENTS_CAP, discover_agent_teams_with_catalog, parse_agent_definition_text,
+    parse_agent_team_definition_text, valid_agent_name,
+};
+use psychevo::config::{
+    ConfigScope, load_agent_backend_configs, remove_config_value, set_config_value,
+};
+use psychevo::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::{PeerResolutionContext, resolve_peer_turn};
+
+use super::binding::WebState;
+use super::runtime_profiles::validate_and_capture_team_runtime_members;
+use super::scope_session::ResolvedScope;
+use super::settings_observability::discover_gateway_agents;
 
 pub(super) fn read_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::AgentReadParams,
+    params: wire::agents_backend_rpc::AgentReadParams,
 ) -> psychevo::Result<Value> {
     let target = agent_config_target(params.target);
     let path = agent_definition_path(state, scope, target, &params.name)?;
@@ -34,7 +58,7 @@ pub(super) fn discover_gateway_teams(
 pub(super) fn read_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::TeamReadParams,
+    params: wire::agents_backend_rpc::TeamReadParams,
 ) -> psychevo::Result<Value> {
     let target = agent_config_target(params.target);
     let path = team_definition_path(state, scope, target, &params.name)?;
@@ -49,7 +73,7 @@ pub(super) fn read_team_definition(
 pub(super) fn write_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    mut params: wire::TeamWriteParams,
+    mut params: wire::agents_backend_rpc::TeamWriteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -96,19 +120,21 @@ pub(super) fn write_team_definition(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, &text)?;
-    Ok(serde_json::to_value(wire::TeamWriteResult {
-        written: true,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-        team: team_definition_view(&team),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::TeamWriteResult {
+            written: true,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+            team: team_definition_view(&team),
+        },
+    )?)
 }
 
 pub(super) fn set_team_definition_enabled(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::TeamSetEnabledParams,
+    params: wire::agents_backend_rpc::TeamSetEnabledParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -129,19 +155,21 @@ pub(super) fn set_team_definition_enabled(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, &text)?;
-    Ok(serde_json::to_value(wire::TeamSetEnabledResult {
-        written: true,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-        team: team_definition_view(&team),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::TeamSetEnabledResult {
+            written: true,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+            team: team_definition_view(&team),
+        },
+    )?)
 }
 
 pub(super) fn delete_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::TeamDeleteParams,
+    params: wire::agents_backend_rpc::TeamDeleteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -156,17 +184,19 @@ pub(super) fn delete_team_definition(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
         Err(err) => return Err(err.into()),
     };
-    Ok(serde_json::to_value(wire::TeamDeleteResult {
-        deleted,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::TeamDeleteResult {
+            deleted,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+        },
+    )?)
 }
 
 fn structured_team_markdown(
     path: &Path,
-    params: &wire::TeamWriteParams,
+    params: &wire::agents_backend_rpc::TeamWriteParams,
 ) -> psychevo::Result<String> {
     let description = params.description.trim();
     if description.is_empty() {
@@ -294,7 +324,9 @@ fn structured_team_markdown(
     render_agent_markdown(frontmatter, params.instructions.trim())
 }
 
-fn team_member_input(member: &wire::TeamMemberInput) -> psychevo::Result<AgentTeamMember> {
+fn team_member_input(
+    member: &wire::agents_backend_rpc::TeamMemberInput,
+) -> psychevo::Result<AgentTeamMember> {
     let runtime_profile_revision = member
         .runtime_profile_revision
         .as_deref()
@@ -321,8 +353,8 @@ fn team_member_input(member: &wire::TeamMemberInput) -> psychevo::Result<AgentTe
     })
 }
 
-fn team_member_wire_input(member: &AgentTeamMember) -> wire::TeamMemberInput {
-    wire::TeamMemberInput {
+fn team_member_wire_input(member: &AgentTeamMember) -> wire::agents_backend_rpc::TeamMemberInput {
+    wire::agents_backend_rpc::TeamMemberInput {
         id: member.id.clone(),
         agent: member.agent.clone(),
         runtime_ref: member.runtime_ref.clone(),
@@ -339,7 +371,7 @@ fn team_member_wire_input(member: &AgentTeamMember) -> wire::TeamMemberInput {
 pub(super) fn write_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::AgentWriteParams,
+    params: wire::agents_backend_rpc::AgentWriteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -372,19 +404,21 @@ pub(super) fn write_agent_definition(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, &text)?;
-    Ok(serde_json::to_value(wire::AgentWriteResult {
-        written: true,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-        agent: agent_definition_view(&agent),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::AgentWriteResult {
+            written: true,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+            agent: agent_definition_view(&agent),
+        },
+    )?)
 }
 
 pub(super) fn set_agent_definition_enabled(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::AgentSetEnabledParams,
+    params: wire::agents_backend_rpc::AgentSetEnabledParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -403,18 +437,20 @@ pub(super) fn set_agent_definition_enabled(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, &text)?;
-    Ok(serde_json::to_value(wire::AgentSetEnabledResult {
-        written: true,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-        agent: agent_definition_view(&agent),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::AgentSetEnabledResult {
+            written: true,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+            agent: agent_definition_view(&agent),
+        },
+    )?)
 }
 
 fn structured_agent_markdown(
     path: &Path,
-    params: &wire::AgentWriteParams,
+    params: &wire::agents_backend_rpc::AgentWriteParams,
 ) -> psychevo::Result<String> {
     let description = params.description.trim();
     if description.is_empty() {
@@ -507,12 +543,11 @@ fn structured_agent_markdown(
     }
     let mut optional_contributions = BTreeSet::new();
     for name in &params.optional_contributions {
-        let contribution = psychevo::__product::capabilities::AgentContribution::parse(name)
-            .ok_or_else(|| {
-                Error::Message(format!(
-                    "optional contribution `{name}` must be instructions, tools, mcp, or skills"
-                ))
-            })?;
+        let contribution = psychevo::agents::AgentContribution::parse(name).ok_or_else(|| {
+            Error::Message(format!(
+                "optional contribution `{name}` must be instructions, tools, mcp, or skills"
+            ))
+        })?;
         optional_contributions.insert(contribution.as_str());
     }
     if optional_contributions.is_empty() {
@@ -534,7 +569,7 @@ fn structured_agent_markdown(
 pub(super) fn delete_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::AgentDeleteParams,
+    params: wire::agents_backend_rpc::AgentDeleteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
@@ -549,30 +584,36 @@ pub(super) fn delete_agent_definition(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
         Err(err) => return Err(err.into()),
     };
-    Ok(serde_json::to_value(wire::AgentDeleteResult {
-        deleted,
-        name: params.name,
-        path: path.display().to_string(),
-        target,
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::AgentDeleteResult {
+            deleted,
+            name: params.name,
+            path: path.display().to_string(),
+            target,
+        },
+    )?)
 }
 
-fn agent_config_target(target: Option<wire::AgentConfigTarget>) -> wire::AgentConfigTarget {
-    target.unwrap_or(wire::AgentConfigTarget::Project)
+fn agent_config_target(
+    target: Option<wire::agents_backend_rpc::AgentConfigTarget>,
+) -> wire::agents_backend_rpc::AgentConfigTarget {
+    target.unwrap_or(wire::agents_backend_rpc::AgentConfigTarget::Project)
 }
 
 fn agent_definition_path(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::AgentConfigTarget,
+    target: wire::agents_backend_rpc::AgentConfigTarget,
     name: &str,
 ) -> psychevo::Result<PathBuf> {
     if !valid_agent_name(name) {
         return Err(Error::Message(format!("invalid agent name: {name}")));
     }
     let root = match target {
-        wire::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
-        wire::AgentConfigTarget::Profile => active_profile_config_dir(state, scope),
+        wire::agents_backend_rpc::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
+        wire::agents_backend_rpc::AgentConfigTarget::Profile => {
+            active_profile_config_dir(state, scope)
+        }
     };
     Ok(root.join("agents").join(format!("{name}.md")))
 }
@@ -580,30 +621,32 @@ fn agent_definition_path(
 fn team_definition_path(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::AgentConfigTarget,
+    target: wire::agents_backend_rpc::AgentConfigTarget,
     name: &str,
 ) -> psychevo::Result<PathBuf> {
     if !valid_agent_name(name) {
         return Err(Error::Message(format!("invalid team name: {name}")));
     }
     let root = match target {
-        wire::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
-        wire::AgentConfigTarget::Profile => active_profile_config_dir(state, scope),
+        wire::agents_backend_rpc::AgentConfigTarget::Project => scope.cwd.join(".psychevo"),
+        wire::agents_backend_rpc::AgentConfigTarget::Profile => {
+            active_profile_config_dir(state, scope)
+        }
     };
     Ok(root.join("teams").join(format!("{name}.md")))
 }
 
-fn agent_source_for_target(target: wire::AgentConfigTarget) -> AgentSource {
+fn agent_source_for_target(target: wire::agents_backend_rpc::AgentConfigTarget) -> AgentSource {
     match target {
-        wire::AgentConfigTarget::Project => AgentSource::Project,
-        wire::AgentConfigTarget::Profile => AgentSource::Global,
+        wire::agents_backend_rpc::AgentConfigTarget::Project => AgentSource::Project,
+        wire::agents_backend_rpc::AgentConfigTarget::Profile => AgentSource::Global,
     }
 }
 
-fn team_source_for_target(target: wire::AgentConfigTarget) -> AgentTeamSource {
+fn team_source_for_target(target: wire::agents_backend_rpc::AgentConfigTarget) -> AgentTeamSource {
     match target {
-        wire::AgentConfigTarget::Project => AgentTeamSource::Project,
-        wire::AgentConfigTarget::Profile => AgentTeamSource::Profile,
+        wire::agents_backend_rpc::AgentConfigTarget::Project => AgentTeamSource::Project,
+        wire::agents_backend_rpc::AgentConfigTarget::Profile => AgentTeamSource::Profile,
     }
 }
 
@@ -611,7 +654,7 @@ fn parse_managed_agent_text(
     text: &str,
     name: &str,
     path: &Path,
-    target: wire::AgentConfigTarget,
+    target: wire::agents_backend_rpc::AgentConfigTarget,
 ) -> psychevo::Result<AgentDefinition> {
     let agent = parse_agent_definition_text(
         text,
@@ -632,7 +675,7 @@ fn parse_managed_team_text(
     text: &str,
     name: &str,
     path: &Path,
-    target: wire::AgentConfigTarget,
+    target: wire::agents_backend_rpc::AgentConfigTarget,
     agents: &AgentCatalog,
 ) -> psychevo::Result<AgentTeamDefinition> {
     let team = parse_agent_team_definition_text(
@@ -703,8 +746,10 @@ fn set_yaml_bool(frontmatter: &mut serde_yaml::Mapping, key: &str, value: bool) 
     frontmatter.insert(yaml_key(key), serde_yaml::Value::Bool(value));
 }
 
-pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult {
-    wire::AgentListResult {
+pub(super) fn agent_list_result(
+    catalog: &AgentCatalog,
+) -> wire::agents_backend_rpc::AgentListResult {
+    wire::agents_backend_rpc::AgentListResult {
         agents: catalog.agents.iter().map(agent_definition_view).collect(),
         shadowed_agents: catalog
             .shadowed_agents
@@ -724,8 +769,10 @@ pub(super) fn agent_list_result(catalog: &AgentCatalog) -> wire::AgentListResult
     }
 }
 
-pub(super) fn team_list_result(catalog: &AgentTeamCatalog) -> wire::TeamListResult {
-    wire::TeamListResult {
+pub(super) fn team_list_result(
+    catalog: &AgentTeamCatalog,
+) -> wire::agents_backend_rpc::TeamListResult {
+    wire::agents_backend_rpc::TeamListResult {
         teams: catalog.teams.iter().map(team_definition_view).collect(),
         shadowed_teams: catalog
             .shadowed_teams
@@ -745,7 +792,9 @@ pub(super) fn team_list_result(catalog: &AgentTeamCatalog) -> wire::TeamListResu
     }
 }
 
-pub(super) fn agent_read_result(agent: &AgentDefinition) -> wire::AgentReadResult {
+pub(super) fn agent_read_result(
+    agent: &AgentDefinition,
+) -> wire::agents_backend_rpc::AgentReadResult {
     let raw_markdown = agent
         .file_path
         .as_ref()
@@ -757,15 +806,17 @@ pub(super) fn agent_read_result(agent: &AgentDefinition) -> wire::AgentReadResul
 fn agent_read_result_with_raw(
     agent: &AgentDefinition,
     raw_markdown: String,
-) -> wire::AgentReadResult {
-    wire::AgentReadResult {
+) -> wire::agents_backend_rpc::AgentReadResult {
+    wire::agents_backend_rpc::AgentReadResult {
         agent: agent_definition_view(agent),
         instructions: agent.instructions.clone(),
         raw_markdown,
     }
 }
 
-pub(super) fn team_read_result(team: &AgentTeamDefinition) -> wire::TeamReadResult {
+pub(super) fn team_read_result(
+    team: &AgentTeamDefinition,
+) -> wire::agents_backend_rpc::TeamReadResult {
     let raw_markdown = team
         .file_path
         .as_ref()
@@ -777,15 +828,15 @@ pub(super) fn team_read_result(team: &AgentTeamDefinition) -> wire::TeamReadResu
 fn team_read_result_with_raw(
     team: &AgentTeamDefinition,
     raw_markdown: String,
-) -> wire::TeamReadResult {
-    wire::TeamReadResult {
+) -> wire::agents_backend_rpc::TeamReadResult {
+    wire::agents_backend_rpc::TeamReadResult {
         team: team_definition_view(team),
         instructions: team.instructions.clone(),
         raw_markdown,
     }
 }
 
-fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
+fn agent_definition_view(agent: &AgentDefinition) -> wire::agents_backend_rpc::AgentDefinitionView {
     let target = agent_definition_target(agent);
     let tools = agent
         .tool_policy
@@ -795,43 +846,39 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
         .unwrap_or_default();
     let mut contributions = Vec::new();
     if !agent.instructions.trim().is_empty() {
-        contributions.push(wire::AgentContributionView::Instructions);
+        contributions.push(wire::agents_backend_rpc::AgentContributionView::Instructions);
     }
     if agent.tool_policy.allowed.is_some()
         || !agent.tool_policy.denied.is_empty()
         || agent.tool_policy.allowed_agents.is_some()
         || !agent.tool_policy.denied_agents.is_empty()
     {
-        contributions.push(wire::AgentContributionView::Tools);
+        contributions.push(wire::agents_backend_rpc::AgentContributionView::Tools);
     }
     if !agent.tool_policy.mcp_servers.is_empty() {
-        contributions.push(wire::AgentContributionView::Mcp);
+        contributions.push(wire::agents_backend_rpc::AgentContributionView::Mcp);
     }
     if !agent.skills.is_empty() {
-        contributions.push(wire::AgentContributionView::Skills);
+        contributions.push(wire::agents_backend_rpc::AgentContributionView::Skills);
     }
-    wire::AgentDefinitionView {
+    wire::agents_backend_rpc::AgentDefinitionView {
         name: agent.name.clone(),
         description: agent.description.clone(),
         enabled: agent.enabled,
         source: agent.source.as_str().to_string(),
         source_label: agent.source.display_label().to_string(),
-        generated: matches!(
-            agent.source,
-            psychevo::__product::capabilities::AgentSource::Generated
-        ),
+        generated: matches!(agent.source, psychevo::agents::AgentSource::Generated),
         target,
         mutable: target.is_some(),
         path: agent
             .file_path
             .as_ref()
             .map(|path| path.display().to_string()),
-        backend: agent
-            .backend
-            .as_ref()
-            .map(|backend| wire::AgentBackendRefView {
+        backend: agent.backend.as_ref().map(|backend| {
+            wire::agents_backend_rpc::AgentBackendRefView {
                 name: backend.name.clone(),
-            }),
+            }
+        }),
         entrypoints: agent
             .entrypoints
             .iter()
@@ -853,9 +900,11 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
     }
 }
 
-fn team_definition_view(team: &AgentTeamDefinition) -> wire::TeamDefinitionView {
+fn team_definition_view(
+    team: &AgentTeamDefinition,
+) -> wire::agents_backend_rpc::TeamDefinitionView {
     let target = team_definition_target(team);
-    wire::TeamDefinitionView {
+    wire::agents_backend_rpc::TeamDefinitionView {
         name: team.name.clone(),
         description: team.description.clone(),
         enabled: team.enabled,
@@ -874,23 +923,27 @@ fn team_definition_view(team: &AgentTeamDefinition) -> wire::TeamDefinitionView 
     }
 }
 
-fn agent_definition_target(agent: &AgentDefinition) -> Option<wire::AgentConfigTarget> {
+fn agent_definition_target(
+    agent: &AgentDefinition,
+) -> Option<wire::agents_backend_rpc::AgentConfigTarget> {
     match agent.source {
-        AgentSource::Project => Some(wire::AgentConfigTarget::Project),
-        AgentSource::Global => Some(wire::AgentConfigTarget::Profile),
+        AgentSource::Project => Some(wire::agents_backend_rpc::AgentConfigTarget::Project),
+        AgentSource::Global => Some(wire::agents_backend_rpc::AgentConfigTarget::Profile),
         _ => None,
     }
 }
 
-fn team_definition_target(team: &AgentTeamDefinition) -> Option<wire::AgentConfigTarget> {
+fn team_definition_target(
+    team: &AgentTeamDefinition,
+) -> Option<wire::agents_backend_rpc::AgentConfigTarget> {
     match team.source {
-        AgentTeamSource::Project => Some(wire::AgentConfigTarget::Project),
-        AgentTeamSource::Profile => Some(wire::AgentConfigTarget::Profile),
+        AgentTeamSource::Project => Some(wire::agents_backend_rpc::AgentConfigTarget::Project),
+        AgentTeamSource::Profile => Some(wire::agents_backend_rpc::AgentConfigTarget::Profile),
     }
 }
 
-fn team_member_view(member: &AgentTeamMember) -> wire::TeamMemberView {
-    wire::TeamMemberView {
+fn team_member_view(member: &AgentTeamMember) -> wire::agents_backend_rpc::TeamMemberView {
+    wire::agents_backend_rpc::TeamMemberView {
         id: member.id.clone(),
         agent: member.agent.clone(),
         runtime_ref: member.runtime_ref.clone(),
@@ -904,8 +957,10 @@ fn team_member_view(member: &AgentTeamMember) -> wire::TeamMemberView {
     }
 }
 
-fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticView {
-    wire::AgentDiagnosticView {
+fn agent_diagnostic_view(
+    diagnostic: &AgentDiagnostic,
+) -> wire::agents_backend_rpc::AgentDiagnosticView {
+    wire::agents_backend_rpc::AgentDiagnosticView {
         kind: diagnostic.kind.clone(),
         message: diagnostic.message.clone(),
         path: diagnostic
@@ -919,8 +974,8 @@ pub(super) async fn agent_status_result(
     control: &AgentControl,
     parent_session_id: Option<&str>,
     all: bool,
-) -> wire::AgentStatusResult {
-    wire::AgentStatusResult {
+) -> wire::agents_backend_rpc::AgentStatusResult {
+    wire::agents_backend_rpc::AgentStatusResult {
         agents: control
             .status_records(parent_session_id, all)
             .await
@@ -932,51 +987,37 @@ pub(super) async fn agent_status_result(
 }
 
 pub(super) async fn team_status_result(
-    store: &psychevo::__product::persistence::StateRuntime,
+    thread: Option<&psychevo::Thread>,
     control: &AgentControl,
-    parent_session_id: Option<&str>,
-) -> psychevo::Result<wire::TeamStatusResult> {
-    let team = if let Some(thread) = parent_session_id {
-        match store.find_active_agent_team_run(thread).await? {
-            Some(team) => Some(team),
-            None => store
-                .list_agent_team_runs_for_parent(thread)
-                .await
-                .ok()
-                .and_then(|runs| runs.into_iter().next()),
-        }
-    } else {
-        None
+) -> psychevo::Result<wire::agents_backend_rpc::TeamStatusResult> {
+    let parent_thread_id = thread.map(psychevo::Thread::id);
+    let coordination = match thread {
+        Some(thread) => Some(thread.agent_coordination_status().await?),
+        None => None,
     };
-    let mission = if let Some(thread) = parent_session_id {
-        match store.find_active_agent_mission_run(thread).await? {
-            Some(mission) => Some(mission),
-            None => store
-                .list_agent_mission_runs_for_parent(thread)
-                .await
-                .ok()
-                .and_then(|runs| runs.into_iter().next()),
-        }
-    } else {
-        None
-    };
-    Ok(wire::TeamStatusResult {
-        team: team.as_ref().map(team_run_view),
-        mission: mission.as_ref().map(mission_run_view),
+    Ok(wire::agents_backend_rpc::TeamStatusResult {
+        team: coordination
+            .as_ref()
+            .and_then(|status| status.team.as_ref())
+            .map(team_run_view),
+        mission: coordination
+            .as_ref()
+            .and_then(|status| status.mission.as_ref())
+            .map(mission_run_view),
         agents: control
-            .status_records(parent_session_id, false)
+            .status_records(parent_thread_id, false)
             .await
             .iter()
             .map(agent_run_view)
             .collect(),
-        control: agent_status_control_view(control, parent_session_id),
+        control: agent_status_control_view(control, parent_thread_id),
     })
 }
 
 pub(super) async fn agent_control_result(
     control: &AgentControl,
-    params: wire::AgentControlParams,
-) -> psychevo::Result<wire::AgentControlResult> {
+    params: wire::agents_backend_rpc::AgentControlParams,
+) -> psychevo::Result<wire::agents_backend_rpc::AgentControlResult> {
     let action = params.action.trim();
     let agent = match action {
         "stop" => {
@@ -1015,14 +1056,16 @@ pub(super) async fn agent_control_result(
             )));
         }
     };
-    Ok(wire::AgentControlResult {
+    Ok(wire::agents_backend_rpc::AgentControlResult {
         accepted: matches!(action, "pauseSpawning" | "resumeSpawning") || agent.is_some(),
         agent: agent.as_ref().map(agent_run_view),
         control: agent_status_control_view(control, params.thread_id.as_deref()),
     })
 }
 
-fn required_control_target(params: &wire::AgentControlParams) -> psychevo::Result<&str> {
+fn required_control_target(
+    params: &wire::agents_backend_rpc::AgentControlParams,
+) -> psychevo::Result<&str> {
     params
         .target
         .as_deref()
@@ -1031,7 +1074,9 @@ fn required_control_target(params: &wire::AgentControlParams) -> psychevo::Resul
         .ok_or_else(|| Error::Message("agent/control action requires target".to_string()))
 }
 
-fn required_control_thread(params: &wire::AgentControlParams) -> psychevo::Result<&str> {
+fn required_control_thread(
+    params: &wire::agents_backend_rpc::AgentControlParams,
+) -> psychevo::Result<&str> {
     params
         .thread_id
         .as_deref()
@@ -1047,16 +1092,16 @@ fn required_control_thread(params: &wire::AgentControlParams) -> psychevo::Resul
 fn agent_status_control_view(
     control: &AgentControl,
     parent_session_id: Option<&str>,
-) -> wire::AgentStatusControlView {
-    wire::AgentStatusControlView {
+) -> wire::agents_backend_rpc::AgentStatusControlView {
+    wire::agents_backend_rpc::AgentStatusControlView {
         spawning_paused: parent_session_id.is_some_and(|parent| control.spawning_paused(parent)),
         max_spawn_depth_cap: MAX_AGENT_SPAWN_DEPTH_CAP,
         concurrency_cap: Some(MAX_TEAM_PARALLEL_AGENTS_CAP),
     }
 }
 
-fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
-    wire::AgentRunView {
+fn agent_run_view(record: &AgentRunRecord) -> wire::agents_backend_rpc::AgentRunView {
+    wire::agents_backend_rpc::AgentRunView {
         id: record.id.clone(),
         task_name: record.task_name.clone(),
         agent_name: record.agent_name.clone(),
@@ -1081,22 +1126,16 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
     }
 }
 
-fn team_run_view(
-    record: &psychevo::__product::persistence::AgentTeamRunRecord,
-) -> wire::TeamRunView {
-    wire::TeamRunView {
+fn team_run_view(record: &psychevo::AgentTeamRunStatus) -> wire::agents_backend_rpc::TeamRunView {
+    wire::agents_backend_rpc::TeamRunView {
         id: record.id.clone(),
-        parent_session_id: record.parent_session_id.clone(),
+        parent_session_id: record.parent_thread_id.clone(),
         mission_run_id: record.mission_run_id.clone(),
         team_name: record.team_name.clone(),
         description: record.description.clone(),
         source_path: record.source_path.clone(),
         leader_agent_name: record.leader_agent_name.clone(),
-        members: serde_json::from_value::<Vec<AgentTeamMember>>(record.members.clone())
-            .unwrap_or_default()
-            .iter()
-            .map(team_member_view)
-            .collect(),
+        members: record.members.iter().map(team_member_view).collect(),
         max_parallel_agents: record.max_parallel_agents,
         status: record.status.clone(),
         started_at_ms: record.started_at_ms,
@@ -1106,11 +1145,11 @@ fn team_run_view(
 }
 
 fn mission_run_view(
-    record: &psychevo::__product::persistence::AgentMissionRunRecord,
-) -> wire::MissionRunView {
-    wire::MissionRunView {
+    record: &psychevo::AgentMissionRunStatus,
+) -> wire::agents_backend_rpc::MissionRunView {
+    wire::agents_backend_rpc::MissionRunView {
         id: record.id.clone(),
-        parent_session_id: record.parent_session_id.clone(),
+        parent_session_id: record.parent_thread_id.clone(),
         team_run_id: record.team_run_id.clone(),
         team_name: record.team_name.clone(),
         goal: record.goal.clone(),
@@ -1124,9 +1163,9 @@ fn mission_run_view(
 
 fn backend_value_with_sources(
     backend: &AgentBackendConfig,
-    source_targets: Vec<wire::BackendConfigTarget>,
-) -> wire::BackendConfigView {
-    wire::BackendConfigView {
+    source_targets: Vec<wire::agents_backend_rpc::BackendConfigTarget>,
+) -> wire::agents_backend_rpc::BackendConfigView {
+    wire::agents_backend_rpc::BackendConfigView {
         id: backend.id.clone(),
         kind: backend.kind.as_str().to_string(),
         enabled: backend.enabled,
@@ -1152,7 +1191,7 @@ pub(super) fn backend_values_for_scope(
     state: &WebState,
     scope: &ResolvedScope,
     backends: &BTreeMap<String, AgentBackendConfig>,
-) -> psychevo::Result<Vec<wire::BackendConfigView>> {
+) -> psychevo::Result<Vec<wire::agents_backend_rpc::BackendConfigView>> {
     backends
         .values()
         .map(|backend| {
@@ -1273,7 +1312,7 @@ fn local_acp_backend_config_json(shortcut: &LocalAcpBackendShortcut) -> Value {
 pub(super) fn write_backend_config(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::BackendWriteParams,
+    params: wire::agents_backend_rpc::BackendWriteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!("invalid backend id: {}", params.id)));
@@ -1290,22 +1329,24 @@ pub(super) fn write_backend_config(
     let backend = backends
         .get(&params.id)
         .ok_or_else(|| Error::Message(format!("backend write did not reload: {}", params.id)))?;
-    Ok(serde_json::to_value(wire::BackendWriteResult {
-        written: true,
-        changed: result.changed,
-        path: result.path.display().to_string(),
-        target,
-        backend: backend_value_with_sources(
-            backend,
-            backend_source_targets(state, scope, &backend.id)?,
-        ),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::BackendWriteResult {
+            written: true,
+            changed: result.changed,
+            path: result.path.display().to_string(),
+            target,
+            backend: backend_value_with_sources(
+                backend,
+                backend_source_targets(state, scope, &backend.id)?,
+            ),
+        },
+    )?)
 }
 
 pub(super) fn delete_backend_config(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::BackendDeleteParams,
+    params: wire::agents_backend_rpc::BackendDeleteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!("invalid backend id: {}", params.id)));
@@ -1313,32 +1354,36 @@ pub(super) fn delete_backend_config(
     let target = params.target;
     let config_dir = backend_config_dir(state, scope, target)?;
     let result = remove_config_value(config_dir, &format!("agents.backends.{}", params.id))?;
-    Ok(serde_json::to_value(wire::BackendDeleteResult {
-        deleted: result.changed,
-        changed: result.changed,
-        id: params.id,
-        path: result.path.display().to_string(),
-        target,
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::BackendDeleteResult {
+            deleted: result.changed,
+            changed: result.changed,
+            id: params.id,
+            path: result.path.display().to_string(),
+            target,
+        },
+    )?)
 }
 
 fn backend_config_dir(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::BackendConfigTarget,
+    target: wire::agents_backend_rpc::BackendConfigTarget,
 ) -> psychevo::Result<PathBuf> {
     match target {
-        wire::BackendConfigTarget::Project => Ok(scope.cwd.join(".psychevo")),
-        wire::BackendConfigTarget::Profile => Ok(active_profile_config_dir(state, scope)),
+        wire::agents_backend_rpc::BackendConfigTarget::Project => Ok(scope.cwd.join(".psychevo")),
+        wire::agents_backend_rpc::BackendConfigTarget::Profile => {
+            Ok(active_profile_config_dir(state, scope))
+        }
     }
 }
 
 fn ensure_profile_config_for_backend_write(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::BackendConfigTarget,
+    target: wire::agents_backend_rpc::BackendConfigTarget,
 ) -> psychevo::Result<()> {
-    if target != wire::BackendConfigTarget::Profile
+    if target != wire::agents_backend_rpc::BackendConfigTarget::Profile
         || !state
             .inner
             .inherited_env
@@ -1392,7 +1437,7 @@ fn resolve_gateway_env_path(value: &str, state: &WebState, scope: &ResolvedScope
 }
 
 fn backend_config_json(
-    params: &wire::BackendWriteParams,
+    params: &wire::agents_backend_rpc::BackendWriteParams,
     existing: Option<&AgentBackendConfig>,
 ) -> psychevo::Result<Value> {
     let entrypoints = if params.entrypoints.is_empty() {
@@ -1525,13 +1570,13 @@ fn backend_source_targets(
     state: &WebState,
     scope: &ResolvedScope,
     id: &str,
-) -> psychevo::Result<Vec<wire::BackendConfigTarget>> {
+) -> psychevo::Result<Vec<wire::agents_backend_rpc::BackendConfigTarget>> {
     let mut targets = Vec::new();
     if backend_exists_in_scope(state, scope, id, ConfigScope::Global)? {
-        targets.push(wire::BackendConfigTarget::Profile);
+        targets.push(wire::agents_backend_rpc::BackendConfigTarget::Profile);
     }
     if backend_exists_in_scope(state, scope, id, ConfigScope::Local)? {
-        targets.push(wire::BackendConfigTarget::Project);
+        targets.push(wire::agents_backend_rpc::BackendConfigTarget::Project);
     }
     Ok(targets)
 }
@@ -1569,16 +1614,18 @@ fn backend_exists_in_config_dir(config_dir: &Path, id: &str) -> psychevo::Result
         .is_some())
 }
 
-fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<wire::BackendDiagnosticView> {
+fn backend_diagnostics(
+    backend: &AgentBackendConfig,
+) -> Vec<wire::agents_backend_rpc::BackendDiagnosticView> {
     let mut diagnostics = Vec::new();
     if !backend.enabled {
-        diagnostics.push(wire::BackendDiagnosticView {
+        diagnostics.push(wire::agents_backend_rpc::BackendDiagnosticView {
             kind: "disabled".to_string(),
             message: "backend is disabled".to_string(),
         });
     }
     if backend.command.is_none() {
-        diagnostics.push(wire::BackendDiagnosticView {
+        diagnostics.push(wire::agents_backend_rpc::BackendDiagnosticView {
             kind: "missing_command".to_string(),
             message: "backend command is required for execution".to_string(),
         });
@@ -1589,7 +1636,7 @@ fn backend_diagnostics(backend: &AgentBackendConfig) -> Vec<wire::BackendDiagnos
 pub(super) async fn manage_backend_value(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::BackendManageParams,
+    params: wire::agents_backend_rpc::BackendManageParams,
     operation: &str,
 ) -> psychevo::Result<Value> {
     if params.id != crate::managed_acp::CODEX_ACP_BACKEND_ID {
@@ -1626,18 +1673,20 @@ pub(super) async fn manage_backend_value(
     )
     .await?;
     materialize_local_acp_backends(state, scope)?;
-    Ok(serde_json::to_value(wire::BackendManageResult {
-        id: params.id,
-        operation: operation.to_string(),
-        changed: !matches!(before, crate::managed_acp::ManagedCodexAcpStatus::Ready(_))
-            || operation != "install",
-        status: "ready".to_string(),
-        path: paths.root.display().to_string(),
-        message: format!(
-            "Managed Codex ACP {} is ready.",
-            crate::managed_acp::CODEX_ACP_VERSION
-        ),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::BackendManageResult {
+            id: params.id,
+            operation: operation.to_string(),
+            changed: !matches!(before, crate::managed_acp::ManagedCodexAcpStatus::Ready(_))
+                || operation != "install",
+            status: "ready".to_string(),
+            path: paths.root.display().to_string(),
+            message: format!(
+                "Managed Codex ACP {} is ready.",
+                crate::managed_acp::CODEX_ACP_VERSION
+            ),
+        },
+    )?)
 }
 
 pub(super) fn backend_doctor_value_for_platform(
@@ -1645,9 +1694,9 @@ pub(super) fn backend_doctor_value_for_platform(
     env: &BTreeMap<String, String>,
     cwd: &Path,
     platform: HostPlatform,
-) -> psychevo::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::BackendDoctorResult> {
     let mut checks = Vec::new();
-    checks.push(wire::BackendDoctorCheck {
+    checks.push(wire::agents_backend_rpc::BackendDoctorCheck {
         name: "enabled".to_string(),
         ok: backend.enabled,
         message: if backend.enabled {
@@ -1658,7 +1707,7 @@ pub(super) fn backend_doctor_value_for_platform(
         .to_string(),
         path: None,
     });
-    checks.push(wire::BackendDoctorCheck {
+    checks.push(wire::agents_backend_rpc::BackendDoctorCheck {
         name: "description".to_string(),
         ok: true,
         message: if backend
@@ -1675,20 +1724,20 @@ pub(super) fn backend_doctor_value_for_platform(
     });
     let command_check = match backend.command.as_deref() {
         Some(command) => match resolve_command_path(command, env, cwd, platform) {
-            Some(path) => wire::BackendDoctorCheck {
+            Some(path) => wire::agents_backend_rpc::BackendDoctorCheck {
                 name: "command".to_string(),
                 ok: true,
                 message: "command resolved".to_string(),
                 path: Some(path.display().to_string()),
             },
-            None => wire::BackendDoctorCheck {
+            None => wire::agents_backend_rpc::BackendDoctorCheck {
                 name: "command".to_string(),
                 ok: false,
                 message: "command was not found on PATH or as a configured path".to_string(),
                 path: None,
             },
         },
-        None => wire::BackendDoctorCheck {
+        None => wire::agents_backend_rpc::BackendDoctorCheck {
             name: "command".to_string(),
             ok: false,
             message: "command missing".to_string(),
@@ -1697,7 +1746,7 @@ pub(super) fn backend_doctor_value_for_platform(
     };
     checks.push(command_check);
     let ok = checks.iter().all(|check| check.ok);
-    Ok(wire::BackendDoctorResult {
+    Ok(wire::agents_backend_rpc::BackendDoctorResult {
         id: backend.id.clone(),
         kind: backend.kind.as_str().to_string(),
         ok,
@@ -1709,7 +1758,7 @@ pub(super) fn managed_backend_doctor_value(
     state: &WebState,
     scope: &ResolvedScope,
     backend: &AgentBackendConfig,
-) -> psychevo::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::BackendDoctorResult> {
     let platform = HostPlatform::current();
     let mut result = backend_doctor_value_for_platform(
         backend,
@@ -1723,30 +1772,34 @@ pub(super) fn managed_backend_doctor_value(
     for program in ["node", "npm"] {
         let resolved =
             resolve_command_path(program, &state.inner.inherited_env, &scope.cwd, platform);
-        result.checks.push(wire::BackendDoctorCheck {
-            name: program.to_string(),
-            ok: resolved.is_some(),
-            message: if resolved.is_some() {
-                format!("{program} resolved")
-            } else {
-                format!("{program} is required for managed Codex ACP installation")
-            },
-            path: resolved.map(|path| path.display().to_string()),
-        });
+        result
+            .checks
+            .push(wire::agents_backend_rpc::BackendDoctorCheck {
+                name: program.to_string(),
+                ok: resolved.is_some(),
+                message: if resolved.is_some() {
+                    format!("{program} resolved")
+                } else {
+                    format!("{program} is required for managed Codex ACP installation")
+                },
+                path: resolved.map(|path| path.display().to_string()),
+            });
     }
     let managed =
         match crate::managed_acp::inspect_managed_codex_acp_full(&state.inner.home, platform) {
-            crate::managed_acp::ManagedCodexAcpStatus::Ready(paths) => wire::BackendDoctorCheck {
-                name: "managedAdapter".to_string(),
-                ok: true,
-                message: format!(
-                    "managed Codex ACP {} is installed and verified",
-                    crate::managed_acp::CODEX_ACP_VERSION
-                ),
-                path: Some(paths.executable.display().to_string()),
-            },
+            crate::managed_acp::ManagedCodexAcpStatus::Ready(paths) => {
+                wire::agents_backend_rpc::BackendDoctorCheck {
+                    name: "managedAdapter".to_string(),
+                    ok: true,
+                    message: format!(
+                        "managed Codex ACP {} is installed and verified",
+                        crate::managed_acp::CODEX_ACP_VERSION
+                    ),
+                    path: Some(paths.executable.display().to_string()),
+                }
+            }
             crate::managed_acp::ManagedCodexAcpStatus::Missing { paths } => {
-                wire::BackendDoctorCheck {
+                wire::agents_backend_rpc::BackendDoctorCheck {
                     name: "managedAdapter".to_string(),
                     ok: false,
                     message: "managed Codex ACP is not installed; run backend/install".to_string(),
@@ -1754,7 +1807,7 @@ pub(super) fn managed_backend_doctor_value(
                 }
             }
             crate::managed_acp::ManagedCodexAcpStatus::Invalid { paths, reason } => {
-                wire::BackendDoctorCheck {
+                wire::agents_backend_rpc::BackendDoctorCheck {
                     name: "managedAdapter".to_string(),
                     ok: false,
                     message: format!("{reason}; run backend/repair"),
@@ -1771,37 +1824,50 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
     state: &WebState,
     scope: &ResolvedScope,
     backend: &AgentBackendConfig,
-) -> psychevo::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::BackendDoctorResult> {
     let mut result = managed_backend_doctor_value(state, scope, backend)?;
     if !result.ok {
-        result.checks.push(wire::BackendDoctorCheck {
-            name: "protocol".to_string(),
-            ok: true,
-            message: "protocol compatibility unchecked because backend launch prerequisites failed"
-                .to_string(),
-            path: None,
-        });
-        result.checks.push(wire::BackendDoctorCheck {
-            name: "authentication".to_string(),
-            ok: true,
-            message: "authentication unchecked because backend launch prerequisites failed"
-                .to_string(),
-            path: None,
-        });
+        result
+            .checks
+            .push(wire::agents_backend_rpc::BackendDoctorCheck {
+                name: "protocol".to_string(),
+                ok: true,
+                message:
+                    "protocol compatibility unchecked because backend launch prerequisites failed"
+                        .to_string(),
+                path: None,
+            });
+        result
+            .checks
+            .push(wire::agents_backend_rpc::BackendDoctorCheck {
+                name: "authentication".to_string(),
+                ok: true,
+                message: "authentication unchecked because backend launch prerequisites failed"
+                    .to_string(),
+                path: None,
+            });
         return Ok(result);
     }
 
-    let mut options = state.run_options(scope.cwd.clone(), None);
-    options.runtime_ref = Some(backend.id.clone());
-    let (protocol_check, auth_check) = match crate::resolve_peer_turn(&options) {
+    let mut base_env = state.inner.inherited_env.clone();
+    base_env
+        .entry("PSYCHEVO_HOME".to_string())
+        .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
+    let (protocol_check, auth_check) = match resolve_peer_turn(PeerResolutionContext {
+        cwd: &scope.cwd,
+        base_env: &base_env,
+        runtime_ref: Some(&backend.id),
+        agent_ref: None,
+        no_agents: false,
+    }) {
         Ok(Some(peer)) => match state
             .inner
             .gateway
             .probe_acp_backend_protocol_compatibility(peer.clone(), scope.cwd.clone())
             .await
         {
-            Ok(crate::acp_peer::AcpProtocolDoctorStatus::Compatible { version }) => {
-                let protocol_check = wire::BackendDoctorCheck {
+            Ok(crate::acp_peer::process_pool::AcpProtocolDoctorStatus::Compatible { version }) => {
+                let protocol_check = wire::agents_backend_rpc::BackendDoctorCheck {
                     name: "protocol".to_string(),
                     ok: true,
                     message: format!("stable ACP protocol v{version} negotiated"),
@@ -1813,13 +1879,19 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
                     .probe_acp_backend_authentication(peer, scope.cwd.clone())
                     .await
                 {
-                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Authenticated(method)) => {
+                    Ok(crate::acp_peer::process_pool::AcpAuthDoctorStatus::Authenticated(
+                        method,
+                    )) => {
                         let method = match method {
-                            crate::acp_peer::AcpAuthenticatedKind::ApiKey => "api-key",
-                            crate::acp_peer::AcpAuthenticatedKind::ChatGpt => "chat-gpt",
-                            crate::acp_peer::AcpAuthenticatedKind::Gateway => "gateway",
+                            crate::acp_peer::process_pool::AcpAuthenticatedKind::ApiKey => "api-key",
+                            crate::acp_peer::process_pool::AcpAuthenticatedKind::ChatGpt => {
+                                "chat-gpt"
+                            }
+                            crate::acp_peer::process_pool::AcpAuthenticatedKind::Gateway => {
+                                "gateway"
+                            }
                         };
-                        wire::BackendDoctorCheck {
+                        wire::agents_backend_rpc::BackendDoctorCheck {
                             name: "authentication".to_string(),
                             ok: true,
                             message: format!(
@@ -1828,16 +1900,16 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
                             path: None,
                         }
                     }
-                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Required) => {
-                        wire::BackendDoctorCheck {
+                    Ok(crate::acp_peer::process_pool::AcpAuthDoctorStatus::Required) => {
+                        wire::agents_backend_rpc::BackendDoctorCheck {
                             name: "authentication".to_string(),
                             ok: false,
                             message: "authentication required".to_string(),
                             path: None,
                         }
                     }
-                    Ok(crate::acp_peer::AcpAuthDoctorStatus::Unchecked) => {
-                        wire::BackendDoctorCheck {
+                    Ok(crate::acp_peer::process_pool::AcpAuthDoctorStatus::Unchecked) => {
+                        wire::agents_backend_rpc::BackendDoctorCheck {
                             name: "authentication".to_string(),
                             ok: true,
                             message: "authentication unchecked; this ACP Agent has no source-proven side-effect-free credential-status request"
@@ -1845,7 +1917,7 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
                             path: None,
                         }
                     }
-                    Err(error) => wire::BackendDoctorCheck {
+                    Err(error) => wire::agents_backend_rpc::BackendDoctorCheck {
                         name: "authentication".to_string(),
                         ok: false,
                         message: format!(
@@ -1857,11 +1929,11 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
                 };
                 (protocol_check, auth_check)
             }
-            Ok(crate::acp_peer::AcpProtocolDoctorStatus::Incompatible {
+            Ok(crate::acp_peer::process_pool::AcpProtocolDoctorStatus::Incompatible {
                 expected_version,
                 actual_version,
             }) => (
-                wire::BackendDoctorCheck {
+                wire::agents_backend_rpc::BackendDoctorCheck {
                     name: "protocol".to_string(),
                     ok: false,
                     message: format!(
@@ -1872,7 +1944,7 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
                 unchecked_authentication_for_protocol(),
             ),
             Err(error) => (
-                wire::BackendDoctorCheck {
+                wire::agents_backend_rpc::BackendDoctorCheck {
                     name: "protocol".to_string(),
                     ok: false,
                     message: format!(
@@ -1885,7 +1957,7 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
             ),
         },
         Ok(None) => (
-            wire::BackendDoctorCheck {
+            wire::agents_backend_rpc::BackendDoctorCheck {
                 name: "protocol".to_string(),
                 ok: false,
                 message: "protocol probe could not resolve an ACP Agent for this backend"
@@ -1895,7 +1967,7 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
             unchecked_authentication_for_protocol(),
         ),
         Err(error) => (
-            wire::BackendDoctorCheck {
+            wire::agents_backend_rpc::BackendDoctorCheck {
                 name: "protocol".to_string(),
                 ok: false,
                 message: format!(
@@ -1913,8 +1985,8 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
     Ok(result)
 }
 
-fn unchecked_authentication_for_protocol() -> wire::BackendDoctorCheck {
-    wire::BackendDoctorCheck {
+fn unchecked_authentication_for_protocol() -> wire::agents_backend_rpc::BackendDoctorCheck {
+    wire::agents_backend_rpc::BackendDoctorCheck {
         name: "authentication".to_string(),
         ok: true,
         message: "authentication unchecked because ACP protocol is incompatible or unavailable"

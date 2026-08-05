@@ -1,3 +1,10 @@
+use psychevo::application::RunStreamEvent;
+use serde_json::json;
+
+use crate::projection::gateway_event_from_run_stream;
+use psychevo_gateway_protocol::events_transcript::GatewayEvent;
+use psychevo_gateway_protocol::source::GatewayTurnStatus;
+
 #[test]
 fn run_start_projects_selected_skills() {
     let event = gateway_event_from_run_stream(

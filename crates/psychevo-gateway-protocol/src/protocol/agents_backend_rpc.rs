@@ -1,3 +1,29 @@
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::events_transcript::{
+    GatewayEvent, PendingActionView, ThreadHistoryView, ThreadSnapshot,
+};
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
+    option_json_safe_u64, option_json_safe_usize,
+};
+use crate::source::{AgentErrorView, GatewayRequestScope, GatewaySourceInput};
+use crate::thread_command_turn::{
+    RunnableTargetInput, ShellErrorPayload, ShellResultPayload, TerminalExitedPayload,
+    TerminalOutputPayload, ThreadActionKind,
+};
+use crate::voice::{
+    ThreadRealtimeClosedNotification, ThreadRealtimeErrorNotification,
+    ThreadRealtimeItemAddedNotification, ThreadRealtimeOutputAudioDeltaNotification,
+    ThreadRealtimeSdpNotification, ThreadRealtimeStartedNotification,
+    ThreadRealtimeTranscriptNotification,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -132,7 +158,10 @@ pub struct TeamMemberInput {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, rename = "maxTurns")]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub max_turns: Option<usize>,
@@ -152,7 +181,10 @@ pub struct TeamWriteParams {
     #[serde(default)]
     pub members: Vec<TeamMemberInput>,
     #[serde(default, rename = "maxParallelAgents")]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub max_parallel_agents: Option<u64>,
@@ -417,7 +449,10 @@ pub struct TeamMemberView {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, rename = "maxTurns")]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub max_turns: Option<usize>,
@@ -440,7 +475,10 @@ pub struct TeamDefinitionView {
     pub leader: String,
     pub members: Vec<TeamMemberView>,
     #[serde(rename = "maxParallelAgents")]
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub max_parallel_agents: u64,
@@ -464,12 +502,18 @@ pub struct AgentRunView {
     pub status: String,
     #[serde(default)]
     pub edge_status: Option<String>,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
@@ -500,7 +544,10 @@ pub struct AgentStatusControlView {
     pub spawning_paused: bool,
     pub max_spawn_depth_cap: u8,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub concurrency_cap: Option<u64>,
@@ -522,17 +569,26 @@ pub struct TeamRunView {
     pub leader_agent_name: String,
     pub members: Vec<TeamMemberView>,
     #[serde(rename = "maxParallelAgents")]
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub max_parallel_agents: u64,
     pub status: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
@@ -553,12 +609,18 @@ pub struct MissionRunView {
     pub goal: String,
     pub lead_agent_name: String,
     pub status: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
@@ -744,7 +806,10 @@ pub struct ThreadControlSetParams {
     #[serde(rename = "expectedCapabilityRevision")]
     pub expected_capability_revision: String,
     #[serde(rename = "expectedBindingRevision")]
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub expected_binding_revision: u64,
@@ -1164,12 +1229,18 @@ pub struct McpUpsertParams {
     #[serde(default, rename = "supportsParallelToolCalls")]
     pub supports_parallel_tool_calls: Option<bool>,
     #[serde(default, rename = "startupTimeoutSecs")]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub startup_timeout_secs: Option<u64>,
     #[serde(default, rename = "toolTimeoutSecs")]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub tool_timeout_secs: Option<u64>,
@@ -1378,7 +1449,10 @@ pub struct RuntimeHealthView {
     #[serde(default)]
     pub command_path: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub checked_at_ms: Option<i64>,
@@ -1404,7 +1478,10 @@ pub struct RuntimeReadinessStageView {
     pub status: RuntimeReadinessStatusView,
     pub summary: String,
     #[serde(default, rename = "observedAtMs")]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub observed_at_ms: Option<i64>,
@@ -1593,7 +1670,10 @@ pub struct RuntimeBindingView {
     pub profile_fingerprint: String,
     pub ownership: RuntimeBindingOwnershipView,
     #[serde(rename = "bindingRevision")]
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub binding_revision: u64,
@@ -1749,7 +1829,10 @@ pub struct ThreadImportProfileView {
     #[serde(default, rename = "nextCursor")]
     pub next_cursor: Option<String>,
     #[serde(default, rename = "alreadyImportedCount")]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub already_imported_count: usize,
@@ -1803,7 +1886,10 @@ pub struct ThreadControlSetResult {
     pub control: ThreadControlDescriptorView,
     pub context: ThreadContextReadResult,
     #[serde(rename = "bindingRevision")]
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub binding_revision: u64,
@@ -1860,7 +1946,10 @@ pub struct CreateLaunchParams {
 #[ts(rename_all = "camelCase")]
 pub struct CreateLaunchResult {
     pub launch_id: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub expires_at_ms: i64,
@@ -1877,17 +1966,26 @@ pub struct ManagedServerState {
     pub pid: u32,
     pub base_url: String,
     pub readyz_url: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
     pub version: String,
     pub executable_path: Option<String>,
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub executable_modified_ms: Option<i64>,
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub executable_size: Option<u64>,
@@ -1949,7 +2047,10 @@ pub struct JsonRpcErrorResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct JsonRpcError {
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub code: i64,

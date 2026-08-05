@@ -1,5 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::sync::Arc;
+use std::time::Instant;
+
+use super::stream::emit;
+use crate::Result;
+use crate::events::{AgentEvent, EventSink};
+use crate::support::{duration_ms_u64, now_ms};
+use crate::tool_router::ToolRouter;
+use crate::types::{
+    AssistantBlock, Message, ToolAttachment, ToolCallBlock, ToolDisplaySpec, ToolExecutionMode,
+    ToolExposure, ToolOutput, UserContentBlock,
+};
+use futures::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
+use psychevo_ai::{AbortSignal, Outcome};
 #[derive(Debug, Clone)]
 pub(crate) struct ToolCallBuilder {
     pub(crate) id: String,
@@ -266,7 +278,11 @@ pub(crate) fn tool_attachment_messages(
 
 #[cfg(test)]
 mod provider_tool_tests {
-    use super::*;
+    use psychevo_ai::Outcome;
+    use serde_json::json;
+
+    use super::assistant_tool_calls;
+    use crate::types::{AssistantBlock, Message, ProviderToolBlock};
 
     #[test]
     fn provider_executed_blocks_never_become_router_calls() {

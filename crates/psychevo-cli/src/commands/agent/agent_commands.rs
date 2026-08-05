@@ -1,20 +1,17 @@
 use std::env;
-use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use psychevo::__product::persistence::{AgentEdgeRecord, StateRuntime};
 use psychevo::{
-    Application, StartThreadRequest, TurnOutcome, TurnRequest, __product::usage::effective_usage_total,
-    __product::capabilities::AgentBackendConfig, __product::capabilities::AgentCatalog,
-    __product::capabilities::AgentControl, __product::capabilities::AgentDiscoveryOptions,
-    __product::capabilities::discover_agents, __product::capabilities::list_agents_value,
-    __product::capabilities::resolve_agent_definition,
-    __product::capabilities::valid_agent_name, __product::capabilities::view_agent_value_with_catalog,
-    __product::capabilities::wait_agent_mailbox, __product::configuration::load_agent_backend_configs, __product::configuration::set_config_value,
-    __product::runtime::SessionSummary, __product::runtime::TuiMessageSummary,
+    AgentMailboxWaitOutcome, AgentRelationship, AgentRelationshipStatus, Application,
+    Client as FrameworkClient, HistoryReader, StartThreadRequest, ThreadItem, ThreadListQuery,
+    ThreadSummary, TurnOutcome, TurnRequest, accounting::effective_usage_total,
+    agents::AgentBackendConfig, agents::AgentControl, agents::AgentRunRecord,
+    agents::list_agents_value, agents::resolve_agent_definition, agents::valid_agent_name,
+    agents::view_agent_value_with_catalog, config::load_agent_backend_configs,
+    config::set_config_value,
 };
 use serde_json::{Value, json};
 
@@ -27,6 +24,11 @@ use crate::args::{
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
+};
+
+use super::support::{
+    agent_backend_diagnostics, agent_backend_doctor_value, catalog, catalog_for,
+    command_application, print_agent_record, print_agent_status, print_wait_report, read_prompt,
 };
 
 pub(crate) async fn run_agent_command(args: AgentArgs) -> Result<ExitCode> {
@@ -47,7 +49,7 @@ pub(crate) async fn run_agent_command(args: AgentArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn agent_backend(args: AgentBackendArgs) -> Result<ExitCode> {
+fn agent_backend(args: AgentBackendArgs) -> Result<ExitCode> {
     match args.command {
         AgentBackendCommand::List(args) => agent_backend_list(args),
         AgentBackendCommand::Add(args) => agent_backend_add(args),
@@ -55,7 +57,7 @@ pub(crate) fn agent_backend(args: AgentBackendArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
+fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
     let catalog = catalog()?;
     if args.json {
         println!("{}", serde_json::to_string(&list_agents_value(&catalog))?);
@@ -80,7 +82,7 @@ pub(crate) fn list_agents(args: AgentListArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn agent_backend_list(args: AgentBackendListArgs) -> Result<ExitCode> {
+fn agent_backend_list(args: AgentBackendListArgs) -> Result<ExitCode> {
     let (home, cwd, env_map) = backend_context()?;
     let backends = load_agent_backend_configs(&home, &cwd, &env_map)?;
     let values = backends
@@ -109,7 +111,7 @@ pub(crate) fn agent_backend_list(args: AgentBackendListArgs) -> Result<ExitCode>
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
+fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
     if !valid_agent_name(&args.id) {
         return Err(anyhow!("invalid backend id: {}", args.id));
     }
@@ -183,7 +185,7 @@ pub(crate) fn agent_backend_add(args: AgentBackendAddArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn agent_backend_doctor(args: AgentBackendDoctorArgs) -> Result<ExitCode> {
+fn agent_backend_doctor(args: AgentBackendDoctorArgs) -> Result<ExitCode> {
     let (home, cwd, env_map) = backend_context()?;
     let backends = load_agent_backend_configs(&home, &cwd, &env_map)?;
     let backend = backends
@@ -221,7 +223,7 @@ pub(crate) fn agent_backend_doctor(args: AgentBackendDoctorArgs) -> Result<ExitC
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
+fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -238,7 +240,7 @@ pub(crate) fn view_agent(args: AgentNameArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
+fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -261,7 +263,7 @@ pub(crate) fn validate_agent(args: AgentNameArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
+async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -288,9 +290,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         return Err(anyhow!("You must provide a message"));
     }
 
-    let mut builder = Application::builder()
-        .home(&home)
-        .database_path(&db_path);
+    let mut builder = Application::builder().home(&home).database_path(&db_path);
     if let Some(config_path) = config_path.as_ref() {
         builder = builder.config_path(config_path);
     }
@@ -354,22 +354,28 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     })
 }
 
-pub(crate) async fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
-    let env_map = inherited_env();
-    let cwd = env::current_dir()?;
-    let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path).await?;
-    let cwd = cwd.canonicalize().unwrap_or(cwd);
-    let parent = if args.all {
-        None
-    } else {
-        store
-            .latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])
-            .await?
-    };
-    let control = AgentControl::__standalone(Some(store.clone()));
-    let value = control.status_value_for(parent.as_deref(), args.all).await;
+async fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
+    let (application, cwd) = command_application().await?;
+    let execution = async {
+        let parent = if args.all {
+            None
+        } else {
+            latest_thread_id(application.client(), &cwd, &["run", "tui"]).await?
+        };
+        Ok::<_, anyhow::Error>(
+            application
+                .agent_control()
+                .status_value_for(parent.as_deref(), args.all)
+                .await,
+        )
+    }
+    .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let value = execution?;
+    shutdown?;
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
     } else {
@@ -378,30 +384,53 @@ pub(crate) async fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
-    let store = command_store().await?;
-    let edge = store
-        .find_agent_edge(&args.id)
-        .await?
-        .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
-    let mut record = agent_status_record_value(&store, &args.id, &edge).await?;
-    let parent_session = store.session_summary(&edge.parent_session_id).await?;
-    let child_session = store.session_summary(&edge.child_session_id).await?;
-    let mut messages = store
-        .load_tui_message_summaries(&edge.child_session_id)
-        .await?;
-    let latest_usage = latest_usage_from_summaries(&messages);
-    let latest_total_tokens = latest_usage.as_ref().and_then(usage_total_tokens);
-    if let Some(object) = record.as_object_mut() {
-        if let Some(usage) = latest_usage.clone() {
-            object.insert("latest_usage".to_string(), usage);
+async fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let client = application.client();
+    let control = application.agent_control();
+    let execution = async {
+        let relationship = client
+            .agent_relationship(&args.id)
+            .await?
+            .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
+        let mut record =
+            serde_json::to_value(agent_status_record(&control, &args.id, &relationship).await?)?;
+        let parent_session = client
+            .resume_thread(relationship.parent_thread_id.clone())
+            .await?
+            .summary()
+            .await?;
+        let child_thread = client
+            .resume_thread(relationship.child_thread_id.clone())
+            .await?;
+        let child_session = child_thread.summary().await?;
+        let history = child_thread.history();
+        let latest_usage = history.latest_assistant_usage().await?;
+        let messages = latest_history_items(&history, args.limit).await?;
+        let latest_total_tokens = latest_usage.as_ref().and_then(usage_total_tokens);
+        if let Some(object) = record.as_object_mut() {
+            if let Some(usage) = latest_usage.clone() {
+                object.insert("latest_usage".to_string(), usage);
+            }
+            if let Some(tokens) = latest_total_tokens {
+                object.insert("latest_total_tokens".to_string(), Value::from(tokens));
+            }
         }
-        if let Some(tokens) = latest_total_tokens {
-            object.insert("latest_total_tokens".to_string(), Value::from(tokens));
-        }
+        Ok::<_, anyhow::Error>((
+            relationship,
+            record,
+            parent_session,
+            child_session,
+            messages,
+        ))
     }
-    let keep_from = messages.len().saturating_sub(args.limit);
-    messages.drain(..keep_from);
+    .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let (relationship, record, parent_session, child_session, messages) = execution?;
+    shutdown?;
 
     if args.json {
         let messages = messages
@@ -412,49 +441,72 @@ pub(crate) async fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
             "{}",
             serde_json::to_string(&json!({
                 "agent": record,
-                "edge": agent_edge_value(&edge),
-                "parent_session": parent_session.as_ref().map(session_summary_value),
-                "child_session": child_session.as_ref().map(session_summary_value),
+                "edge": agent_relationship_value(&relationship),
+                "parent_session": session_summary_value(&parent_session),
+                "child_session": session_summary_value(&child_session),
                 "messages": messages,
             }))?
         );
     } else {
         print_agent_inspect(
             &record,
-            &edge,
-            parent_session.as_ref(),
-            child_session.as_ref(),
+            &relationship,
+            Some(&parent_session),
+            Some(&child_session),
             &messages,
         )?;
     }
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
-    let env_map = inherited_env();
-    let cwd = env::current_dir()?;
-    let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path).await?;
-    let cwd = cwd.canonicalize().unwrap_or(cwd);
-    let session_id = store
-        .latest_run_session_for_cwd(&cwd)
-        .await?
-        .ok_or_else(|| anyhow!("no run session found for {}", cwd.display()))?;
-    let value =
-        wait_agent_mailbox(&session_id, Duration::from_millis(args.timeout_ms), &store).await?;
+async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
+    let (application, cwd) = command_application().await?;
+    let execution: Result<AgentMailboxWaitOutcome> = async {
+        let thread_id = latest_thread_id(application.client(), &cwd, &["run"])
+            .await?
+            .ok_or_else(|| anyhow!("no run session found for {}", cwd.display()))?;
+        Ok(application
+            .client()
+            .resume_thread(thread_id)
+            .await?
+            .wait_for_agent_mailbox(Duration::from_millis(args.timeout_ms))
+            .await?)
+    }
+    .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let outcome = execution?;
+    shutdown?;
     if args.json {
-        println!("{}", serde_json::to_string(&value)?);
+        println!(
+            "{}",
+            serde_json::to_string(&agent_wait_report_value(outcome))?
+        );
     } else {
-        print_wait_report(&value);
+        print_wait_report(outcome);
     }
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
-    let store = command_store().await?;
-    let control = AgentControl::__standalone(Some(store));
-    let record = control.close(&args.id).await?;
+fn agent_wait_report_value(outcome: AgentMailboxWaitOutcome) -> Value {
+    let timed_out = outcome == AgentMailboxWaitOutcome::TimedOut;
+    json!({
+        "message": if timed_out { "Wait timed out." } else { "Wait completed." },
+        "timed_out": timed_out,
+    })
+}
+
+async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let record = application.agent_control().close(&args.id).await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let record = record?;
+    shutdown?;
     if args.json {
         println!(
             "{}",
@@ -468,10 +520,18 @@ pub(crate) async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
-    let store = command_store().await?;
-    let control = AgentControl::__standalone(Some(store));
-    let record = control.send(&args.id, &args.message.join(" ")).await?;
+async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let record = application
+        .agent_control()
+        .send(&args.id, &args.message.join(" "))
+        .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let record = record?;
+    shutdown?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -482,10 +542,15 @@ pub(crate) async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
-    let store = command_store().await?;
-    let control = AgentControl::__standalone(Some(store));
-    let record = control.resume(&args.id).await?;
+async fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let record = application.agent_control().resume(&args.id).await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let record = record?;
+    shutdown?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -496,27 +561,26 @@ pub(crate) async fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
-    let env_map = inherited_env();
-    let cwd = env::current_dir()?;
-    let home = resolve_psychevo_home(&env_map, &cwd)?;
-    let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path).await?;
-    let edge = store
-        .find_agent_edge(&args.id)
-        .await?
-        .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
+async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let relationship = application.client().agent_relationship(&args.id).await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let relationship = relationship?.ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
+    shutdown?;
     if args.json {
         println!(
             "{}",
-            serde_json::to_string(&json!({ "session": edge.child_session_id }))?
+            serde_json::to_string(&json!({ "session": relationship.child_thread_id }))?
         );
         return Ok(ExitCode::SUCCESS);
     }
     let status = std::process::Command::new(std::env::current_exe()?)
         .arg("tui")
         .arg("--session")
-        .arg(edge.child_session_id)
+        .arg(relationship.child_thread_id)
         .status()?;
     Ok(status
         .code()
@@ -524,17 +588,28 @@ pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
         .unwrap_or(ExitCode::FAILURE))
 }
 
-pub(crate) async fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
-    let store = command_store().await?;
-    let edge = store
-        .find_agent_edge(&args.id)
-        .await?
-        .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
-    let mut messages = store
-        .load_tui_message_summaries(&edge.child_session_id)
-        .await?;
-    let keep_from = messages.len().saturating_sub(args.limit);
-    messages.drain(..keep_from);
+async fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
+    let (application, _cwd) = command_application().await?;
+    let client = application.client();
+    let execution = async {
+        let relationship = client
+            .agent_relationship(&args.id)
+            .await?
+            .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
+        let history = client
+            .resume_thread(relationship.child_thread_id)
+            .await?
+            .history();
+        let messages = latest_history_items(&history, args.limit).await?;
+        Ok::<_, anyhow::Error>(messages)
+    }
+    .await;
+    let shutdown = application
+        .shutdown()
+        .await
+        .and_then(|report| report.require_clean());
+    let messages = execution?;
+    shutdown?;
     if args.json {
         let values = messages
             .iter()
@@ -556,48 +631,36 @@ pub(crate) async fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn agent_status_record_value(
-    store: &StateRuntime,
+async fn agent_status_record(
+    control: &AgentControl,
     target: &str,
-    edge: &AgentEdgeRecord,
-) -> Result<Value> {
-    let control = AgentControl::__standalone(Some(store.clone()));
-    let value = control.status_value_for(None, true).await;
-    let agents = value
-        .get("agents")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("agent status projection is missing agents"))?;
-    agents
-        .iter()
-        .find(|item| agent_value_matches_target(item, target, edge))
-        .cloned()
+    relationship: &AgentRelationship,
+) -> Result<AgentRunRecord> {
+    control
+        .status_records(None, true)
+        .await
+        .into_iter()
+        .find(|record| {
+            record.id == target
+                || record.task_name.as_deref() == Some(target)
+                || record.child_session_id.as_deref() == Some(target)
+                || record.child_session_id.as_deref() == Some(relationship.child_thread_id.as_str())
+        })
         .ok_or_else(|| anyhow!("agent not found: {target}"))
 }
 
-pub(crate) fn agent_value_matches_target(
-    item: &Value,
-    target: &str,
-    edge: &AgentEdgeRecord,
-) -> bool {
-    item.get("id").and_then(Value::as_str) == Some(target)
-        || item.get("task_name").and_then(Value::as_str) == Some(target)
-        || item.get("child_session_id").and_then(Value::as_str) == Some(target)
-        || item.get("child_session_id").and_then(Value::as_str)
-            == Some(edge.child_session_id.as_str())
-}
-
-pub(crate) fn agent_edge_value(edge: &AgentEdgeRecord) -> Value {
+fn agent_relationship_value(relationship: &AgentRelationship) -> Value {
     json!({
-        "parent_session_id": edge.parent_session_id,
-        "child_session_id": edge.child_session_id,
-        "status": edge.status.as_str(),
-        "created_at_ms": edge.created_at_ms,
-        "updated_at_ms": edge.updated_at_ms,
-        "metadata": edge.metadata,
+        "parent_session_id": relationship.parent_thread_id,
+        "child_session_id": relationship.child_thread_id,
+        "status": relationship.status,
+        "created_at_ms": relationship.created_at_ms,
+        "updated_at_ms": relationship.updated_at_ms,
+        "agent": relationship.agent,
     })
 }
 
-pub(crate) fn session_summary_value(summary: &SessionSummary) -> Value {
+fn session_summary_value(summary: &ThreadSummary) -> Value {
     json!({
         "id": summary.id,
         "source": summary.source,
@@ -615,7 +678,7 @@ pub(crate) fn session_summary_value(summary: &SessionSummary) -> Value {
     })
 }
 
-pub(crate) fn tui_message_summary_value(summary: &TuiMessageSummary) -> Result<Value> {
+fn tui_message_summary_value(summary: &ThreadItem) -> Result<Value> {
     Ok(json!({
         "message": serde_json::to_value(&summary.message)?,
         "usage": summary.usage,
@@ -624,12 +687,12 @@ pub(crate) fn tui_message_summary_value(summary: &TuiMessageSummary) -> Result<V
     }))
 }
 
-pub(crate) fn print_agent_inspect(
+fn print_agent_inspect(
     record: &Value,
-    edge: &AgentEdgeRecord,
-    parent_session: Option<&SessionSummary>,
-    child_session: Option<&SessionSummary>,
-    messages: &[TuiMessageSummary],
+    relationship: &AgentRelationship,
+    parent_session: Option<&ThreadSummary>,
+    child_session: Option<&ThreadSummary>,
+    messages: &[ThreadItem],
 ) -> Result<()> {
     let id = record.get("id").and_then(Value::as_str).unwrap_or_default();
     let agent_name = record
@@ -658,14 +721,20 @@ pub(crate) fn print_agent_inspect(
     {
         println!("task: {}", truncate_preview(task, 180));
     }
-    println!("edge: {}", edge.status.as_str());
+    println!(
+        "edge: {}",
+        match relationship.status {
+            AgentRelationshipStatus::Open => "open",
+            AgentRelationshipStatus::Closed => "closed",
+        }
+    );
     println!(
         "parent session: {}",
-        session_summary_label(parent_session, &edge.parent_session_id)
+        session_summary_label(parent_session, &relationship.parent_thread_id)
     );
     println!(
         "child session: {}",
-        session_summary_label(child_session, &edge.child_session_id)
+        session_summary_label(child_session, &relationship.child_thread_id)
     );
     println!("logs: pevo agent logs {id}");
     println!("attach: pevo agent attach {id}");
@@ -685,7 +754,7 @@ pub(crate) fn print_agent_inspect(
     Ok(())
 }
 
-pub(crate) fn session_summary_label(summary: Option<&SessionSummary>, fallback_id: &str) -> String {
+fn session_summary_label(summary: Option<&ThreadSummary>, fallback_id: &str) -> String {
     let Some(summary) = summary else {
         return fallback_id.to_string();
     };
@@ -704,7 +773,7 @@ pub(crate) fn session_summary_label(summary: Option<&SessionSummary>, fallback_i
     parts.join(" ")
 }
 
-pub(crate) fn message_preview(message: &Value) -> String {
+fn message_preview(message: &Value) -> String {
     match message
         .get("role")
         .and_then(Value::as_str)
@@ -739,7 +808,7 @@ pub(crate) fn message_preview(message: &Value) -> String {
     }
 }
 
-pub(crate) fn message_content_text(message: &Value) -> String {
+fn message_content_text(message: &Value) -> String {
     message
         .get("content")
         .and_then(Value::as_array)
@@ -760,7 +829,7 @@ pub(crate) fn message_content_text(message: &Value) -> String {
         .unwrap_or_default()
 }
 
-pub(crate) fn assistant_tool_call_names(message: &Value) -> Vec<String> {
+fn assistant_tool_call_names(message: &Value) -> Vec<String> {
     message
         .get("content")
         .and_then(Value::as_array)
@@ -775,18 +844,53 @@ pub(crate) fn assistant_tool_call_names(message: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) fn latest_usage_from_summaries(messages: &[TuiMessageSummary]) -> Option<Value> {
-    messages
-        .iter()
-        .rev()
-        .find_map(|summary| summary.usage.clone())
+async fn latest_history_items(history: &HistoryReader, limit: usize) -> Result<Vec<ThreadItem>> {
+    const PAGE_SIZE: usize = 200;
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut items = Vec::with_capacity(limit.min(PAGE_SIZE));
+    let mut before = None;
+    while items.len() < limit {
+        let page = history
+            .before(before, Some((limit - items.len()).min(PAGE_SIZE)))
+            .await?;
+        let mut older = page.items;
+        older.append(&mut items);
+        items = older;
+        let Some(next_before) = page.next_before else {
+            break;
+        };
+        before = Some(next_before);
+    }
+    Ok(items)
 }
 
-pub(crate) fn usage_total_tokens(usage: &Value) -> Option<u64> {
+async fn latest_thread_id(
+    client: FrameworkClient,
+    cwd: &std::path::Path,
+    sources: &[&str],
+) -> Result<Option<String>> {
+    Ok(client
+        .list_threads(ThreadListQuery {
+            cwd: Some(cwd.to_path_buf()),
+            archived: false,
+            sources: sources.iter().map(|source| (*source).to_string()).collect(),
+            cursor: None,
+            limit: 1,
+        })
+        .await?
+        .threads
+        .into_iter()
+        .next()
+        .map(|thread| thread.id))
+}
+
+fn usage_total_tokens(usage: &Value) -> Option<u64> {
     effective_usage_total(Some(usage)).tokens
 }
 
-pub(crate) fn truncate_preview(input: &str, max_chars: usize) -> String {
+fn truncate_preview(input: &str, max_chars: usize) -> String {
     let normalized = input.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= max_chars {
         return normalized;
@@ -799,8 +903,7 @@ pub(crate) fn truncate_preview(input: &str, max_chars: usize) -> String {
     out
 }
 
-pub(crate) fn backend_context()
--> Result<(PathBuf, PathBuf, std::collections::BTreeMap<String, String>)> {
+fn backend_context() -> Result<(PathBuf, PathBuf, std::collections::BTreeMap<String, String>)> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -808,7 +911,7 @@ pub(crate) fn backend_context()
     Ok((home, cwd, env_map))
 }
 
-pub(crate) fn validate_backend_entrypoints(values: &[String]) -> Result<Vec<String>> {
+fn validate_backend_entrypoints(values: &[String]) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for value in values {
         let value = value.trim();
@@ -822,7 +925,7 @@ pub(crate) fn validate_backend_entrypoints(values: &[String]) -> Result<Vec<Stri
     Ok(out)
 }
 
-pub(crate) fn validate_backend_client_capabilities(values: &[String]) -> Result<Vec<String>> {
+fn validate_backend_client_capabilities(values: &[String]) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for value in values {
         let value = value.trim();
@@ -836,7 +939,7 @@ pub(crate) fn validate_backend_client_capabilities(values: &[String]) -> Result<
     Ok(out)
 }
 
-pub(crate) fn agent_backend_value(backend: &AgentBackendConfig) -> Value {
+fn agent_backend_value(backend: &AgentBackendConfig) -> Value {
     json!({
         "id": backend.id,
         "kind": backend.kind.as_str(),

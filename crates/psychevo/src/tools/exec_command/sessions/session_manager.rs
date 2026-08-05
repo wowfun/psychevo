@@ -1,10 +1,41 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::{BTreeMap, HashMap};
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
-#[allow(unused_imports)]
-use serde_json::json;
+use futures::future::BoxFuture;
+use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+
+use super::super::process::{
+    apply_pty_subprocess_env, apply_subprocess_env, bounded_stdin_chars, clamp_yield_ms,
+    configure_process_group, decode_exec_output, default_shell_for_env, duration_ms_u64,
+    get_exec_session, get_exec_session_for_task, insert_exec_session, now_unix_ms,
+    output_token_limit, reject_untracked_background_command, remove_exec_session, required_u64,
+    reserve_exec_session_id, resolve_exec_cwd, shell_args,
+};
+use super::completion::{await_session_result, spawn_pty_waiter_thread};
+#[cfg(windows)]
+use super::windows_restricted;
+#[cfg(test)]
+use crate::config::LspConfig;
+use crate::error::{Error, Result};
+use crate::process_env::terminate_std_child_process_group;
+use crate::sandbox::SandboxPolicy;
+use crate::tools::args::{optional_bool, optional_i64, optional_string, required_string};
+use crate::tools::cwd::CwdTool;
+#[cfg(test)]
+use crate::tools::write_support::patch_lsp::default_lsp_manager;
+use crate::tools::{
+    DEFAULT_MAX_OUTPUT_TOKENS, EMPTY_POLL_MAX_YIELD_TIME_MS, EMPTY_POLL_MIN_YIELD_TIME_MS,
+    EXEC_DEFAULT_YIELD_TIME_MS, EXEC_MAX_YIELD_TIME_MS, EXEC_MIN_YIELD_TIME_MS, ToolRuntimeContext,
+    WRITE_STDIN_DEFAULT_YIELD_TIME_MS,
+};
+use crate::types::{RunStreamEvent, RunStreamSink, WorkspaceMutation};
 
 pub(crate) struct ExecCommandTool(CwdTool);
 
@@ -362,16 +393,17 @@ pub(crate) async fn write_stdin_tool_impl_with_call(
 pub(crate) async fn run_exec_command_for_user_shell(
     cwd: PathBuf,
     command: String,
+    environment: BTreeMap<String, String>,
     sandbox_policy: SandboxPolicy,
     abort: AbortSignal,
 ) -> Result<(Value, bool)> {
     let invocation = ExecInvocation {
         cmd: command,
         cwd,
-        shell: default_shell_for_env(&std::env::vars().collect())?,
+        shell: default_shell_for_env(&environment)?,
         login: false,
         tty: false,
-        env: std::env::vars().collect(),
+        env: environment,
         path_prefixes: Vec::new(),
         sandbox_policy,
     };
@@ -419,7 +451,8 @@ pub(crate) async fn run_exec_command_for_user_shell(
         ));
     }
     final_value["output"] = Value::String(output);
-    Ok((final_value, false))
+    let is_error = final_value["exit_code"].as_i64() != Some(0);
+    Ok((final_value, is_error))
 }
 
 #[derive(Clone)]
@@ -657,7 +690,7 @@ impl ExecProcess {
         match self {
             Self::Pipe(child) => {
                 if let Ok(mut child) = child.lock() {
-                    terminate_std_child_tree(&mut child);
+                    terminate_std_child_process_group(&mut child);
                 }
             }
             #[cfg(windows)]
@@ -794,11 +827,12 @@ fn spawn_windows_restricted_pipe_session(
     stdin_allowed: bool,
     initial_output: &[u8],
 ) -> Result<Arc<ExecSession>> {
-    let spawned = windows_restricted::spawn_read_only(invocation, stdin_allowed).map_err(|error| {
-        crate::sandbox::sandbox_denied(format!(
-            "failed to spawn Windows restricted-token command: {error}"
-        ))
-    })?;
+    let spawned =
+        windows_restricted::spawn_read_only(invocation, stdin_allowed).map_err(|error| {
+            crate::sandbox::sandbox_denied(format!(
+                "failed to spawn Windows restricted-token command: {error}"
+            ))
+        })?;
     let windows_restricted::WindowsRestrictedSpawn {
         process,
         stdin,

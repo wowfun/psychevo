@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -5,14 +6,15 @@ use psychevo_agent_core::user_text_message;
 use psychevo_ai::Outcome;
 use serde_json::{Map, Value, json};
 
-use crate::config::{load_run_config, resolve_run_provider};
+use crate::config::{ResolvedRunProvider, load_run_config, resolve_run_provider};
 use crate::error::{Error, Result};
 use crate::paths::canonical_cwd;
 use crate::run::SESSION_TITLE_MAX_CHARS;
 use crate::store::StateRuntime;
-use crate::tools::{default_exec_max_output_tokens, run_exec_command_for_user_shell};
+use crate::tools::default_exec_max_output_tokens;
+use crate::tools::exec_command::sessions::session_manager::run_exec_command_for_user_shell;
 use crate::types::{
-    RunControl, RunOptions, RunStreamEvent, RunStreamSink, USER_SHELL_METADATA_KEY,
+    RunControl, RunMode, RunOptions, RunStreamEvent, RunStreamSink, USER_SHELL_METADATA_KEY,
     UserShellContextOptions, UserShellOptions, UserShellResult,
 };
 
@@ -33,7 +35,9 @@ pub async fn run_user_shell_command_streaming_controlled(
         return Err(Error::Message("shell command is empty".to_string()));
     }
     let prepared_context = match options.context.as_ref() {
-        Some(context) => Some(prepare_user_shell_context(context, &cwd, &command).await?),
+        Some(context) => {
+            Some(prepare_user_shell_context(context, &options.environment, &cwd, &command).await?)
+        }
         None => None,
     };
     let stream_session_id = prepared_context
@@ -59,6 +63,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     let (result, is_error) = match run_exec_command_for_user_shell(
         cwd.clone(),
         command.clone(),
+        options.environment,
         sandbox_policy,
         control.receivers.abort_signal(),
     )
@@ -143,6 +148,7 @@ pub async fn run_user_shell_command_streaming_controlled(
 
 pub(crate) async fn prepare_user_shell_context(
     context: &UserShellContextOptions,
+    environment: &BTreeMap<String, String>,
     cwd: &Path,
     command: &str,
 ) -> Result<PreparedUserShellContext> {
@@ -170,7 +176,7 @@ pub(crate) async fn prepare_user_shell_context(
         permission_mode: None,
         approval_handler: None,
         clarify_enabled: false,
-        inherited_env: context.inherited_env.clone(),
+        inherited_env: Some(environment.clone()),
         agent: None,
         external_agent_delegate: None,
         no_agents: true,
@@ -196,38 +202,18 @@ pub(crate) async fn prepare_user_shell_context(
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    let (session_id, created_session) = if let Some(session_id) = context.session.clone() {
-        store.resume_session(&session_id).await?;
-        (session_id, false)
+    let existing_session = if let Some(session_id) = context.session.clone() {
+        Some(session_id)
     } else if context.continue_latest {
-        if let Some(session_id) = store
+        store
             .latest_session_for_cwd_with_sources(cwd, &continue_sources)
             .await?
-        {
-            store.resume_session(&session_id).await?;
-            (session_id, false)
-        } else {
-            (
-                store
-                    .create_session_with_metadata(
-                        cwd,
-                        &context.source,
-                        &resolved.model,
-                        &resolved.provider,
-                        Some(json!({
-                            "provider_label": resolved.display_label.clone(),
-                            "base_url": resolved.base_url.clone(),
-                            "api_key_env": resolved.api_key_env.clone(),
-                            "reasoning_effort": resolved.reasoning_effort.clone(),
-                            "context_limit": resolved.context_limit,
-                            "model_metadata": resolved.metadata.public_json(),
-                            "mode": context.mode.as_str(),
-                        })),
-                    )
-                    .await?,
-                true,
-            )
-        }
+    } else {
+        None
+    };
+    let (session_id, created_session) = if let Some(session_id) = existing_session {
+        store.resume_session(&session_id).await?;
+        (session_id, false)
     } else {
         (
             store
@@ -236,15 +222,7 @@ pub(crate) async fn prepare_user_shell_context(
                     &context.source,
                     &resolved.model,
                     &resolved.provider,
-                    Some(json!({
-                        "provider_label": resolved.display_label.clone(),
-                        "base_url": resolved.base_url.clone(),
-                        "api_key_env": resolved.api_key_env.clone(),
-                        "reasoning_effort": resolved.reasoning_effort.clone(),
-                        "context_limit": resolved.context_limit,
-                        "model_metadata": resolved.metadata.public_json(),
-                        "mode": context.mode.as_str(),
-                    })),
+                    Some(user_shell_session_metadata(&resolved, context.mode)),
                 )
                 .await?,
             true,
@@ -258,6 +236,22 @@ pub(crate) async fn prepare_user_shell_context(
         store,
         session_id,
         sandbox_policy,
+    })
+}
+
+fn user_shell_session_metadata(resolved: &ResolvedRunProvider, mode: RunMode) -> Value {
+    json!({
+        "provider_label": resolved.display_label,
+        "base_url": resolved.base_url,
+        "api_key_env": resolved.api_key_env,
+        "reasoning_effort": resolved.reasoning_effort,
+        "context_limit": resolved.context_limit,
+        "model_metadata": resolved.metadata.public_json(),
+        "mode": mode.as_str(),
+        "composerModel": {
+            "model": format!("{}/{}", resolved.provider, resolved.model),
+            "reasoningEffort": resolved.reasoning_effort,
+        },
     })
 }
 

@@ -1,7 +1,38 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+use crate::tui::tests::fixtures::{
+    buffer_text, draw_fullscreen_for_test, finished_turn_result, test_app,
+    test_shell_running_control,
+};
+use crate::tui::tests::{runtime_turn_event, start_thread_fixture};
+use crate::tui::{
+    CrosstermEvent, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, PermissionMode, QueuedInput,
+    RunMode, RunningTask, RunningTurn, RunningTurnEvents, SlashCommand, StartedTurn, StartingTurn,
+    TranscriptKind, TranscriptRow, TurnEvent, TurnResult, textarea_text, textarea_with_text,
+    transcript_line_count,
+};
+
+fn install_test_turn_admission(
+    app: &crate::tui::TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    display_prompt: &str,
+    task: tokio::task::JoinHandle<psychevo::Result<StartedTurn>>,
+) {
+    let optimistic_start = ui.transcript.len();
+    ui.push_user(display_prompt.to_string());
+    ui.mark_optimistic_rows_from(optimistic_start);
+    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    ui.starting_turn = Some(StartingTurn {
+        session_id: app.current_session.clone(),
+        queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),
+        display_prompt: display_prompt.to_string(),
+        images: Vec::new(),
+        cancellation,
+        task,
+    });
+    ui.start_assistant();
+}
 
 #[tokio::test]
 pub(crate) async fn fullscreen_thinking_toggle_hides_existing_blocks_without_status() {
@@ -78,37 +109,13 @@ pub(crate) async fn shift_tab_cycles_mode_without_status_row() {
     );
 }
 
-pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo::__product::runtime::RunResult {
-    psychevo::__product::runtime::RunResult {
-        session_id: "finished-session".to_string(),
-        outcome: Outcome::Normal,
-        terminal_reason: None,
-        final_answer: "done".to_string(),
-        db_path: app.db_path.clone(),
-        cwd: app.cwd.clone(),
-        provider: "mock".to_string(),
-        model: "mock-model".to_string(),
-        base_url: "http://127.0.0.1".to_string(),
-        api_key_env: Some("TEST_PROVIDER_KEY".to_string()),
-        reasoning_effort: None,
-        context_limit: None,
-        tool_failures: 0,
-        selected_agent: None,
-        selected_skills: Vec::new(),
-        context_snapshot: None,
-        terminal_error: None,
-        events: Vec::new(),
-        warnings: Vec::new(),
-    }
-}
-
 #[tokio::test]
 pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -119,14 +126,14 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
         }
     })))
     .expect("send answer");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_read_fixture",
         "tool_name": "read",
         "args": {"path": "fixture.txt"}
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_read_fixture",
         "tool_name": "read",
@@ -137,15 +144,15 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
     .expect("send end");
     drop(tx);
 
-    let result = finished_run_result(&app);
+    let result = finished_turn_result("finished-session");
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -189,12 +196,66 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
 }
 
 #[tokio::test]
+pub(crate) async fn resync_reloads_history_before_turn_completion_reconciles_tools() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "model-a", "mock", None).await;
+    app.current_session = Some(session_id.clone());
+    let mut ui = FullscreenUi::new(&app);
+    let (tx, rx) = mpsc::unbounded_channel();
+    tx.send(runtime_turn_event(serde_json::json!({
+        "type": "run_start",
+        "session_id": session_id.clone(),
+        "provider": "mock",
+        "model": "model-a",
+        "mode": "default"
+    })))
+    .expect("run start");
+    tx.send(runtime_turn_event(serde_json::json!({
+        "type": "tool_execution_start",
+        "tool_call_id": "call-missed-end",
+        "tool_name": "read",
+        "args": {"path": "fixture.txt"}
+    })))
+    .expect("tool start");
+    tx.send(TurnEvent::ResyncRequired { missed: 1 })
+        .expect("resync");
+    drop(tx);
+    let task_session = app.current_session.clone().expect("session");
+    let task = tokio::spawn(async move { Ok(finished_turn_result(&task_session)) });
+    ui.running = Some(RunningTurn {
+        session_id: app.current_session.clone(),
+        control: test_shell_running_control(&app),
+        selector: None,
+        turn_id: Some("turn-resync".to_string()),
+        events: RunningTurnEvents::TurnTest(rx),
+        task: RunningTask::Agent(task),
+    });
+    while !ui.running.as_ref().expect("running").task.is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    for _ in 0..3 {
+        app.drain_fullscreen_events(&mut ui).await.expect("drain");
+        if ui.running.is_none() {
+            break;
+        }
+    }
+    assert!(ui.running.is_none());
+    assert!(
+        ui.transcript.iter().all(|row| {
+            row.tool_call_id.as_deref() != Some("call-missed-end") && !row.interrupted
+        })
+    );
+}
+
+#[tokio::test]
 pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "run_start",
         "session_id": "streamed-session",
         "provider": "xiaomi-token-plan",
@@ -202,7 +263,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         "mode": "default"
     })))
     .expect("send run start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_sqlite",
         "tool_name": "exec_command",
@@ -211,7 +272,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         "outcome": "failed"
     })))
     .expect("send tool end");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -229,35 +290,21 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
-        Ok(psychevo::__product::runtime::RunResult {
-            session_id: "streamed-session".to_string(),
-            outcome: Outcome::Normal,
-            terminal_reason: None,
+        Ok(TurnResult {
             final_answer: "I can continue with the remaining data.".to_string(),
-            db_path: temp.path().join("state.db"),
-            cwd: temp.path().to_path_buf(),
             provider: "xiaomi-token-plan".to_string(),
             model: "mimo-v2.5-pro".to_string(),
-            base_url: "http://127.0.0.1".to_string(),
-            api_key_env: None,
-            reasoning_effort: None,
-            context_limit: None,
             tool_failures: 1,
-            selected_agent: None,
-            selected_skills: Vec::new(),
-            context_snapshot: None,
-            terminal_error: None,
-            events: Vec::new(),
-            warnings: Vec::new(),
+            ..finished_turn_result("streamed-session")
         })
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
@@ -279,7 +326,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
         ui.transcript
     );
 
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "agent_end",
         "outcome": "normal",
         "messages": []
@@ -304,12 +351,12 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
-    tx.send(RunStreamEvent::ReasoningDelta {
+    tx.send(TurnEvent::ReasoningDelta {
         text: "Let me compose the full report now. I have all the data. Let me write it out."
             .to_string(),
     })
     .expect("send reasoning");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "message_end",
         "message": {
             "role": "assistant",
@@ -338,7 +385,7 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
         }
     })))
     .expect("send message end");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_start",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -348,7 +395,7 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
         }
     })))
     .expect("send start");
-    tx.send(RunStreamEvent::value(serde_json::json!({
+    tx.send(runtime_turn_event(serde_json::json!({
         "type": "tool_execution_end",
         "tool_call_id": "call_write_report",
         "tool_name": "write",
@@ -363,15 +410,15 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
     .expect("send end");
     drop(tx);
 
-    let result = finished_run_result(&app);
+    let result = finished_turn_result("finished-session");
     let task = tokio::spawn(async move { Ok(result) });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     while !ui.running.as_ref().expect("running").task.is_finished() {
@@ -432,4 +479,131 @@ pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion
             .iter()
             .any(|row| row.title == "write feeds/2026-05-10/hackernews-hot-05-39.md")
     );
+}
+
+#[tokio::test]
+pub(crate) async fn turn_admission_failure_stays_fullscreen_and_restores_the_draft() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    let task: tokio::task::JoinHandle<psychevo::Result<StartedTurn>> = tokio::spawn(async move {
+        Err(psychevo::Error::Message(
+            "deterministic admission rejection".to_string(),
+        ))
+    });
+    install_test_turn_admission(&app, &mut ui, "retry this prompt", task);
+    let queue_owner_id = ui
+        .starting_turn
+        .as_ref()
+        .expect("starting Turn")
+        .queue_owner_id
+        .clone();
+    ui.queued_inputs.push_back(QueuedInput::Prompt {
+        session_id: Some("other-session".to_string()),
+        prompt: "other session input".to_string(),
+        display_prompt: "other session input".to_string(),
+        images: Vec::new(),
+        mission: None,
+        sequence: 1,
+    });
+    ui.queued_inputs.push_back(QueuedInput::Shell {
+        session_id: Some(queue_owner_id),
+        command: "owned-shell".to_string(),
+        sequence: 2,
+    });
+    ui.set_composer_text("newer draft");
+    while !ui
+        .starting_turn
+        .as_ref()
+        .expect("starting Turn")
+        .task
+        .is_finished()
+    {
+        tokio::task::yield_now().await;
+    }
+
+    assert!(app.drain_fullscreen_events(&mut ui).await.expect("drain"));
+
+    assert!(ui.starting_turn.is_none());
+    assert!(ui.running.is_none());
+    assert!(app.current_session.is_none());
+    assert!(!ui.quit_requested);
+    assert_eq!(
+        textarea_text(&ui.textarea),
+        "retry this prompt\n!owned-shell\nnewer draft"
+    );
+    assert_eq!(ui.queued_inputs.len(), 1);
+    assert!(matches!(
+        ui.queued_inputs.front(),
+        Some(QueuedInput::Prompt { session_id, .. })
+            if session_id.as_deref() == Some("other-session")
+    ));
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| row.transcript_source.as_deref() != Some("tui.optimistic"))
+    );
+    assert!(ui.transcript.iter().any(|row| {
+        row.kind == TranscriptKind::Error && row.text.contains("deterministic admission rejection")
+    }));
+
+    app.handle_fullscreen_event(
+        &mut ui,
+        CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+    )
+    .await
+    .expect("fullscreen remains interactive");
+    assert!(textarea_text(&ui.textarea).ends_with('x'));
+}
+
+#[tokio::test]
+pub(crate) async fn pending_turn_admission_does_not_block_input_or_redraw() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let task: tokio::task::JoinHandle<psychevo::Result<StartedTurn>> = tokio::spawn(async move {
+        let _ = release_rx.await;
+        Err(psychevo::Error::Message(
+            "released delayed admission".to_string(),
+        ))
+    });
+    install_test_turn_admission(&app, &mut ui, "pending admission", task);
+
+    tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        app.handle_fullscreen_event(
+            &mut ui,
+            CrosstermEvent::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)),
+        ),
+    )
+    .await
+    .expect("input handling is independent from admission")
+    .expect("input event");
+    let rendered = buffer_text(&draw_fullscreen_for_test(&app, &mut ui, 100, 18));
+
+    assert_eq!(textarea_text(&ui.textarea), "d");
+    assert!(rendered.contains("pending admission"));
+    assert!(rendered.contains('d'));
+    assert!(ui.starting_turn.is_some());
+    assert!(
+        ui.status_running_elapsed(app.current_session.as_deref())
+            .is_some()
+    );
+
+    release_tx.send(()).expect("release admission");
+    while !ui
+        .starting_turn
+        .as_ref()
+        .expect("starting Turn")
+        .task
+        .is_finished()
+    {
+        tokio::task::yield_now().await;
+    }
+    app.drain_fullscreen_events(&mut ui)
+        .await
+        .expect("drain released admission");
 }

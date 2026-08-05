@@ -1,54 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use crate::{
-    accounting::*, agents::*, automations::*, compaction::*, config::*, context::*,
-    context_usage::*, events::*, extensions::*, hooks::*, host_paths::*, host_process::*, mcp::*,
-    media::*, model_state::*, paths::*, plugins::*, process_env::*, prompt_image::*,
-    prompt_templates::*, run::*, sandbox::*, session_export::*, session_lookup::*,
-    session_trace::*, skills::*, stats::*, thread_lineage::*, tool_argument_display::*,
-    tool_result_display::*, tools::*, types::*, undo::*, user_shell::*, workspace_diff::*,
+use crate::{
+    state::StateRuntime,
+    types::{RunMode, RunOptions},
 };
-#[allow(unused_imports)]
-pub(crate) use psychevo_agent_core::*;
-#[allow(unused_imports)]
-pub(crate) use psychevo_ai::*;
-pub(crate) use std::collections::BTreeMap;
-pub(crate) use std::fs;
-pub(crate) use std::io::{Read, Write};
-pub(crate) use std::net::TcpListener;
-pub(crate) use std::path::PathBuf;
-pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use std::thread;
-pub(crate) use std::time::{Duration, Instant};
-
-pub(crate) use crate::config::{
-    ResolvedRunProvider, create_global_custom_provider, custom_provider_api_key_env,
-    fetch_and_cache_model_catalog, fetch_model_catalog_with_client, load_agent_backend_configs,
-    load_project_context_instruction_mode, load_run_config, model_catalog_endpoint,
-    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
-    provider_models_cache_path_for_home, read_cached_model_catalog, resolve_compression_config,
-    resolve_default_workspace_cwd, resolve_run_provider, resolve_workspace_root,
-    set_auxiliary_model_with_reasoning, set_default_model, set_default_model_with_reasoning,
-    write_cached_model_catalog,
+use psychevo_agent_core::ToolBinding;
+use serde_json::Value;
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::{Read, Write},
+    net::TcpListener,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
 };
-pub(crate) use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
-pub(crate) use crate::paths::canonical_cwd;
-pub(crate) use crate::run::{
-    SESSION_TITLE_MAX_CHARS, ensure_new_visible_session_title,
-    visible_session_source_allows_auto_title,
-};
-pub(crate) use crate::snapshot::SnapshotStore;
-pub(crate) use crate::state::*;
-pub(crate) use crate::types::{
-    MessageAccounting, ModelCatalogEntry, ModelCost, ModelCostTier, ModelMetadata,
-    ProjectContextInstructionMode, SelectedAgent,
-};
-pub(crate) use psychevo_agent_core::{
-    AgentEvent, AssistantBlock, EventSink, Message, ToolBinding, ToolDisplaySpec,
-};
-pub(crate) use psychevo_ai::Outcome;
-pub(crate) use rusqlite::Connection;
-pub(crate) use serde_json::{Value, json};
-pub(crate) use tempfile::tempdir;
 
 pub(crate) async fn base_options(temp: &tempfile::TempDir) -> RunOptions {
     seed_managed_rg(&home_dir(temp));
@@ -112,7 +77,7 @@ pub(crate) fn seed_managed_rg(psychevo_home: &std::path::Path) {
     fs::write(&rg, "#!/bin/sh\nprintf 'test rg\\n'\n").expect("rg");
     #[cfg(unix)]
     {
-        pub(crate) use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::PermissionsExt;
 
         let mut permissions = fs::metadata(&rg).expect("metadata").permissions();
         permissions.set_mode(0o755);
@@ -305,11 +270,10 @@ pub(crate) mod media;
 pub(crate) mod model_catalog;
 #[path = "modes_shell_tools.rs"]
 pub(crate) mod modes_shell_tools;
-#[path = "sessions_titles.rs"]
-pub(crate) mod sessions_titles;
-pub(crate) use sessions_titles::{assistant_message, user_message};
 #[path = "persistence_projection.rs"]
 pub(crate) mod persistence_projection;
+#[path = "sessions_titles.rs"]
+pub(crate) mod sessions_titles;
 #[path = "skills.rs"]
 pub(crate) mod skills;
 #[path = "sqlite.rs"]

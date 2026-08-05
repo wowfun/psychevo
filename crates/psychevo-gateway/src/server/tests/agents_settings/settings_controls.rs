@@ -1,3 +1,17 @@
+use axum::Router;
+use axum::response::Json;
+use axum::routing::get;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{web_state, write_agent_definition};
+
 #[tokio::test]
 async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
     async fn qr_code() -> Json<Value> {
@@ -27,7 +41,7 @@ async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "channel/wechat-qr/start".to_string(),
             params: Some(json!({
@@ -72,7 +86,7 @@ reasoning = false
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/read".to_string(),
             params: None,
@@ -131,28 +145,47 @@ async fn web_search_settings_store_secrets_in_profile_env_and_only_return_status
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope").to_wire_scope();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
-    let result = handle_rpc(state.clone(), AuthContext::Bearer, tx, RpcRequest {
-        jsonrpc: wire::JSONRPC_VERSION.to_string(), id: Some(json!("web-search")),
-        method: "web/search/settings/update".to_string(), params: Some(json!({
-            "scope": scope,
-            "search": {
-                "execution":"local", "backend":"brave", "externalAccess":"live",
-                "contextSize":"medium", "returnTokenBudget":"default", "contentTypes":["text"],
-                "allowedDomains":[], "blockedDomains":[], "backgroundStorageAcknowledged":false,
-                "location": {"country":"", "region":"", "city":"", "timezone":""},
-                "image": {"max_results":3, "caption":true},
-                "credentials": {"brave":"missing"}
-            },
-            "credentialValues": {"BRAVE_SEARCH_API_KEY":"super-secret"}
-        })),
-    }).await.expect("web search settings update");
+    let result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("web-search")),
+            method: "web/search/settings/update".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "search": {
+                    "execution":"local", "backend":"brave", "externalAccess":"live",
+                    "contextSize":"medium", "returnTokenBudget":"default", "contentTypes":["text"],
+                    "allowedDomains":[], "blockedDomains":[], "backgroundStorageAcknowledged":false,
+                    "location": {"country":"", "region":"", "city":"", "timezone":""},
+                    "image": {"max_results":3, "caption":true},
+                    "credentials": {"brave":"missing"}
+                },
+                "credentialValues": {"BRAVE_SEARCH_API_KEY":"super-secret"}
+            })),
+        },
+    )
+    .await
+    .expect("web search settings update");
     assert_eq!(result["backend"], "brave");
     assert_eq!(result["credentials"]["brave"], "present");
     assert!(!result.to_string().contains("super-secret"));
-    assert!(!std::fs::read_to_string(state.inner.home.join("config.toml")).unwrap().contains("super-secret"));
-    assert!(std::fs::read_to_string(state.inner.home.join(".env")).unwrap().contains("BRAVE_SEARCH_API_KEY="));
+    assert!(
+        !std::fs::read_to_string(state.inner.home.join("config.toml"))
+            .unwrap()
+            .contains("super-secret")
+    );
+    assert!(
+        std::fs::read_to_string(state.inner.home.join(".env"))
+            .unwrap()
+            .contains("BRAVE_SEARCH_API_KEY=")
+    );
 }
 
 #[tokio::test]
@@ -164,7 +197,7 @@ async fn settings_read_projects_web_search_with_protocol_field_names() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("web-search-settings-read")),
             method: "settings/read".to_string(),
             params: None,
@@ -202,7 +235,7 @@ async fn settings_read_reports_model_resolution_errors_without_failing() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/read".to_string(),
             params: None,
@@ -224,25 +257,24 @@ async fn settings_read_reports_model_resolution_errors_without_failing() {
 #[tokio::test]
 async fn settings_read_exposes_session_agent() {
     let (_temp, state) = web_state().await;
-    let session = state
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "web".to_string();
+    let thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "model",
-            "provider",
-            Some(json!({
-                "main_agent": main_agent_metadata(
-                    "translate",
-                    "translate",
-                    psychevo::__product::capabilities::AgentSource::Project,
-                    None,
-                )
-            })),
-        )
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("thread");
+    thread
+        .set_main_agent_selection(psychevo::SetThreadMainAgentSelection::Agent {
+            input: "translate".to_string(),
+            name: "translate".to_string(),
+            source: psychevo::agents::AgentSource::Project,
+            path: None,
+        })
+        .await
+        .expect("select agent");
+    let session = thread.id().to_string();
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -250,7 +282,7 @@ async fn settings_read_exposes_session_agent() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/read".to_string(),
             params: Some(json!({ "threadId": session })),
@@ -270,12 +302,15 @@ async fn settings_update_persists_session_agent_and_default() {
         "translate",
         "Translate user messages",
     );
-    let session = state
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "web".to_string();
+    let thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("thread");
+    let session = thread.id().to_string();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -286,7 +321,7 @@ async fn settings_update_persists_session_agent_and_default() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/update".to_string(),
             params: Some(json!({
@@ -300,15 +335,16 @@ async fn settings_update_persists_session_agent_and_default() {
     .expect("settings/update");
 
     assert_eq!(result["controls"]["agent"].as_str(), Some("translate"));
-    let metadata = state
-        .inner
-        .state
-
-        .session_metadata(&session)
-        .await.expect("metadata")
-        .expect("metadata value");
-    assert_eq!(metadata["main_agent"]["mode"], "agent");
-    assert_eq!(metadata["main_agent"]["name"], "translate");
+    let selection = thread
+        .main_agent_selection()
+        .await
+        .expect("agent selection");
+    assert_eq!(
+        selection,
+        psychevo::ThreadMainAgentSelection::Agent {
+            input: "translate".to_string()
+        }
+    );
     assert!(!state.inner.cwd.join(".psychevo/config.toml").exists());
 
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -320,7 +356,7 @@ async fn settings_update_persists_session_agent_and_default() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "settings/update".to_string(),
             params: Some(json!({
@@ -334,14 +370,14 @@ async fn settings_update_persists_session_agent_and_default() {
     .expect("settings/update");
 
     assert_eq!(result["controls"]["agent"], Value::Null);
-    let metadata = state
-        .inner
-        .state
-
-        .session_metadata(&session)
-        .await.expect("metadata")
-        .expect("metadata value");
-    assert_eq!(metadata["main_agent"]["mode"], "default");
+    let selection = thread
+        .main_agent_selection()
+        .await
+        .expect("agent selection");
+    assert!(matches!(
+        selection,
+        psychevo::ThreadMainAgentSelection::Default { .. }
+    ));
 }
 
 #[tokio::test]
@@ -351,12 +387,16 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
     let home_agents = state.inner.home.join("agents");
     write_agent_definition(&project_agents, "review", "Project review");
     let shadowed = write_agent_definition(&home_agents, "review", "Global review");
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "web".to_string();
     let session = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("thread")
+        .id()
+        .to_string();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -367,7 +407,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/update".to_string(),
             params: Some(json!({
@@ -390,7 +430,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "settings/update".to_string(),
             params: Some(json!({
@@ -416,7 +456,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "settings/update".to_string(),
             params: Some(json!({

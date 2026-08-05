@@ -1,5 +1,6 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, BottomSelectionValue, FullscreenUi, Result, RunningTask, SessionListView, TuiApp,
+};
 
 impl TuiApp {
     pub(crate) async fn apply_session_panel_action(
@@ -51,7 +52,12 @@ impl TuiApp {
             }
             return Ok(());
         }
-        self.state_runtime.archive_session(&session_id).await?;
+        self.runtime
+            .client()
+            .resume_thread(session_id.clone())
+            .await?
+            .archive()
+            .await?;
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }
@@ -65,7 +71,12 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         session_id: String,
     ) -> Result<()> {
-        self.state_runtime.restore_session(&session_id).await?;
+        self.runtime
+            .client()
+            .resume_thread(session_id.clone())
+            .await?
+            .restore()
+            .await?;
         self.rebuild_session_panel(
             ui,
             SessionListView::Archived,
@@ -99,7 +110,12 @@ impl TuiApp {
         }
         let view = panel.session_view.unwrap_or(SessionListView::Active);
         panel.delete_confirm = None;
-        self.state_runtime.delete_session(&session_id).await?;
+        self.runtime
+            .client()
+            .resume_thread(session_id.clone())
+            .await?
+            .delete()
+            .await?;
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }

@@ -1,32 +1,20 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{
-    ControlHandle, ControlInputError, ControlReceivers, Message, PendingInputId, TerminalReason,
-    ToolBinding,
-};
+use psychevo_agent_core::ToolBinding;
 use psychevo_ai::{AbortSignal, Outcome, SecretValue};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use tokio::sync::oneshot;
 
 use crate::error::Result;
 use crate::extensions::SelectedCapabilityRoot;
-use crate::skills::SelectedSkill;
 use crate::state::StateRuntime;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SmokeControl {
-    #[default]
-    None,
-    StopAfterTurn,
-    AbortOnAgentStart,
-}
+use super::runtime_views::WorkspaceMutationSink;
+
+pub(super) mod results;
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -161,41 +149,16 @@ pub trait ExternalAgentDelegate: Send + Sync + fmt::Debug {
     ) -> BoxFuture<'static, Result<ExternalAgentDelegateResult>>;
 }
 
-#[derive(Debug, Clone)]
-pub struct AgentSpawnOptions {
-    pub state: StateRuntime,
-    pub cwd: PathBuf,
-    pub parent_session: Option<String>,
-    pub prompt: String,
-    pub agent: String,
-    pub config_path: Option<PathBuf>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub mode: RunMode,
-    pub permission_mode: Option<PermissionMode>,
-    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
-    pub inherited_env: Option<BTreeMap<String, String>>,
-    pub selected_parent_agent: Option<String>,
-    pub no_skills: bool,
-    pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
-    pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<McpServerInput>,
-    #[doc(hidden)]
-    pub agent_control: Option<crate::agents::AgentControl>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentSpawnResult {
-    pub parent_session_id: String,
-    pub agent: crate::agents::AgentRunRecord,
-}
-
 pub const TUI_DISPLAY_METADATA_KEY: &str = "tui_display";
 pub const USER_SHELL_METADATA_KEY: &str = "user_shell";
 pub const EDITABLE_INPUT_METADATA_KEY: &str = "editable_input";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum StoredEditableInputPart {
     Text { text: String },
     Image { image_block_index: usize },
@@ -246,7 +209,20 @@ pub struct McpServerInput {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ResolvedMcpServerInput {
     pub server: McpServerInput,
-    pub bearer_token: Option<SecretValue>,
+    bearer_token: Option<SecretValue>,
+}
+
+impl ResolvedMcpServerInput {
+    pub fn new(server: McpServerInput, bearer_token: Option<String>) -> Self {
+        Self {
+            server,
+            bearer_token: bearer_token.map(SecretValue::new),
+        }
+    }
+
+    pub fn bearer_token(&self) -> Option<&str> {
+        self.bearer_token.as_ref().map(SecretValue::expose_secret)
+    }
 }
 
 impl fmt::Debug for ResolvedMcpServerInput {
@@ -648,13 +624,6 @@ impl ExecPolicyPatternToken {
             Self::Alternatives(values) => values.iter().any(|expected| expected == value),
         }
     }
-
-    pub fn alternatives(&self) -> &[String] {
-        match self {
-            Self::Single(value) => std::slice::from_ref(value),
-            Self::Alternatives(values) => values,
-        }
-    }
 }
 
 impl From<String> for ExecPolicyPatternToken {
@@ -754,7 +723,11 @@ pub struct McpStartupApprovalRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum McpStartupApprovalTarget {
     Stdio {
         command: String,
@@ -872,6 +845,14 @@ pub trait ApprovalHandler: Send + Sync + fmt::Debug {
     fn cancel_permission(&self, _tool_call_id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
+
+    fn cancel_permission_with_reason(
+        &self,
+        tool_call_id: &str,
+        _reason: &str,
+    ) -> BoxFuture<'static, ()> {
+        self.cancel_permission(tool_call_id)
+    }
 }
 
 impl RunMode {
@@ -909,5 +890,3 @@ impl ProjectContextInstructionMode {
         }
     }
 }
-
-include!("run_options/results.rs");

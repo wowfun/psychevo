@@ -1,5 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AgentCatalog, AgentDiscoveryOptions, AgentSearchMatch, ClipboardSink, CompactionResult,
+    ConfiguredModel, ContextSnapshot, EffectiveSlashConfig, FILE_POPUP_MAX_ROWS, FullscreenUi,
+    GatewayApplication, GatewaySource, ModelCatalogCache, ModelState, PermissionMode, RunMode,
+    SkillBundle, SkillCatalog, SkillDiscoveryOptions, SkillSearchMatch, SlashMenuItem,
+    TuiJourneyProfileProbe, TuiRenderer, TuiState, WorkspaceDiff, configured_slash_menu_items,
+    discover_agents, discover_skills, fuzzy_subsequence_score, list_skill_bundles,
+    slash_menu_items_from,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
+};
+use tokio::task::JoinHandle;
 static NEXT_TUI_DRAFT_SOURCE: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) struct TuiApp {
@@ -9,10 +23,7 @@ pub(crate) struct TuiApp {
     pub(crate) state: TuiState,
     pub(crate) model_state_path: PathBuf,
     pub(crate) model_state: ModelState,
-    pub(crate) state_runtime: StateRuntime,
-    pub(crate) application: Application,
-    pub(crate) framework: FrameworkClient,
-    pub(crate) gateway: Gateway,
+    pub(crate) runtime: GatewayApplication,
     pub(crate) db_path: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) cwd: PathBuf,
@@ -52,6 +63,7 @@ pub(crate) struct TuiApp {
     pub(crate) gateway_live_snapshot_revisions: BTreeMap<String, i64>,
     pub(crate) session_browser_limits: BTreeMap<String, usize>,
     pub(crate) side_cleanup_task: Option<SideCleanupTask>,
+    pub(crate) side_delete_tasks: Vec<SideDeleteTask>,
     pub(crate) compaction_task: Option<CompactionTask>,
     pub(crate) diff_task: Option<DiffTask>,
     pub(crate) journey_profile: TuiJourneyProfileProbe,
@@ -71,6 +83,11 @@ pub(crate) struct SideConversationState {
 
 pub(crate) struct SideCleanupTask {
     pub(crate) task: JoinHandle<std::result::Result<usize, String>>,
+}
+
+pub(crate) struct SideDeleteTask {
+    pub(crate) thread_id: String,
+    pub(crate) task: JoinHandle<std::result::Result<(), String>>,
 }
 
 pub(crate) struct CompactionTask {
@@ -221,11 +238,10 @@ impl TuiApp {
                         SkillSearchMatch {
                             name: skill.name,
                             description: skill.description,
-                            source_label:
-                                psychevo::__product::capabilities::skill_source_display_label(Some(
-                                    skill.source.as_str(),
-                                ))
-                                .map(ToString::to_string),
+                            source_label: psychevo::skills::skill_source_display_label(Some(
+                                skill.source.as_str(),
+                            ))
+                            .map(ToString::to_string),
                         },
                     )
                 })
@@ -258,11 +274,10 @@ impl TuiApp {
                         AgentSearchMatch {
                             name: agent.name,
                             description: agent.description,
-                            source_label:
-                                psychevo::__product::capabilities::agent_source_display_label(Some(
-                                    agent.source.as_str(),
-                                ))
-                                .map(ToString::to_string),
+                            source_label: psychevo::agents::agent_source_display_label(Some(
+                                agent.source.as_str(),
+                            ))
+                            .map(ToString::to_string),
                         },
                     )
                 })

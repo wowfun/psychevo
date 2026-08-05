@@ -1,3 +1,4 @@
-include!("agents/imports.rs");
-include!("agents/panel_selection.rs");
-include!("agents/agent_actions.rs");
+#[path = "agents/agent_actions.rs"]
+mod agent_actions;
+#[path = "agents/panel_selection.rs"]
+mod panel_selection;

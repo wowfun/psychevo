@@ -1,3 +1,15 @@
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
+    option_json_safe_u64, option_json_safe_usize,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -66,7 +78,13 @@ pub struct AppThreadIdParams {
 #[ts(rename_all = "camelCase")]
 pub struct AppThreadForkParams {
     pub thread_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
+    #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub before_session_seq: Option<i64>,
 }
@@ -86,6 +104,84 @@ pub struct AppThreadCompactParams {
     pub force: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct AppThreadCompactResult {
+    pub thread_id: String,
+    pub compacted: bool,
+    pub reason: String,
+    pub message: String,
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<JsonSafeI64>")]
+    #[ts(type = "number | null")]
+    pub checkpoint_id: Option<i64>,
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<JsonSafeI64>")]
+    #[ts(type = "number | null")]
+    pub first_kept_session_seq: Option<i64>,
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<JsonSafeU64>")]
+    #[ts(type = "number | null")]
+    pub tokens_before: Option<u64>,
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<JsonSafeU64>")]
+    #[ts(type = "number | null")]
+    pub tokens_after: Option<u64>,
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<String>")]
+    #[serde(deserialize_with = "required_nullable::deserialize")]
+    pub summary: Option<String>,
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<String>")]
+    #[serde(deserialize_with = "required_nullable::deserialize")]
+    pub summary_provider: Option<String>,
+    #[schemars(required)]
+    #[schemars(with = "AppNullable<String>")]
+    #[serde(deserialize_with = "required_nullable::deserialize")]
+    pub summary_model: Option<String>,
+}
+
+struct AppNullable<T>(std::marker::PhantomData<T>);
+
+impl<T: JsonSchema> JsonSchema for AppNullable<T> {
+    fn schema_name() -> String {
+        format!("AppNullable{}", T::schema_name())
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <Option<T>>::json_schema(generator)
+    }
+}
+
+mod required_nullable {
+    use serde::{Deserialize, Deserializer};
+
+    pub(super) fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::<T>::deserialize(deserializer)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -99,7 +195,10 @@ pub struct AppThreadListParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
@@ -198,7 +297,12 @@ pub struct AppToolDefinition {
     #[ts(type = "unknown")]
     pub parameters: Value,
     pub execution_mode: AppToolExecutionMode,
-    #[serde(default = "default_app_callback_timeout_ms")]
+    #[serde(
+        default = "default_app_callback_timeout_ms",
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
+    #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub timeout_ms: u64,
 }
@@ -288,8 +392,16 @@ pub struct AppMcpStartupApprovalRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
-#[ts(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AppMcpStartupApprovalTarget {
     Stdio {
         command: String,
@@ -335,13 +447,21 @@ pub struct AppThreadSnapshot {
     pub source: String,
     pub cwd: String,
     pub title: Option<String>,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
     pub archived: bool,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub message_count: i64,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub tool_call_count: i64,
     pub active_turn_id: Option<String>,
@@ -355,6 +475,8 @@ pub struct AppThreadSnapshot {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct AppThreadItem {
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub session_seq: i64,
     #[ts(type = "unknown")]
@@ -378,13 +500,21 @@ pub struct AppThreadSummary {
     pub source: String,
     pub cwd: String,
     pub title: Option<String>,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
     pub archived: bool,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub message_count: i64,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub tool_call_count: i64,
     pub active_turn_id: Option<String>,
@@ -404,9 +534,17 @@ pub struct AppPendingInteraction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "unknown")]
     pub resolution: Option<Value>,
+    #[serde(with = "json_safe_i64")]
+    #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub requested_at_ms: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
+    #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub resolved_at_ms: Option<i64>,
 }
@@ -449,9 +587,20 @@ pub struct AppTurnResult {
     pub provider: String,
     pub model: String,
     pub reasoning_effort: Option<String>,
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
+    #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub tool_failures: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
+    #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub context_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -484,13 +633,27 @@ pub enum AppItemStage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
-#[ts(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum AppTurnEvent {
     Accepted {
         receipt: AppTurnReceipt,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[serde(rename = "queuePosition")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "queuePosition",
+            serialize_with = "option_json_safe_usize::serialize",
+            deserialize_with = "option_json_safe_usize::deserialize"
+        )]
+        #[schemars(with = "Option<JsonSafeU64>")]
         #[ts(type = "number | null")]
         #[ts(optional)]
         queue_position: Option<usize>,
@@ -525,6 +688,9 @@ pub enum AppTurnEvent {
         text: String,
     },
     ReasoningCompleted {
+        #[serde(deserialize_with = "required_nullable::deserialize")]
+        #[schemars(required)]
+        #[schemars(with = "AppNullable<String>")]
         text: Option<String>,
     },
     Tool {
@@ -563,6 +729,8 @@ pub enum AppTurnEvent {
         message: String,
     },
     ResyncRequired {
+        #[serde(with = "json_safe_u64")]
+        #[schemars(with = "JsonSafeU64")]
         #[ts(type = "number")]
         missed: u64,
     },
@@ -579,7 +747,66 @@ pub struct AppTurnEventNotification {
 
 #[cfg(test)]
 mod app_server_contract_tests {
+    use serde::de::DeserializeOwned;
+
     use super::*;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PublicWireCorpus {
+        schema_version: u32,
+        decoders: BTreeMap<String, PublicWireCases>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PublicWireCases {
+        schema: String,
+        valid: Vec<PublicWireCase>,
+        invalid: Vec<PublicWireCase>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PublicWireCase {
+        name: String,
+        value: Value,
+    }
+
+    fn public_wire_corpus() -> PublicWireCorpus {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/protocol/fixtures/app-python-wire.json"
+        )))
+        .expect("public Python wire corpus")
+    }
+
+    fn assert_public_wire_type<T>(corpus: &PublicWireCorpus, python_type: &str, schema: &str)
+    where
+        T: DeserializeOwned + Serialize,
+    {
+        let cases = corpus
+            .decoders
+            .get(python_type)
+            .unwrap_or_else(|| panic!("missing fixture decoder {python_type}"));
+        assert_eq!(cases.schema, schema, "schema name for {python_type}");
+        for case in &cases.valid {
+            let decoded = serde_json::from_value::<T>(case.value.clone()).unwrap_or_else(|error| {
+                panic!("valid {python_type} fixture {} failed: {error}", case.name)
+            });
+            assert_eq!(
+                serde_json::to_value(decoded).expect("serialize accepted public wire value"),
+                case.value,
+                "valid {python_type} fixture {} did not normalize canonically",
+                case.name
+            );
+        }
+        for case in &cases.invalid {
+            assert!(
+                serde_json::from_value::<T>(case.value.clone()).is_err(),
+                "invalid {python_type} fixture {} was accepted",
+                case.name
+            );
+        }
+    }
 
     fn assert_serialized_variant_matches_schema<T>(tag: &str, value: T)
     where
@@ -689,6 +916,48 @@ mod app_server_contract_tests {
                 turn_id: "turn-1".to_string(),
                 message: "failed".to_string(),
             },
+        );
+    }
+
+    #[test]
+    fn public_python_wire_types_match_the_shared_cross_language_corpus() {
+        let corpus = public_wire_corpus();
+        assert_eq!(corpus.schema_version, 1);
+        assert_eq!(corpus.decoders.len(), 11);
+        assert_public_wire_type::<AppPendingInteraction>(
+            &corpus,
+            "PendingInteraction",
+            "AppPendingInteraction",
+        );
+        assert_public_wire_type::<AppThreadCompactResult>(
+            &corpus,
+            "CompactionResult",
+            "AppThreadCompactResult",
+        );
+        assert_public_wire_type::<AppThreadItem>(&corpus, "ThreadItem", "AppThreadItem");
+        assert_public_wire_type::<AppThreadSummary>(&corpus, "ThreadSummary", "AppThreadSummary");
+        assert_public_wire_type::<AppThreadSnapshot>(
+            &corpus,
+            "ThreadSnapshot",
+            "AppThreadSnapshot",
+        );
+        assert_public_wire_type::<AppTurnReceipt>(&corpus, "TurnReceipt", "AppTurnReceipt");
+        assert_public_wire_type::<AppTurnResult>(&corpus, "TurnResult", "AppTurnResult");
+        assert_public_wire_type::<AppTurnEvent>(&corpus, "TurnEvent", "AppTurnEvent");
+        assert_public_wire_type::<AppFilesystemApprovalTarget>(
+            &corpus,
+            "FilesystemApprovalTarget",
+            "AppFilesystemApprovalTarget",
+        );
+        assert_public_wire_type::<AppFilesystemApprovalRequest>(
+            &corpus,
+            "FilesystemApprovalRequest",
+            "AppFilesystemApprovalRequest",
+        );
+        assert_public_wire_type::<AppMcpStartupApprovalRequest>(
+            &corpus,
+            "McpStartupApprovalRequest",
+            "AppMcpStartupApprovalRequest",
         );
     }
 

@@ -1,5 +1,129 @@
+use psychevo::{ShellCommandEvent, ShellCommandOutcome};
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+};
+
+use super::live_helpers::{
+    live_block, live_tool_block_id, merge_live_block, temporary_tool_call_id,
+    temporary_tool_call_id_for_value, tool_position_key,
+};
+use super::live_projector_agents::enrich_agent_metadata_from_fields;
+use super::tool_helpers::{
+    background_running_agent_result_value, compact_text, exec_result_completed_value,
+    exec_result_running_value, exec_session_id_from_args_value, exec_session_id_from_result_value,
+    explicit_tool_call_id_from_value, generated_image_artifact_id,
+    generated_image_body_from_metadata, json_preview, live_tool_title, merge_output,
+    result_body_from_metadata, set_metadata_field, set_metadata_result_field, tool_args_from_value,
+    tool_event_failed, tool_kind, tool_name_from_value, tool_result_output_runtime,
+    tool_result_output_value, tool_value_metadata,
+};
+use super::{GatewayLiveProjector, LiveExecState, LiveToolBlockBuild, LiveToolBlockUpdate};
+
 impl GatewayLiveProjector {
-    fn project_tool_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
+    pub(crate) fn project_shell_event(
+        &mut self,
+        turn_id: &str,
+        event: &ShellCommandEvent,
+    ) -> GatewayEvent {
+        match event {
+            ShellCommandEvent::Started {
+                thread_id, command, ..
+            } => {
+                self.prepare_shell_event(turn_id, thread_id.as_deref());
+                let args = json!({"cmd": command});
+                self.tool_args
+                    .insert("user_shell".to_string(), args.clone());
+                self.project_shell_tool_block(
+                    turn_id,
+                    TranscriptBlockStatus::Running,
+                    None,
+                    json!({
+                        "projection": "tool",
+                        "type": "tool_execution_start",
+                        "tool_name": "exec_command",
+                        "tool_call_id": "user_shell",
+                        "source": "user_shell",
+                        "args": args,
+                        "outcome": "normal",
+                    }),
+                    false,
+                )
+            }
+            ShellCommandEvent::Completed {
+                thread_id,
+                output,
+                outcome,
+                ..
+            } => {
+                self.prepare_shell_event(turn_id, thread_id.as_deref());
+                let (status, outcome) = match outcome {
+                    ShellCommandOutcome::Completed => (TranscriptBlockStatus::Completed, "normal"),
+                    ShellCommandOutcome::Failed => (TranscriptBlockStatus::Failed, "failed"),
+                    ShellCommandOutcome::Interrupted => (TranscriptBlockStatus::Failed, "aborted"),
+                };
+                let mut metadata = json!({
+                    "projection": "tool",
+                    "type": "tool_execution_end",
+                    "tool_name": "exec_command",
+                    "tool_call_id": "user_shell",
+                    "source": "user_shell",
+                    "result": output,
+                    "outcome": outcome,
+                });
+                if let Some(args) = self.tool_args.get("user_shell") {
+                    set_metadata_field(&mut metadata, "args", args.clone());
+                }
+                self.project_shell_tool_block(turn_id, status, json_preview(output), metadata, true)
+            }
+            ShellCommandEvent::Warning { kind, message } => GatewayEvent::Warning {
+                kind: kind.clone(),
+                message: message.clone(),
+                source_path: None,
+                suggestion: None,
+            },
+        }
+    }
+
+    fn prepare_shell_event(&mut self, turn_id: &str, thread_id: Option<&str>) {
+        if let Some(thread_id) = thread_id
+            .map(str::trim)
+            .filter(|thread_id| !thread_id.is_empty())
+        {
+            self.thread_id = Some(thread_id.to_string());
+        }
+        self.prepare_turn(turn_id);
+    }
+
+    fn project_shell_tool_block(
+        &mut self,
+        turn_id: &str,
+        status: TranscriptBlockStatus,
+        body: Option<String>,
+        metadata: Value,
+        completed: bool,
+    ) -> GatewayEvent {
+        let segment = self.tool_owner_segment("user_shell");
+        let mut event = self.project_tool_block_from_metadata(LiveToolBlockUpdate {
+            turn_id,
+            segment,
+            tool_call_id: "user_shell",
+            tool_name: "exec_command",
+            status,
+            body,
+            metadata,
+            completed,
+        });
+        self.attach_thread_id(&mut event);
+        event
+    }
+
+    pub(super) fn project_tool_event(
+        &mut self,
+        turn_id: &str,
+        value: &Value,
+    ) -> Option<GatewayEvent> {
         let tool_name = tool_name_from_value(value);
         let raw_tool_call_id = self.raw_tool_call_id_for_event(tool_name, value);
         let args = tool_args_from_value(value);
@@ -11,13 +135,7 @@ impl GatewayLiveProjector {
         let tool_call_id = if tool_name == "spawn_agent" {
             self.strict_agent_tool_call_id(turn_id, &raw_tool_call_id, value)
         } else {
-            self.canonical_tool_call_id(
-                turn_id,
-                &raw_tool_call_id,
-                tool_name,
-                args.as_ref(),
-                value,
-            )
+            self.canonical_tool_call_id(turn_id, &raw_tool_call_id, tool_name, args.as_ref(), value)
         };
         if tool_call_id != raw_tool_call_id
             && let Some(args) = args.clone()
@@ -170,7 +288,11 @@ impl GatewayLiveProjector {
             .is_some_and(|session_id| self.exec_sessions.contains_key(&session_id))
     }
 
-    fn project_exec_session_event(&mut self, turn_id: &str, value: &Value) -> Option<GatewayEvent> {
+    pub(super) fn project_exec_session_event(
+        &mut self,
+        turn_id: &str,
+        value: &Value,
+    ) -> Option<GatewayEvent> {
         let session_id = value.get("session_id").and_then(Value::as_u64)?;
         let event_type = value.get("type").and_then(Value::as_str);
         let completed = event_type == Some("exec_session_finished");
@@ -275,7 +397,10 @@ impl GatewayLiveProjector {
             enrich_agent_metadata_from_fields(&mut metadata);
         }
         let late_nonterminal_write = tool_name == "write"
-            && matches!(status, TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running)
+            && matches!(
+                status,
+                TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+            )
             && self.tool_block_is_terminal(turn_id, tool_call_id);
         if tool_name == "write" && !late_nonterminal_write {
             self.enrich_write_preview_for_tool_event(tool_call_id, value, &mut metadata);
@@ -377,15 +502,10 @@ impl GatewayLiveProjector {
         }
         tool_position_key(self.assistant_segment, value)
             .map(|position_key| format!("{tool_name}@{position_key}"))
-            .unwrap_or_else(|| {
-                format!(
-                    "{tool_name}@event:{}",
-                    self.stream_seq.saturating_add(1)
-                )
-            })
+            .unwrap_or_else(|| format!("{tool_name}@event:{}", self.stream_seq.saturating_add(1)))
     }
 
-    fn register_tool_content_identity(
+    pub(super) fn register_tool_content_identity(
         &mut self,
         turn_id: &str,
         segment: usize,
@@ -405,14 +525,18 @@ impl GatewayLiveProjector {
             self.tool_owners.insert(tool_call_id.clone(), segment);
             return tool_call_id;
         }
-        let tool_call_id =
-            self.strict_agent_tool_call_id_for_segment(turn_id, segment, raw_tool_call_id, metadata);
+        let tool_call_id = self.strict_agent_tool_call_id_for_segment(
+            turn_id,
+            segment,
+            raw_tool_call_id,
+            metadata,
+        );
         set_metadata_field(metadata, "tool_call_id", json!(tool_call_id.clone()));
         self.tool_owners.insert(tool_call_id.clone(), segment);
         tool_call_id
     }
 
-    fn strict_agent_tool_call_id(
+    pub(super) fn strict_agent_tool_call_id(
         &mut self,
         turn_id: &str,
         raw_tool_call_id: &str,
@@ -516,7 +640,8 @@ impl GatewayLiveProjector {
         self.migrate_tool_identity(turn_id, segment, &existing, &raw_tool_call_id);
         self.tool_aliases
             .insert(existing.clone(), raw_tool_call_id.clone());
-        self.tool_positions.insert(position_key, raw_tool_call_id.clone());
+        self.tool_positions
+            .insert(position_key, raw_tool_call_id.clone());
         raw_tool_call_id
     }
 
@@ -534,7 +659,9 @@ impl GatewayLiveProjector {
             self.tool_owners.insert(new_tool_call_id.to_string(), owner);
         }
         if let Some(args) = self.tool_args.remove(old_tool_call_id) {
-            self.tool_args.entry(new_tool_call_id.to_string()).or_insert(args);
+            self.tool_args
+                .entry(new_tool_call_id.to_string())
+                .or_insert(args);
         }
         if let Some(preview) = self.write_previews.remove(old_tool_call_id) {
             self.write_previews
@@ -671,7 +798,10 @@ impl GatewayLiveProjector {
         self.emit_entry_event(turn_id, segment, completed, false)
     }
 
-    fn live_tool_block_from_metadata(&mut self, build: LiveToolBlockBuild<'_>) -> TranscriptBlock {
+    pub(super) fn live_tool_block_from_metadata(
+        &mut self,
+        build: LiveToolBlockBuild<'_>,
+    ) -> TranscriptBlock {
         let order = build
             .order
             .unwrap_or_else(|| self.tool_block_order(build.segment, build.tool_call_id));
@@ -687,7 +817,7 @@ impl GatewayLiveProjector {
         )
     }
 
-    fn tool_owner_segment(&mut self, tool_call_id: &str) -> usize {
+    pub(super) fn tool_owner_segment(&mut self, tool_call_id: &str) -> usize {
         if let Some(segment) = self.tool_owners.get(tool_call_id).copied() {
             return segment;
         }
@@ -698,7 +828,7 @@ impl GatewayLiveProjector {
         segment
     }
 
-    fn tool_block_is_terminal(&self, turn_id: &str, tool_call_id: &str) -> bool {
+    pub(super) fn tool_block_is_terminal(&self, turn_id: &str, tool_call_id: &str) -> bool {
         let segment = self
             .tool_owners
             .get(tool_call_id)
@@ -717,113 +847,6 @@ impl GatewayLiveProjector {
             })
     }
 
-    fn enrich_write_preview_from_metadata(
-        &mut self,
-        tool_call_id: &str,
-        metadata: &mut Value,
-        force: bool,
-    ) {
-        let Some(arguments_json) = metadata
-            .get("arguments_json")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-        else {
-            return;
-        };
-        let force = force || serde_json::from_str::<Value>(&arguments_json).is_ok();
-        if let Some(preview) = self.observe_write_preview(tool_call_id, &arguments_json, force) {
-            set_write_argument_preview(metadata, &preview, "generating");
-        }
-    }
-
-    fn enrich_write_preview_for_tool_event(
-        &mut self,
-        tool_call_id: &str,
-        value: &Value,
-        metadata: &mut Value,
-    ) {
-        match value.get("type").and_then(Value::as_str) {
-            Some("tool_call_pending") => {
-                if let Some(arguments_json) = value
-                    .get("arguments_json")
-                    .and_then(Value::as_str)
-                {
-                    let force = serde_json::from_str::<Value>(arguments_json).is_ok();
-                    let _ = self.observe_write_preview(tool_call_id, arguments_json, force);
-                }
-                if let Some(preview) = self.cached_write_preview(tool_call_id) {
-                    set_write_argument_preview(metadata, &preview, "generating");
-                }
-            }
-            Some("tool_execution_start" | "tool_execution_update") => {
-                if let Some(args) = value
-                    .get("args")
-                    .or_else(|| self.tool_args.get(tool_call_id))
-                    && let Some(preview) = write_argument_preview_from_args(args)
-                {
-                    self.cache_write_preview(tool_call_id, preview);
-                }
-                if let Some(preview) = self.cached_write_preview(tool_call_id) {
-                    set_write_argument_preview(metadata, &preview, "writing");
-                }
-            }
-            Some("tool_execution_end") if !tool_event_failed(value) => {
-                self.write_previews.remove(tool_call_id);
-                set_metadata_field(metadata, "write_argument_preview", Value::Null);
-            }
-            Some("tool_execution_end") => {
-                if let Some(args) = self.tool_args.get(tool_call_id)
-                    && let Some(preview) = write_argument_preview_from_args(args)
-                {
-                    self.cache_write_preview(tool_call_id, preview);
-                }
-                if let Some(preview) = self.cached_write_preview(tool_call_id) {
-                    let phase = match value.get("outcome").and_then(Value::as_str) {
-                        Some("aborted" | "cancelled" | "interrupted") => "cancelled",
-                        _ => "failed",
-                    };
-                    set_write_argument_preview(metadata, &preview, phase);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn observe_write_preview(
-        &mut self,
-        tool_call_id: &str,
-        arguments_json: &str,
-        force: bool,
-    ) -> Option<WriteArgumentPreview> {
-        let state = self
-            .write_previews
-            .entry(tool_call_id.to_string())
-            .or_default();
-        let now = Instant::now();
-        let update = if force {
-            state.tracker.flush(arguments_json, now)
-        } else {
-            state.tracker.observe(arguments_json, now)
-        };
-        if let Some(preview) = update {
-            state.preview = Some(preview);
-        }
-        state.preview.clone()
-    }
-
-    fn cached_write_preview(&self, tool_call_id: &str) -> Option<WriteArgumentPreview> {
-        self.write_previews
-            .get(tool_call_id)
-            .and_then(|state| state.preview.clone())
-    }
-
-    fn cache_write_preview(&mut self, tool_call_id: &str, preview: WriteArgumentPreview) {
-        self.write_previews
-            .entry(tool_call_id.to_string())
-            .or_default()
-            .preview = Some(preview);
-    }
-
     fn tool_block_order(&mut self, segment: usize, tool_call_id: &str) -> i64 {
         if let Some(order) = self
             .entries
@@ -837,25 +860,4 @@ impl GatewayLiveProjector {
         state.next_placeholder_order += 1;
         order
     }
-}
-
-pub(crate) fn set_write_argument_preview(
-    metadata: &mut Value,
-    preview: &WriteArgumentPreview,
-    phase: &str,
-) {
-    set_metadata_field(
-        metadata,
-        "write_argument_preview",
-        write_argument_preview_metadata_value(preview, phase),
-    );
-}
-
-pub(crate) fn write_argument_preview_metadata_value(
-    preview: &WriteArgumentPreview,
-    phase: &str,
-) -> Value {
-    let mut value = serde_json::to_value(preview).unwrap_or(Value::Null);
-    set_metadata_field(&mut value, "phase", json!(phase));
-    value
 }

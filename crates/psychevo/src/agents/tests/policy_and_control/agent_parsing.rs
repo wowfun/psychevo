@@ -1,87 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::fs;
 
-#[derive(Debug, Default)]
-struct FakeExternalAgentDelegate {
-    calls: Arc<Mutex<Vec<ExternalAgentDelegateRequest>>>,
-    failure: Option<String>,
-}
+use tempfile::TempDir;
 
-impl crate::types::ExternalAgentDelegate for FakeExternalAgentDelegate {
-    fn run(
-        &self,
-        request: ExternalAgentDelegateRequest,
-    ) -> BoxFuture<'static, Result<crate::types::ExternalAgentDelegateResult>> {
-        self.calls
-            .lock()
-            .expect("delegate calls lock poisoned")
-            .push(request.clone());
-        let failure = self.failure.clone();
-        Box::pin(async move {
-            if let Some(message) = failure {
-                return Err(Error::Message(message));
-            }
-            Ok(crate::types::ExternalAgentDelegateResult {
-                child_session_id: request.child_session_id,
-                final_answer: "delegated final".to_string(),
-                outcome: Outcome::Normal,
-            })
-        })
-    }
-}
+use crate::agents::definition_policy::{agent_allows_tool, parse_agent_file};
+use crate::agents::{
+    AgentCatalog, AgentContribution, AgentEntrypoint, AgentPermissionMode, AgentSource,
+    agent_tools, parse_agent_definition_text,
+};
+use crate::state::StateRuntime;
+use crate::types::RunMode;
 
-#[derive(Debug, Default)]
-struct AbortAwareExternalAgentDelegate {
-    started: Arc<tokio::sync::Notify>,
-}
-
-impl crate::types::ExternalAgentDelegate for AbortAwareExternalAgentDelegate {
-    fn run(
-        &self,
-        request: ExternalAgentDelegateRequest,
-    ) -> BoxFuture<'static, Result<crate::types::ExternalAgentDelegateResult>> {
-        let started = Arc::clone(&self.started);
-        Box::pin(async move {
-            started.notify_waiters();
-            let mut abort = request.abort.clone();
-            abort.wait_for_abort().await;
-            Ok(crate::types::ExternalAgentDelegateResult {
-                child_session_id: request.child_session_id,
-                final_answer: String::new(),
-                outcome: Outcome::Aborted,
-            })
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-struct AbortAwareProvider {
-    started: Arc<tokio::sync::Notify>,
-}
-
-impl LanguageAdapter for AbortAwareProvider {
-    fn stream(
-        &self,
-        call: AdapterCall<LanguageRequest>,
-    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
-        let started = Arc::clone(&self.started);
-        Box::pin(async move {
-            started.notify_waiters();
-            let mut abort = call.context.abort;
-            abort.wait_for_abort().await;
-            Ok(Box::pin(futures::stream::pending()) as AdapterStream<_>)
-        })
-    }
-}
-
-fn backend_backed_agent(name: &str, backend: &str) -> AgentDefinition {
-    let mut agent = built_in_agent(name, "Backend agent", "Delegates.", None);
-    agent.backend = Some(AgentBackendRef {
-        name: backend.to_string(),
-    });
-    agent.entrypoints = default_subagent_entrypoints();
-    agent
-}
+use super::super::{
+    assert_first_party_tool_declaration_quality, fake_language_model, test_agent_tool_context,
+};
 
 #[tokio::test]
 pub(crate) async fn agent_control_declarations_hide_implementation_details() {
@@ -313,7 +244,11 @@ Plan the work.
     );
     assert!(agent.tool_policy.denied_agents.contains("explore"));
     assert!(agent_allows_tool("read", Some(&agent), RunMode::Default));
-    assert!(agent_allows_tool("spawn_agent", Some(&agent), RunMode::Default));
+    assert!(agent_allows_tool(
+        "spawn_agent",
+        Some(&agent),
+        RunMode::Default
+    ));
     assert!(!agent_allows_tool(
         "exec_command",
         Some(&agent),

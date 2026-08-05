@@ -1,13 +1,24 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::{BTreeMap, VecDeque};
+use std::pin::Pin;
 use std::time::Duration;
 
-use crate::openai_http::{
+use futures::{StreamExt, future::BoxFuture, stream};
+
+use super::http::{
     GuardedHttpError, error_body_guarded, inference_event_is_progress, provider_response_error,
     send_guarded, wait_for_deadline,
 };
 #[cfg(test)]
-use crate::openai_http::{generation_http_client, inference_idle_timeout};
+use super::http::{generation_http_client, inference_idle_timeout};
+use super::request::{
+    openai_chat_completions_endpoint, openai_chat_request_body,
+    openai_chat_request_body_text_only_images, request_has_image_blocks,
+};
+use crate::control::{AbortSignal, GenerationProvider};
+use crate::stream::chat_chunks::ChatChunkNormalizer;
+use crate::stream::sse::SseParser;
+use crate::types::{Error, GenerationRequest, Outcome, StreamEvent};
+use crate::{GenerationStream, Result};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiChatProvider {
@@ -33,7 +44,7 @@ impl OpenAiChatProvider {
             api_key: api_key.into(),
             provider_name: provider_name.into(),
             inference_idle_timeout: inference_idle_timeout(
-                crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
+                super::http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
             ),
             headers: BTreeMap::new(),
             allow_image_text_fallback: true,

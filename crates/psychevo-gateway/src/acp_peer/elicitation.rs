@@ -1,3 +1,19 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::v1::{
+    CreateElicitationRequest, CreateElicitationResponse, ElicitationAcceptAction,
+    ElicitationAction, ElicitationContentValue, ElicitationMode, ElicitationPropertySchema,
+    ElicitationScope, MultiSelectItems, StringFormat,
+};
+use psychevo::application::{
+    ClarifyAnswer, ClarifyInteractionOutcome, ClarifyQuestion, ClarifyQuestionOption,
+    ClarifyRequestEvent,
+};
+
+use super::metadata_permissions::acp_request_context;
+use super::turn::AcpClientContext;
+
 const ACP_MAX_ELICITATION_FIELDS: usize = 32;
 const ACP_MAX_ELICITATION_OPTIONS: usize = 128;
 const ACP_MAX_ELICITATION_TEXT_CHARS: usize = 8_192;
@@ -16,7 +32,7 @@ struct AcpElicitationChoice {
 }
 
 #[derive(Debug, Clone)]
-struct AcpElicitationField {
+pub(super) struct AcpElicitationField {
     name: String,
     required: bool,
     schema: ElicitationPropertySchema,
@@ -24,7 +40,7 @@ struct AcpElicitationField {
     custom: bool,
 }
 
-async fn create_elicitation(
+pub(super) async fn create_elicitation(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     request: CreateElicitationRequest,
 ) -> Result<CreateElicitationResponse, agent_client_protocol::Error> {
@@ -34,9 +50,7 @@ async fn create_elicitation(
         _ => return Ok(declined_elicitation()),
     };
     let context = acp_request_context(contexts, &session_id)?;
-    let (Some(control), Some(stream)) =
-        (context.clarify_control.clone(), context.stream.clone())
-    else {
+    let Some(control) = context.turn_control.clone() else {
         return Ok(declined_elicitation());
     };
     let ElicitationMode::Form(form) = request.mode else {
@@ -47,9 +61,7 @@ async fn create_elicitation(
         Ok(projected) => projected,
         Err(_) => return Ok(declined_elicitation()),
     };
-    let response = control
-        .request_clarification(clarify, stream, context.abort.clone())
-        .await;
+    let response = control.request_clarification(clarify).await;
     match response {
         ClarifyInteractionOutcome::Answered(response) => {
             Ok(encode_acp_elicitation_response(&fields, response)
@@ -61,7 +73,7 @@ async fn create_elicitation(
     }
 }
 
-fn project_acp_elicitation_form(
+pub(super) fn project_acp_elicitation_form(
     call_id: String,
     message: &str,
     form: agent_client_protocol::schema::v1::ElicitationFormMode,
@@ -142,7 +154,8 @@ fn project_acp_elicitation_form(
                 "ACP elicitation field `{name}` has too many options"
             ));
         }
-        let question = non_empty_elicitation_question(message, description.as_deref(), Some(&title));
+        let question =
+            non_empty_elicitation_question(message, description.as_deref(), Some(&title));
         bounded_elicitation_text(&question, "projected question")?;
         questions.push(ClarifyQuestion {
             header: name.clone(),
@@ -238,8 +251,20 @@ fn project_acp_elicitation_property(
         ElicitationPropertySchema::Boolean(schema) => {
             let mut options = Vec::new();
             let mut choices = Vec::new();
-            push_elicitation_choice(&mut options, &mut choices, "True", "true", "Enable this value.")?;
-            push_elicitation_choice(&mut options, &mut choices, "False", "false", "Disable this value.")?;
+            push_elicitation_choice(
+                &mut options,
+                &mut choices,
+                "True",
+                "true",
+                "Enable this value.",
+            )?;
+            push_elicitation_choice(
+                &mut options,
+                &mut choices,
+                "False",
+                "false",
+                "Disable this value.",
+            )?;
             Ok((
                 schema.title.clone().unwrap_or_else(|| name.to_string()),
                 schema.description.clone(),
@@ -271,7 +296,10 @@ fn project_acp_elicitation_property(
                             &mut choices,
                             &option.title,
                             &option.value,
-                            option.description.as_deref().unwrap_or("Include this value."),
+                            option
+                                .description
+                                .as_deref()
+                                .unwrap_or("Include this value."),
                         )?;
                     }
                 }
@@ -345,7 +373,11 @@ fn push_elicitation_choice(
 
 fn unique_elicitation_label(proposed: &str, choices: &[AcpElicitationChoice]) -> String {
     let proposed = proposed.trim();
-    let proposed = if proposed.is_empty() { "Value" } else { proposed };
+    let proposed = if proposed.is_empty() {
+        "Value"
+    } else {
+        proposed
+    };
     if !choices.iter().any(|choice| choice.label == proposed) {
         return proposed.to_string();
     }
@@ -388,9 +420,9 @@ fn bounded_elicitation_text(value: &str, field: &str) -> std::result::Result<(),
     }
 }
 
-fn encode_acp_elicitation_response(
+pub(super) fn encode_acp_elicitation_response(
     fields: &[AcpElicitationField],
-    response: psychevo::__product::runtime::ClarifyResponse,
+    response: psychevo::application::ClarifyResponse,
 ) -> std::result::Result<CreateElicitationResponse, String> {
     if fields.is_empty() {
         let answer = response
@@ -400,9 +432,11 @@ fn encode_acp_elicitation_response(
             .map(String::as_str)
             .ok_or_else(|| "ACP elicitation confirmation has no answer".to_string())?;
         return Ok(if answer == "Continue" {
-            CreateElicitationResponse::new(ElicitationAcceptAction::new().content(
-                BTreeMap::<String, ElicitationContentValue>::new(),
-            ))
+            CreateElicitationResponse::new(ElicitationAcceptAction::new().content(BTreeMap::<
+                String,
+                ElicitationContentValue,
+            >::new(
+            )))
         } else {
             declined_elicitation()
         });
@@ -429,11 +463,7 @@ fn encode_acp_elicitation_field(
     let mut skipped = false;
     let mut empty_array = false;
     for answer in answer.answers {
-        if let Some(choice) = field
-            .choices
-            .iter()
-            .find(|choice| choice.label == answer)
-        {
+        if let Some(choice) = field.choices.iter().find(|choice| choice.label == answer) {
             match &choice.value {
                 AcpElicitationChoiceValue::Scalar(value) => values.push(value.clone()),
                 AcpElicitationChoiceValue::Skip => skipped = true,
@@ -465,9 +495,9 @@ fn encode_acp_elicitation_field(
         }
         ElicitationPropertySchema::Number(schema) => {
             let raw = exactly_one_elicitation_value(&field.name, values)?;
-            let value = raw.parse::<f64>().map_err(|_| {
-                format!("ACP elicitation field `{}` requires a number", field.name)
-            })?;
+            let value = raw
+                .parse::<f64>()
+                .map_err(|_| format!("ACP elicitation field `{}` requires a number", field.name))?;
             if !value.is_finite()
                 || schema.minimum.is_some_and(|minimum| value < minimum)
                 || schema.maximum.is_some_and(|maximum| value > maximum)
@@ -540,9 +570,9 @@ fn exactly_one_elicitation_value(
     name: &str,
     values: Vec<String>,
 ) -> std::result::Result<String, String> {
-    let [value]: [String; 1] = values.try_into().map_err(|_| {
-        format!("ACP elicitation field `{name}` requires exactly one answer")
-    })?;
+    let [value]: [String; 1] = values
+        .try_into()
+        .map_err(|_| format!("ACP elicitation field `{name}` requires exactly one answer"))?;
     Ok(value)
 }
 

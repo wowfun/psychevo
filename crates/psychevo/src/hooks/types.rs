@@ -219,10 +219,7 @@ impl HookSourceKind {
     }
 
     pub(crate) fn trusted_by_source(self) -> bool {
-        matches!(
-            self,
-            Self::Managed | Self::Profile | Self::Runtime
-        )
+        matches!(self, Self::Managed | Self::Profile | Self::Runtime)
     }
 
     pub(crate) fn requires_hash_review(self) -> bool {

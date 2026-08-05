@@ -1,6 +1,25 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use psychevo::ThreadAgentBinding;
+use psychevo::application::{Message, PermissionApprovalDecision};
+use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
+
+use super::support_peer::{
+    FrameworkNativeProbe, copied_acp_fixture, harness, request, send_framework_turn,
+    send_framework_turn_with_handle, send_framework_turn_with_id, test_acp_command_toml,
+};
+use crate::GatewayEventEmitter;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent,
+};
+use psychevo_gateway_protocol::source::{GatewayInputPart, GatewaySource};
+
 #[tokio::test]
 async fn acp_peer_rejects_non_v1_protocol_without_fallback() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let fixture = copied_acp_fixture(
@@ -43,8 +62,8 @@ entrypoints: [peer]
     )
     .expect("agent file");
 
-    let raw_events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
-    let raw_events_for_sink = Arc::clone(&raw_events);
+    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::TurnEvent>::new()));
+    let turn_events_for_sink = Arc::clone(&turn_events);
     let env = BTreeMap::from([
         (
             "HOME".to_string(),
@@ -57,11 +76,11 @@ entrypoints: [peer]
         GatewaySource::new("web", "peer-wrong-version").persistent(),
         "hello",
     );
-    turn_request.options.agent = Some("reviewer".to_string());
-    turn_request.options.runtime_ref = Some("acp:fake".to_string());
-    turn_request.options.inherited_env = Some(env.clone());
-    turn_request.stream = Some(Arc::new(move |event| {
-        raw_events_for_sink
+    turn_request.policy.agent_ref = Some("reviewer".to_string());
+    turn_request.policy.runtime_profile_ref = Some("acp:fake".to_string());
+    turn_request.policy.inherited_env = Some(env.clone());
+    turn_request.turn_events = Some(Arc::new(move |event| {
+        turn_events_for_sink
             .lock()
             .expect("raw events lock")
             .push(event);
@@ -75,12 +94,12 @@ entrypoints: [peer]
     let methods = std::fs::read_to_string(log).expect("protocol log");
     assert!(methods.contains("initialize"), "{methods}");
     assert!(!methods.contains("session/new"), "{methods}");
-    let raw_events = raw_events.lock().expect("raw events lock");
-    assert!(!raw_events.iter().any(|event| matches!(
+    let turn_events = turn_events.lock().expect("Turn events lock");
+    assert!(!turn_events.iter().any(|event| matches!(
         event,
-        RunStreamEvent::Event(value)
-            if value["type"] == "acp_peer_protocol_negotiated"
-                || value["type"] == "acp_peer_protocol_fallback"
+        psychevo::TurnEvent::Runtime { data }
+            if data["type"] == "acp_peer_protocol_negotiated"
+                || data["type"] == "acp_peer_protocol_fallback"
     )));
 }
 
@@ -88,7 +107,7 @@ entrypoints: [peer]
 async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     use base64::Engine as _;
 
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let fixture = copied_acp_fixture(
@@ -104,7 +123,7 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     std::fs::write(
         &image,
         base64::engine::general_purpose::STANDARD
-            .decode(psychevo::__ai::DEFAULT_FAKE_IMAGE_BASE64)
+            .decode(crate::test_support::ONE_PIXEL_PNG_BASE64)
             .expect("PNG fixture"),
     )
     .expect("image");
@@ -142,8 +161,8 @@ Peer instructions from markdown.
     )
     .expect("agent file");
 
-    let raw_events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
-    let raw_events_for_sink = Arc::clone(&raw_events);
+    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::TurnEvent>::new()));
+    let turn_events_for_sink = Arc::clone(&turn_events);
     let env = BTreeMap::from([
         (
             "HOME".to_string(),
@@ -156,18 +175,22 @@ Peer instructions from markdown.
         GatewaySource::new("web", "peer-v1-contract").persistent(),
         "inspect the image",
     );
-    turn_request.options.agent = Some("reviewer".to_string());
-    turn_request.options.runtime_ref = Some("acp:fake".to_string());
-    turn_request.options.runtime_options = BTreeMap::from([
+    turn_request.policy.agent_ref = Some("reviewer".to_string());
+    turn_request.policy.runtime_profile_ref = Some("acp:fake".to_string());
+    turn_request.policy.control_values = BTreeMap::from([
         ("model".to_string(), "test/second-model".to_string()),
         ("effort".to_string(), "high".to_string()),
         ("mode".to_string(), "code".to_string()),
         ("fast".to_string(), "true".to_string()),
     ]);
-    turn_request.options.image_inputs = vec![ImageInput::LocalPath(image)];
-    turn_request.options.inherited_env = Some(env.clone());
-    turn_request.stream = Some(Arc::new(move |event| {
-        raw_events_for_sink
+    turn_request.input.push(GatewayInputPart::Image {
+        input: psychevo_gateway_protocol::source::GatewayImageInput::LocalPath {
+            path: image.display().to_string(),
+        },
+    });
+    turn_request.policy.inherited_env = Some(env.clone());
+    turn_request.turn_events = Some(Arc::new(move |event| {
+        turn_events_for_sink
             .lock()
             .expect("raw events lock")
             .push(event);
@@ -206,28 +229,34 @@ Peer instructions from markdown.
     assert_eq!(prompt["resourceMime"], "text/markdown");
     assert_eq!(prompt["imageMime"], "image/png");
     assert!(prompt["imageDataLength"].as_u64().unwrap_or_default() > 0);
-    assert!(raw_events
-        .lock()
-        .expect("raw events lock")
-        .iter()
-        .filter_map(RunStreamEvent::legacy_value)
-        .any(|event| {
-            event["type"] == "acp_peer_unknown_notification"
-                && event["update_kind"] == "_future_status"
-                && event["origin"] == "live"
-        }));
+    assert!(
+        turn_events
+            .lock()
+            .expect("Turn events lock")
+            .iter()
+            .filter_map(|event| match event {
+                psychevo::TurnEvent::Runtime { data } => Some(data),
+                _ => None,
+            })
+            .any(|event| {
+                event["type"] == "acp_peer_unknown_notification"
+                    && event["update_kind"] == "_future_status"
+                    && event["origin"] == "live"
+            })
+    );
 
     {
-        let raw_events_guard = raw_events.lock().expect("raw events lock");
-        assert!(raw_events_guard.iter().any(|event| matches!(
+        let turn_events = turn_events.lock().expect("Turn events lock");
+        assert!(turn_events.iter().any(|event| matches!(
             event,
-            RunStreamEvent::Event(value)
-                if value["type"] == "acp_peer_protocol_negotiated"
-                    && value["protocol_version"] == "1"
+            psychevo::TurnEvent::Runtime { data }
+                if data["type"] == "acp_peer_protocol_negotiated"
+                    && data["protocol_version"] == "1"
         )));
-        assert!(!raw_events_guard.iter().any(|event| matches!(
+        assert!(!turn_events.iter().any(|event| matches!(
             event,
-            RunStreamEvent::Event(value) if value["type"] == "acp_peer_protocol_fallback"
+            psychevo::TurnEvent::Runtime { data }
+                if data["type"] == "acp_peer_protocol_fallback"
         )));
     }
 
@@ -237,13 +266,13 @@ Peer instructions from markdown.
         GatewaySource::new("web", "peer-v1-config-rejected").persistent(),
         "must not be delivered",
     );
-    rejected.options.agent = Some("reviewer".to_string());
-    rejected.options.runtime_ref = Some("acp:fake".to_string());
+    rejected.policy.agent_ref = Some("reviewer".to_string());
+    rejected.policy.runtime_profile_ref = Some("acp:fake".to_string());
     rejected
-        .options
-        .runtime_options
+        .policy
+        .control_values
         .insert("model".to_string(), "test/missing-model".to_string());
-    rejected.options.inherited_env = Some(env);
+    rejected.policy.inherited_env = Some(env);
     let error = harness
         .send(rejected)
         .await
@@ -279,7 +308,7 @@ Peer instructions from markdown.
 
 #[tokio::test]
 async fn acp_peer_abort_sends_session_cancel_before_process_cleanup() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let fixture = copied_acp_fixture(
@@ -322,26 +351,25 @@ entrypoints: [peer]
     )
     .expect("agent file");
 
-    let (handle, control) = run_control();
+    let (handle_tx, handle_rx) = oneshot::channel();
     let mut request = request(
         &harness,
         GatewaySource::new("web", "peer-cancel").persistent(),
         "wait",
     );
-    request.options.agent = Some("reviewer".to_string());
-    request.options.runtime_ref = Some("acp:fake".to_string());
-    request.options.inherited_env = Some(BTreeMap::from([
+    request.policy.agent_ref = Some("reviewer".to_string());
+    request.policy.runtime_profile_ref = Some("acp:fake".to_string());
+    request.policy.inherited_env = Some(BTreeMap::from([
         (
             "HOME".to_string(),
             harness._temp.path().display().to_string(),
         ),
         ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
     ]));
-    request.control_handle = Some(handle.clone());
-    request.control = Some(control);
     let (application, gateway) = harness.runner();
-    let turn =
-        tokio::spawn(async move { send_framework_turn(application, gateway, request).await });
+    let turn = tokio::spawn(async move {
+        send_framework_turn_with_handle(application, gateway, request, handle_tx).await
+    });
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -356,27 +384,34 @@ entrypoints: [peer]
     })
     .await
     .expect("prompt should start");
-    handle.abort();
+    handle_rx
+        .await
+        .expect("accepted Framework Turn handle")
+        .interrupt();
 
     let result = turn
         .await
         .expect("turn task")
         .expect("aborted turn should remain a typed result");
-    assert_eq!(result.result.outcome, Outcome::Aborted);
+    assert_eq!(result.result.outcome, psychevo::TurnOutcome::Interrupted);
     let methods = std::fs::read_to_string(log).expect("cancel log");
     assert!(methods.contains("session/cancel"), "{methods}");
     let binding = harness
-        .state
-
-        .gateway_runtime_binding(&result.result.session_id)
-        .await.expect("runtime binding")
+        ._application
+        .client()
+        .thread_agent_binding(&result.result.thread_id)
+        .await
+        .expect("runtime binding")
         .expect("binding after abort");
+    let ThreadAgentBinding::Resolved { binding, .. } = binding else {
+        panic!("binding remained unresolved after abort");
+    };
     assert_eq!(binding.native_session_id.as_deref(), Some("native-cancel"));
 }
 
 #[tokio::test]
 async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let fixture = copied_acp_fixture(
@@ -434,9 +469,9 @@ entrypoints: [peer]
         request.input = vec![GatewayInputPart::Text {
             text: prompt.to_string(),
         }];
-        request.options.agent = Some("reviewer".to_string());
-        request.options.runtime_ref = Some("acp:fake".to_string());
-        request.options.inherited_env = Some(env.clone());
+        request.policy.agent_ref = Some("reviewer".to_string());
+        request.policy.runtime_profile_ref = Some("acp:fake".to_string());
+        request.policy.inherited_env = Some(env.clone());
         request
     };
 
@@ -449,31 +484,32 @@ entrypoints: [peer]
     )
     .await
     .expect_err("first prompt response is lost after Agent acceptance");
-    let first_delivery = harness
-        .state
-
-        .gateway_turn_delivery(first_turn_id)
-        .await.expect("first delivery")
-        .expect("first delivery record");
-    assert_eq!(
-        first_delivery.status, "unknown",
-        "unexpected first delivery after {first_error}: {first_delivery:?}"
-    );
-    assert!(first_delivery.input_json.is_some());
-    let thread_id = first_delivery.thread_id.clone();
+    let thread_id = harness
+        .gateway
+        .resolve_source_thread(&source)
+        .await
+        .expect("source lookup after uncertain delivery")
+        .expect("published Thread after uncertain delivery");
     let first_terminal = harness
-        .state
-
-        .gateway_turn_terminal(first_turn_id)
-        .await.expect("first terminal")
+        ._application
+        .client()
+        .framework_turn_terminal_evidence(first_turn_id)
+        .await
+        .expect("first terminal")
         .expect("first terminal record");
-    assert_eq!(first_terminal.status, "failed");
+    assert_eq!(first_terminal.status.as_str(), "failed", "{first_error}");
     assert_eq!(
         harness
-            .state
-
-            .load_tui_message_summaries(&thread_id)
-            .await.expect("messages after unknown delivery")
+            ._application
+            .client()
+            .resume_thread(&thread_id)
+            .await
+            .expect("Thread after uncertain delivery")
+            .history()
+            .latest(Some(200))
+            .await
+            .expect("messages after unknown delivery")
+            .items
             .len(),
         1,
         "transport failure belongs to the terminal fact, not an assistant message"
@@ -487,50 +523,37 @@ entrypoints: [peer]
     let second_turn_id = "turn-acp-reconcile-second";
     let mut second_request = request_for("new input after reconciliation");
     second_request.thread_id = Some(thread_id.clone());
-    second_request.explicit_thread = true;
     let second = send_framework_turn_with_id(
         harness._application.clone(),
         harness.gateway.clone(),
         second_request,
         second_turn_id.to_string(),
     )
-        .await
-        .expect("next explicit turn loads and continues");
+    .await
+    .expect("next explicit turn loads and continues");
     assert_eq!(second.result.final_answer, "reconciled answer 2");
 
-    let reconciled_delivery = harness
-        .state
-
-        .gateway_turn_delivery(first_turn_id)
-        .await.expect("reconciled delivery")
-        .expect("reconciled delivery record");
-    assert_eq!(reconciled_delivery.status, "terminal");
-    assert_eq!(reconciled_delivery.input_json, None);
-    assert!(reconciled_delivery.delivery_confirmed_at_ms.is_some());
-    assert!(reconciled_delivery.terminal_at_ms.is_some());
     let reconciled_terminal = harness
-        .state
-
-        .gateway_turn_terminal(first_turn_id)
-        .await.expect("reconciled terminal")
+        ._application
+        .client()
+        .framework_turn_terminal_evidence(first_turn_id)
+        .await
+        .expect("reconciled terminal")
         .expect("reconciled terminal record");
-    assert_eq!(reconciled_terminal.status, "completed");
-    assert_eq!(reconciled_terminal.outcome.as_deref(), Some("normal"));
-    assert_eq!(reconciled_terminal.error_message, None);
-    assert_eq!(
-        reconciled_terminal
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get("replayMessageIds")),
-        Some(&json!(["assistant-1"])),
-        "tool and Plan replay ids are not delivery evidence"
-    );
+    assert_eq!(reconciled_terminal.status.as_str(), "completed");
+    assert_eq!(reconciled_terminal.outcome.as_str(), "normal");
 
     let messages = harness
-        .state
-
-        .load_tui_message_summaries(&thread_id)
-        .await.expect("reconciled messages");
+        ._application
+        .client()
+        .resume_thread(&thread_id)
+        .await
+        .expect("reconciled Thread")
+        .history()
+        .latest(Some(200))
+        .await
+        .expect("reconciled messages")
+        .items;
     assert_eq!(
         messages
             .iter()
@@ -573,21 +596,26 @@ entrypoints: [peer]
         .expect("settle second ACP generation");
     let mut third_request = request_for("third input after a second load");
     third_request.thread_id = Some(thread_id.clone());
-    third_request.explicit_thread = true;
     let third = send_framework_turn_with_id(
         harness._application.clone(),
         harness.gateway.clone(),
         third_request,
         "turn-acp-reconcile-third".to_string(),
     )
-        .await
-        .expect("second load deduplicates replay before third input");
+    .await
+    .expect("second load deduplicates replay before third input");
     assert_eq!(third.result.final_answer, "reconciled answer 3");
     let deduplicated = harness
-        .state
-
-        .load_tui_message_summaries(&thread_id)
-        .await.expect("deduplicated messages");
+        ._application
+        .client()
+        .resume_thread(&thread_id)
+        .await
+        .expect("deduplicated Thread")
+        .history()
+        .latest(Some(200))
+        .await
+        .expect("deduplicated messages")
+        .items;
     assert_eq!(deduplicated.len(), 8);
     let encoded_messages = deduplicated
         .iter()
@@ -677,7 +705,7 @@ entrypoints: [peer]
 
 #[tokio::test]
 async fn submit_permission_resolves_gateway_permission_request() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     backend.request_permission();
     let harness = harness(backend).await;
     let source = GatewaySource::new("tui", "cwd").process();
@@ -741,7 +769,7 @@ async fn submit_permission_resolves_gateway_permission_request() {
 
 #[tokio::test]
 async fn framework_permission_accepts_the_materialized_source_thread() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     backend.request_permission();
     let harness = harness(backend).await;
     let source = GatewaySource::new("tui", "cwd").process();

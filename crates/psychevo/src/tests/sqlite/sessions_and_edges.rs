@@ -1,10 +1,27 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
+use crate::application::{FrameworkTurnTerminalOutcome, FrameworkTurnTerminalStatus};
+use crate::paths::canonical_cwd;
+use crate::state::StateRuntime;
+use crate::store::{
+    AgentCoordinationRunStatus, AgentEdgeStatus, AgentMissionRunInput, AgentTeamRunInput,
+    ContextEvidenceInput, FrameworkInteractionStatus, GatewayActivityClaimInput,
+    GatewayActivityKind, GatewayChannelOutboxInput, GatewayChannelOutboxStatus,
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeControlStatePatch,
+    GatewaySourceBindingInput, GatewaySourceLaneInput, GatewayTurnDeliveryInput,
+    GatewayTurnDeliveryStatus, GatewayTurnTerminalInput, PromptPrefixRecord,
+    PromptPrefixSlotRecord,
+};
+use crate::tests::sessions_titles::{assistant_message, user_message};
+use crate::tests::sqlite::accounting_compaction::sqlite_columns;
+use crate::types::BlockingActionKind;
 use psychevo_agent_core::now_ms;
+use psychevo_ai::Outcome;
+use rusqlite::Connection;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use tempfile::tempdir;
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v29_rejects_legacy_state_databases_with_reset_guidance() {
+pub(crate) async fn sqlite_schema_v32_rejects_legacy_state_databases_with_reset_guidance() {
     for version in 1..=28 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
@@ -30,7 +47,7 @@ pub(crate) async fn sqlite_schema_v29_rejects_legacy_state_databases_with_reset_
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v29_rejects_unknown_state_database() {
+pub(crate) async fn sqlite_schema_v32_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -50,7 +67,7 @@ pub(crate) async fn sqlite_schema_v29_rejects_unknown_state_database() {
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v29_creates_framework_and_gateway_coordination_schema() {
+pub(crate) async fn sqlite_schema_v32_creates_framework_and_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -74,7 +91,7 @@ pub(crate) async fn sqlite_schema_v29_creates_framework_and_gateway_coordination
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 29);
+    assert_eq!(user_version, 32);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -131,9 +148,37 @@ pub(crate) async fn sqlite_schema_v29_creates_framework_and_gateway_coordination
             .any(|name| name == "completed_at_ms")
     );
     assert!(
+        sqlite_columns(&conn, "gateway_turn_terminals")
+            .iter()
+            .any(|name| name == "boundary_session_seq")
+    );
+    assert!(
         sqlite_columns(&conn, "gateway_live_snapshots")
             .iter()
             .any(|name| name == "revision")
+    );
+    assert!(
+        sqlite_columns(&conn, "gateway_live_events")
+            .iter()
+            .any(|name| name == "idempotency_key")
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_gateway_live_events_idempotency_key'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("gateway live event idempotency index"),
+        1
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_gateway_turn_terminals_visible_history'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("visible terminal history index"),
+        1
     );
     assert!(
         sqlite_columns(&conn, "gateway_turn_deliveries")
@@ -173,8 +218,8 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
                 "answered-before-request",
                 &thread_id,
                 "turn-answered",
-                "clarify",
-                "resolved",
+                BlockingActionKind::Clarify,
+                FrameworkInteractionStatus::Resolved,
                 json!({"kind": "clarify", "value": [["yes"]]}),
             )
             .await
@@ -186,7 +231,7 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
                 "answered-before-request",
                 &thread_id,
                 "turn-answered",
-                "clarify",
+                BlockingActionKind::Clarify,
                 json!([{"question": "Proceed?"}]),
             )
             .await
@@ -197,19 +242,20 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
         .await
         .expect("interactions");
     assert_eq!(answered.len(), 1);
-    assert_eq!(answered[0].status, "pending");
-    assert_eq!(answered[0].kind, "clarify");
+    assert_eq!(answered[0].status, FrameworkInteractionStatus::Pending);
+    assert_eq!(answered[0].kind, BlockingActionKind::Clarify);
     assert_eq!(answered[0].resolution, None);
 
     store
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
             turn_id: "turn-completed",
             thread_id: &thread_id,
-            status: "completed",
-            outcome: Some("completed"),
+            status: FrameworkTurnTerminalStatus::Completed,
+            outcome: Some(FrameworkTurnTerminalOutcome::Normal),
             error_message: None,
             started_at_ms: None,
             completed_at_ms: now_ms(),
+            boundary_session_seq: None,
             metadata: None,
         })
         .await
@@ -220,7 +266,7 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
                 "requested-after-terminal",
                 &thread_id,
                 "turn-completed",
-                "approval",
+                BlockingActionKind::Permission,
                 json!({"summary": "late"}),
             )
             .await
@@ -247,7 +293,7 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
             "call_1",
             &thread_id,
             "turn-first",
-            "clarify",
+            BlockingActionKind::Clarify,
             json!([{"question": "First?"}]),
         )
         .await
@@ -258,8 +304,8 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
                 "call_1",
                 &thread_id,
                 "turn-first",
-                "clarify",
-                "resolved",
+                BlockingActionKind::Clarify,
+                FrameworkInteractionStatus::Resolved,
                 json!({"kind": "clarify", "value": [["first"]]}),
             )
             .await
@@ -270,7 +316,7 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
             "call_1",
             &thread_id,
             "turn-second",
-            "clarify",
+            BlockingActionKind::Clarify,
             json!([{"question": "Second?"}]),
         )
         .await
@@ -292,9 +338,9 @@ pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped
         .collect::<Vec<_>>();
     assert_eq!(reused.len(), 2);
     assert_eq!(reused[0].turn_id, "turn-first");
-    assert_eq!(reused[0].status, "resolved");
+    assert_eq!(reused[0].status, FrameworkInteractionStatus::Resolved);
     assert_eq!(reused[1].turn_id, "turn-second");
-    assert_eq!(reused[1].status, "pending");
+    assert_eq!(reused[1].status, FrameworkInteractionStatus::Pending);
 }
 
 fn gateway_runtime_binding_input<'a>(
@@ -660,7 +706,7 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
             thread_id: Some(&thread_id),
             source_key: Some("agent:test-1"),
             turn_id: Some("turn-1"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "owner",
             owner_surface: Some("test"),
             lease_expires_at_ms: now_ms() + 60_000,
@@ -686,7 +732,10 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
         })
         .await
         .expect("delivery");
-    assert_eq!(not_delivered.status, "not_delivered");
+    assert_eq!(
+        not_delivered.status,
+        GatewayTurnDeliveryStatus::NotDelivered
+    );
     assert!(
         not_delivered
             .input_json
@@ -749,7 +798,7 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
         .await
         .expect("read delivered")
         .expect("delivery");
-    assert_eq!(delivered.status, "delivered");
+    assert_eq!(delivered.status, GatewayTurnDeliveryStatus::Delivered);
     assert_eq!(delivered.input_json, None);
     assert_eq!(delivered.input_hash, "input-hash");
     assert!(delivered.delivery_confirmed_at_ms.is_some());
@@ -778,7 +827,7 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
             thread_id: None,
             source_key: Some("agent:test-2"),
             turn_id: Some("turn-2"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "owner",
             owner_surface: Some("test"),
             lease_expires_at_ms: now_ms() + 60_000,
@@ -842,7 +891,7 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
         })
         .await
         .expect("outbox");
-    assert_eq!(pending.status, "pending");
+    assert_eq!(pending.status, GatewayChannelOutboxStatus::Pending);
     assert_eq!(pending.payload_text.as_deref(), Some("final answer"));
     let retryable = store
         .retryable_gateway_channel_outbox("telegram")
@@ -860,7 +909,7 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
         .await
         .expect("failed outbox list");
     assert_eq!(retryable.len(), 1);
-    assert_eq!(retryable[0].status, "failed");
+    assert_eq!(retryable[0].status, GatewayChannelOutboxStatus::Failed);
     assert!(
         store
             .acknowledge_gateway_channel_outbox("delivery-1")
@@ -872,7 +921,10 @@ pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payl
         .await
         .expect("read outbox")
         .expect("outbox");
-    assert_eq!(acknowledged.status, "acknowledged");
+    assert_eq!(
+        acknowledged.status,
+        GatewayChannelOutboxStatus::Acknowledged
+    );
     assert_eq!(acknowledged.payload_text, None);
     assert_eq!(acknowledged.payload_hash, "payload-hash");
     assert!(
@@ -902,7 +954,7 @@ pub(crate) async fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempot
             thread_id: Some(&thread_id),
             source_key: Some("agent:test"),
             turn_id: Some("turn-unknown"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "owner",
             owner_surface: Some("test"),
             lease_expires_at_ms: now_ms() + 60_000,
@@ -936,11 +988,12 @@ pub(crate) async fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempot
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
             turn_id: "turn-unknown",
             thread_id: &thread_id,
-            status: "failed",
-            outcome: Some("failed"),
+            status: FrameworkTurnTerminalStatus::Failed,
+            outcome: Some(FrameworkTurnTerminalOutcome::Failed),
             error_message: Some("ACP response boundary became uncertain"),
             started_at_ms: Some(10),
             completed_at_ms: 20,
+            boundary_session_seq: None,
             metadata: Some(json!({"source": "transport_failure"})),
         })
         .await
@@ -979,7 +1032,7 @@ pub(crate) async fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempot
         .await
         .expect("read delivery")
         .expect("delivery");
-    assert_eq!(delivery.status, "terminal");
+    assert_eq!(delivery.status, GatewayTurnDeliveryStatus::Terminal);
     assert_eq!(delivery.input_json, None);
     assert_eq!(delivery.input_hash, "unknown-input-hash");
     assert!(delivery.delivery_confirmed_at_ms.is_some());
@@ -999,8 +1052,8 @@ pub(crate) async fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempot
         .await
         .expect("read terminal")
         .expect("terminal");
-    assert_eq!(terminal.status, "completed");
-    assert_eq!(terminal.outcome.as_deref(), Some("normal"));
+    assert_eq!(terminal.status, FrameworkTurnTerminalStatus::Completed);
+    assert_eq!(terminal.outcome, Some(FrameworkTurnTerminalOutcome::Normal));
     assert_eq!(terminal.error_message, None);
     assert_eq!(terminal.started_at_ms, Some(10));
     assert_eq!(terminal.metadata.as_ref(), Some(&reconciliation_metadata));
@@ -1061,7 +1114,7 @@ pub(crate) async fn sqlite_agent_team_and_mission_runs_round_trip() {
             leader_agent_name: "general",
             members: members.clone(),
             max_parallel_agents: 4,
-            status: "running",
+            status: AgentCoordinationRunStatus::Running,
             metadata: Some(json!({"source": "test"})),
         })
         .await
@@ -1074,7 +1127,7 @@ pub(crate) async fn sqlite_agent_team_and_mission_runs_round_trip() {
             team_name: Some("ship"),
             goal: "finish the feature",
             lead_agent_name: "general",
-            status: "running",
+            status: AgentCoordinationRunStatus::Running,
             metadata: Some(json!({"source": "test"})),
         })
         .await
@@ -1094,6 +1147,74 @@ pub(crate) async fn sqlite_agent_team_and_mission_runs_round_trip() {
         .expect("mission");
     assert_eq!(active_team.id, "team-run-1");
     assert_eq!(active_mission.id, "mission-run-1");
+}
+
+#[tokio::test]
+pub(crate) async fn unknown_persisted_agent_states_fail_closed() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = StateRuntime::open(&db).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let child = store
+        .create_child_session_with_metadata(&parent, &cwd, "agent", "model", "provider", None)
+        .await
+        .expect("child");
+    store
+        .upsert_agent_edge(&parent, &child, AgentEdgeStatus::Open, None)
+        .await
+        .expect("edge");
+    store
+        .create_agent_team_run(AgentTeamRunInput {
+            id: "team-corrupt",
+            parent_session_id: &parent,
+            mission_run_id: None,
+            team_name: "team",
+            description: None,
+            source_path: None,
+            leader_agent_name: "general",
+            members: json!([]),
+            max_parallel_agents: 1,
+            status: AgentCoordinationRunStatus::Running,
+            metadata: None,
+        })
+        .await
+        .expect("team");
+
+    let conn = Connection::open(&db).expect("connection");
+    conn.execute(
+        "UPDATE agent_edges SET status = 'future' WHERE child_session_id = ?1",
+        [&child],
+    )
+    .expect("corrupt edge");
+    conn.execute(
+        "UPDATE agent_team_runs SET status = 'future' WHERE id = 'team-corrupt'",
+        [],
+    )
+    .expect("corrupt team");
+    drop(conn);
+
+    let edge_error = store
+        .find_agent_edge(&child)
+        .await
+        .expect_err("unknown edge state must fail");
+    assert!(
+        edge_error
+            .to_string()
+            .contains("invalid persisted Agent edge status")
+    );
+    let team_error = store
+        .list_agent_team_runs_for_parent(&parent)
+        .await
+        .expect_err("unknown coordination state must fail");
+    assert!(
+        team_error
+            .to_string()
+            .contains("invalid persisted Agent coordination run status")
+    );
 }
 
 #[tokio::test]

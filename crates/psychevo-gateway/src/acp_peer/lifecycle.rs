@@ -1,8 +1,41 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::v1::{
+    CancelNotification, CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest,
+    ForkSessionResponse, ListSessionsRequest, McpServer, ResumeSessionRequest,
+    ResumeSessionResponse,
+};
+use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol_schema::v1::InitializeResponse;
+use psychevo::{Error, application::ResolvedMcpServerInput};
+use serde_json::json;
+use sha2::Digest as _;
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+
+use super::metadata_permissions::{
+    peer_allows_fs_read, peer_allows_fs_write, peer_allows_terminal,
+};
+use super::process_pool::AcpProcessGeneration;
+use super::session_projection::{
+    ACP_MAX_AGENT_NAME_CHARS, ACP_MAX_SESSION_TITLE_CHARS, ACP_MAX_UPDATED_AT_CHARS,
+    AcpBarrierProjection, AcpNotificationSubscription, AcpResidentSession, AcpResidentSessionInput,
+    AcpResidentSessions, AcpSessionSnapshot, acp_response_with_projection_barrier,
+    acp_session_response_with_legacy_models, acp_session_snapshot, bounded_acp_text,
+    new_acp_resident_session, next_acp_session_epoch, reduce_acp_notifications_through_barrier,
+};
+use super::terminal_callbacks::AcpTerminalRegistry;
+use super::turn::AcpClientContext;
+use super::{acp_backend_effective_env, mcp_handoff};
+
 const ACP_MAX_LISTED_SESSIONS: usize = 512;
 const ACP_MAX_LIFECYCLE_CURSOR_CHARS: usize = 16_384;
 const ACP_MAX_SAFE_ERROR_MESSAGE_CHARS: usize = 1_024;
 
-fn safe_acp_error(error: &agent_client_protocol::Error) -> String {
+pub(super) fn safe_acp_error(error: &agent_client_protocol::Error) -> String {
     let message = error
         .message
         .chars()
@@ -18,7 +51,7 @@ fn safe_acp_error(error: &agent_client_protocol::Error) -> String {
     format!("ACP error {}: {message}", i32::from(error.code))
 }
 
-fn acp_agent_not_delivered_error(
+pub(super) fn acp_agent_not_delivered_error(
     default_code: &str,
     operation: &str,
     error: &agent_client_protocol::Error,
@@ -66,7 +99,7 @@ pub(crate) struct AcpResidentSessionRef {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum AcpLifecycleCapability {
+pub(super) enum AcpLifecycleCapability {
     List,
     Resume,
     Fork,
@@ -97,7 +130,7 @@ impl AcpLifecycleCapability {
     }
 }
 
-fn require_acp_lifecycle_capability(
+pub(super) fn require_acp_lifecycle_capability(
     initialized: &InitializeResponse,
     capability: AcpLifecycleCapability,
 ) -> psychevo::Result<()> {
@@ -113,10 +146,10 @@ fn require_acp_lifecycle_capability(
     ))
 }
 
-fn acp_lifecycle_error(code: &str, message: impl Into<String>) -> Error {
-    crate::agent_session_error(
+pub(super) fn acp_lifecycle_error(code: &str, message: impl Into<String>) -> Error {
+    agent_session_error(
         code,
-        crate::AgentErrorStage::History,
+        AgentErrorStage::History,
         "user_action",
         "not_delivered",
         message,
@@ -130,15 +163,13 @@ fn lifecycle_client_context(peer: &ResolvedPeerTurn, cwd: PathBuf) -> Arc<AcpCli
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler: None,
-        clarify_control: None,
+        turn_control: None,
         terminal: peer_allows_terminal(peer),
         terminal_env: acp_backend_effective_env(peer),
-        stream: None,
-        abort: None,
     })
 }
 
-fn mcp_declaration_fingerprint(mcp_servers: &[McpServer]) -> psychevo::Result<String> {
+pub(super) fn mcp_declaration_fingerprint(mcp_servers: &[McpServer]) -> psychevo::Result<String> {
     Ok(format!(
         "{:x}",
         sha2::Sha256::digest(serde_json::to_vec(mcp_servers)?)
@@ -157,7 +188,7 @@ fn insert_acp_context(
     Ok(())
 }
 
-fn remove_acp_context(
+pub(super) fn remove_acp_context(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     native_session_id: &str,
 ) -> psychevo::Result<()> {
@@ -168,7 +199,7 @@ fn remove_acp_context(
     Ok(())
 }
 
-fn validate_lifecycle_session_identity(
+pub(super) fn validate_lifecycle_session_identity(
     session: &AcpResidentSession,
     expected: &AcpResidentSessionRef,
 ) -> psychevo::Result<()> {
@@ -184,7 +215,7 @@ fn validate_lifecycle_session_identity(
     ))
 }
 
-async fn validate_resident_session_ref(
+pub(super) async fn validate_resident_session_ref(
     sessions: &AcpResidentSessions,
     session_ref: &AcpResidentSessionRef,
 ) -> psychevo::Result<()> {
@@ -198,7 +229,7 @@ async fn validate_resident_session_ref(
     validate_lifecycle_session_identity(session, session_ref)
 }
 
-async fn validate_delete_session_ref(
+pub(super) async fn validate_delete_session_ref(
     sessions: &AcpResidentSessions,
     native_session_id: &str,
     resident: Option<&AcpResidentSessionRef>,
@@ -226,20 +257,42 @@ async fn validate_delete_session_ref(
     Ok(())
 }
 
-struct AcpListSessionsInput {
-    cwd: Option<PathBuf>,
-    cursor: Option<String>,
+pub(super) struct AcpListSessionsInput {
+    pub(super) cwd: Option<PathBuf>,
+    pub(super) cursor: Option<String>,
 }
 
-async fn listed_acp_sessions(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) struct AcpResumeSessionInput {
+    pub(super) session: AcpResidentSessionRef,
+    pub(super) cwd: PathBuf,
+    pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
+}
+
+pub(super) struct AcpForkSessionInput {
+    pub(super) source: AcpResidentSessionRef,
+    pub(super) fork_local_session_id: String,
+    pub(super) cwd: PathBuf,
+}
+
+pub(super) struct AcpCloseSessionInput {
+    pub(super) session: AcpResidentSessionRef,
+}
+
+pub(super) struct AcpDeleteSessionInput {
+    pub(super) native_session_id: String,
+    pub(super) resident: Option<AcpResidentSessionRef>,
+}
+
+pub(super) async fn listed_acp_sessions(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    generation: u64,
     input: AcpListSessionsInput,
 ) -> psychevo::Result<AcpSessionListPage> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let generation = process.generation;
     let AcpListSessionsInput { cwd, cursor } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::List)?;
     if cwd.as_ref().is_some_and(|cwd| !cwd.is_absolute()) {
@@ -258,22 +311,22 @@ async fn listed_acp_sessions(
         ));
     }
     let request = ListSessionsRequest::new().cwd(cwd).cursor(cursor);
-    let (response, response_barrier) = acp_response_with_projection_barrier(
-        cx.send_request(request),
-        notification_ingress,
-    )
-    .await
-    .map_err(|error| {
-        acp_agent_not_delivered_error("acp_session_list_failed", "session/list", &error)
-    })?;
+    let (response, response_barrier) =
+        acp_response_with_projection_barrier(cx.send_request(request), notification_ingress)
+            .await
+            .map_err(|error| {
+                acp_agent_not_delivered_error("acp_session_list_failed", "session/list", &error)
+            })?;
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        None,
-        None,
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: None,
+            active_state: None,
+        },
     )
     .await?;
     if response.sessions.len() > ACP_MAX_LISTED_SESSIONS {
@@ -337,21 +390,24 @@ async fn listed_acp_sessions(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn resume_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn resume_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    session_ref: AcpResidentSessionRef,
-    cwd: PathBuf,
-    resolved_mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+    input: AcpResumeSessionInput,
 ) -> psychevo::Result<AcpSessionSnapshot> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let peer = &process.peer;
+    let contexts = &process.contexts;
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let next_session_epoch = process.next_session_epoch.as_ref();
+    let generation = process.generation;
+    let AcpResumeSessionInput {
+        session: session_ref,
+        cwd,
+        mcp_servers: resolved_mcp_servers,
+    } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Resume)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
@@ -362,9 +418,9 @@ async fn resume_resident_acp_session(
     {
         let sessions = sessions.lock().await;
         if sessions.contains_key(&session_ref.local_session_id)
-            || sessions.values().any(|session| {
-                session.native_session_id == session_ref.native_session_id
-            })
+            || sessions
+                .values()
+                .any(|session| session.native_session_id == session_ref.native_session_id)
         {
             return Err(acp_lifecycle_error(
                 "acp_session_already_resident",
@@ -377,9 +433,7 @@ async fn resume_resident_acp_session(
         &resolved_mcp_servers,
         &initialized.agent_capabilities,
     )
-    .map_err(|error| {
-        acp_lifecycle_error("acp_mcp_configuration_invalid", error.to_string())
-    })?;
+    .map_err(|error| acp_lifecycle_error("acp_mcp_configuration_invalid", error.to_string()))?;
     let mcp_declaration_fingerprint = mcp_declaration_fingerprint(&mcp_servers)?;
     let session_epoch = next_acp_session_epoch(next_session_epoch)?;
     insert_acp_context(
@@ -427,12 +481,14 @@ async fn resume_resident_acp_session(
         .insert(session_ref.local_session_id.clone(), session);
     if let Err(error) = reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        None,
-        Some(&session_ref.native_session_id),
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: Some(&session_ref.native_session_id),
+            active_state: None,
+        },
     )
     .await
     {
@@ -454,21 +510,24 @@ async fn resume_resident_acp_session(
     Ok(acp_session_snapshot(&session, generation))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn fork_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn fork_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    source: AcpResidentSessionRef,
-    fork_local_session_id: String,
-    cwd: PathBuf,
+    input: AcpForkSessionInput,
 ) -> psychevo::Result<AcpSessionSnapshot> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let peer = &process.peer;
+    let contexts = &process.contexts;
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let next_session_epoch = process.next_session_epoch.as_ref();
+    let generation = process.generation;
+    let AcpForkSessionInput {
+        source,
+        fork_local_session_id,
+        cwd,
+    } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Fork)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
@@ -490,12 +549,15 @@ async fn fork_resident_acp_session(
                 "ACP session/fork destination is already resident.",
             ));
         }
-        let session = sessions.get(&source.local_session_id).cloned().ok_or_else(|| {
-            acp_lifecycle_error(
-                "acp_session_not_resident",
-                "ACP session/fork source is not attached to this process generation.",
-            )
-        })?;
+        let session = sessions
+            .get(&source.local_session_id)
+            .cloned()
+            .ok_or_else(|| {
+                acp_lifecycle_error(
+                    "acp_session_not_resident",
+                    "ACP session/fork source is not attached to this process generation.",
+                )
+            })?;
         validate_lifecycle_session_identity(&session, &source)?;
         session
     };
@@ -503,15 +565,15 @@ async fn fork_resident_acp_session(
         .mcp_servers(source_session.mcp_servers.clone());
     let (response, legacy_models, response_barrier) =
         acp_session_response_with_legacy_models::<ForkSessionResponse, _>(
-        cx,
-        "session/fork",
-        request,
-        notification_ingress,
-    )
-    .await
-    .map_err(|error| {
-        acp_agent_not_delivered_error("acp_session_fork_failed", "session/fork", &error)
-    })?;
+            cx,
+            "session/fork",
+            request,
+            notification_ingress,
+        )
+        .await
+        .map_err(|error| {
+            acp_agent_not_delivered_error("acp_session_fork_failed", "session/fork", &error)
+        })?;
     let native_session_id = response.session_id.to_string();
     {
         let sessions = sessions.lock().await;
@@ -552,12 +614,14 @@ async fn fork_resident_acp_session(
         .insert(fork_local_session_id.clone(), forked);
     if let Err(error) = reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        Some(&native_session_id),
-        Some(&native_session_id),
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: Some(&native_session_id),
+            active_native_session_id: Some(&native_session_id),
+            active_state: None,
+        },
     )
     .await
     {
@@ -579,7 +643,7 @@ async fn fork_resident_acp_session(
     Ok(acp_session_snapshot(&session, generation))
 }
 
-fn cooperative_acp_session_cancel(
+pub(super) fn cooperative_acp_session_cancel(
     cx: &ConnectionTo<Agent>,
     native_session_id: &str,
 ) -> psychevo::Result<()> {
@@ -595,7 +659,7 @@ fn cooperative_acp_session_cancel(
         })
 }
 
-async fn remove_resident_session_resources(
+pub(super) async fn remove_resident_session_resources(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     sessions: &AcpResidentSessions,
     terminals: &AcpTerminalRegistry,
@@ -620,18 +684,21 @@ async fn remove_resident_session_resources(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn close_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    terminals: &AcpTerminalRegistry,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn close_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    generation: u64,
-    session_ref: AcpResidentSessionRef,
+    input: AcpCloseSessionInput,
 ) -> psychevo::Result<()> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let contexts = &process.contexts;
+    let sessions = &process.sessions;
+    let terminals = &process.terminals;
+    let notification_ingress = &process.notification_ingress;
+    let generation = process.generation;
+    let AcpCloseSessionInput {
+        session: session_ref,
+    } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Close)?;
     {
         let sessions = sessions.lock().await;
@@ -655,30 +722,35 @@ async fn close_resident_acp_session(
     })?;
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        None,
-        Some(&session_ref.native_session_id),
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: Some(&session_ref.native_session_id),
+            active_state: None,
+        },
     )
     .await?;
     remove_resident_session_resources(contexts, sessions, terminals, &session_ref).await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn delete_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    terminals: &AcpTerminalRegistry,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn delete_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    generation: u64,
-    native_session_id: String,
-    resident: Option<AcpResidentSessionRef>,
+    input: AcpDeleteSessionInput,
 ) -> psychevo::Result<()> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let contexts = &process.contexts;
+    let sessions = &process.sessions;
+    let terminals = &process.terminals;
+    let notification_ingress = &process.notification_ingress;
+    let generation = process.generation;
+    let AcpDeleteSessionInput {
+        native_session_id,
+        resident,
+    } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Delete)?;
     validate_delete_session_ref(sessions, &native_session_id, resident.as_ref()).await?;
     let (_, response_barrier) = acp_response_with_projection_barrier(
@@ -691,12 +763,14 @@ async fn delete_acp_session(
     })?;
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        None,
-        Some(&native_session_id),
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: Some(&native_session_id),
+            active_state: None,
+        },
     )
     .await?;
     if let Some(resident) = resident {

@@ -54,12 +54,15 @@ impl Default for SandboxConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum SandboxBackend {
     Disabled,
+    #[cfg(target_os = "macos")]
     Seatbelt,
+    #[cfg(any(target_os = "linux", test))]
     Landlock,
+    #[cfg(any(windows, test))]
     WindowsRestricted,
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     Unsupported,
 }
 
@@ -67,9 +70,13 @@ impl SandboxBackend {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
+            #[cfg(target_os = "macos")]
             Self::Seatbelt => "seatbelt",
+            #[cfg(any(target_os = "linux", test))]
             Self::Landlock => "landlock",
+            #[cfg(any(windows, test))]
             Self::WindowsRestricted => "windows-restricted-token-advisory",
+            #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
             Self::Unsupported => "unsupported",
         }
     }
@@ -326,12 +333,14 @@ impl SandboxPolicy {
     }
 
     pub(crate) fn ensure_shell_supported(&self) -> Result<()> {
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         if self.enabled && matches!(self.backend, SandboxBackend::Unsupported) {
             return Err(sandbox_denied(format!(
                 "sandbox is not supported on platform {}",
                 self.platform
             )));
         }
+        #[cfg(any(windows, test))]
         if self.enabled
             && matches!(self.backend, SandboxBackend::WindowsRestricted)
             && !matches!(self.effective_mode, SandboxMode::ReadOnly)
@@ -604,7 +613,9 @@ fn shell_enforcement(policy: &SandboxPolicy) -> &'static str {
         "disabled"
     } else {
         match policy.backend {
+            #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
             SandboxBackend::Unsupported => "unsupported",
+            #[cfg(any(windows, test))]
             SandboxBackend::WindowsRestricted => "not-confined",
             _ => "confined",
         }
@@ -674,7 +685,9 @@ fn path_from_config(raw: &str, cwd: &Path) -> PathBuf {
 }
 
 fn canonicalize_existing(path: &Path) -> Result<PathBuf> {
-    Ok(crate::host_paths::normalized_native_path(&path.canonicalize()?))
+    Ok(crate::host_paths::normalized_native_path(
+        &path.canonicalize()?,
+    ))
 }
 
 fn push_existing_unique(roots: &mut Vec<PathBuf>, path: PathBuf) -> Result<()> {

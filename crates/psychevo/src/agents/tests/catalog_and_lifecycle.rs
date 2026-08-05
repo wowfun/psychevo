@@ -1,5 +1,39 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use psychevo_agent_core::{AssistantBlock, ControlHandle, Message, ToolBinding};
+use psychevo_ai::{AbortSignal, Outcome};
+use serde_json::json;
+use tempfile::TempDir;
+use tokio::sync::watch;
+
+use crate::agents::child_runs::{
+    SpawnAgentArgs, resolve_agent_tool_name, resolved_child_spawn_depth_remaining, spawn_subagent,
+    validate_task_name,
+};
+use crate::agents::definition_policy::{
+    SpawnAgentTool, agent_allows_tool, agent_policy_allows_skill_catalog, built_in_agent,
+    parse_agent_file,
+};
+use crate::agents::lifecycle::agent_child_session_summary_value;
+use crate::agents::mailbox_tools::{now_ms, run_hook_commands};
+use crate::agents::{
+    AgentCatalog, AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole, AgentRunPhase,
+    AgentRunRecord, AgentRunStatus, AgentSource, AgentSupervisor, AgentTeamSource,
+    AgentToolContext, MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP,
+    agent_catalog_for_prompt, agent_source_display_label, apply_agent_tool_policy,
+    discover_agent_teams_with_catalog, discover_agents, format_selected_agent_instruction,
+    list_agents_value, parse_agent_team_definition_text, resolve_agent_team_definition,
+    skill_catalog_visible_for_tools, stop_agent_id_with_grace,
+};
+use crate::state::StateRuntime;
+use crate::store::AgentEdgeStatus;
+use crate::types::{ModelMetadata, PermissionConfig, PermissionMode, RunMode};
+
+use super::{env, fake_language_model, test_agent_tool_context, test_tool};
 
 #[tokio::test]
 pub(crate) async fn agent_name_allowlist_filters_prompt_catalog_and_spawn() {
@@ -77,6 +111,7 @@ Coordinate.
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             home: tmp.path().join(".psychevo"),
+            mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
             image_input_enabled: true,
             image_generation: None,
             web_search: Default::default(),
@@ -905,27 +940,27 @@ pub(crate) async fn stop_agent_with_grace_retains_the_id_until_its_finalizer_com
     supervisor
         .register(
             AgentRunRecord {
-                    id: id.clone(),
-                    task_name: Some("worker_task".to_string()),
-                    agent_name: "general".to_string(),
-                    task: "stop gracefully".to_string(),
-                    parent_session_id: "parent".to_string(),
-                    child_session_id: Some("child".to_string()),
-                    role: AgentInvocationRole::Subagent,
-                    background: true,
-                    status: AgentRunStatus::Running,
-                    edge_status: Some(AgentEdgeStatus::Open),
-                    started_at_ms: now_ms(),
-                    ended_at_ms: None,
-                    outcome: None,
-                    final_answer: None,
-                    error: None,
-                    effective_max_spawn_depth: Some(0),
-                    team_run_id: None,
-                    mission_run_id: None,
-                    team_name: None,
-                    team_member_id: None,
-                    agent_path: None,
+                id: id.clone(),
+                task_name: Some("worker_task".to_string()),
+                agent_name: "general".to_string(),
+                task: "stop gracefully".to_string(),
+                parent_session_id: "parent".to_string(),
+                child_session_id: Some("child".to_string()),
+                role: AgentInvocationRole::Subagent,
+                background: true,
+                status: AgentRunStatus::Running,
+                edge_status: Some(AgentEdgeStatus::Open),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                outcome: None,
+                final_answer: None,
+                error: None,
+                effective_max_spawn_depth: Some(0),
+                team_run_id: None,
+                mission_run_id: None,
+                team_name: None,
+                team_member_id: None,
+                agent_path: None,
             },
             Some(control),
             4,

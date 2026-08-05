@@ -75,47 +75,4 @@ impl GatewayContext {
             paths,
         })
     }
-
-    pub(super) async fn run_options(
-        &self,
-        cwd: PathBuf,
-    ) -> Result<psychevo::__product::runtime::RunOptions> {
-        Ok(psychevo::__product::runtime::RunOptions {
-            state: psychevo::__product::persistence::StateRuntime::open(self.home.join("state.db"))
-                .await?,
-            cwd,
-            snapshot_root: Some(self.home.join("snapshots")),
-            session: None,
-            continue_latest: false,
-            prompt: String::new(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: true,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: None,
-            project_context_override: None,
-            sandbox_override: None,
-            model: None,
-            reasoning_effort: None,
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            external_agent_delegate: None,
-            include_reasoning: false,
-            mode: psychevo::__product::runtime::RunMode::Default,
-            permission_mode: None,
-            approval_handler: None,
-            clarify_enabled: false,
-            inherited_env: Some(self.env_map.clone()),
-            agent: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
-        })
-    }
 }

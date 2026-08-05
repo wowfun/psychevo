@@ -1,7 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo::{
+    ThreadSummary,
+    application::ModelMetadataCacheTarget,
+    config::{ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider},
+};
+use std::{collections::BTreeMap, io, sync::Arc};
+use tokio::task::JoinHandle;
 pub(crate) struct TuiSessionDisplaySummary {
-    pub(crate) summary: SessionSummary,
+    pub(crate) summary: ThreadSummary,
     pub(crate) project_label: String,
     pub(crate) project_display_path: String,
     pub(crate) visible_message_count: usize,

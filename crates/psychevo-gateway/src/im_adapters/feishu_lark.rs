@@ -1,4 +1,13 @@
-use super::*;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use futures::future::BoxFuture;
+use psychevo::{Error, Result};
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, mpsc};
+
+use crate::im::{ImAdapter, ImIdentity, ImInboundMessage, ImOutboundMessage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeishuLarkDomain {

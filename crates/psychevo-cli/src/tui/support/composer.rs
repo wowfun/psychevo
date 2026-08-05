@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AgentToken, FILE_POPUP_MAX_ROWS, FileSearchMatch, FileSearchMatchKind, FileToken, SkillToken,
+    text_selection_style, tui_theme,
+};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{layout::Rect, style::Style, widgets::Block};
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
+use std::path::Path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+use unicode_width::UnicodeWidthChar;
 pub(crate) fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
     apply_composer_textarea_style(&mut textarea);

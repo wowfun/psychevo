@@ -1,123 +1,84 @@
-use super::*;
-use psychevo::__ai::{
-    DeploymentConfig, Fake, FakeSpeechAdapter, FakeTranscriptionAdapter, Media, MediaInput,
-    Provider, RealtimeCloseReason, RealtimeConnectRequest, RealtimeEvent, RealtimeSender,
-    SecretValue, SpeechRequest, TranscriptionRequest, Xiaomi,
+use psychevo::application::{
+    Configuration, ConfigurationQuery, VoiceAudioFormat, VoiceAudioInput, VoiceRealtimeCloseReason,
+    VoiceRealtimeConnection, VoiceRealtimeControl, VoiceRealtimeEvent, VoiceRealtimeRequest,
+    VoiceSpeechRequest, VoiceTranscriptionRequest,
 };
+use psychevo::{Error, Result};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use super::auth_input::authorize_thread;
+use super::binding::{AuthContext, WebState};
+use super::event_delivery::ConnectionSender;
+use super::rpc_json::rpc_notification;
+use super::scope_session::resolve_optional_scope;
+use psychevo_gateway_protocol::source::{GatewaySource, SourceKey};
 
 #[derive(Debug, Clone)]
 pub(super) struct RealtimeSessionState {
-    pub(super) provider: String,
-    pub(super) sender: RealtimeSender,
+    pub(super) control: VoiceRealtimeControl,
 }
 
 pub(super) async fn voice_asr_transcribe_value(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::VoiceAsrTranscribeParams,
-) -> psychevo::Result<Value> {
-    let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
-    let options = state.run_options(scope.cwd, None);
-    let resolved = resolve_voice_asr_config(
-        &options,
-        params.provider.as_deref(),
-        params.model.as_deref(),
-        params.language.as_deref(),
-    )?;
-    let audio_format = ai_audio_format(params.audio.format);
-    let mime_type = validated_asr_mime_type(audio_format, params.audio.mime_type.as_deref())?;
-    let request = TranscriptionRequest {
-        audio: MediaInput::Inline {
-            media: Media::from_base64(mime_type, params.audio.data),
+    params: wire::voice::VoiceAsrTranscribeParams,
+) -> Result<Value> {
+    let scope = resolve_optional_scope(state, auth, params.scope)?;
+    let result = voice_configuration(state, scope.cwd)?
+        .transcribe_voice(VoiceTranscriptionRequest {
+            audio: voice_audio_input(params.audio),
+            provider: params.provider,
+            model: params.model,
+            language: params.language,
+        })
+        .await?;
+    Ok(serde_json::to_value(
+        wire::voice::VoiceAsrTranscribeResult {
+            transcript: result.transcript,
+            provider: result.provider,
+            model: result.model,
+            language: result.language,
+            metadata: Some(Value::Object(result.metadata.into_iter().collect())),
         },
-        language: resolved.language.clone(),
-        prompt: None,
-        headers: BTreeMap::new(),
-        extensions: BTreeMap::new(),
-    };
-    let provider = voice_provider(
-        &resolved.provider,
-        &resolved.base_url,
-        resolved.api_key.as_deref(),
-        &resolved.api_key_env,
-    )?;
-    let model = provider
-        .transcription_model(resolved.model.clone())
-        .map_err(voice_runtime_error)?;
-    let result = model
-        .transcribe(request)
-        .await
-        .map_err(voice_runtime_error)?;
-    Ok(serde_json::to_value(wire::VoiceAsrTranscribeResult {
-        transcript: result.text,
-        provider: result.model.provider_family,
-        model: result.model.model_id,
-        language: result.language,
-        metadata: Some(Value::Object(
-            result.provider_metadata.into_iter().collect(),
-        )),
-    })?)
+    )?)
 }
 
 pub(super) async fn voice_tts_synthesize_value(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::VoiceTtsSynthesizeParams,
-) -> psychevo::Result<Value> {
-    let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
-    let options = state.run_options(scope.cwd, None);
-    let resolved = resolve_voice_tts_config(
-        &options,
-        params.provider.as_deref(),
-        params.model.as_deref(),
-        params.voice.as_deref(),
-        params.format.map(ai_audio_format),
-    )?;
-    let request = SpeechRequest {
-        text: params.text,
-        voice: Some(resolved.voice.clone()),
-        format: Some(resolved.format.as_str().to_string()),
-        speed: None,
-        headers: BTreeMap::new(),
-        extensions: BTreeMap::new(),
-    };
-    let provider = voice_provider(
-        &resolved.provider,
-        &resolved.base_url,
-        resolved.api_key.as_deref(),
-        &resolved.api_key_env,
-    )?;
-    let model = provider
-        .speech_model(resolved.model.clone())
-        .map_err(voice_runtime_error)?;
-    let result = model
-        .synthesize(request)
-        .await
-        .map_err(voice_runtime_error)?;
-    Ok(serde_json::to_value(wire::VoiceTtsSynthesizeResult {
-        audio: wire::VoiceAudioOutput {
-            data: result
-                .audio
-                .base64()
-                .map_err(|error| Error::Message(error.to_string()))?
-                .to_string(),
-            format: wire_audio_format(resolved.format),
-            mime_type: result.audio.mime_type().to_string(),
+    params: wire::voice::VoiceTtsSynthesizeParams,
+) -> Result<Value> {
+    let scope = resolve_optional_scope(state, auth, params.scope)?;
+    let result = voice_configuration(state, scope.cwd)?
+        .synthesize_voice(VoiceSpeechRequest {
+            text: params.text,
+            provider: params.provider,
+            model: params.model,
+            voice: params.voice,
+            format: params.format.map(application_voice_format),
+        })
+        .await?;
+    Ok(serde_json::to_value(
+        wire::voice::VoiceTtsSynthesizeResult {
+            audio: wire::voice::VoiceAudioOutput {
+                data: result.audio.data,
+                format: wire_audio_format(result.audio.format),
+                mime_type: result.audio.mime_type,
+            },
+            provider: result.provider,
+            model: result.model,
+            voice: result.voice,
+            metadata: Some(Value::Object(result.metadata.into_iter().collect())),
         },
-        provider: result.model.provider_family,
-        model: result.model.model_id,
-        voice: resolved.voice,
-        metadata: Some(Value::Object(
-            result.provider_metadata.into_iter().collect(),
-        )),
-    })?)
+    )?)
 }
 
 pub(super) async fn voice_policy_read_value(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::VoicePolicyReadParams,
-) -> psychevo::Result<Value> {
+    params: wire::voice::VoicePolicyReadParams,
+) -> Result<Value> {
     let target = voice_policy_target(
         state,
         auth,
@@ -133,8 +94,8 @@ pub(super) async fn voice_policy_read_value(
         .expect("voice policies poisoned")
         .get(&target)
         .copied()
-        .unwrap_or(wire::VoicePolicyMode::Off);
-    Ok(serde_json::to_value(wire::VoicePolicyResult {
+        .unwrap_or(wire::voice::VoicePolicyMode::Off);
+    Ok(serde_json::to_value(wire::voice::VoicePolicyResult {
         mode,
         target,
     })?)
@@ -143,8 +104,8 @@ pub(super) async fn voice_policy_read_value(
 pub(super) async fn voice_policy_update_value(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::VoicePolicyUpdateParams,
-) -> psychevo::Result<Value> {
+    params: wire::voice::VoicePolicyUpdateParams,
+) -> Result<Value> {
     let target = voice_policy_target(
         state,
         auth,
@@ -158,12 +119,12 @@ pub(super) async fn voice_policy_update_value(
         .voice_policies
         .lock()
         .expect("voice policies poisoned");
-    if params.mode == wire::VoicePolicyMode::Off {
+    if params.mode == wire::voice::VoicePolicyMode::Off {
         policies.remove(&target);
     } else {
         policies.insert(target.clone(), params.mode);
     }
-    Ok(serde_json::to_value(wire::VoicePolicyResult {
+    Ok(serde_json::to_value(wire::voice::VoicePolicyResult {
         mode: params.mode,
         target,
     })?)
@@ -173,83 +134,61 @@ pub(super) async fn start_realtime(
     state: &WebState,
     auth: &AuthContext,
     out_tx: ConnectionSender,
-    params: wire::ThreadRealtimeStartParams,
-) -> psychevo::Result<wire::ThreadRealtimeStartResult> {
+    params: wire::voice::ThreadRealtimeStartParams,
+) -> Result<wire::voice::ThreadRealtimeStartResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
-    let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
-    let mut options = state.run_options(scope.cwd, Some(params.thread_id.clone()));
-    options.config_path = Some(state.inner.home.join("config.toml"));
-    let resolved = resolve_voice_realtime_config(
-        &options,
-        params.provider.as_deref(),
-        params.model.as_deref(),
-        params.transport.map(ai_realtime_transport),
-        params.voice.as_deref(),
-    )?
-    .ok_or_else(|| Error::Config("voice.realtime is not configured".to_string()))?;
-    if resolved.provider != "fake" {
-        return Err(Error::Config(format!(
-            "provider-native realtime is not available for {} in this build",
-            resolved.provider
-        )));
-    }
-    let model = Fake::new()
-        .map_err(voice_runtime_error)?
-        .provider()
-        .realtime_model(resolved.model.clone())
-        .map_err(voice_runtime_error)?;
-    let mut stream = model
-        .connect(RealtimeConnectRequest {
-            instructions: None,
-            voice: resolved.voice.clone(),
-            headers: BTreeMap::new(),
-            extensions: BTreeMap::from([(
-                "psychevo".to_string(),
-                json!({
-                    "thread_id": params.thread_id,
-                    "transport": match resolved.transport {
-                        psychevo::__product::configuration::VoiceRealtimeTransport::Webrtc => "webrtc",
-                        psychevo::__product::configuration::VoiceRealtimeTransport::Websocket => "websocket",
-                    },
-                    "sdp_offer": params.sdp_offer,
-                }),
-            )]),
+    let scope = resolve_optional_scope(state, auth, params.scope)?;
+    let thread_id = params.thread_id;
+    let connection = voice_configuration(state, scope.cwd)?
+        .connect_realtime_voice(VoiceRealtimeRequest {
+            thread_id: thread_id.clone(),
+            provider: params.provider,
+            model: params.model,
+            transport: params.transport.map(application_realtime_transport),
+            voice: params.voice,
+            sdp_offer: params.sdp_offer,
         })
-        .await
-        .map_err(voice_runtime_error)?;
-    let session_id = format!("fake-realtime-{}", params.thread_id);
-    let sender = stream.sender();
+        .await?;
+    let VoiceRealtimeConnection {
+        provider,
+        control,
+        mut events,
+    } = connection;
+    let session_id = format!("{provider}-realtime-{thread_id}");
     state
         .inner
         .realtime_sessions
         .lock()
         .expect("realtime sessions poisoned")
-        .insert(
-            session_id.clone(),
-            RealtimeSessionState {
-                provider: resolved.provider,
-                sender,
-            },
-        );
+        .insert(session_id.clone(), RealtimeSessionState { control });
     let _ = out_tx.send(rpc_notification(
         "thread/realtime/started",
-        json!(wire::ThreadRealtimeStartedNotification {
+        json!(wire::voice::ThreadRealtimeStartedNotification {
             session_id: session_id.clone(),
-            thread_id: params.thread_id.clone(),
+            thread_id: thread_id.clone(),
         }),
     ));
-    let thread_id = params.thread_id.clone();
     let state_for_close = state.clone();
     let event_session_id = session_id.clone();
     let cleanup_session_id = session_id.clone();
     let supervisor = state.inner.gateway.clone();
     supervisor.spawn_background(format!("realtime-voice:{session_id}"), async move {
-        while let Some(event) = stream.next_event().await {
-            let Ok(event) = event else {
-                continue;
+        while let Some(event) = events.next_event().await {
+            let event = match event {
+                Ok(event) => event,
+                Err(error) => {
+                    let _ = out_tx.send(rpc_notification(
+                        "thread/realtime/error",
+                        json!(wire::voice::ThreadRealtimeErrorNotification {
+                            session_id: event_session_id.clone(),
+                            message: error.to_string(),
+                        }),
+                    ));
+                    continue;
+                }
             };
             let should_send = match &event {
-                RealtimeEvent::Closed { .. } => state_for_close
+                VoiceRealtimeEvent::Closed { .. } => state_for_close
                     .inner
                     .realtime_sessions
                     .lock()
@@ -257,11 +196,8 @@ pub(super) async fn start_realtime(
                     .contains_key(&event_session_id),
                 _ => true,
             };
-            if !should_send {
-                continue;
-            }
-            if let Some(notification) =
-                realtime_event_notification(&event_session_id, &thread_id, event)
+            if should_send
+                && let Some(notification) = realtime_event_notification(&event_session_id, event)
             {
                 let _ = out_tx.send(notification);
             }
@@ -273,63 +209,51 @@ pub(super) async fn start_realtime(
             .expect("realtime sessions poisoned")
             .remove(&cleanup_session_id);
     });
-    Ok(wire::ThreadRealtimeStartResult {
+    Ok(wire::voice::ThreadRealtimeStartResult {
         accepted: true,
         session_id,
-        thread_id: params.thread_id,
+        thread_id,
     })
 }
 
 pub(super) async fn append_realtime_audio(
     state: &WebState,
-    params: wire::ThreadRealtimeAppendAudioParams,
-) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    let session = ensure_realtime_session(state, &params.session_id)?;
-    let mime_type = params
-        .audio
-        .mime_type
-        .unwrap_or_else(|| ai_audio_format(params.audio.format).mime_type().to_string());
-    let audio = Media::from_base64(mime_type, params.audio.data);
-    session
-        .sender
-        .send_audio(audio)
-        .await
-        .map_err(voice_runtime_error)?;
+    params: wire::voice::ThreadRealtimeAppendAudioParams,
+) -> Result<wire::voice::ThreadRealtimeMutationResult> {
+    ensure_realtime_session(state, &params.session_id)?
+        .control
+        .append_audio(voice_audio_input(params.audio))
+        .await?;
     Ok(realtime_accepted())
 }
 
 pub(super) async fn append_realtime_text(
     state: &WebState,
-    params: wire::ThreadRealtimeAppendTextParams,
-) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    let session = ensure_realtime_session(state, &params.session_id)?;
-    session
-        .sender
-        .send_text(params.text)
-        .await
-        .map_err(voice_runtime_error)?;
+    params: wire::voice::ThreadRealtimeAppendTextParams,
+) -> Result<wire::voice::ThreadRealtimeMutationResult> {
+    ensure_realtime_session(state, &params.session_id)?
+        .control
+        .append_text(params.text)
+        .await?;
     Ok(realtime_accepted())
 }
 
 pub(super) async fn append_realtime_speech(
     state: &WebState,
-    params: wire::ThreadRealtimeAppendSpeechParams,
-) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    let session = ensure_realtime_session(state, &params.session_id)?;
-    session
-        .sender
-        .send_text(params.text)
-        .await
-        .map_err(voice_runtime_error)?;
-    session.sender.commit().await.map_err(voice_runtime_error)?;
+    params: wire::voice::ThreadRealtimeAppendSpeechParams,
+) -> Result<wire::voice::ThreadRealtimeMutationResult> {
+    ensure_realtime_session(state, &params.session_id)?
+        .control
+        .append_speech(params.text)
+        .await?;
     Ok(realtime_accepted())
 }
 
 pub(super) fn stop_realtime(
     state: &WebState,
     out_tx: ConnectionSender,
-    params: wire::ThreadRealtimeSessionParams,
-) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
+    params: wire::voice::ThreadRealtimeSessionParams,
+) -> Result<wire::voice::ThreadRealtimeMutationResult> {
     let removed = state
         .inner
         .realtime_sessions
@@ -342,17 +266,17 @@ pub(super) fn stop_realtime(
             .inner
             .gateway
             .spawn_background("realtime-voice-close", async move {
-                let _ = session.sender.close().await;
+                let _ = session.control.close().await;
             });
         let _ = out_tx.send(rpc_notification(
             "thread/realtime/closed",
-            json!(wire::ThreadRealtimeClosedNotification {
+            json!(wire::voice::ThreadRealtimeClosedNotification {
                 session_id: params.session_id,
                 reason: "requested".to_string(),
             }),
         ));
     }
-    Ok(wire::ThreadRealtimeMutationResult {
+    Ok(wire::voice::ThreadRealtimeMutationResult {
         accepted,
         message: (!accepted).then(|| "unknown realtime session".to_string()),
     })
@@ -360,24 +284,26 @@ pub(super) fn stop_realtime(
 
 pub(super) fn list_realtime_voices(
     state: &WebState,
-    params: wire::ThreadRealtimeSessionParams,
-) -> psychevo::Result<wire::ThreadRealtimeListVoicesResult> {
+    params: wire::voice::ThreadRealtimeSessionParams,
+) -> Result<wire::voice::ThreadRealtimeListVoicesResult> {
     let session = ensure_realtime_session(state, &params.session_id)?;
-    let voices = if session.provider == "fake" {
-        vec![wire::ThreadRealtimeVoiceView {
-            id: "fake".to_string(),
-            label: "Fake voice".to_string(),
-        }]
-    } else {
-        Vec::new()
-    };
-    Ok(wire::ThreadRealtimeListVoicesResult { voices })
+    Ok(wire::voice::ThreadRealtimeListVoicesResult {
+        voices: session
+            .control
+            .voices()
+            .into_iter()
+            .map(|voice| wire::voice::ThreadRealtimeVoiceView {
+                id: voice.id,
+                label: voice.label,
+            })
+            .collect(),
+    })
 }
 
 pub(super) fn voice_policy_for_source(
     state: &WebState,
     source: &GatewaySource,
-) -> wire::VoicePolicyMode {
+) -> wire::voice::VoicePolicyMode {
     state
         .inner
         .voice_policies
@@ -385,35 +311,35 @@ pub(super) fn voice_policy_for_source(
         .expect("voice policies poisoned")
         .get(&source.source_key().0)
         .copied()
-        .unwrap_or(wire::VoicePolicyMode::Off)
+        .unwrap_or(wire::voice::VoicePolicyMode::Off)
 }
 
 pub(super) fn update_voice_policy_for_source(
     state: &WebState,
     source: &GatewaySource,
-    mode: wire::VoicePolicyMode,
-) -> wire::VoicePolicyResult {
+    mode: wire::voice::VoicePolicyMode,
+) -> wire::voice::VoicePolicyResult {
     let target = source.source_key().0;
     let mut policies = state
         .inner
         .voice_policies
         .lock()
         .expect("voice policies poisoned");
-    if mode == wire::VoicePolicyMode::Off {
+    if mode == wire::voice::VoicePolicyMode::Off {
         policies.remove(&target);
     } else {
         policies.insert(target.clone(), mode);
     }
-    wire::VoicePolicyResult { mode, target }
+    wire::voice::VoicePolicyResult { mode, target }
 }
 
 async fn voice_policy_target(
     state: &WebState,
     auth: &AuthContext,
-    scope: Option<wire::GatewayRequestScope>,
+    scope: Option<wire::source::GatewayRequestScope>,
     source_key: Option<SourceKey>,
     thread_id: Option<String>,
-) -> psychevo::Result<String> {
+) -> Result<String> {
     if let Some(thread_id) = thread_id {
         authorize_thread(state, auth, &thread_id).await?;
         return Ok(format!("thread:{thread_id}"));
@@ -425,10 +351,13 @@ async fn voice_policy_target(
     Ok(scope.source.source_key().0)
 }
 
-fn ensure_realtime_session(
-    state: &WebState,
-    session_id: &str,
-) -> psychevo::Result<RealtimeSessionState> {
+fn voice_configuration(state: &WebState, cwd: std::path::PathBuf) -> Result<Configuration> {
+    let mut query = ConfigurationQuery::new(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    state.inner.framework.configuration(query)
+}
+
+fn ensure_realtime_session(state: &WebState, session_id: &str) -> Result<RealtimeSessionState> {
     state
         .inner
         .realtime_sessions
@@ -439,210 +368,112 @@ fn ensure_realtime_session(
         .ok_or_else(|| Error::Config(format!("unknown realtime session: {session_id}")))
 }
 
-fn realtime_accepted() -> wire::ThreadRealtimeMutationResult {
-    wire::ThreadRealtimeMutationResult {
+fn realtime_accepted() -> wire::voice::ThreadRealtimeMutationResult {
+    wire::voice::ThreadRealtimeMutationResult {
         accepted: true,
         message: None,
     }
 }
 
-fn realtime_event_notification(
-    session_id: &str,
-    _thread_id: &str,
-    event: RealtimeEvent,
-) -> Option<String> {
+fn realtime_event_notification(session_id: &str, event: VoiceRealtimeEvent) -> Option<String> {
     match event {
-        RealtimeEvent::InputTranscriptDelta { delta } => Some(rpc_notification(
+        VoiceRealtimeEvent::InputTranscriptDelta { delta } => Some(rpc_notification(
             "thread/realtime/transcript/delta",
-            json!(wire::ThreadRealtimeTranscriptNotification {
+            json!(wire::voice::ThreadRealtimeTranscriptNotification {
                 session_id: session_id.to_string(),
                 role: "user".to_string(),
                 text: delta,
             }),
         )),
-        RealtimeEvent::InputTranscriptDone { text } => Some(rpc_notification(
+        VoiceRealtimeEvent::InputTranscriptDone { text } => Some(rpc_notification(
             "thread/realtime/transcript/done",
-            json!(wire::ThreadRealtimeTranscriptNotification {
+            json!(wire::voice::ThreadRealtimeTranscriptNotification {
                 session_id: session_id.to_string(),
                 role: "user".to_string(),
                 text,
             }),
         )),
-        RealtimeEvent::OutputTextDelta { delta } => Some(rpc_notification(
+        VoiceRealtimeEvent::OutputTextDelta { delta } => Some(rpc_notification(
             "thread/realtime/transcript/delta",
-            json!(wire::ThreadRealtimeTranscriptNotification {
+            json!(wire::voice::ThreadRealtimeTranscriptNotification {
                 session_id: session_id.to_string(),
                 role: "assistant".to_string(),
                 text: delta,
             }),
         )),
-        RealtimeEvent::OutputTextDone { text } => Some(rpc_notification(
+        VoiceRealtimeEvent::OutputTextDone { text } => Some(rpc_notification(
             "thread/realtime/transcript/done",
-            json!(wire::ThreadRealtimeTranscriptNotification {
+            json!(wire::voice::ThreadRealtimeTranscriptNotification {
                 session_id: session_id.to_string(),
                 role: "assistant".to_string(),
                 text,
             }),
         )),
-        RealtimeEvent::OutputAudioDelta { audio } => Some(rpc_notification(
+        VoiceRealtimeEvent::OutputAudioDelta { audio } => Some(rpc_notification(
             "thread/realtime/outputAudio/delta",
-            json!(wire::ThreadRealtimeOutputAudioDeltaNotification {
+            json!(wire::voice::ThreadRealtimeOutputAudioDeltaNotification {
                 session_id: session_id.to_string(),
-                data: audio.base64().ok()?.to_string(),
-                format: wire_audio_format_from_mime(audio.mime_type()),
+                data: audio.data,
+                format: wire_audio_format(audio.format),
             }),
         )),
-        RealtimeEvent::Warning { warning } => Some(rpc_notification(
+        VoiceRealtimeEvent::Warning { message } => Some(rpc_notification(
             "thread/realtime/error",
-            json!(wire::ThreadRealtimeErrorNotification {
+            json!(wire::voice::ThreadRealtimeErrorNotification {
                 session_id: session_id.to_string(),
-                message: warning.message,
+                message,
             }),
         )),
-        RealtimeEvent::Closed { reason } => Some(rpc_notification(
+        VoiceRealtimeEvent::Closed { reason } => Some(rpc_notification(
             "thread/realtime/closed",
-            json!(wire::ThreadRealtimeClosedNotification {
+            json!(wire::voice::ThreadRealtimeClosedNotification {
                 session_id: session_id.to_string(),
                 reason: match reason {
-                    RealtimeCloseReason::Requested => "requested".to_string(),
-                    RealtimeCloseReason::Remote => "remote".to_string(),
-                    RealtimeCloseReason::Aborted => "aborted".to_string(),
+                    VoiceRealtimeCloseReason::Requested => "requested".to_string(),
+                    VoiceRealtimeCloseReason::Remote => "remote".to_string(),
+                    VoiceRealtimeCloseReason::Aborted => "aborted".to_string(),
                 },
             }),
         )),
-        RealtimeEvent::OutputAudioDone
-        | RealtimeEvent::ResponseDone
-        | RealtimeEvent::Metadata { .. } => None,
+        VoiceRealtimeEvent::OutputAudioDone
+        | VoiceRealtimeEvent::ResponseDone
+        | VoiceRealtimeEvent::Metadata { .. } => None,
     }
 }
 
-fn voice_provider(
-    provider: &str,
-    base_url: &str,
-    api_key: Option<&str>,
-    api_key_env: &Option<String>,
-) -> psychevo::Result<psychevo::__ai::Provider> {
-    if provider == "fake" {
-        return Provider::builder(
-            DeploymentConfig::new("fake", "fake", "fake://local")
-                .with_default_language_protocol("fake"),
-        )
-        .transcription_adapter(FakeTranscriptionAdapter::default())
-        .speech_adapter(FakeSpeechAdapter::new(Media::from_base64(
-            "audio/wav",
-            "UklGRg==",
-        )))
-        .build()
-        .map_err(voice_runtime_error);
+fn voice_audio_input(audio: wire::voice::VoiceAudioInput) -> VoiceAudioInput {
+    VoiceAudioInput {
+        data: audio.data,
+        format: application_voice_format(audio.format),
+        mime_type: audio.mime_type,
     }
-    if !is_xiaomi_voice_provider(provider) {
-        return Err(Error::Config(format!(
-            "voice provider is not supported yet: {provider}"
-        )));
-    }
-    let api_key = api_key.ok_or_else(|| missing_voice_credentials(api_key_env))?;
-    Xiaomi::builder(
-        DeploymentConfig::new(provider, provider, base_url)
-            .with_default_language_protocol("xiaomi_voice"),
-    )
-    .with_api_key(SecretValue::new(api_key))
-    .build()
-    .and_then(|facade| facade.provider())
-    .map_err(voice_runtime_error)
 }
 
-fn is_xiaomi_voice_provider(provider: &str) -> bool {
-    matches!(provider, "xiaomi" | "xiaomi-token-plan")
-}
-
-fn voice_runtime_error(err: impl std::fmt::Display) -> Error {
-    Error::Message(format!("voice provider failed: {err}"))
-}
-
-fn missing_voice_credentials(api_key_env: &Option<String>) -> Error {
-    Error::Config(format!(
-        "missing {}",
-        api_key_env
-            .as_deref()
-            .unwrap_or("voice provider credentials")
-    ))
-}
-
-fn ai_audio_format(
-    format: wire::VoiceAudioFormat,
-) -> psychevo::__product::configuration::VoiceAudioFormat {
+fn application_voice_format(format: wire::voice::VoiceAudioFormat) -> VoiceAudioFormat {
     match format {
-        wire::VoiceAudioFormat::Wav => psychevo::__product::configuration::VoiceAudioFormat::Wav,
-        wire::VoiceAudioFormat::Mp3 => psychevo::__product::configuration::VoiceAudioFormat::Mp3,
-        wire::VoiceAudioFormat::Pcm16 => {
-            psychevo::__product::configuration::VoiceAudioFormat::Pcm16
-        }
+        wire::voice::VoiceAudioFormat::Wav => VoiceAudioFormat::Wav,
+        wire::voice::VoiceAudioFormat::Mp3 => VoiceAudioFormat::Mp3,
+        wire::voice::VoiceAudioFormat::Pcm16 => VoiceAudioFormat::Pcm16,
     }
 }
 
-fn validated_asr_mime_type(
-    format: psychevo::__product::configuration::VoiceAudioFormat,
-    declared_mime_type: Option<&str>,
-) -> psychevo::Result<String> {
-    if !format.supports_asr_input() {
-        return Err(Error::Message(format!(
-            "unsupported ASR audio format `{}`",
-            format.as_str()
-        )));
-    }
-    if let Some(declared) = declared_mime_type {
-        let declared = declared.trim().to_ascii_lowercase();
-        let matches = match format {
-            psychevo::__product::configuration::VoiceAudioFormat::Wav => {
-                matches!(
-                    declared.as_str(),
-                    "audio/wav" | "audio/wave" | "audio/x-wav"
-                )
-            }
-            psychevo::__product::configuration::VoiceAudioFormat::Mp3 => {
-                matches!(declared.as_str(), "audio/mpeg" | "audio/mp3")
-            }
-            psychevo::__product::configuration::VoiceAudioFormat::Pcm16 => false,
-        };
-        if !matches {
-            return Err(Error::Message(format!(
-                "ASR audio format `{}` conflicts with MIME type `{declared}`",
-                format.as_str()
-            )));
-        }
-    }
-    Ok(format.mime_type().to_string())
-}
-
-fn wire_audio_format(
-    format: psychevo::__product::configuration::VoiceAudioFormat,
-) -> wire::VoiceAudioFormat {
+fn wire_audio_format(format: VoiceAudioFormat) -> wire::voice::VoiceAudioFormat {
     match format {
-        psychevo::__product::configuration::VoiceAudioFormat::Wav => wire::VoiceAudioFormat::Wav,
-        psychevo::__product::configuration::VoiceAudioFormat::Mp3 => wire::VoiceAudioFormat::Mp3,
-        psychevo::__product::configuration::VoiceAudioFormat::Pcm16 => {
-            wire::VoiceAudioFormat::Pcm16
-        }
+        VoiceAudioFormat::Wav => wire::voice::VoiceAudioFormat::Wav,
+        VoiceAudioFormat::Mp3 => wire::voice::VoiceAudioFormat::Mp3,
+        VoiceAudioFormat::Pcm16 => wire::voice::VoiceAudioFormat::Pcm16,
     }
 }
 
-fn wire_audio_format_from_mime(mime_type: &str) -> wire::VoiceAudioFormat {
-    match mime_type {
-        "audio/mpeg" | "audio/mp3" => wire::VoiceAudioFormat::Mp3,
-        "audio/pcm" | "audio/l16" => wire::VoiceAudioFormat::Pcm16,
-        _ => wire::VoiceAudioFormat::Wav,
-    }
-}
-
-fn ai_realtime_transport(
-    transport: wire::RealtimeTransport,
-) -> psychevo::__product::configuration::VoiceRealtimeTransport {
+fn application_realtime_transport(
+    transport: wire::voice::RealtimeTransport,
+) -> psychevo::application::VoiceRealtimeTransport {
     match transport {
-        wire::RealtimeTransport::Webrtc => {
-            psychevo::__product::configuration::VoiceRealtimeTransport::Webrtc
+        wire::voice::RealtimeTransport::Webrtc => {
+            psychevo::application::VoiceRealtimeTransport::Webrtc
         }
-        wire::RealtimeTransport::Websocket => {
-            psychevo::__product::configuration::VoiceRealtimeTransport::Websocket
+        wire::voice::RealtimeTransport::Websocket => {
+            psychevo::application::VoiceRealtimeTransport::Websocket
         }
     }
 }

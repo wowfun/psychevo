@@ -1,13 +1,22 @@
-use super::*;
+use agent_client_protocol::schema::v1::{
+    AgentCapabilities, EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerStdio,
+};
+use psychevo::{
+    Error,
+    application::{McpTransportInput, ResolvedMcpServerInput},
+};
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
 
 pub(super) fn requested_peer_mcp_server_names(
     peer: &ResolvedPeerTurn,
 ) -> psychevo::Result<std::collections::BTreeSet<String>> {
     for name in &peer.agent.tool_policy.mcp_servers {
         if !peer.backend.mcp_servers.contains(name) {
-            return Err(crate::agent_session_error(
+            return Err(agent_session_error(
                 "acp_mcp_backend_policy_rejected",
-                crate::AgentErrorStage::Binding,
+                AgentErrorStage::Binding,
                 "user_action",
                 "not_delivered",
                 format!(
@@ -23,7 +32,7 @@ pub(super) fn requested_peer_mcp_server_names(
 
 pub(super) fn acp_mcp_server_declarations(
     peer: &ResolvedPeerTurn,
-    resolved_servers: &[psychevo::__product::runtime::ResolvedMcpServerInput],
+    resolved_servers: &[ResolvedMcpServerInput],
     capabilities: &AgentCapabilities,
 ) -> psychevo::Result<Vec<McpServer>> {
     resolved_servers
@@ -79,11 +88,7 @@ pub(super) fn acp_mcp_server_declarations(
                         .iter()
                         .map(|(name, value)| acp_mcp_http_header(&server.name, name, value))
                         .collect::<psychevo::Result<Vec<_>>>()?;
-                    if let Some(token) = resolved
-                        .bearer_token
-                        .as_ref()
-                        .map(psychevo::__ai::SecretValue::expose_secret)
-                    {
+                    if let Some(token) = resolved.bearer_token() {
                         if token.contains(['\r', '\n']) {
                             return Err(Error::Message(format!(
                                 "ACP MCP server `{}` bearer token contains a line break",
@@ -112,9 +117,7 @@ pub(super) fn acp_mcp_server_declarations(
         .collect()
 }
 
-fn validate_portable_acp_mcp_policy(
-    server: &psychevo::__product::runtime::McpServerInput,
-) -> psychevo::Result<()> {
+fn validate_portable_acp_mcp_policy(server: &psychevo::McpServerInput) -> psychevo::Result<()> {
     let policy = &server.policy;
     if policy.required
         || policy.enabled_tools.is_some()

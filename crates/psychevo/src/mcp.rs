@@ -26,13 +26,14 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::config::{
-    config_show_value, load_mcp_oauth_access_token, parse_run_config, resolve_psychevo_home,
+    McpOAuthCredentialStore, SystemMcpOAuthCredentialStore, config_show_value,
+    load_mcp_oauth_access_token_with_store, parse_run_config, resolve_psychevo_home,
 };
 use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
 use crate::permissions::PermissionRuntime;
+pub use crate::types::McpTransportInput;
 use crate::types::{
-    McpServerInput, McpServerPolicy, McpStartupApprovalTarget, McpTransportInput, RunOptions,
-    RunWarning,
+    McpServerInput, McpServerPolicy, McpStartupApprovalTarget, RunOptions, RunWarning,
 };
 
 const LIST_MCP_RESOURCES_TOOL: &str = "list_mcp_resources";
@@ -330,6 +331,8 @@ pub(crate) struct McpRuntimeSnapshot {
 #[derive(Clone)]
 pub struct McpRuntime {
     owner: McpRuntimeOwner,
+    profile_home: Option<PathBuf>,
+    mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
 }
 
 #[derive(Clone)]
@@ -341,17 +344,29 @@ enum McpRuntimeOwner {
     },
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct McpRuntimeRegistry {
     managers: Arc<StdMutex<HashMap<String, Arc<Mutex<McpConnectionManager>>>>>,
+    profile_home: Option<PathBuf>,
+    mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
+}
+
+impl Default for McpRuntimeRegistry {
+    fn default() -> Self {
+        Self {
+            managers: Arc::default(),
+            profile_home: None,
+            mcp_oauth_credentials: Arc::new(SystemMcpOAuthCredentialStore),
+        }
+    }
 }
 
 impl Default for McpRuntime {
     fn default() -> Self {
         Self {
-            owner: McpRuntimeOwner::Direct(Arc::new(Mutex::new(
-                McpConnectionManager::default(),
-            ))),
+            owner: McpRuntimeOwner::Direct(Arc::new(Mutex::new(McpConnectionManager::default()))),
+            profile_home: None,
+            mcp_oauth_credentials: Arc::new(SystemMcpOAuthCredentialStore),
         }
     }
 }
@@ -363,11 +378,17 @@ impl std::fmt::Debug for McpRuntime {
 }
 
 impl McpRuntime {
-    pub(crate) fn for_thread(
+    pub(crate) fn mcp_oauth_credentials(&self) -> Arc<dyn McpOAuthCredentialStore> {
+        Arc::clone(&self.mcp_oauth_credentials)
+    }
+
+    fn for_thread_with_credentials(
         registry: McpRuntimeRegistry,
         thread_id: impl Into<Arc<str>>,
     ) -> Self {
         Self {
+            profile_home: registry.profile_home.clone(),
+            mcp_oauth_credentials: Arc::clone(&registry.mcp_oauth_credentials),
             owner: McpRuntimeOwner::Thread {
                 registry,
                 thread_id: thread_id.into(),
@@ -384,7 +405,15 @@ impl McpRuntime {
     ) -> (McpRuntimeSnapshot, u64) {
         if inputs.is_empty() && matches!(self.owner, McpRuntimeOwner::Thread { .. }) {
             return (
-                mcp_runtime_snapshot(inputs, cwd, permission_runtime, read_only_tools).await,
+                mcp_runtime_snapshot_with_store(
+                    inputs,
+                    cwd,
+                    permission_runtime,
+                    read_only_tools,
+                    self.profile_home.as_deref(),
+                    self.mcp_oauth_credentials.as_ref(),
+                )
+                .await,
                 0,
             );
         }
@@ -397,7 +426,14 @@ impl McpRuntime {
         };
         let mut manager = manager.lock().await;
         let snapshot = manager
-            .snapshot(inputs, cwd, permission_runtime, read_only_tools)
+            .snapshot(
+                inputs,
+                cwd,
+                permission_runtime,
+                read_only_tools,
+                self.profile_home.as_deref(),
+                self.mcp_oauth_credentials.as_ref(),
+            )
             .await;
         (snapshot, manager.generation())
     }
@@ -417,15 +453,24 @@ impl McpRuntime {
                     registry: right_registry,
                     thread_id: right_thread,
                 },
-            ) => {
-                left_registry.same_instance(right_registry) && left_thread == right_thread
-            }
+            ) => left_registry.same_instance(right_registry) && left_thread == right_thread,
             _ => false,
         }
     }
 }
 
 impl McpRuntimeRegistry {
+    pub(crate) fn new(
+        profile_home: PathBuf,
+        mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
+    ) -> Self {
+        Self {
+            managers: Arc::default(),
+            profile_home: Some(profile_home),
+            mcp_oauth_credentials,
+        }
+    }
+
     fn manager(&self, thread_id: &str) -> Arc<Mutex<McpConnectionManager>> {
         Arc::clone(
             self.managers
@@ -437,7 +482,7 @@ impl McpRuntimeRegistry {
     }
 
     pub(crate) fn runtime(&self, thread_id: &str) -> McpRuntime {
-        McpRuntime::for_thread(self.clone(), Arc::<str>::from(thread_id))
+        McpRuntime::for_thread_with_credentials(self.clone(), Arc::<str>::from(thread_id))
     }
 
     pub(crate) fn remove(&self, thread_id: &str) {
@@ -503,12 +548,16 @@ impl McpConnectionManager {
         cwd: &Path,
         permission_runtime: Option<&PermissionRuntime>,
         read_only_tools: bool,
+        profile_home: Option<&Path>,
+        mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
     ) -> McpRuntimeSnapshot {
         let connection_identity_hash = mcp_connection_identity_hash(
             inputs,
             cwd,
             permission_runtime,
             read_only_tools,
+            profile_home,
+            mcp_oauth_credentials,
         );
         let cwd = cwd.to_path_buf();
         if self.dirty_servers.is_empty()
@@ -519,8 +568,15 @@ impl McpConnectionManager {
             return cached.snapshot.clone();
         }
 
-        let snapshot =
-            mcp_runtime_snapshot(inputs, &cwd, permission_runtime, read_only_tools).await;
+        let snapshot = mcp_runtime_snapshot_with_store(
+            inputs,
+            &cwd,
+            permission_runtime,
+            read_only_tools,
+            profile_home,
+            mcp_oauth_credentials,
+        )
+        .await;
         self.generation = self.generation.saturating_add(1);
         self.dirty_servers.clear();
         self.cached = snapshot.reusable.then(|| McpCachedSnapshot {
@@ -537,6 +593,8 @@ fn mcp_connection_identity_hash(
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
     read_only_tools: bool,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> String {
     let catalog = McpSourceCatalog::resolve(inputs);
     let mut hasher = Sha256::new();
@@ -564,6 +622,8 @@ fn mcp_connection_identity_hash(
                     &entry.input,
                     bearer_token_env_var.as_deref(),
                     url,
+                    profile_home,
+                    mcp_oauth_credentials,
                 );
                 if let Some(token) = token {
                     hasher.update(Sha256::digest(token.as_bytes()));
@@ -574,29 +634,36 @@ fn mcp_connection_identity_hash(
         }
     }
     if let Some(runtime) = permission_runtime {
-        let inner = &runtime.inner;
-        update_mcp_hash_value(&mut hasher, &inner.cwd.to_string_lossy());
-        update_mcp_hash_value(&mut hasher, &inner.project_config_dir.to_string_lossy());
-        update_mcp_hash_value(&mut hasher, inner.mode.as_str());
-        update_mcp_hash_value(&mut hasher, &format!("{:?}", inner.config));
-        update_mcp_hash_value(&mut hasher, &format!("{:?}", inner.sandbox_policy));
-        for path in &inner.protected_config_paths {
-            update_mcp_hash_value(&mut hasher, &path.to_string_lossy());
-        }
-        hasher.update([
-            u8::from(inner.approval_handler.is_some()),
-            u8::from(inner.smart_approval_handler.is_some()),
-            u8::from(inner.hook_runtime.is_some()),
-        ]);
+        runtime.update_cache_identity_hasher(&mut hasher);
     }
     format!("{:x}", hasher.finalize())
 }
 
+#[cfg(test)]
 pub(crate) async fn mcp_runtime_snapshot(
     inputs: &[McpServerInput],
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
     read_only_tools: bool,
+) -> McpRuntimeSnapshot {
+    mcp_runtime_snapshot_with_store(
+        inputs,
+        cwd,
+        permission_runtime,
+        read_only_tools,
+        None,
+        &SystemMcpOAuthCredentialStore,
+    )
+    .await
+}
+
+async fn mcp_runtime_snapshot_with_store(
+    inputs: &[McpServerInput],
+    cwd: &Path,
+    permission_runtime: Option<&PermissionRuntime>,
+    read_only_tools: bool,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> McpRuntimeSnapshot {
     let catalog = McpSourceCatalog::resolve(inputs);
     let mut tools = Vec::<Arc<dyn ToolBinding>>::new();
@@ -628,7 +695,14 @@ pub(crate) async fn mcp_runtime_snapshot(
         .map(|(index, entry)| async move {
             (
                 index,
-                prepare_mcp_server(entry, cwd, permission_runtime).await,
+                prepare_mcp_server(
+                    entry,
+                    cwd,
+                    permission_runtime,
+                    profile_home,
+                    mcp_oauth_credentials,
+                )
+                .await,
             )
         })
         .buffer_unordered(MCP_STARTUP_CONCURRENCY)
@@ -775,7 +849,12 @@ struct ResolvedMcpLaunch {
 }
 
 impl ResolvedMcpLaunch {
-    fn resolve(entry: McpCatalogEntry, cwd: &Path) -> Result<Self, String> {
+    fn resolve(
+        entry: McpCatalogEntry,
+        cwd: &Path,
+        profile_home: Option<&Path>,
+        mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
+    ) -> Result<Self, String> {
         let mut input = entry.input.clone();
         let bearer_token = match &mut input.transport {
             McpTransportInput::Stdio {
@@ -823,6 +902,8 @@ impl ResolvedMcpLaunch {
                     &entry.input,
                     bearer_token_env_var.as_deref(),
                     &configured_url,
+                    profile_home,
+                    mcp_oauth_credentials,
                 )
                 .map(SecretValue::new);
                 *url = normalize_mcp_http_url(&configured_url);
@@ -901,6 +982,8 @@ async fn prepare_mcp_server(
     entry: McpCatalogEntry,
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> Result<PreparedMcpServer, McpStartupFailure> {
     let required = entry.input.policy.required;
     let timeout_secs = entry
@@ -909,11 +992,8 @@ async fn prepare_mcp_server(
         .startup_timeout_secs
         .unwrap_or(DEFAULT_MCP_STARTUP_TIMEOUT_SECS);
     let display_name = entry.input.name.clone();
-    let launch =
-        ResolvedMcpLaunch::resolve(entry, cwd).map_err(|message| McpStartupFailure {
-            message,
-            required,
-        })?;
+    let launch = ResolvedMcpLaunch::resolve(entry, cwd, profile_home, mcp_oauth_credentials)
+        .map_err(|message| McpStartupFailure { message, required })?;
     let authorization_id = format!("mcp_startup:{}", launch.descriptor_key());
     match tokio::time::timeout(
         Duration::from_secs(timeout_secs),
@@ -1034,6 +1114,21 @@ pub(crate) fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str 
 }
 
 pub async fn mcp_test_server_value(options: &RunOptions, name: &str) -> crate::Result<Value> {
+    let env_map = options
+        .inherited_env
+        .clone()
+        .unwrap_or_else(|| env::vars().collect());
+    let profile_home = resolve_psychevo_home(&env_map)?;
+    mcp_test_server_value_with_store(options, name, &profile_home, &SystemMcpOAuthCredentialStore)
+        .await
+}
+
+pub(crate) async fn mcp_test_server_value_with_store(
+    options: &RunOptions,
+    name: &str,
+    profile_home: &Path,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
+) -> crate::Result<Value> {
     let document = config_show_value(options, crate::types::ConfigScope::Effective)?;
     let value = document.get("value").cloned().unwrap_or_else(|| json!({}));
     let config = parse_run_config(value)?;
@@ -1042,7 +1137,14 @@ pub async fn mcp_test_server_value(options: &RunOptions, name: &str) -> crate::R
         .into_iter()
         .find(|server| server.name == name)
         .ok_or_else(|| crate::Error::Config(format!("unknown MCP server: {name}")))?;
-    match connect_mcp_server_with_policy(&server, &options.cwd).await {
+    match connect_mcp_server_with_policy(
+        &server,
+        &options.cwd,
+        Some(profile_home),
+        mcp_oauth_credentials,
+    )
+    .await
+    {
         Ok(service) => {
             let peer = service.peer().clone();
             let tools = peer
@@ -1355,9 +1457,11 @@ fn unique_callable_parts(
     }
 }
 
-pub(crate) async fn connect_mcp_server(
+async fn connect_mcp_server_with_store(
     input: &McpServerInput,
     cwd: &Path,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> Result<RunningService<RoleClient, ()>, String> {
     match &input.transport {
         McpTransportInput::Stdio {
@@ -1389,9 +1493,13 @@ pub(crate) async fn connect_mcp_server(
             }
             let mut config = StreamableHttpClientTransportConfig::with_uri(url.clone())
                 .custom_headers(parsed_headers);
-            if let Some(token) =
-                resolve_http_bearer_token(input, bearer_token_env_var.as_deref(), url)
-            {
+            if let Some(token) = resolve_http_bearer_token(
+                input,
+                bearer_token_env_var.as_deref(),
+                url,
+                profile_home,
+                mcp_oauth_credentials,
+            ) {
                 config = config.auth_header(token);
             }
             let transport = StreamableHttpClientTransport::from_config(config);
@@ -1444,6 +1552,8 @@ fn resolve_http_bearer_token(
     input: &McpServerInput,
     bearer_token_env_var: Option<&str>,
     url: &str,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> Option<String> {
     if let Some(env_var) = bearer_token_env_var
         && let Ok(value) = env::var(env_var)
@@ -1451,9 +1561,16 @@ fn resolve_http_bearer_token(
     {
         return Some(value);
     }
-    let env_map = env::vars().collect::<BTreeMap<_, _>>();
-    let home = resolve_psychevo_home(&env_map).ok()?;
-    load_mcp_oauth_access_token(&home, &input.name, url)
+    let ambient_home;
+    let home = match profile_home {
+        Some(home) => home,
+        None => {
+            let env_map = env::vars().collect::<BTreeMap<_, _>>();
+            ambient_home = resolve_psychevo_home(&env_map).ok()?;
+            &ambient_home
+        }
+    };
+    load_mcp_oauth_access_token_with_store(mcp_oauth_credentials, home, &input.name, url)
         .ok()
         .flatten()
 }
@@ -1461,6 +1578,8 @@ fn resolve_http_bearer_token(
 async fn connect_mcp_server_with_policy(
     input: &McpServerInput,
     cwd: &Path,
+    profile_home: Option<&Path>,
+    mcp_oauth_credentials: &dyn McpOAuthCredentialStore,
 ) -> Result<RunningService<RoleClient, ()>, String> {
     let timeout_secs = input
         .policy
@@ -1468,7 +1587,7 @@ async fn connect_mcp_server_with_policy(
         .unwrap_or(DEFAULT_MCP_STARTUP_TIMEOUT_SECS);
     tokio::time::timeout(
         Duration::from_secs(timeout_secs),
-        connect_mcp_server(input, cwd),
+        connect_mcp_server_with_store(input, cwd, profile_home, mcp_oauth_credentials),
     )
     .await
     .map_err(|_| format!("startup timed out after {timeout_secs}s"))?
@@ -1752,7 +1871,8 @@ async fn execute_mcp_utility(
                             "MCP resource listing",
                         )
                         .await
-                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                    })
+                        as BoxFuture<'static, Result<Vec<_>, String>>;
                     (server, request)
                 })
                 .collect();
@@ -1793,7 +1913,8 @@ async fn execute_mcp_utility(
                             "MCP resource template listing",
                         )
                         .await
-                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                    })
+                        as BoxFuture<'static, Result<Vec<_>, String>>;
                     (server, request)
                 })
                 .collect();
@@ -1860,13 +1981,10 @@ async fn execute_mcp_utility(
                 .map(|(server, peer)| {
                     let mut abort = abort.clone();
                     let request = Box::pin(async move {
-                        await_mcp_utility(
-                            peer.list_all_prompts(),
-                            &mut abort,
-                            "MCP prompt listing",
-                        )
-                        .await
-                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                        await_mcp_utility(peer.list_all_prompts(), &mut abort, "MCP prompt listing")
+                            .await
+                    })
+                        as BoxFuture<'static, Result<Vec<_>, String>>;
                     (server, request)
                 })
                 .collect();
@@ -1932,18 +2050,14 @@ async fn execute_mcp_utility(
 
 type McpUtilityListResult<T> = Result<Vec<T>, String>;
 type McpUtilityListRequest<T> = (String, BoxFuture<'static, McpUtilityListResult<T>>);
-type IndexedMcpUtilityListRequest<T> =
-    BoxFuture<'static, (usize, String, McpUtilityListResult<T>)>;
+type IndexedMcpUtilityListRequest<T> = BoxFuture<'static, (usize, String, McpUtilityListResult<T>)>;
 
 async fn collect_mcp_utility_lists<T: Send + 'static>(
     requests: Vec<McpUtilityListRequest<T>>,
 ) -> Vec<(String, Result<Vec<T>, String>)> {
-    let mut pending: Vec<IndexedMcpUtilityListRequest<T>> =
-        Vec::with_capacity(requests.len());
+    let mut pending: Vec<IndexedMcpUtilityListRequest<T>> = Vec::with_capacity(requests.len());
     for (index, (server, request)) in requests.into_iter().enumerate() {
-        pending.push(Box::pin(async move {
-            (index, server, request.await)
-        }));
+        pending.push(Box::pin(async move { (index, server, request.await) }));
     }
     let mut results = stream::iter(pending)
         .buffer_unordered(MCP_STARTUP_CONCURRENCY)
@@ -1979,10 +2093,7 @@ where
     }
 }
 
-fn append_utility_values(
-    target: &mut Vec<Value>,
-    values: impl IntoIterator<Item = Value>,
-) -> bool {
+fn append_utility_values(target: &mut Vec<Value>, values: impl IntoIterator<Item = Value>) -> bool {
     for value in values {
         if target.len() == MCP_UTILITY_LIST_LIMIT {
             return true;
@@ -2223,6 +2334,22 @@ pub(crate) fn mcp_tool_output_with_identity(
 pub(crate) mod tests {
     pub(crate) use super::*;
 
+    struct FixedMcpOAuthCredentialStore;
+
+    impl McpOAuthCredentialStore for FixedMcpOAuthCredentialStore {
+        fn load_access_token(&self, _account: &str) -> crate::Result<Option<String>> {
+            Ok(Some("injected-launch-token".to_string()))
+        }
+
+        fn save_access_token(&self, _account: &str, _access_token: &str) -> crate::Result<()> {
+            Ok(())
+        }
+
+        fn clear_access_token(&self, _account: &str) -> crate::Result<bool> {
+            Ok(false)
+        }
+    }
+
     #[test]
     fn normalizes_mcp_names_for_model_visible_tools() {
         assert_eq!(normalize_mcp_server_name("docs server"), "docs_server");
@@ -2260,7 +2387,9 @@ pub(crate) mod tests {
             .into_iter()
             .next()
             .expect("catalog entry");
-        let launch = ResolvedMcpLaunch::resolve(entry, Path::new(".")).expect("resolved launch");
+        let launch =
+            ResolvedMcpLaunch::resolve(entry, Path::new("."), None, &SystemMcpOAuthCredentialStore)
+                .expect("resolved launch");
 
         assert!(matches!(
             &launch.input.transport,
@@ -2275,6 +2404,41 @@ pub(crate) mod tests {
                 header_names: vec!["Authorization".to_string()],
                 credential_names: vec!["MCP_TOKEN".to_string()],
             }
+        );
+    }
+
+    #[test]
+    fn resolved_http_launch_uses_the_instance_owned_oauth_store() {
+        let input = McpServerInput::new(
+            "remote",
+            McpTransportInput::StreamableHttp {
+                url: "https://example.test/mcp".to_string(),
+                headers: BTreeMap::new(),
+                bearer_token_env_var: None,
+                scopes: Vec::new(),
+                oauth_resource: Some("https://example.test".to_string()),
+                oauth_client_id: Some("test-client".to_string()),
+            },
+        );
+        let entry = McpSourceCatalog::resolve(&[input])
+            .entries
+            .into_iter()
+            .next()
+            .expect("catalog entry");
+        let launch = ResolvedMcpLaunch::resolve(
+            entry,
+            Path::new("."),
+            Some(Path::new("/isolated/profile")),
+            &FixedMcpOAuthCredentialStore,
+        )
+        .expect("resolved launch");
+
+        assert_eq!(
+            launch
+                .bearer_token
+                .as_ref()
+                .map(|token| token.expose_secret()),
+            Some("injected-launch-token")
         );
     }
 
@@ -2472,7 +2636,15 @@ pub(crate) mod tests {
             .next()
             .expect("catalog entry");
 
-        let failure = match prepare_mcp_server(entry, &cwd, Some(&permissions)).await {
+        let failure = match prepare_mcp_server(
+            entry,
+            &cwd,
+            Some(&permissions),
+            None,
+            &SystemMcpOAuthCredentialStore,
+        )
+        .await
+        {
             Ok(_) => panic!("expected startup timeout"),
             Err(failure) => failure,
         };
@@ -2614,15 +2786,10 @@ pub(crate) mod tests {
         let first = mcp_descriptor_fingerprint(&entry, &input);
 
         let mut secret_changed = input.clone();
-        if let McpTransportInput::StreamableHttp { headers, .. } =
-            &mut secret_changed.transport
-        {
+        if let McpTransportInput::StreamableHttp { headers, .. } = &mut secret_changed.transport {
             headers.insert("X-Secret".to_string(), "beta".to_string());
         }
-        assert_eq!(
-            first,
-            mcp_descriptor_fingerprint(&entry, &secret_changed)
-        );
+        assert_eq!(first, mcp_descriptor_fingerprint(&entry, &secret_changed));
 
         let mut binding_changed = input;
         if let McpTransportInput::StreamableHttp {
@@ -2632,10 +2799,7 @@ pub(crate) mod tests {
         {
             *bearer_token_env_var = Some("OTHER_MCP_TOKEN".to_string());
         }
-        assert_ne!(
-            first,
-            mcp_descriptor_fingerprint(&entry, &binding_changed)
-        );
+        assert_ne!(first, mcp_descriptor_fingerprint(&entry, &binding_changed));
     }
 
     #[test]
@@ -2672,8 +2836,17 @@ pub(crate) mod tests {
                 &cwd,
                 Some(&default_permissions),
                 false,
+                None,
+                &SystemMcpOAuthCredentialStore,
             ),
-            mcp_connection_identity_hash(&[input], &cwd, Some(&bypass_permissions), false)
+            mcp_connection_identity_hash(
+                &[input],
+                &cwd,
+                Some(&bypass_permissions),
+                false,
+                None,
+                &SystemMcpOAuthCredentialStore,
+            )
         );
     }
 
@@ -2688,8 +2861,22 @@ pub(crate) mod tests {
         let cwd = PathBuf::from("/repo");
 
         assert_ne!(
-            mcp_connection_identity_hash(std::slice::from_ref(&input), &cwd, None, false),
-            mcp_connection_identity_hash(&[input], &cwd, None, true),
+            mcp_connection_identity_hash(
+                std::slice::from_ref(&input),
+                &cwd,
+                None,
+                false,
+                None,
+                &SystemMcpOAuthCredentialStore,
+            ),
+            mcp_connection_identity_hash(
+                &[input],
+                &cwd,
+                None,
+                true,
+                None,
+                &SystemMcpOAuthCredentialStore,
+            ),
         );
     }
 
@@ -2707,7 +2894,14 @@ pub(crate) mod tests {
         );
 
         manager
-            .snapshot(std::slice::from_ref(&unavailable), &cwd, None, false)
+            .snapshot(
+                std::slice::from_ref(&unavailable),
+                &cwd,
+                None,
+                false,
+                None,
+                &SystemMcpOAuthCredentialStore,
+            )
             .await;
         let first_generation = manager.generation();
         assert!(
@@ -2715,7 +2909,16 @@ pub(crate) mod tests {
             "startup failure must remain retryable"
         );
 
-        manager.snapshot(&[unavailable], &cwd, None, false).await;
+        manager
+            .snapshot(
+                &[unavailable],
+                &cwd,
+                None,
+                false,
+                None,
+                &SystemMcpOAuthCredentialStore,
+            )
+            .await;
         assert_eq!(
             manager.generation(),
             first_generation + 1,
@@ -2728,21 +2931,29 @@ pub(crate) mod tests {
         let mut manager = McpConnectionManager::default();
         let cwd = std::env::temp_dir();
 
-        let first = manager.snapshot(&[], &cwd, None, false).await;
+        let first = manager
+            .snapshot(&[], &cwd, None, false, None, &SystemMcpOAuthCredentialStore)
+            .await;
         let first_generation = manager.generation();
-        let second = manager.snapshot(&[], &cwd, None, false).await;
+        let second = manager
+            .snapshot(&[], &cwd, None, false, None, &SystemMcpOAuthCredentialStore)
+            .await;
 
         assert_eq!(first.snapshot_hash, second.snapshot_hash);
         assert_eq!(manager.generation(), first_generation);
 
         manager.mark_tools_changed("repo");
-        let refreshed = manager.snapshot(&[], &cwd, None, false).await;
+        let refreshed = manager
+            .snapshot(&[], &cwd, None, false, None, &SystemMcpOAuthCredentialStore)
+            .await;
 
         assert_eq!(refreshed.snapshot_hash, first.snapshot_hash);
         assert_eq!(manager.generation(), first_generation + 1);
 
         manager.mark_all_dirty();
-        let refreshed_again = manager.snapshot(&[], &cwd, None, false).await;
+        let refreshed_again = manager
+            .snapshot(&[], &cwd, None, false, None, &SystemMcpOAuthCredentialStore)
+            .await;
         assert_eq!(refreshed_again.snapshot_hash, first.snapshot_hash);
         assert_eq!(manager.generation(), first_generation + 2);
     }

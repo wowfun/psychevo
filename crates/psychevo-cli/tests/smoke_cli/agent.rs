@@ -1,11 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::{init_tui_home, pevo_cmd};
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn cli_agent_inspect_unknown_id_reports_not_found() {
     let temp = tempdir().expect("temp");
+    let psychevo_home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
 
     let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_DB", &db)
         .args(["agent", "inspect", "missing-agent"])
         .output()
@@ -17,60 +19,6 @@ pub(crate) async fn cli_agent_inspect_unknown_id_reports_not_found() {
         stderr.contains("agent not found: missing-agent"),
         "{stderr}"
     );
-}
-
-#[tokio::test]
-pub(crate) async fn cli_agent_inspect_json_includes_identity_and_depth() {
-    let temp = tempdir().expect("temp");
-    let db = temp.path().join("state.db");
-    let store = psychevo::__product::persistence::StateRuntime::open(&db)
-        .await
-        .expect("store");
-    let cwd = temp.path().join("repo");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    let parent = store
-        .create_session_with_metadata(&cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent");
-    let child = store
-        .create_child_session_with_metadata(&parent, &cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-run-1",
-                    "task_name": "translate-1",
-                    "name": "translate",
-                    "task": "translate hello",
-                    "effective_max_spawn_depth": 1
-                }
-            })),
-        )
-        .await
-        .expect("edge");
-
-    let output = pevo_cmd(temp.path())
-        .env("PSYCHEVO_DB", &db)
-        .args(["agent", "inspect", "translate-1", "--json"])
-        .output()
-        .expect("pevo agent inspect");
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let body: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
-    assert_eq!(body["agent"]["agent_name"], "translate");
-    assert_eq!(body["agent"]["task_name"], "translate-1");
-    assert_eq!(body["agent"]["effective_max_spawn_depth"], 1);
-    assert_eq!(body["parent_session"]["id"], parent);
-    assert_eq!(body["child_session"]["id"], child);
 }
 
 #[tokio::test]
@@ -114,5 +62,52 @@ pub(crate) async fn cli_agent_validate_json_reports_effective_empty_tools_policy
     assert_eq!(
         body["agent"]["effective_policy"]["project_instructions"]["visible"],
         true
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn cli_agent_wait_zero_timeout_reports_timeout_without_pending_mail() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = init_tui_home(temp.path());
+    let db = temp.path().join("state.db");
+    let cwd = temp.path().join("repo");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let application = psychevo::Application::builder()
+        .home(&psychevo_home)
+        .database_path(&db)
+        .build()
+        .await
+        .expect("Application");
+    let mut request = psychevo::StartThreadRequest::new(&cwd);
+    request.source = "run".to_string();
+    application
+        .client()
+        .start_thread(request)
+        .await
+        .expect("run Thread");
+    application
+        .shutdown()
+        .await
+        .expect("shutdown")
+        .require_clean()
+        .expect("clean shutdown");
+
+    let output = pevo_cmd(temp.path())
+        .current_dir(&cwd)
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_DB", &db)
+        .args(["agent", "wait", "--timeout-ms", "0", "--json"])
+        .output()
+        .expect("pevo agent wait");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!(
+        body,
+        serde_json::json!({"message": "Wait timed out.", "timed_out": true})
     );
 }

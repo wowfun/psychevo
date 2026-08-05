@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo::{AgentRelationship, accounting::effective_usage_total, agents::AgentCatalog};
+use serde_json::Value;
+
+use crate::tui::{
+    render_helpers::{short_session, truncate_chars},
+    ui_types::TranscriptRow,
+};
 
 pub(crate) fn active_agent_tool_title(value: &Value) -> String {
     let args = value.get("args").unwrap_or(&Value::Null);
@@ -104,41 +109,53 @@ fn generated_agent_task_name(agent: &str, task_name: &str) -> bool {
     suffix.len() >= 8 && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
-pub(crate) fn matching_agent_edge<'a>(
+pub(crate) fn matching_agent_relationship<'a>(
     row: &TranscriptRow,
-    edges: &'a [AgentEdgeRecord],
-    used_edges: &std::collections::BTreeSet<usize>,
-) -> Option<(usize, &'a AgentEdgeRecord)> {
+    relationships: &'a [AgentRelationship],
+    used_relationships: &std::collections::BTreeSet<usize>,
+) -> Option<(usize, &'a AgentRelationship)> {
     if row.failed {
         return None;
     }
     let row_tool_call_id = row.tool_call_id.as_deref();
-    if let Some(match_by_id) = edges.iter().enumerate().find(|(index, edge)| {
-        !used_edges.contains(index)
-            && row_tool_call_id.is_some_and(|id| agent_edge_metadata_matches(edge, id))
-    }) {
+    if let Some(match_by_id) = relationships
+        .iter()
+        .enumerate()
+        .find(|(index, relationship)| {
+            !used_relationships.contains(index)
+                && row_tool_call_id
+                    .is_some_and(|id| agent_relationship_identity_matches(relationship, id))
+        })
+    {
         return Some(match_by_id);
     }
 
     let row_name = agent_title_name(&row.title);
-    if let Some(match_by_task) = edges.iter().enumerate().find(|(index, edge)| {
-        !used_edges.contains(index)
-            && agent_edge_agent_name(edge).is_some_and(|name| name == row_name)
-            && agent_row_task_matches(row, edge)
-    }) {
+    if let Some(match_by_task) = relationships
+        .iter()
+        .enumerate()
+        .find(|(index, relationship)| {
+            !used_relationships.contains(index)
+                && agent_relationship_name(relationship).is_some_and(|name| name == row_name)
+                && agent_row_task_matches(row, relationship)
+        })
+    {
         return Some(match_by_task);
     }
 
     None
 }
 
-pub(crate) fn agent_edge_title(
-    edge: &AgentEdgeRecord,
+pub(crate) fn agent_relationship_title(
+    relationship: &AgentRelationship,
     catalog: Option<&AgentCatalog>,
 ) -> Option<String> {
-    let name = agent_edge_agent_name(edge)?;
-    let detail = agent_edge_agent_string(edge, "task_name")
-        .or_else(|| agent_edge_agent_string(edge, "message"))
+    let name = agent_relationship_name(relationship)?;
+    let agent = relationship.agent.as_ref()?;
+    let detail = agent
+        .task_name
+        .as_deref()
+        .or(agent.task.as_deref())
         .or_else(|| {
             catalog.and_then(|catalog| {
                 catalog
@@ -150,25 +167,33 @@ pub(crate) fn agent_edge_title(
         })
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .or_else(|| agent_edge_agent_string(edge, "description"))
-        .or_else(|| agent_edge_agent_string(edge, "task"));
+        .or(agent.description.as_deref());
     Some(agent_title(name, detail))
 }
 
-pub(crate) fn agent_edge_metadata_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
-    agent_edge_agent_string(edge, "id").is_some_and(|value| value == target)
-        || agent_edge_agent_string(edge, "parent_tool_call_id").is_some_and(|value| value == target)
+pub(crate) fn agent_relationship_identity_matches(
+    relationship: &AgentRelationship,
+    target: &str,
+) -> bool {
+    relationship.agent.as_ref().is_some_and(|agent| {
+        agent.id.as_deref() == Some(target) || agent.parent_tool_call_id.as_deref() == Some(target)
+    })
 }
 
-pub(crate) fn agent_edge_task_matches(edge: &AgentEdgeRecord, target: &str) -> bool {
-    agent_edge_agent_string(edge, "task_name").is_some_and(|value| value == target)
-        || agent_edge_agent_string(edge, "message").is_some_and(|value| value == target)
-        || agent_edge_agent_string(edge, "task").is_some_and(|value| value == target)
+pub(crate) fn agent_relationship_task_matches(
+    relationship: &AgentRelationship,
+    target: &str,
+) -> bool {
+    relationship.agent.as_ref().is_some_and(|agent| {
+        agent.task_name.as_deref() == Some(target) || agent.task.as_deref() == Some(target)
+    })
 }
 
-fn agent_row_task_matches(row: &TranscriptRow, edge: &AgentEdgeRecord) -> bool {
-    agent_title_detail(&row.title).is_some_and(|detail| agent_edge_task_matches(edge, detail))
-        || agent_row_prompt_detail(row).is_some_and(|detail| agent_edge_task_matches(edge, detail))
+fn agent_row_task_matches(row: &TranscriptRow, relationship: &AgentRelationship) -> bool {
+    agent_title_detail(&row.title)
+        .is_some_and(|detail| agent_relationship_task_matches(relationship, detail))
+        || agent_row_prompt_detail(row)
+            .is_some_and(|detail| agent_relationship_task_matches(relationship, detail))
 }
 
 fn agent_row_prompt_detail(row: &TranscriptRow) -> Option<&str> {
@@ -179,16 +204,12 @@ fn agent_row_prompt_detail(row: &TranscriptRow) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn agent_edge_agent_name(edge: &AgentEdgeRecord) -> Option<&str> {
-    agent_edge_agent_string(edge, "agent_type").or_else(|| agent_edge_agent_string(edge, "name"))
-}
-
-pub(crate) fn agent_edge_agent_string<'a>(edge: &'a AgentEdgeRecord, key: &str) -> Option<&'a str> {
-    edge.metadata
+pub(crate) fn agent_relationship_name(relationship: &AgentRelationship) -> Option<&str> {
+    relationship
+        .agent
         .as_ref()?
-        .get("agent")?
-        .get(key)?
-        .as_str()
+        .name
+        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }

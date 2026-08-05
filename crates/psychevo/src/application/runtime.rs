@@ -2,19 +2,23 @@
 use std::collections::BTreeMap;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::Instant;
 
 use futures::FutureExt;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock, oneshot};
 use tokio_util::task::TaskTracker;
 
 use super::{
-    ApplicationActivitySnapshot, Error, PendingTerminal, Result, ThreadActivitySnapshot, TurnHandle,
+    ApplicationActivitySnapshot, ApplicationLimits, ApplicationOperationalSnapshot,
+    ApplicationPanicDiagnostic, ApplicationQueuedOperationSnapshot, ApplicationStorageSnapshot,
+    Error, PendingTerminal, Result, ThreadActivitySnapshot, TurnHandle,
 };
+use crate::panic_evidence::{MAX_PANIC_PAYLOAD_BYTES, PanicEvidence, bounded_text};
 
-pub(super) const MAX_APPLICATION_OPERATIONS: usize = 64;
-pub(super) const MAX_THREAD_OPERATIONS: usize = 32;
+const MAX_PANIC_DIAGNOSTICS: usize = 32;
 
 pub(super) struct ApplicationRuntime {
     pub(super) tasks: TaskTracker,
@@ -24,6 +28,8 @@ pub(super) struct ApplicationRuntime {
     next_task_id: AtomicU64,
     next_operation_id: AtomicU64,
     pub(super) task_panics: AtomicU64,
+    task_panic_diagnostics: Mutex<VecDeque<ApplicationPanicDiagnostic>>,
+    limits: ApplicationLimits,
     mcp_runtimes: crate::mcp::McpRuntimeRegistry,
     pub(super) agent_supervisor: crate::agents::AgentSupervisor,
 }
@@ -46,11 +52,13 @@ pub(super) struct ThreadOperation {
     pub(super) kind: ThreadOperationKind,
     pub(super) ready: Option<oneshot::Sender<()>>,
     pub(super) durable_accepted: bool,
+    enqueued_at: Instant,
 }
 
 pub(super) enum ThreadOperationKind {
     Turn(String),
     Mutation(u64),
+    IdleMutation(u64),
 }
 
 pub(super) struct TurnSlot {
@@ -68,7 +76,26 @@ pub(super) enum TurnPhase {
 }
 
 impl ApplicationRuntime {
-    pub(super) fn new() -> Self {
+    #[cfg(test)]
+    pub(super) fn new(limits: ApplicationLimits) -> Self {
+        Self::new_with_mcp_runtime_registry(limits, crate::mcp::McpRuntimeRegistry::default())
+    }
+
+    pub(super) fn new_with_mcp_oauth_credentials(
+        limits: ApplicationLimits,
+        profile_home: PathBuf,
+        mcp_oauth_credentials: Arc<dyn crate::config::McpOAuthCredentialStore>,
+    ) -> Self {
+        Self::new_with_mcp_runtime_registry(
+            limits,
+            crate::mcp::McpRuntimeRegistry::new(profile_home, mcp_oauth_credentials),
+        )
+    }
+
+    fn new_with_mcp_runtime_registry(
+        limits: ApplicationLimits,
+        mcp_runtimes: crate::mcp::McpRuntimeRegistry,
+    ) -> Self {
         Self {
             tasks: TaskTracker::new(),
             state: Mutex::new(ApplicationRuntimeState {
@@ -84,7 +111,9 @@ impl ApplicationRuntime {
             next_task_id: AtomicU64::new(1),
             next_operation_id: AtomicU64::new(1),
             task_panics: AtomicU64::new(0),
-            mcp_runtimes: crate::mcp::McpRuntimeRegistry::default(),
+            task_panic_diagnostics: Mutex::new(VecDeque::new()),
+            limits,
+            mcp_runtimes,
             agent_supervisor: crate::agents::AgentSupervisor::default(),
         }
     }
@@ -119,7 +148,20 @@ impl ApplicationRuntime {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
+        self.spawn_named("application_task", future)
+    }
+
+    pub(super) fn spawn_named<F>(
+        self: &Arc<Self>,
+        actor: impl Into<String>,
+        future: F,
+    ) -> tokio::task::AbortHandle
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
         let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
+        let actor = actor.into();
         let (start_tx, start_rx) = oneshot::channel();
         let runtime = Arc::downgrade(self);
         let panic_runtime = Arc::downgrade(self);
@@ -128,21 +170,48 @@ impl ApplicationRuntime {
             if start_rx.await.is_err() {
                 return;
             }
-            let panicked = std::panic::AssertUnwindSafe(future)
-                .catch_unwind()
-                .await
-                .is_err();
-            if panicked {
+            if let Err(payload) = std::panic::AssertUnwindSafe(future).catch_unwind().await {
                 let Some(runtime) = panic_runtime.upgrade() else {
                     return;
                 };
-                runtime.task_panics.fetch_add(1, Ordering::Relaxed);
+                runtime.record_task_panic(task_id, &actor, payload);
             }
         });
         let abort = task.abort_handle();
         self.lock_task_aborts().insert(task_id, abort.clone());
         let _ = start_tx.send(());
         abort
+    }
+
+    fn record_task_panic(&self, task_id: u64, actor: &str, payload: Box<dyn std::any::Any + Send>) {
+        self.task_panics.fetch_add(1, Ordering::Relaxed);
+        let evidence = PanicEvidence::capture(payload.as_ref());
+        let diagnostic = ApplicationPanicDiagnostic {
+            diagnostic_id: format!("application-actor-panic-{task_id}"),
+            actor: bounded_text(actor.to_string(), MAX_PANIC_PAYLOAD_BYTES),
+            task_id,
+            payload: evidence.payload,
+            backtrace: evidence.backtrace,
+        };
+        let mut diagnostics = self
+            .task_panic_diagnostics
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics.len() == MAX_PANIC_DIAGNOSTICS {
+            diagnostics.pop_front();
+        }
+        diagnostics.push_back(diagnostic.clone());
+        drop(diagnostics);
+        let emitted = serde_json::json!({
+            "target": "psychevo.application",
+            "event": "actor_panicked",
+            "diagnosticId": diagnostic.diagnostic_id,
+            "actor": diagnostic.actor,
+            "taskId": diagnostic.task_id,
+            "payload": diagnostic.payload,
+            "backtrace": diagnostic.backtrace,
+        });
+        eprintln!("{emitted}");
     }
 
     pub(super) fn abort_all_tasks(&self) -> usize {
@@ -182,7 +251,7 @@ impl ApplicationRuntime {
         turn_id: &str,
     ) -> Result<oneshot::Receiver<()>> {
         let mut state = self.lock_state();
-        Self::admit_thread_operation(&state, thread_id)?;
+        self.admit_turn_operation(&state, thread_id)?;
         let before = state
             .threads
             .get(thread_id)
@@ -205,7 +274,7 @@ impl ApplicationRuntime {
         handle: TurnHandle,
     ) -> Result<(oneshot::Receiver<()>, usize)> {
         let mut state = self.lock_state();
-        Self::admit_thread_operation(&state, thread_id)?;
+        self.admit_turn_operation(&state, thread_id)?;
         if state.turns.contains_key(turn_id) {
             return Err(Error::Message(format!(
                 "Turn id is already registered: {turn_id}"
@@ -414,6 +483,30 @@ impl ApplicationRuntime {
         }
     }
 
+    pub(super) fn operational_snapshot(
+        &self,
+        storage: ApplicationStorageSnapshot,
+    ) -> ApplicationOperationalSnapshot {
+        let state = self.lock_state();
+        ApplicationOperationalSnapshot {
+            open: state.open,
+            limits: self.limits,
+            accepted_operations: state.accepted_operations,
+            tracked_threads: state.threads.len(),
+            tracked_tasks: self.tasks.len(),
+            oldest_queued: application_oldest_queued(&state),
+            storage,
+            task_panics: self.task_panics.load(Ordering::Relaxed),
+            panic_diagnostics: self
+                .task_panic_diagnostics
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub(super) fn thread_turn_handles(&self, thread_id: &str) -> Vec<TurnHandle> {
         let state = self.lock_state();
         let Some(cell) = state.threads.get(thread_id) else {
@@ -423,7 +516,7 @@ impl ApplicationRuntime {
             .iter()
             .filter_map(|operation| match &operation.kind {
                 ThreadOperationKind::Turn(turn_id) => state.turns.get(turn_id),
-                ThreadOperationKind::Mutation(_) => None,
+                ThreadOperationKind::Mutation(_) | ThreadOperationKind::IdleMutation(_) => None,
             })
             .map(|slot| slot.handle.clone())
             .collect()
@@ -443,7 +536,7 @@ impl ApplicationRuntime {
     ) -> Result<ApplicationOperationReservation> {
         let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
         let mut state = self.lock_state();
-        Self::admit_application_operation(&state)?;
+        self.admit_application_operation(&state)?;
         let ready = state
             .application_operations
             .reserve(ThreadOperationKind::Mutation(operation_id), true);
@@ -461,7 +554,7 @@ impl ApplicationRuntime {
     ) -> Result<ThreadMutationReservation> {
         let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
         let mut state = self.lock_state();
-        Self::admit_thread_operation(&state, thread_id)?;
+        self.admit_thread_operation(&state, thread_id)?;
         let ready = state
             .threads
             .entry(thread_id.to_string())
@@ -476,12 +569,79 @@ impl ApplicationRuntime {
         })
     }
 
+    pub(super) fn reserve_idle_mutation(
+        self: &Arc<Self>,
+        thread_id: &str,
+    ) -> Result<ThreadMutationReservation> {
+        let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
+        let mut state = self.lock_state();
+        if !state.open {
+            return Err(Error::Message(
+                "Psychevo Application is shutting down".to_string(),
+            ));
+        }
+        if let Some(blocking_operation) =
+            state.threads.get(thread_id).and_then(|cell| {
+                if thread_cell_has_turn(cell) {
+                    Some("turn")
+                } else if cell.operations.iter().any(|operation| {
+                    matches!(&operation.kind, ThreadOperationKind::IdleMutation(_))
+                }) {
+                    Some("history_editing")
+                } else {
+                    None
+                }
+            })
+        {
+            return Err(thread_busy(thread_id, blocking_operation));
+        }
+        self.admit_thread_operation(&state, thread_id)?;
+        let ready = state
+            .threads
+            .entry(thread_id.to_string())
+            .or_default()
+            .reserve(ThreadOperationKind::IdleMutation(operation_id), true);
+        state.accepted_operations += 1;
+        Ok(ThreadMutationReservation {
+            runtime: Arc::clone(self),
+            thread_id: thread_id.to_string(),
+            operation_id,
+            ready: Some(ready),
+        })
+    }
+
+    pub(super) fn thread_history_editing_busy(&self, thread_id: &str) -> bool {
+        self.lock_state()
+            .threads
+            .get(thread_id)
+            .is_some_and(|cell| {
+                cell.operations.iter().any(|operation| {
+                    matches!(
+                        &operation.kind,
+                        ThreadOperationKind::Turn(_) | ThreadOperationKind::IdleMutation(_)
+                    )
+                })
+            })
+    }
+
+    #[cfg(test)]
+    pub(super) fn thread_operation_count_for_test(&self, thread_id: &str) -> usize {
+        self.lock_state()
+            .threads
+            .get(thread_id)
+            .map_or(0, |cell| cell.operations.len())
+    }
+
     fn finish_mutation(&self, thread_id: &str, operation_id: u64) {
         let mut state = self.lock_state();
         let remove = if let Some(cell) = state.threads.get_mut(thread_id) {
-            cell.release(
-                |kind| matches!(kind, ThreadOperationKind::Mutation(id) if *id == operation_id),
-            );
+            cell.release(|kind| {
+                matches!(
+                    kind,
+                    ThreadOperationKind::Mutation(id) | ThreadOperationKind::IdleMutation(id)
+                        if *id == operation_id
+                )
+            });
             cell.operations.is_empty()
         } else {
             false
@@ -500,31 +660,64 @@ impl ApplicationRuntime {
         state.accepted_operations = state.accepted_operations.saturating_sub(1);
     }
 
-    fn admit_application_operation(state: &ApplicationRuntimeState) -> Result<()> {
+    fn admit_application_operation(&self, state: &ApplicationRuntimeState) -> Result<()> {
         if !state.open {
             return Err(Error::Message(
                 "Psychevo Application is shutting down".to_string(),
             ));
         }
-        if state.accepted_operations >= MAX_APPLICATION_OPERATIONS {
+        if state.accepted_operations >= self.limits.max_operations {
             return Err(application_overloaded(
                 "application",
-                MAX_APPLICATION_OPERATIONS,
+                self.limits.max_operations,
+                state.accepted_operations,
+                application_oldest_queued(state),
+                None,
             ));
         }
         Ok(())
     }
 
-    fn admit_thread_operation(state: &ApplicationRuntimeState, thread_id: &str) -> Result<()> {
-        Self::admit_application_operation(state)?;
+    fn admit_thread_operation(
+        &self,
+        state: &ApplicationRuntimeState,
+        thread_id: &str,
+    ) -> Result<()> {
+        self.admit_application_operation(state)?;
         let thread_operations = state
             .threads
             .get(thread_id)
             .map_or(0, |cell| cell.operations.len());
-        if thread_operations >= MAX_THREAD_OPERATIONS {
-            return Err(application_overloaded("thread", MAX_THREAD_OPERATIONS));
+        if thread_operations >= self.limits.max_thread_operations {
+            let oldest_queued = state
+                .threads
+                .get(thread_id)
+                .and_then(|cell| operations_oldest_queued(&cell.operations, Some(thread_id)));
+            return Err(application_overloaded(
+                "thread",
+                self.limits.max_thread_operations,
+                thread_operations,
+                oldest_queued,
+                Some(thread_id),
+            ));
         }
         Ok(())
+    }
+
+    fn admit_turn_operation(&self, state: &ApplicationRuntimeState, thread_id: &str) -> Result<()> {
+        if !state.open {
+            return Err(Error::Message(
+                "Psychevo Application is shutting down".to_string(),
+            ));
+        }
+        if state.threads.get(thread_id).is_some_and(|cell| {
+            cell.operations
+                .iter()
+                .any(|operation| matches!(&operation.kind, ThreadOperationKind::IdleMutation(_)))
+        }) {
+            return Err(thread_busy(thread_id, "history_editing"));
+        }
+        self.admit_thread_operation(state, thread_id)
     }
 
     fn record_activity_transition(
@@ -565,15 +758,86 @@ impl ApplicationRuntime {
     }
 }
 
-fn application_overloaded(scope: &str, limit: usize) -> Error {
+fn application_overloaded(
+    scope: &str,
+    limit: usize,
+    occupancy: usize,
+    oldest_queued: Option<ApplicationQueuedOperationSnapshot>,
+    thread_id: Option<&str>,
+) -> Error {
+    let mut data = serde_json::json!({
+        "kind": "application_overloaded",
+        "scope": scope,
+        "limit": limit,
+        "occupancy": occupancy,
+        "retryable": true,
+        "oldestQueuedAgeMs": oldest_queued.as_ref().map_or(0, |queued| queued.age_ms),
+    });
+    if let Some(queued) = oldest_queued {
+        data["oldestQueuedOperationKind"] = serde_json::Value::String(queued.kind);
+        data["oldestQueuedOperationId"] = serde_json::Value::String(queued.id);
+        if let Some(thread_id) = queued.thread_id {
+            data["oldestQueuedThreadId"] = serde_json::Value::String(thread_id);
+        }
+    }
+    if let Some(thread_id) = thread_id {
+        data["threadId"] = serde_json::Value::String(thread_id.to_string());
+    }
     Error::structured(
         format!("Psychevo Application {scope} operation limit reached ({limit})"),
-        serde_json::json!({
-            "kind": "application_overloaded",
-            "scope": scope,
-            "limit": limit,
-        }),
+        data,
     )
+}
+
+fn application_oldest_queued(
+    state: &ApplicationRuntimeState,
+) -> Option<ApplicationQueuedOperationSnapshot> {
+    let mut oldest = oldest_queued_operation(&state.application_operations.operations)
+        .map(|operation| (None, operation));
+    for (thread_id, cell) in &state.threads {
+        let Some(candidate) = oldest_queued_operation(&cell.operations) else {
+            continue;
+        };
+        if oldest
+            .as_ref()
+            .is_none_or(|(_, current)| candidate.enqueued_at < current.enqueued_at)
+        {
+            oldest = Some((Some(thread_id.as_str()), candidate));
+        }
+    }
+    oldest.map(|(thread_id, operation)| queued_operation_snapshot(operation, thread_id))
+}
+
+fn operations_oldest_queued(
+    operations: &VecDeque<ThreadOperation>,
+    thread_id: Option<&str>,
+) -> Option<ApplicationQueuedOperationSnapshot> {
+    oldest_queued_operation(operations)
+        .map(|operation| queued_operation_snapshot(operation, thread_id))
+}
+
+fn oldest_queued_operation(operations: &VecDeque<ThreadOperation>) -> Option<&ThreadOperation> {
+    operations
+        .iter()
+        .filter(|operation| operation.ready.is_some())
+        .min_by_key(|operation| operation.enqueued_at)
+}
+
+fn queued_operation_snapshot(
+    operation: &ThreadOperation,
+    thread_id: Option<&str>,
+) -> ApplicationQueuedOperationSnapshot {
+    let (kind, id) = match &operation.kind {
+        ThreadOperationKind::Turn(id) => ("turn", id.clone()),
+        ThreadOperationKind::Mutation(id) => ("mutation", id.to_string()),
+        ThreadOperationKind::IdleMutation(id) => ("idle_mutation", id.to_string()),
+    };
+    ApplicationQueuedOperationSnapshot {
+        kind: kind.to_string(),
+        id,
+        thread_id: thread_id.map(str::to_string),
+        age_ms: u64::try_from(operation.enqueued_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+    }
 }
 
 impl ThreadCell {
@@ -587,6 +851,7 @@ impl ThreadCell {
             kind,
             ready: Some(ready_tx),
             durable_accepted,
+            enqueued_at: Instant::now(),
         });
         if self.operations.len() == 1 {
             Self::release_front_waiter(&mut self.operations);
@@ -702,6 +967,24 @@ fn thread_cell_activity(cell: &ThreadCell) -> (bool, Option<String>, usize) {
     )
 }
 
+fn thread_cell_has_turn(cell: &ThreadCell) -> bool {
+    cell.operations
+        .iter()
+        .any(|operation| matches!(&operation.kind, ThreadOperationKind::Turn(_)))
+}
+
+fn thread_busy(thread_id: &str, blocking_operation: &str) -> Error {
+    Error::structured(
+        format!("Thread `{thread_id}` is busy with {blocking_operation}"),
+        serde_json::json!({
+            "kind": "thread_busy",
+            "threadId": thread_id,
+            "blockingOperation": blocking_operation,
+            "retryable": true,
+        }),
+    )
+}
+
 fn thread_turn_queue_position(cell: &ThreadCell) -> usize {
     let active_turn = cell
         .operations
@@ -734,17 +1017,86 @@ impl Drop for ApplicationOperationReservation {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationRuntime, MAX_APPLICATION_OPERATIONS, MAX_THREAD_OPERATIONS};
+    use super::ApplicationRuntime;
+    use crate::application::ApplicationLimits;
     use crate::types::{McpServerInput, McpTransportInput};
-    use serde_json::json;
     use std::path::Path;
     use std::sync::Arc;
 
     #[test]
+    fn idle_mutation_and_turn_admission_are_mutually_exclusive_under_runtime_state() {
+        let runtime = Arc::new(ApplicationRuntime::new(ApplicationLimits::default()));
+        let idle = runtime
+            .reserve_idle_mutation("thread")
+            .expect("idle reservation");
+
+        let error = runtime
+            .reserve_idle_mutation("thread")
+            .err()
+            .expect("idle-only history mutations cannot queue behind each other");
+        assert_eq!(
+            error.structured_data().expect("structured busy")["kind"],
+            "thread_busy"
+        );
+        assert_eq!(
+            error.structured_data().expect("structured busy")["blockingOperation"],
+            "history_editing"
+        );
+        assert_eq!(runtime.thread_operation_count_for_test("thread"), 1);
+
+        let error = runtime
+            .reserve_turn_for_test("thread", "turn-after-idle")
+            .expect_err("Turn cannot pass an idle-only reservation");
+        assert_eq!(
+            error.structured_data().expect("structured busy")["kind"],
+            "thread_busy"
+        );
+        assert_eq!(
+            error.structured_data().expect("structured busy")["blockingOperation"],
+            "history_editing"
+        );
+
+        drop(idle);
+        let turn = runtime
+            .reserve_turn_for_test("thread", "turn-first")
+            .expect("Turn reservation");
+        let error = runtime
+            .reserve_idle_mutation("thread")
+            .err()
+            .expect("idle-only mutation cannot pass a Turn reservation");
+        assert_eq!(
+            error.structured_data().expect("structured busy")["kind"],
+            "thread_busy"
+        );
+        assert_eq!(
+            error.structured_data().expect("structured busy")["blockingOperation"],
+            "turn"
+        );
+        drop(turn);
+        runtime.settle_turn("thread", "turn-first", None);
+    }
+
+    #[test]
+    fn ordinary_thread_mutation_keeps_existing_fifo_admission_semantics() {
+        let runtime = Arc::new(ApplicationRuntime::new(ApplicationLimits::default()));
+        let mutation = runtime
+            .reserve_mutation("thread")
+            .expect("ordinary mutation");
+        let turn = runtime
+            .reserve_turn_for_test("thread", "turn")
+            .expect("ordinary mutation does not reject Turn admission");
+
+        drop(turn);
+        runtime.settle_turn("thread", "turn", None);
+        drop(mutation);
+    }
+
+    #[test]
     fn thread_capacity_rejects_before_admitting_the_thirty_third_operation() {
-        let runtime = Arc::new(ApplicationRuntime::new());
+        let limits = ApplicationLimits::default();
+        let runtime = Arc::new(ApplicationRuntime::new(limits));
         let mut reservations = Vec::new();
-        for _ in 0..MAX_THREAD_OPERATIONS {
+        for _ in 0..limits.max_thread_operations {
             reservations.push(
                 runtime
                     .reserve_mutation("thread")
@@ -756,25 +1108,29 @@ mod tests {
             .reserve_mutation("thread")
             .err()
             .expect("thirty-third Thread operation");
-        assert_eq!(
-            error.structured_data(),
-            Some(&json!({
-                "kind": "application_overloaded",
-                "scope": "thread",
-                "limit": MAX_THREAD_OPERATIONS,
-            }))
-        );
+        let data = error.structured_data().expect("structured overload");
+        assert_eq!(data["kind"], "application_overloaded");
+        assert_eq!(data["scope"], "thread");
+        assert_eq!(data["limit"], limits.max_thread_operations);
+        assert_eq!(data["occupancy"], limits.max_thread_operations);
+        assert_eq!(data["retryable"], true);
+        assert_eq!(data["threadId"], "thread");
+        assert!(data["oldestQueuedAgeMs"].as_u64().is_some());
+        assert_eq!(data["oldestQueuedOperationKind"], "mutation");
+        assert!(data["oldestQueuedOperationId"].as_str().is_some());
+        assert_eq!(data["oldestQueuedThreadId"], "thread");
         assert_eq!(
             runtime.lock_state().accepted_operations,
-            MAX_THREAD_OPERATIONS
+            limits.max_thread_operations
         );
     }
 
     #[test]
     fn application_capacity_rejects_before_admitting_the_sixty_fifth_operation() {
-        let runtime = Arc::new(ApplicationRuntime::new());
+        let limits = ApplicationLimits::default();
+        let runtime = Arc::new(ApplicationRuntime::new(limits));
         let mut reservations = Vec::new();
-        for index in 0..MAX_APPLICATION_OPERATIONS {
+        for index in 0..limits.max_operations {
             reservations.push(
                 runtime
                     .reserve_mutation(&format!("thread-{index}"))
@@ -786,23 +1142,24 @@ mod tests {
             .reserve_mutation("overflow")
             .err()
             .expect("sixty-fifth Application operation");
-        assert_eq!(
-            error.structured_data(),
-            Some(&json!({
-                "kind": "application_overloaded",
-                "scope": "application",
-                "limit": MAX_APPLICATION_OPERATIONS,
-            }))
-        );
+        let data = error.structured_data().expect("structured overload");
+        assert_eq!(data["kind"], "application_overloaded");
+        assert_eq!(data["scope"], "application");
+        assert_eq!(data["limit"], limits.max_operations);
+        assert_eq!(data["occupancy"], limits.max_operations);
+        assert_eq!(data["retryable"], true);
+        assert!(data.get("threadId").is_none());
+        assert!(data["oldestQueuedAgeMs"].as_u64().is_some());
+        assert!(data.get("oldestQueuedOperationId").is_none());
         assert_eq!(
             runtime.lock_state().accepted_operations,
-            MAX_APPLICATION_OPERATIONS
+            limits.max_operations
         );
     }
 
     #[tokio::test]
     async fn mcp_runtime_is_lazy_thread_owned_and_released_with_thread_lifecycle() {
-        let runtime = ApplicationRuntime::new();
+        let runtime = ApplicationRuntime::new(ApplicationLimits::default());
         let first = runtime.mcp_runtime("thread-a");
         let same_thread = runtime.mcp_runtime("thread-a");
         let other_thread = runtime.mcp_runtime("thread-b");
@@ -859,8 +1216,8 @@ mod tests {
 
     #[test]
     fn agent_supervisor_pause_state_is_application_scoped_and_parent_scoped() {
-        let first = ApplicationRuntime::new();
-        let second = ApplicationRuntime::new();
+        let first = ApplicationRuntime::new(ApplicationLimits::default());
+        let second = ApplicationRuntime::new(ApplicationLimits::default());
 
         first.agent_supervisor.set_spawning_paused("thread-a", true);
 

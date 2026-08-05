@@ -1,50 +1,77 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeSet;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+#[cfg(test)]
+use crate::tui::resolve_session_ref_from_summaries;
+use crate::tui::{
+    AgentRelationshipStatus, AgentRunStatus, AuxiliaryAgentTask, AuxiliaryShellTask, ConfigScope,
+    FrameworkClient, FullscreenUi, GatewayActivity, GatewayThreadSelector, HistoryReplayItem,
+    Result, RunMode, RunningTask, RunningTurnEvents, SessionListView, SetThreadMainAgentSelection,
+    TUI_INTERNAL_SESSION_SOURCES, ThreadItem, ThreadListQuery, ThreadMainAgentSelection,
+    ThreadModelSelection, ThreadSummary, TranscriptKind, TuiApp, TuiLiveEvent,
+    TuiSessionDisplaySummary, Value, anyhow, assistant_message_keeps_tool_calls_active,
+    canonicalize_cwd, history_tool_calls_from_message, instant_from_wall_timestamp_ms,
+    load_effective_tui_slash_config, normalize_reasoning_effort, resolve_agent_definition,
+    short_session, user_text_from_item, validate_model_spec, validate_variant,
+};
 pub(crate) const LIVE_AGENT_RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 impl TuiApp {
     pub(crate) fn refresh_selected_model(&mut self) {
-        self.selected_model = selected_configured_model(&self.run_options(String::new()))
+        self.selected_model = self
+            .configuration()
             .ok()
+            .and_then(|configuration| configuration.selected_model().ok())
             .flatten();
     }
 
     pub(crate) async fn refresh_current_session_title(&mut self) -> Result<()> {
         let summary = match self.current_session.as_deref() {
-            Some(session_id) => self.state_runtime.session_summary(session_id).await?,
+            Some(session_id) => Some(
+                self.runtime
+                    .client()
+                    .resume_thread(session_id.to_string())
+                    .await?
+                    .summary()
+                    .await?,
+            ),
             None => None,
         };
         self.current_session_title = summary
-            .and_then(|summary| summary.title)
+            .as_ref()
+            .and_then(|summary| summary.title.clone())
             .filter(|title| !title.trim().is_empty());
+        self.current_session_forked_from =
+            summary.and_then(|summary| summary.forked_from_thread_id);
         self.refresh_current_session_relationships().await?;
         Ok(())
     }
 
     async fn refresh_current_session_relationships(&mut self) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
-            self.current_session_forked_from = None;
             self.current_agent_breadcrumb = None;
             return Ok(());
         };
-        self.current_session_forked_from = self
-            .state_runtime
-            .session_metadata(session_id)
-            .await?
-            .and_then(|metadata| {
-                metadata
-                    .get("forkedFromThreadId")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            });
+        let thread = self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await?;
         self.current_agent_breadcrumb =
-            if let Some(edge) = self.state_runtime.find_agent_edge(session_id).await? {
+            if let Some(relationship) = thread.agent_relationship().await? {
                 let sibling_count = self
-                    .state_runtime
-                    .list_agent_edges_for_parent(&edge.parent_session_id)
+                    .runtime
+                    .client()
+                    .resume_thread(relationship.parent_thread_id.clone())
+                    .await?
+                    .agent_children()
                     .await?
                     .len();
-                let mut parts = vec![format!("parent {}", short_session(&edge.parent_session_id))];
+                let mut parts = vec![format!(
+                    "parent {}",
+                    short_session(&relationship.parent_thread_id)
+                )];
                 if sibling_count > 1 {
                     parts.push("siblings Alt+Up/Right".to_string());
                 }
@@ -63,19 +90,24 @@ impl TuiApp {
             }
             return Ok(());
         };
-        let store = &self.state_runtime;
-        let metadata = store.session_metadata(session_id).await?;
-        match main_agent_from_session_metadata(metadata.as_ref()) {
-            LoadedMainAgent::Default => {
-                self.current_agent = session_base_agent_name_from_metadata(metadata.as_ref());
+        match self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await?
+            .main_agent_selection()
+            .await?
+        {
+            ThreadMainAgentSelection::Default { base_agent } => {
+                self.current_agent = base_agent;
                 self.current_agent_explicit_default = true;
             }
-            LoadedMainAgent::Agent(agent) => {
-                self.current_agent = Some(agent);
+            ThreadMainAgentSelection::Agent { input } => {
+                self.current_agent = Some(input);
                 self.current_agent_explicit_default = false;
             }
-            LoadedMainAgent::Missing => {
-                if let Some(agent) = session_base_agent_name_from_metadata(metadata.as_ref()) {
+            ThreadMainAgentSelection::Missing { base_agent } => {
+                if let Some(agent) = base_agent {
                     self.current_agent = Some(agent);
                     self.current_agent_explicit_default = true;
                 } else {
@@ -103,41 +135,46 @@ impl TuiApp {
             .or_else(|| Some(input.to_string()))
     }
 
-    pub(crate) fn main_agent_metadata_for_input(&self, input: &str) -> Result<Value> {
+    pub(crate) fn main_agent_selection_for_input(
+        &self,
+        input: &str,
+    ) -> Result<SetThreadMainAgentSelection> {
         let catalog = self
             .current_agent_catalog()
             .ok_or_else(|| anyhow!("agents are disabled"))?;
         let agent = resolve_agent_definition(&catalog, input, &self.cwd, &self.env_map)?;
-        Ok(main_agent_metadata(
-            input,
-            &agent.name,
-            agent.source,
-            agent.file_path.as_ref(),
-        ))
+        Ok(SetThreadMainAgentSelection::Agent {
+            input: input.to_string(),
+            name: agent.name,
+            source: agent.source,
+            path: agent.file_path,
+        })
     }
 
     pub(crate) fn schedule_main_agent_selection_persistence(&self, session_id: &str) -> Result<()> {
-        let value = if self.current_agent_explicit_default {
-            Some(main_agent_default_metadata())
+        let selection = if self.current_agent_explicit_default {
+            Some(SetThreadMainAgentSelection::Default)
         } else if let Some(input) = self.current_agent.as_deref() {
-            Some(self.main_agent_metadata_for_input(input)?)
+            Some(self.main_agent_selection_for_input(input)?)
         } else {
             None
         };
-        let Some(value) = value else {
+        let Some(selection) = selection else {
             return Ok(());
         };
-        let state = self.state_runtime.clone();
+        let framework = self.runtime.client().clone();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            if let Err(error) = state
-                .set_session_metadata_field(
-                    &session_id,
-                    SESSION_MAIN_AGENT_METADATA_KEY,
-                    Some(value),
-                )
-                .await
-            {
+            let result = async {
+                framework
+                    .resume_thread(session_id.clone())
+                    .await?
+                    .set_main_agent_selection(selection)
+                    .await?;
+                Ok::<(), psychevo::Error>(())
+            }
+            .await;
+            if let Err(error) = result {
                 eprintln!(
                     "failed to persist main agent selection for session {session_id}: {error:#}"
                 );
@@ -168,7 +205,7 @@ impl TuiApp {
         let id = self.resolve_session_ref(reference).await?;
         let summary = self.session_summary_required(&id).await?;
         self.adopt_session_cwd(&summary)?;
-        self.state_runtime.resume_session(&id).await?;
+        self.runtime.client().resume_thread(id.clone()).await?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
@@ -190,24 +227,27 @@ impl TuiApp {
             ui.push_status("finish the current shell command before opening an agent session");
             return Ok(());
         }
-        let child_session_id = {
-            let store = &self.state_runtime;
-            let edge = store
-                .find_agent_edge(target)
-                .await?
-                .ok_or_else(|| anyhow!("agent not found: {target}"))?;
-            store.resume_session(&edge.child_session_id).await?;
-            edge.child_session_id
-        };
+        let child_session_id = self
+            .runtime
+            .client()
+            .agent_relationship(target)
+            .await?
+            .ok_or_else(|| anyhow!("agent not found: {target}"))?
+            .child_thread_id;
+        self.runtime
+            .client()
+            .resume_thread(child_session_id.clone())
+            .await?;
         let summary = self.session_summary_required(&child_session_id).await?;
         self.adopt_session_cwd(&summary)?;
-        self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
+        self.detach_foreground_for_session_switch(ui, Some(child_session_id.clone()))
+            .await;
         self.current_session = Some(child_session_id.clone());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
         self.refresh_current_session_title().await?;
         self.refresh_current_session_agent().await?;
-        ui.bottom_panel = None;
+        ui.clear_session_local_bottom_panel();
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, &child_session_id);
@@ -220,7 +260,7 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
-        if ui.running.is_some() {
+        if ui.foreground_turn_active() {
             return Ok(false);
         }
         let Some(session_id) = self.current_session.clone() else {
@@ -231,14 +271,18 @@ impl TuiApp {
             return Ok(false);
         }
         self.last_live_agent_reload_check = Some(now);
-        let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&session_id).await? else {
+        let thread = self
+            .runtime
+            .client()
+            .resume_thread(session_id.clone())
+            .await?;
+        let Some(relationship) = thread.agent_relationship().await? else {
             return Ok(false);
         };
-        if edge.status != psychevo::__product::persistence::AgentEdgeStatus::Open {
+        if relationship.status != AgentRelationshipStatus::Open {
             return Ok(false);
         }
-        let message_count = store.load_tui_message_summaries(&session_id).await?.len();
+        let message_count = thread.summary().await?.message_count.max(0) as usize;
         if message_count <= ui.loaded_session_message_count {
             return Ok(false);
         }
@@ -255,32 +299,36 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> bool {
+        if let Some(starting) = ui.starting_turn.take() {
+            let queue_owner_id = starting.queue_owner_id.clone();
+            let (cleanup, display_prompt, images) = starting.into_cleanup_with_input();
+            ui.starting_turn_cleanups.push(cleanup);
+            ui.discard_unbound_optimistic_rows();
+            ui.finish_turn();
+            ui.restore_failed_turn_start_to_composer(&queue_owner_id, display_prompt, images);
+            ui.interrupt_requested = true;
+            ui.follow_transcript_if_needed();
+            ui.refresh_sidebar(self);
+            return true;
+        }
         let current_session = self.current_session.clone();
         let mut interrupted = false;
         if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
-            interrupted |= self.gateway.interrupt_turn(selector).await;
+            interrupted |= self.runtime.gateway().interrupt_turn(selector).await;
         }
         interrupted |= ui.request_interrupt(current_session.as_deref());
         if let Some(session_id) = current_session.as_deref() {
-            let control = self.application.agent_control();
-            let value = control.status_value_for(Some(session_id), false).await;
-            let targets = value
-                .get("agents")
-                .and_then(Value::as_array)
+            let control = self.runtime.application().agent_control();
+            let targets = control
+                .status_records(Some(session_id), false)
+                .await
                 .into_iter()
-                .flatten()
-                .filter(|agent| {
-                    matches!(
-                        agent.get("status").and_then(Value::as_str),
-                        Some("pending_init" | "running")
-                    )
-                })
                 .filter_map(|agent| {
-                    agent
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .or_else(|| agent.get("child_session_id").and_then(Value::as_str))
-                        .map(ToOwned::to_owned)
+                    matches!(
+                        agent.status,
+                        AgentRunStatus::PendingInit | AgentRunStatus::Running
+                    )
+                    .then_some(agent.id)
                 })
                 .collect::<Vec<_>>();
             for target in targets {
@@ -308,12 +356,19 @@ impl TuiApp {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&current).await? else {
+        let Some(relationship) = self
+            .runtime
+            .client()
+            .resume_thread(current)
+            .await?
+            .agent_relationship()
+            .await?
+        else {
             ui.push_status("no parent agent session");
             return Ok(());
         };
-        self.open_session_direct(ui, &edge.parent_session_id).await
+        self.open_session_direct(ui, &relationship.parent_thread_id)
+            .await
     }
 
     pub(crate) async fn open_agent_sibling_session(
@@ -324,13 +379,23 @@ impl TuiApp {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&current).await? else {
+        let Some(relationship) = self
+            .runtime
+            .client()
+            .resume_thread(current.clone())
+            .await?
+            .agent_relationship()
+            .await?
+        else {
             ui.push_status("no sibling agent sessions");
             return Ok(());
         };
-        let siblings = store
-            .list_agent_edges_for_parent(&edge.parent_session_id)
+        let siblings = self
+            .runtime
+            .client()
+            .resume_thread(relationship.parent_thread_id)
+            .await?
+            .agent_children()
             .await?;
         if siblings.len() <= 1 {
             ui.push_status("no sibling agent sessions");
@@ -338,10 +403,10 @@ impl TuiApp {
         }
         let current_index = siblings
             .iter()
-            .position(|sibling| sibling.child_session_id == current)
+            .position(|sibling| sibling.child_thread_id == current)
             .unwrap_or(0) as isize;
         let next = (current_index + direction).rem_euclid(siblings.len() as isize) as usize;
-        self.open_session_direct(ui, &siblings[next].child_session_id)
+        self.open_session_direct(ui, &siblings[next].child_thread_id)
             .await
     }
 
@@ -352,14 +417,13 @@ impl TuiApp {
     ) -> Result<()> {
         let summary = self.session_summary_required(session_id).await?;
         self.adopt_session_cwd(&summary)?;
-        self.detach_running_for_session_switch(ui, None);
-        self.state_runtime.resume_session(session_id).await?;
+        self.detach_foreground_for_session_switch(ui, None).await;
         self.current_session = Some(session_id.to_string());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
         self.refresh_current_session_title().await?;
         self.refresh_current_session_agent().await?;
-        ui.bottom_panel = None;
+        ui.clear_session_local_bottom_panel();
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, session_id);
@@ -369,18 +433,27 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn detach_running_for_session_switch(
+    pub(crate) async fn detach_foreground_for_session_switch(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         child_session_id: Option<String>,
     ) {
+        if let Some(starting) = ui.starting_turn.take() {
+            let queue_owner_id = starting.queue_owner_id.clone();
+            ui.starting_turn_cleanups.push(starting.into_cleanup());
+            ui.queued_inputs.retain(|input| {
+                crate::tui::queued_input_session_id(input) != Some(queue_owner_id.as_str())
+            });
+            ui.discard_unbound_optimistic_rows();
+            ui.finish_turn();
+        }
         let owner_session = ui
             .running
             .as_ref()
             .and_then(|running| running.session_id.clone());
         let mut pending = std::mem::take(&mut ui.deferred_stream_events);
         if let Some(running) = &mut ui.running {
-            while let Ok(event) = running.events.try_recv() {
+            while let Some(event) = running.events.try_recv() {
                 pending.push_back(event);
             }
         }
@@ -390,14 +463,18 @@ impl TuiApp {
             let pending = pending
                 .into_iter()
                 .filter_map(|event| match event {
-                    TuiLiveEvent::Runtime(event) => Some(event),
+                    TuiLiveEvent::Turn(event) => Some(event),
                     TuiLiveEvent::Gateway(event) => {
                         self.apply_gateway_event(ui, owner_session.as_deref(), *event);
                         None
                     }
+                    TuiLiveEvent::Shell(event) => {
+                        self.apply_fullscreen_shell_event(ui, event);
+                        None
+                    }
                 })
                 .collect();
-            self.apply_pending_fullscreen_stream_events_without_frames(ui, pending)
+            self.apply_pending_fullscreen_turn_events_without_frames(ui, pending)
         };
         if had_pending {
             ui.follow_transcript_if_needed();
@@ -411,9 +488,11 @@ impl TuiApp {
             RunningTask::Agent(task) => {
                 ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
                     session_id: owner_session,
+                    turn_id: running.turn_id,
                     child_session_id,
                     visible_live: true,
                     pending_unowned_live_events: Vec::new(),
+                    approval_rx: ui.approval_rx.take(),
                     control: running.control,
                     events: running.events,
                     task,
@@ -422,13 +501,22 @@ impl TuiApp {
             RunningTask::UserShell(task) => {
                 ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
                     session_id: owner_session,
-                    control: running.control,
+                    control: running
+                        .control
+                        .shell_control()
+                        .expect("a foreground user shell owns typed Shell control"),
                     rx: match running.events {
-                        RunningTurnEvents::Runtime(rx) => rx,
+                        RunningTurnEvents::Shell(rx) => rx,
+                        RunningTurnEvents::Turn(_) => {
+                            unreachable!("a foreground user shell owns typed Shell events")
+                        }
+                        #[cfg(test)]
+                        RunningTurnEvents::TurnTest(_) => {
+                            unreachable!("a foreground user shell owns typed Shell events")
+                        }
                         #[cfg(test)]
                         RunningTurnEvents::Gateway(_) => {
-                            let (_tx, rx) = mpsc::unbounded_channel();
-                            rx
+                            unreachable!("a foreground user shell owns typed Shell events")
                         }
                     },
                     task,
@@ -447,7 +535,7 @@ impl TuiApp {
             return;
         };
         for event in events {
-            ui.apply_stream_event_for_session(
+            ui.apply_turn_event_for_session(
                 event,
                 self.thinking_visible,
                 self.debug,
@@ -499,10 +587,12 @@ impl TuiApp {
                 self.model_state_path.display()
             ));
         }
-        let value = set_default_model_with_reasoning(
-            &self.home,
-            &self.cwd,
-            global,
+        let value = self.configuration()?.set_default_model(
+            if global {
+                ConfigScope::Global
+            } else {
+                ConfigScope::Local
+            },
             &model,
             reasoning_effort.as_deref(),
         )?;
@@ -563,27 +653,26 @@ impl TuiApp {
         let Some((provider, model_id)) = model.split_once('/') else {
             return Ok(());
         };
-        let store = &self.state_runtime;
-        if store.session_summary(session_id).await?.is_none() {
-            return Ok(());
-        }
-        store
-            .set_session_model(session_id, provider, model_id)
-            .await?;
-        let mut metadata = serde_json::Map::new();
-        metadata.insert("model".to_string(), Value::String(model.to_string()));
-        if let Some(reasoning_effort) = self.current_variant.as_deref() {
-            metadata.insert(
-                "reasoningEffort".to_string(),
-                Value::String(reasoning_effort.to_string()),
-            );
-        }
-        store
-            .set_session_metadata_field(
-                session_id,
-                SESSION_COMPOSER_MODEL_METADATA_KEY,
-                Some(Value::Object(metadata)),
-            )
+        let thread = match self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await
+        {
+            Ok(thread) => thread,
+            Err(psychevo::Error::Message(message))
+                if message == format!("thread not found: {session_id}") =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        thread
+            .set_model_selection(ThreadModelSelection {
+                provider: provider.to_string(),
+                model: model_id.to_string(),
+                reasoning_effort: self.current_variant.clone(),
+            })
             .await?;
         Ok(())
     }
@@ -623,30 +712,28 @@ impl TuiApp {
             return Err(anyhow!("no current session to rename"));
         };
         let title = self
-            .state_runtime
-            .set_session_title(session_id, &title)
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
+            .await?
+            .set_title(&title)
             .await?;
         self.current_session_title = Some(title.clone());
         Ok(title)
     }
 
-    pub(crate) fn undo_options(&self) -> Result<SessionUndoOptions> {
-        let Some(session_id) = self.current_session.clone() else {
+    pub(crate) async fn current_framework_thread(&self) -> Result<psychevo::Thread> {
+        let Some(session_id) = self.current_session.as_ref() else {
             return Err(anyhow!("no current session to undo"));
         };
-        Ok(SessionUndoOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            snapshot_root: self.home.join("snapshots"),
-            session_id,
-        })
+        Ok(self.runtime.client().resume_thread(session_id).await?)
     }
 
     pub(crate) async fn undo_session_no_print(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<String> {
-        let result = undo_session(self.undo_options()?).await?;
+        let result = self.current_framework_thread().await?.undo().await?;
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         ui.set_composer_text(&result.prompt);
@@ -661,7 +748,7 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<String> {
-        let result = redo_session(self.undo_options()?).await?;
+        let result = self.current_framework_thread().await?.redo().await?;
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         ui.clear_composer();
@@ -700,13 +787,11 @@ impl TuiApp {
     }
 
     #[cfg(test)]
-    pub(crate) async fn sessions(&self) -> Result<Vec<SessionSummary>> {
-        Ok(self
-            .state_runtime
-            .list_sessions_with_sources(&[])
+    pub(crate) async fn sessions(&self) -> Result<Vec<ThreadSummary>> {
+        Ok(all_thread_summaries(self.runtime.client(), false)
             .await?
             .into_iter()
-            .filter(human_visible_tui_session_summary)
+            .filter(human_visible_tui_thread_summary)
             .collect())
     }
 
@@ -714,32 +799,32 @@ impl TuiApp {
         &self,
         view: SessionListView,
     ) -> Result<Vec<TuiSessionDisplaySummary>> {
-        tui_sessions_for_store(&self.state_runtime, view).await
+        tui_sessions_for_client(self.runtime.client(), view).await
     }
 
-    pub(crate) async fn session_summary_required(
-        &self,
-        session_id: &str,
-    ) -> Result<SessionSummary> {
-        self.state_runtime
-            .session_summary(session_id)
+    pub(crate) async fn session_summary_required(&self, session_id: &str) -> Result<ThreadSummary> {
+        Ok(self
+            .runtime
+            .client()
+            .resume_thread(session_id.to_string())
             .await?
-            .ok_or_else(|| anyhow!("session not found: {session_id}"))
+            .summary()
+            .await?)
     }
 
-    pub(crate) fn adopt_session_cwd(&mut self, summary: &SessionSummary) -> Result<()> {
+    pub(crate) fn adopt_session_cwd(&mut self, summary: &ThreadSummary) -> Result<()> {
         let next_cwd = canonicalize_cwd(Path::new(&summary.cwd))?;
         if next_cwd == self.cwd {
             return Ok(());
         }
+        let next_slash_config = load_effective_tui_slash_config(
+            self.runtime.client(),
+            &self.env_map,
+            next_cwd.clone(),
+        )?;
         self.cwd = next_cwd;
         self.cwd_key = self.cwd.to_string_lossy().to_string();
-        self.slash_config = load_effective_tui_slash_config(
-            &self.env_map,
-            self.state_runtime.clone(),
-            self.cwd.clone(),
-            self.config_path.clone(),
-        )?;
+        self.slash_config = next_slash_config;
         self.refresh_selected_model();
         Ok(())
     }
@@ -756,65 +841,102 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             return Ok(());
         };
-        let metadata = self.state_runtime.session_metadata(&session_id).await?;
-        ui.sidebar_context_limit = session_context_limit_with_parent_fallback(
-            &self.state_runtime,
-            &session_id,
-            metadata.as_ref(),
-        )
-        .await?;
-        let summaries = self
-            .state_runtime
-            .load_tui_message_summaries(&session_id)
+        let thread = self
+            .runtime
+            .client()
+            .resume_thread(session_id.clone())
             .await?;
-        ui.session_usage_summary = Some(
-            session_usage_summary(SessionUsageOptions {
-                state: self.state_runtime.clone(),
-                session_id: session_id.clone(),
-            })
-            .await?,
-        );
-        ui.loaded_session_message_count = summaries.len();
-        let summary_count = summaries.len();
+        ui.sidebar_context_limit = thread.context_limit_with_parent_fallback().await?;
+        let history = thread.history();
+        ui.session_usage_summary = Some(thread.usage_summary().await?);
         let activity = self
             .sync_gateway_activity_for_session(ui, &session_id)
             .await;
         let live_owner = ui.local_status_has_running(Some(&session_id)) || activity.running;
         let suppress_latest_terminal_meta = live_owner;
-        let active_tool_call_ids = history_active_tool_call_ids_for_reload(&summaries, live_owner)?;
-        let mut history_prompts = Vec::new();
-        for (index, summary) in summaries.into_iter().enumerate() {
-            let session_seq = summary.session_seq;
-            let value = serde_json::to_value(summary.message)?;
-            let is_user = value.get("role").and_then(Value::as_str) == Some("user");
-            if is_user && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
-            {
-                history_prompts.push(text);
+        let mut active_tool_call_ids = BTreeSet::new();
+        let mut after = None;
+        loop {
+            let page = history.replay_after(after, Some(200)).await?;
+            if let Some(warning) = page.warnings.first() {
+                return Err(anyhow!(
+                    "stored session history is invalid at message {} ({:?})",
+                    warning.session_seq,
+                    warning.kind
+                ));
             }
-            let first_new_row = ui.transcript.len();
-            ui.push_history_message_with_projection_options(
-                &value,
-                summary.usage.as_ref(),
-                summary.metadata.as_ref(),
-                summary.accounting.as_ref(),
-                suppress_latest_terminal_meta && index + 1 == summary_count,
-                Some(&active_tool_call_ids),
-            );
-            if is_user
-                && let Some(row) = ui.transcript[first_new_row..]
-                    .iter_mut()
-                    .find(|row| row.kind == TranscriptKind::Prompt)
-            {
-                row.transcript_entry_id = Some(format!("message:{session_seq}"));
-                row.transcript_message_seq = Some(session_seq);
-            }
+            let summaries = page
+                .items
+                .into_iter()
+                .filter_map(|item| match item {
+                    HistoryReplayItem::Available { item } => Some(*item),
+                    HistoryReplayItem::Unavailable { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            active_tool_call_ids.extend(history_active_tool_call_ids_for_reload(
+                &summaries, live_owner,
+            )?);
+            let Some(next_after) = page.next_after else {
+                break;
+            };
+            after = Some(next_after);
         }
+
+        let mut history_prompts = Vec::new();
+        let mut loaded_message_count = 0usize;
+        let mut after = None;
+        loop {
+            let page = history.replay_after(after, Some(200)).await?;
+            if let Some(warning) = page.warnings.first() {
+                return Err(anyhow!(
+                    "stored session history is invalid at message {} ({:?})",
+                    warning.session_seq,
+                    warning.kind
+                ));
+            }
+            let next_after = page.next_after;
+            let summaries = page
+                .items
+                .into_iter()
+                .filter_map(|item| match item {
+                    HistoryReplayItem::Available { item } => Some(*item),
+                    HistoryReplayItem::Unavailable { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            let page_len = summaries.len();
+            for (index, summary) in summaries.into_iter().enumerate() {
+                loaded_message_count = loaded_message_count.saturating_add(1);
+                let session_seq = summary.session_seq;
+                let value = serde_json::to_value(&summary.message)?;
+                let is_user = value.get("role").and_then(Value::as_str) == Some("user");
+                if is_user && let Some(text) = user_text_from_item(&value, &summary) {
+                    history_prompts.push(text);
+                }
+                let first_new_row = ui.transcript.len();
+                ui.push_thread_item_with_projection_options(
+                    &summary,
+                    &value,
+                    suppress_latest_terminal_meta && next_after.is_none() && index + 1 == page_len,
+                    Some(&active_tool_call_ids),
+                );
+                if is_user
+                    && let Some(row) = ui.transcript[first_new_row..]
+                        .iter_mut()
+                        .find(|row| row.kind == TranscriptKind::Prompt)
+                {
+                    row.transcript_entry_id = Some(format!("message:{session_seq}"));
+                    row.transcript_message_seq = Some(session_seq);
+                }
+            }
+            let Some(next_after) = next_after else {
+                break;
+            };
+            after = Some(next_after);
+        }
+        ui.loaded_session_message_count = loaded_message_count;
         let agent_catalog = self.current_agent_catalog();
-        let agent_edges = self
-            .state_runtime
-            .list_agent_edges_for_parent(&session_id)
-            .await?;
-        ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
+        let agent_relationships = thread.agent_children().await?;
+        ui.reconcile_history_agent_rows(&agent_relationships, agent_catalog.as_ref());
         ui.visible_turn_started = ui
             .foreign_gateway_activity_started(&session_id)
             .or_else(|| {
@@ -825,7 +947,9 @@ impl TuiApp {
             ui.turn_session_id = Some(session_id.clone());
         }
         ui.replace_session_history_prompts(history_prompts);
-        if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
+        if activity.running
+            && activity.owner_id.as_deref() != Some(self.runtime.gateway().owner_id())
+        {
             self.replay_foreign_gateway_live_events_for_session(ui, &session_id)
                 .await?;
         }
@@ -834,16 +958,33 @@ impl TuiApp {
         Ok(())
     }
 
+    pub(crate) async fn reload_invalidated_turn_projection(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<bool> {
+        if !ui.turn_projection_invalid || self.current_session.is_none() {
+            return Ok(false);
+        }
+        ui.clear_transcript();
+        self.load_current_session_history(ui).await?;
+        ui.turn_projection_invalid = false;
+        ui.push_status("live turn projection reloaded from authoritative history");
+        Ok(true)
+    }
+
     pub(crate) async fn sync_gateway_activity_for_session(
         &self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
     ) -> GatewayActivity {
         let activity = self
-            .gateway
+            .runtime
+            .gateway()
             .activity_for_selector(GatewayThreadSelector::thread_id(session_id))
             .await;
-        if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
+        if activity.running
+            && activity.owner_id.as_deref() != Some(self.runtime.gateway().owner_id())
+        {
             ui.observe_foreign_gateway_activity(session_id, &activity);
         } else {
             ui.clear_foreign_gateway_activity(session_id);
@@ -853,40 +994,28 @@ impl TuiApp {
 }
 
 pub(crate) async fn latest_human_visible_session_id(
-    store: &StateRuntime,
+    client: &FrameworkClient,
 ) -> Result<Option<String>> {
-    Ok(tui_sessions_for_store(store, SessionListView::Active)
+    Ok(tui_sessions_for_client(client, SessionListView::Active)
         .await?
         .into_iter()
         .next()
         .map(|session| session.summary.id))
 }
 
-pub(crate) async fn tui_sessions_for_store(
-    store: &StateRuntime,
+pub(crate) async fn tui_sessions_for_client(
+    client: &FrameworkClient,
     view: SessionListView,
 ) -> Result<Vec<TuiSessionDisplaySummary>> {
-    let sessions = match view {
-        SessionListView::Active => store.list_sessions_with_sources(&[]).await?,
-        SessionListView::Archived => store.list_archived_sessions_with_sources(&[]).await?,
-    };
+    let sessions = all_thread_summaries(client, view == SessionListView::Archived).await?;
     let mut visible = Vec::new();
     for summary in sessions {
-        if !human_visible_tui_session_summary(&summary) {
+        if !human_visible_tui_thread_summary(&summary) {
             continue;
         }
-        let messages = store.load_tui_message_summaries(&summary.id).await?;
-        let visible_message_count = visible_tui_message_count(&messages)?;
-        let forked_from_thread_id =
-            store
-                .session_metadata(&summary.id)
-                .await?
-                .and_then(|metadata| {
-                    metadata
-                        .get("forkedFromThreadId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                });
+        let thread = client.resume_thread(summary.id.clone()).await?;
+        let visible_message_count = thread.history().display_message_count().await?;
+        let forked_from_thread_id = summary.forked_from_thread_id.clone();
         visible.push(TuiSessionDisplaySummary {
             project_label: session_project_label(&summary.cwd),
             project_display_path: session_project_display_path(&summary.cwd),
@@ -898,8 +1027,31 @@ pub(crate) async fn tui_sessions_for_store(
     Ok(visible)
 }
 
-pub(crate) fn human_visible_tui_session_summary(summary: &SessionSummary) -> bool {
-    summary.parent_session_id.is_none()
+pub(crate) async fn all_thread_summaries(
+    client: &FrameworkClient,
+    archived: bool,
+) -> Result<Vec<ThreadSummary>> {
+    let mut summaries = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = client
+            .list_threads(ThreadListQuery {
+                archived,
+                cursor,
+                limit: 200,
+                ..ThreadListQuery::default()
+            })
+            .await?;
+        summaries.extend(page.threads);
+        let Some(next) = page.next_cursor else {
+            return Ok(summaries);
+        };
+        cursor = Some(next);
+    }
+}
+
+pub(crate) fn human_visible_tui_thread_summary(summary: &ThreadSummary) -> bool {
+    summary.parent_thread_id.is_none()
         && !TUI_INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str())
 }
 
@@ -916,25 +1068,6 @@ pub(crate) fn session_project_display_path(cwd: &str) -> String {
     Path::new(cwd).display().to_string()
 }
 
-pub(crate) async fn session_context_limit_with_parent_fallback(
-    store: &StateRuntime,
-    session_id: &str,
-    metadata: Option<&Value>,
-) -> Result<Option<u64>> {
-    if let Some(limit) = metadata.and_then(session_context_limit) {
-        return Ok(Some(limit));
-    }
-    let Some(edge) = store.find_agent_edge(session_id).await? else {
-        return Ok(None);
-    };
-    let parent_metadata = store.session_metadata(&edge.parent_session_id).await?;
-    Ok(parent_metadata.as_ref().and_then(session_context_limit))
-}
-
-pub(crate) fn session_context_limit(metadata: &Value) -> Option<u64> {
-    metadata.get("context_limit").and_then(Value::as_u64)
-}
-
 pub(crate) fn live_agent_reload_due(last_check: Option<Instant>, now: Instant) -> bool {
     match last_check {
         Some(last_check) => now.duration_since(last_check) >= LIVE_AGENT_RELOAD_POLL_INTERVAL,
@@ -943,7 +1076,7 @@ pub(crate) fn live_agent_reload_due(last_check: Option<Instant>, now: Instant) -
 }
 
 pub(crate) fn history_active_tool_call_ids_for_reload(
-    summaries: &[TuiMessageSummary],
+    summaries: &[ThreadItem],
     live_owner: bool,
 ) -> Result<BTreeSet<String>> {
     let mut active = BTreeSet::new();

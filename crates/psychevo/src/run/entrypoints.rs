@@ -1,31 +1,49 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use psychevo_ai::Provider;
+use serde_json::json;
+
+use super::execution::{
+    main_agent_input_from_sources, run_live_internal, selected_agent_for_result,
+    session_model_metadata,
+};
+use crate::agents::{
+    AgentDiscoveryOptions, AgentSupervisor, AgentToolContext, agent_catalog_for_prompt,
+    agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_tool_policy,
+    apply_runtime_hooks, discover_agents, effective_run_mode, effective_tool_names,
+    narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
+    skill_catalog_visible_for_tools, spawn_child_agent_background,
+};
+use crate::application::{AgentTaskReceipt, StartAgentTaskRequest};
+use crate::config::{
+    load_plugin_policy_config_lenient, load_project_context_instruction_mode, load_run_config,
+    resolve_run_provider,
+};
+use crate::error::{Error, Result};
+use crate::managed_tools::ensure_rg;
+use crate::paths::canonical_cwd;
+use crate::project_instructions::load_project_instructions;
+use crate::prompt_assembly::{
+    MainPromptPrefixInput, PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput,
+    assemble_main_prompt_prefix, developer_provider_role, prompt_prefix_record,
+    tool_declarations_hash,
+};
+use crate::skills::{
+    SkillDiscoveryOptions, SkillRuntime, discover_skills, resolve_skills_home,
+    skills_visible_for_prompt_with_tools_and_toolsets,
+};
+use crate::tool_surface::{
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
+};
+use crate::types::{
+    PermissionConfig, ReloadContextOptions, ReloadContextResult, RunControl, RunMode, RunOptions,
+    RunResult, RunStreamSink,
+};
 
 pub(crate) const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
 pub(crate) const DEFAULT_AGENT_MAX_TURNS: usize = 128;
 pub(crate) const SESSION_TITLE_MAX_CHARS: usize = 100;
-
-pub async fn run_live(options: RunOptions) -> Result<RunResult> {
-    run_live_internal(options, "run", &["run"], None, None, false, None).await
-}
-
-pub async fn run_live_streaming(
-    options: RunOptions,
-    source: &str,
-    continue_sources: &[&str],
-    stream: RunStreamSink,
-) -> Result<RunResult> {
-    run_live_internal(
-        options,
-        source,
-        continue_sources,
-        Some(stream),
-        None,
-        false,
-        None,
-    )
-    .await
-}
 
 pub async fn run_live_streaming_controlled(
     options: RunOptions,
@@ -244,6 +262,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             home: home.clone(),
+            mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
             image_input_enabled:
                 !crate::prompt_image::model_metadata_explicitly_disallows_image_input(
                     &model_metadata,
@@ -403,50 +422,72 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
     reload_result
 }
 
-pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
-    let cwd = canonical_cwd(&options.cwd)?;
-    if options.prompt.trim().is_empty() {
+pub(crate) async fn start_agent_task(
+    state: crate::state::StateRuntime,
+    supervisor: AgentSupervisor,
+    config_path: Option<std::path::PathBuf>,
+    request: StartAgentTaskRequest,
+) -> Result<AgentTaskReceipt> {
+    let StartAgentTaskRequest {
+        cwd,
+        parent_thread_id,
+        prompt,
+        agent,
+        model,
+        reasoning_effort,
+        mode,
+        permission_mode,
+        approval_handler,
+        inherited_env,
+        selected_parent_agent,
+        no_skills,
+        selected_capability_roots,
+        skill_inputs,
+        mcp_servers,
+    } = request;
+    let cwd = canonical_cwd(&cwd)?;
+    if prompt.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
     let run_options = RunOptions {
-        state: options.state.clone(),
+        state: state.clone(),
         cwd: cwd.clone(),
         snapshot_root: None,
-        session: options.parent_session.clone(),
+        session: parent_thread_id.clone(),
         continue_latest: false,
-        prompt: options.prompt.clone(),
+        prompt: prompt.clone(),
         image_inputs: Vec::new(),
         extract_prompt_image_sources: true,
         prompt_display: None,
         max_context_messages: None,
-        config_path: options.config_path.clone(),
+        config_path: config_path.clone(),
         project_context_override: None,
         sandbox_override: None,
-        model: options.model.clone(),
-        reasoning_effort: options.reasoning_effort.clone(),
+        model: model.clone(),
+        reasoning_effort: reasoning_effort.clone(),
         runtime_ref: None,
         runtime_session_id: None,
         runtime_options: std::collections::BTreeMap::new(),
         include_reasoning: false,
-        mode: options.mode,
-        permission_mode: options.permission_mode,
-        approval_handler: options.approval_handler.clone(),
+        mode,
+        permission_mode,
+        approval_handler: approval_handler.clone(),
         clarify_enabled: false,
-        inherited_env: options.inherited_env.clone(),
-        agent: options.selected_parent_agent.clone(),
+        inherited_env: inherited_env.clone(),
+        agent: selected_parent_agent.clone(),
         external_agent_delegate: None,
         no_agents: false,
-        no_skills: options.no_skills,
-        selected_capability_roots: options.selected_capability_roots.clone(),
-        skill_inputs: options.skill_inputs.clone(),
-        mcp_servers: options.mcp_servers.clone(),
+        no_skills,
+        selected_capability_roots: selected_capability_roots.clone(),
+        skill_inputs: skill_inputs.clone(),
+        mcp_servers: mcp_servers.clone(),
         mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let loaded = load_run_config(&run_options, &cwd)?;
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
-    let mut mcp_inputs = options.mcp_servers.clone();
+    let mut mcp_inputs = mcp_servers.clone();
     mcp_inputs.extend(loaded.config.mcp_servers.clone());
     let mut extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
@@ -454,17 +495,16 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             cwd: &cwd,
             env: &loaded.env,
             plugin_policy: &loaded.config.plugins,
-            selected_capability_roots: &options.selected_capability_roots,
+            selected_capability_roots: &selected_capability_roots,
             mcp_servers: mcp_inputs,
             runtime_tools: Vec::new(),
         })
         .await;
     let spawn_result = async {
-    let permission_mode = options.permission_mode.unwrap_or_default();
+    let permission_mode = permission_mode.unwrap_or_default();
     let approvals_reviewer = loaded.config.permissions.approvals_reviewer;
     let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
-    let mut explicit_agent_inputs = options
-        .selected_parent_agent
+    let mut explicit_agent_inputs = selected_parent_agent
         .iter()
         .cloned()
         .collect::<Vec<_>>();
@@ -476,7 +516,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         explicit_inputs: explicit_agent_inputs,
         no_agents: false,
     })?;
-    let selected_parent_agent = match &options.selected_parent_agent {
+    let selected_parent_agent = match &selected_parent_agent {
         Some(input) => Some(resolve_agent_definition(
             &agent_catalog,
             input,
@@ -487,13 +527,13 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     };
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
-    let effective_mode = effective_run_mode(options.mode, selected_parent_agent.as_ref());
+    let effective_mode = effective_run_mode(mode, selected_parent_agent.as_ref());
     if effective_mode == RunMode::Default {
         extension_assembly.materialize_worker_tools().await;
     } else {
         extension_assembly.activate_worker_runtime();
     }
-    let child_agent = resolve_agent_definition(&agent_catalog, &options.agent, &cwd, &loaded.env)?;
+    let child_agent = resolve_agent_definition(&agent_catalog, &agent, &cwd, &loaded.env)?;
     if selected_parent_agent
         .as_ref()
         .is_some_and(|agent| !agent_policy_allows_agent_spawn(agent))
@@ -538,9 +578,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
     let managed_tools = ensure_rg(&loaded.env).await?;
-    let store = options.state.clone();
+    let store = state.clone();
     let selected_parent_summary = selected_agent_for_result(selected_parent_agent.as_ref());
-    let parent_session_id = if let Some(session_id) = options.parent_session.clone() {
+    let parent_session_id = if let Some(session_id) = parent_thread_id.clone() {
         store.resume_session(&session_id).await?;
         session_id
     } else {
@@ -581,11 +621,6 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         resolved.provider.clone(),
         resolved.inference_idle_timeout_secs,
     )?;
-    let supervisor = options
-        .agent_control
-        .as_ref()
-        .map(|control| control.supervisor.clone())
-        .unwrap_or_default();
     let context = AgentToolContext {
         provider,
         model_provider: resolved.provider.clone(),
@@ -605,9 +640,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         permission_config: loaded.config.permissions.clone(),
         lsp: loaded.config.lsp.clone(),
         permission_mode,
-        approval_handler: options.approval_handler.clone(),
-        state: options.state.clone(),
-        config_path: options.config_path.clone(),
+        approval_handler: approval_handler.clone(),
+        state: state.clone(),
+        config_path: config_path.clone(),
         protected_config_paths: loaded.sources.clone(),
         parent_session_id: parent_session_id.clone(),
         parent_context_snapshot: Vec::new(),
@@ -625,6 +660,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             &loaded.env,
         )?,
         home,
+        mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
         image_input_enabled,
         image_generation,
         web_search: loaded.config.web.search.clone(),
@@ -640,19 +676,16 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             .unwrap_or_default(),
         required_agent_names: Vec::new(),
         spawn_depth_remaining: None,
-        active_team: crate::agents::active_agent_team_context_for_session(
-            &options.state,
-            &parent_session_id,
-        )
+        active_team: crate::agents::active_agent_team_context_for_session(&state, &parent_session_id)
         .await
         .ok()
         .flatten(),
         external_delegate: None,
         supervisor,
     };
-    let agent = spawn_child_agent_background(context, child_agent, options.prompt).await?;
-    Ok(AgentSpawnResult {
-        parent_session_id,
+    let agent = spawn_child_agent_background(context, child_agent, prompt).await?;
+    Ok(AgentTaskReceipt {
+        thread_id: parent_session_id,
         agent,
     })
     }

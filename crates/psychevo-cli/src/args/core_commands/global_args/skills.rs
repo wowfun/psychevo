@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum SkillsCommand {
     #[command(about = "List discoverable skills")]

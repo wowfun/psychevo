@@ -1,3 +1,11 @@
+use crate::tui::support_running::queued_input_session_id;
+use crate::tui::{
+    CompactionReason, FullscreenUi, PendingImageAttachment, PendingInputAction, PendingInputRef,
+    QueuedInput, QueuedSteerId, RunningTask, TuiApp, USER_SHELL_HELP, VecDeque,
+    prompt_message_from_inputs_with_options, prompt_without_image_placeholders,
+};
+use anyhow::Result;
+
 enum PendingSteerUpdate {
     Updated,
     Stale,
@@ -149,7 +157,7 @@ impl TuiApp {
     fn update_pending_steer_input(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        id: PendingInputId,
+        id: QueuedSteerId,
         display_prompt: String,
         images: &[PendingImageAttachment],
     ) -> Result<PendingSteerUpdate> {
@@ -249,7 +257,20 @@ impl TuiApp {
                 if command.trim().is_empty() {
                     ui.push_status(USER_SHELL_HELP);
                 } else {
-                    ui.pending_auxiliary_shell_commands.push_back(command);
+                    let running = ui.running.as_ref().expect("checked Agent Turn");
+                    let owner_session_id = running
+                        .session_id
+                        .clone()
+                        .or_else(|| self.current_session.clone());
+                    let request =
+                        self.shell_command_request_for_session(command, owner_session_id.clone());
+                    ui.pending_auxiliary_shell_commands.push_back(
+                        crate::tui::PendingAuxiliaryShellCommand {
+                            owner_session_id,
+                            owner_turn_id: running.turn_id.clone(),
+                            request,
+                        },
+                    );
                     ui.refresh_sidebar(self);
                 }
                 return Ok(());
@@ -263,8 +284,11 @@ impl TuiApp {
         self.start_fullscreen_shell(ui, command)
     }
 
-    pub(crate) fn start_next_queued_input(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
-        while ui.running.is_none() && self.compaction_task.is_none() {
+    pub(crate) async fn start_next_queued_input(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
+        while !ui.foreground_turn_active() && self.compaction_task.is_none() {
             let Some(index) =
                 ui.queued_inputs
                     .iter()
@@ -281,8 +305,15 @@ impl TuiApp {
                     prompt,
                     display_prompt,
                     images,
+                    mission,
                     ..
-                } => self.start_fullscreen_turn(ui, prompt, display_prompt, images)?,
+                } => self.start_fullscreen_turn_with_mission(
+                    ui,
+                    prompt,
+                    display_prompt,
+                    images,
+                    mission.map(|mission| *mission),
+                )?,
                 QueuedInput::Shell { command, .. } => self.start_fullscreen_shell(ui, command)?,
                 QueuedInput::Compact {
                     instructions,

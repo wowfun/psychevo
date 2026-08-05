@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::text_edit::{
+    char_count, insert_char, move_cursor, remove_next_char, remove_previous_char, wrapped_height,
+};
+use crate::tui::{
+    BTreeMap, BTreeSet, BottomPanel, BottomSelectionPanel, BottomSelectionRow,
+    BottomSelectionValue, ClarifyInputMode, ClarifyPanel, ClarifyQuestion, ClarifyQuestionState,
+    ClarifyRequestEvent, PermissionApprovalDecision, PermissionApprovalPanel,
+    PermissionApprovalRequest, SessionListView, format_model_spec,
+};
 
 impl ClarifyPanel {
     pub(crate) fn new(request: ClarifyRequestEvent, previous_panel: Option<BottomPanel>) -> Self {
@@ -356,9 +363,7 @@ impl PermissionApprovalPanel {
                     ));
                     options.push((
                         PermissionApprovalChoice::Decision(
-                            PermissionApprovalDecision::allow_filesystem_session(
-                                directory.clone(),
-                            ),
+                            PermissionApprovalDecision::allow_filesystem_session(directory.clone()),
                         ),
                         format!("Allow session · {directory}"),
                         "Allow writes below this directory for the current session".to_string(),
@@ -442,10 +447,10 @@ impl PermissionApprovalPanel {
         }
         rows.push(self.notice.clone().unwrap_or_default());
         let wrapped_rows = rows
-        .into_iter()
-        .filter(|line| !line.is_empty())
-        .map(|line| wrapped_height(&line, inner_width))
-        .sum::<u16>();
+            .into_iter()
+            .filter(|line| !line.is_empty())
+            .map(|line| wrapped_height(&line, inner_width))
+            .sum::<u16>();
         (self.options().len() as u16 + wrapped_rows + 4).max(10)
     }
 
@@ -493,61 +498,6 @@ pub(crate) enum PermissionApprovalChoice {
     Decision(PermissionApprovalDecision),
     ExpandScopes,
     CollapseScopes,
-}
-
-pub(crate) fn wrapped_height(text: &str, width: u16) -> u16 {
-    let width = usize::from(width.max(1));
-    let display_width = UnicodeWidthStr::width(text);
-    display_width.div_ceil(width).max(1) as u16
-}
-
-pub(crate) fn char_count(value: &str) -> usize {
-    value.chars().count()
-}
-
-pub(crate) fn byte_index_for_char(value: &str, char_index: usize) -> usize {
-    value
-        .char_indices()
-        .map(|(index, _)| index)
-        .nth(char_index)
-        .unwrap_or(value.len())
-}
-
-pub(crate) fn insert_char(value: &mut String, cursor: &mut usize, ch: char) {
-    let len = char_count(value);
-    *cursor = (*cursor).min(len);
-    let byte_index = byte_index_for_char(value, *cursor);
-    value.insert(byte_index, ch);
-    *cursor += 1;
-}
-
-pub(crate) fn remove_previous_char(value: &mut String, cursor: &mut usize) {
-    if *cursor == 0 {
-        return;
-    }
-    let len = char_count(value);
-    *cursor = (*cursor).min(len);
-    let start = byte_index_for_char(value, (*cursor).saturating_sub(1));
-    let end = byte_index_for_char(value, *cursor);
-    value.replace_range(start..end, "");
-    *cursor = (*cursor).saturating_sub(1);
-}
-
-pub(crate) fn remove_next_char(value: &mut String, cursor: &mut usize) {
-    let len = char_count(value);
-    *cursor = (*cursor).min(len);
-    if *cursor >= len {
-        return;
-    }
-    let start = byte_index_for_char(value, *cursor);
-    let end = byte_index_for_char(value, (*cursor).saturating_add(1));
-    value.replace_range(start..end, "");
-}
-
-pub(crate) fn move_cursor(value: &str, cursor: &mut usize, delta: isize) {
-    let len = char_count(value);
-    let current = (*cursor).min(len) as isize;
-    *cursor = (current + delta).clamp(0, len as isize) as usize;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -217,10 +217,15 @@ Runtime resolves streamable HTTP auth in this order:
 2. stored OAuth token for the active profile, server name, and URL
 3. unauthenticated connection
 
-Production MCP OAuth credentials are stored in the system keyring under service
-`psychevo-mcp-oauth`. The account key is derived from the active profile home,
-server name, and URL. Tests use an injectable fake keyring store and do not
-touch the user's real keyring.
+Production MCP OAuth credentials are stored in the native system credential
+store under service `psychevo-mcp-oauth`: Secret Service on Linux, Keychain on
+macOS, and Credential Manager on Windows. The account key is derived from the
+active profile home, server name, and URL. Each supported production target
+must enable its matching native `keyring` backend explicitly; silently falling
+back to `keyring`'s process-local mock backend is invalid. Credential access is
+owned by one semantic store boundary. Tests inject an instance-local fake
+through that boundary and never replace `keyring`'s process-global default
+builder or touch the user's real keyring.
 
 OAuth login is started explicitly by a CLI or Gateway management action, not by
 ordinary server startup. The login flow opens a loopback callback listener,

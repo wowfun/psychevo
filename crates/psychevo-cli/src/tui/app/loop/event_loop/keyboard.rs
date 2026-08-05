@@ -1,3 +1,16 @@
+use crate::tui::app_commands::normalize_submitted_slash_echo;
+use crate::tui::support_composer::is_newline_key;
+use crate::tui::support_input::{
+    is_empty_shell_escape_input, selected_slash_menu_command_with_items, should_submit_typed_slash,
+};
+use crate::tui::{
+    BottomPanel, FocusMode, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, SlashShortcutMatch,
+    SubmittedSlashInput, TuiApp, new_textarea, parse_shell_escape_input,
+    parse_slash_command_with_config, textarea_text,
+};
+use anyhow::Result;
+use std::time::Instant;
+
 impl TuiApp {
     pub(crate) async fn handle_fullscreen_key(
         &mut self,
@@ -86,9 +99,7 @@ impl TuiApp {
                         self.open_agent_target_session(ui, &target).await?;
                     } else {
                         let history_opened = match ui.selected_target {
-                            Some(target) => {
-                                self.open_history_message_actions(ui, target).await?
-                            }
+                            Some(target) => self.open_history_message_actions(ui, target).await?,
                             None => false,
                         };
                         if !history_opened {
@@ -214,9 +225,7 @@ impl TuiApp {
         }
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if ui.running.is_some() {
-                    ui.push_status("press Ctrl+C again to quit after the running turn");
-                    ui.quit_requested = true;
+                if self.request_current_session_interrupt(ui).await {
                     return Ok(false);
                 }
                 return Ok(true);

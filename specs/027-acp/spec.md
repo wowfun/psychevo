@@ -8,12 +8,14 @@ psychevo_self_edit: deny
 Define the inbound Agent Client Protocol Adapter through which an ACP client
 uses Psychevo.
 
-Inbound ACP is a caller-side Adapter over `psychevo-gateway`. It maps protocol
-requests and notifications to the same Thread Application Interface used by
-Workbench and Channels. It does not own agent execution, Adapter selection,
-provider behavior, tool semantics, runtime permission policy, durable storage,
-or MCP semantics. Outbound ACP Agent execution has the opposite protocol role
-and is defined by [052 Agent Runtimes](../052-agent-runtimes/spec.md).
+Inbound ACP is a caller-side protocol Adapter over the public `psychevo`
+Framework Interface. It maps protocol requests and notifications to the same
+`Client`, `Thread`, and `TurnHandle` use cases used by other first-party
+surfaces. It does not own agent execution, Adapter selection, provider
+behavior, tool semantics, runtime permission policy, durable storage, or MCP
+semantics. Outbound ACP Agent execution has the opposite protocol role, is
+hosted by Gateway behind the Framework Agent Session seam, and is defined by
+[052 Agent Runtimes](../052-agent-runtimes/spec.md).
 
 ## Scope
 
@@ -38,13 +40,16 @@ Out of scope:
 ## Protocol Boundary
 
 An inbound ACP implementation accepts protocol requests, translates them into
-Gateway Thread Application inputs, projects Gateway observations back to ACP
-updates, and keeps transport state for active ACP sessions.
+typed Framework `Client`, `Thread`, and Turn inputs, projects typed Framework
+observations back to ACP updates, and keeps transport state for active ACP
+actors.
 
-Inbound ACP must call `psychevo-gateway` for context, prompting, cancellation,
-interactions, queue, actions, controls, history, and source-to-thread behavior.
-It must not call a runtime Adapter directly or shell out through a CLI command
-for normal interactive behavior.
+Inbound ACP must call the public `psychevo` Framework Interface for context,
+prompting, cancellation, interactions, accepted-Turn controls, history, and
+Thread administration. It may own the ACP actor map and its process-local
+prompt FIFO, but it must not access `StateRuntime`, manufacture private run
+options, import `psychevo-agent-core`, call an Agent Session Adapter directly,
+or shell out through a CLI command for normal interactive behavior.
 
 Concrete product specs choose how Psychevo exposes an ACP server. This topic
 owns the protocol mapping, not the product process that hosts it.
@@ -59,30 +64,41 @@ clients receive the best available compatibility projection.
 
 ## Sessions
 
-ACP session ids identify inbound transport actors. Each actor maps to a
-Psychevo public thread once the first prompt captures a `RunnableTarget` and
-creates or loads the backing thread. New ACP sessions use Gateway source kind
-`acp`. The ACP id remains stable and links to the public thread id; it never
-exposes a Native or outbound-ACP session id.
+ACP session ids identify inbound transport actors. Each actor owns at most one
+optional public Framework `Thread`. A new actor has no backing Thread; its first
+model-backed prompt uses the atomic Framework create-Thread-with-first-Turn use
+case and then stores that Thread. Loading an existing session resumes its
+Framework Thread and stores it on the actor. Framework caller identity records
+`acp`; the ACP actor id never exposes a Native or outbound-ACP session id.
 
-ACP uses a `Persistent` Gateway source lifetime. Source-to-thread binding is
-therefore durable across reconnects, while active turns and queued turns remain
-process-local to the Gateway instance that owns the running ACP agent.
+The actor-to-Thread binding, active handle, and ACP prompt FIFO are process-local
+transport state, not durable evidence. Framework owns durable Thread/Turn
+identity, transcript, delivery, and terminal evidence. After reconnect, a
+client loads a durable Framework Thread explicitly; inbound ACP does not add a
+parallel Gateway source binding or a second persistence path.
 
 `session/new` creates only an ACP session actor for the selected cwd, provider,
 model, mode, permissions, and ACP-supplied MCP sources. Its backing runtime
 session remains absent until the first model-backed prompt creates it.
 `session/load` opens an existing Psychevo session for replay and future prompts.
-`session/list` lists Psychevo sessions visible to the requested cwd.
+`session/list` lists Psychevo sessions visible to the requested cwd. Its opaque
+ACP request cursor is passed to the Framework list query, and the Framework
+page's next cursor is returned unchanged; callers can therefore traverse every
+matching Thread beyond the bounded default page without gaps or silent
+truncation.
 `session/close` closes the ACP actor and aborts any active invocation for that
 actor.
 
-Session history replay uses the Gateway History Interface and ACP session updates.
-Replay is presentation, not new evidence. `session/load` must replay history
-before returning the load response. Replay is best effort: corrupt, older, or
-unsupported message shapes produce visible placeholder updates and a structured
+Session history replay uses the Framework `Thread::history()` typed reader and
+ACP session updates. Replay is presentation, not new evidence. A
+`session/load` request with `replay_from = { type = "start" }` replays the full
+retained history before returning the load response. An omitted or null
+`replay_from` resumes without replay, as required by the ACP request contract.
+Unknown or extension replay cursors are rejected explicitly rather than being
+guessed. Requested replay is best effort: corrupt, older, or unsupported
+message shapes produce visible placeholder updates and a structured, bounded
 `_meta.psychevo.replay_warnings` summary instead of failing the load when the
-runtime session itself exists.
+Framework Thread itself exists.
 
 ## Prompting And Observation
 
@@ -91,27 +107,30 @@ content is preserved in order. A single text block that starts with `/` may be
 handled as an ACP slash command; prompts with multiple blocks, images, or
 resources are model prompts even when a text block starts with `/`.
 
-Image content maps to structured Gateway image blocks when the source is usable.
+Image content maps to structured Framework image inputs when the source is usable.
 Image data becomes a data URL; non-empty image URIs remain image references.
 Image file resources use the shared workspace pipeline. Audio and unsupported
 resources return a bounded protocol error before delivery; they are not
 silently converted to text.
 
-Text resource links are resolved only when they are local paths or file URIs
-inside the session cwd context. All text resources are capped at 512 KiB
-after decoding. Remote HTTP(S) resource links are not fetched proactively and
-remain typed resource links for a capable target; otherwise admission rejects
-them. Resource handling records prompt-scoped summaries in context evidence;
-text actually inlined for the Agent is persisted in the accepted user intent.
-Server-side resource resolution must not depend on client fs callbacks.
+Text resource links are resolved only when their canonical target is a regular
+file contained by the canonical session cwd; absolute paths, parent traversal,
+and symlink escapes receive no exception. All text resources are capped at 512
+KiB after decoding, and an embedded or linked text resource above that bound
+rejects admission rather than being truncated or partially delivered. Remote
+HTTP(S) resource links are not fetched proactively and remain typed resource
+links for a capable target; otherwise admission rejects them. Resource
+handling records prompt-scoped summaries in context evidence; text actually
+inlined for the Agent is persisted in the accepted user intent. Server-side
+resource resolution must not depend on client fs callbacks.
 
-Gateway transcript observation maps to ACP session updates:
+Typed Framework Turn observation maps to ACP session updates:
 
 - assistant text progress becomes agent message chunks; the completed result
   contributes only a missing suffix or a non-streamed fallback, never a
   duplicate copy of text already delivered as chunks
 - reasoning progress becomes agent thought chunks; ACP only exposes reasoning
-  already projected by runtime or Gateway and must not mine provider-private
+  already projected by Framework and must not mine provider-private
   raw reasoning fields
 - pending tool-call argument progress becomes pending tool call update records
   when the runtime exposes it, so clients can distinguish model generation of a
@@ -212,8 +231,8 @@ availability, and bounded unsupported behavior do not drift.
 ACP sends available command updates only after the session exists from the
 client's point of view. For `session/new`, the agent responds with the new
 session id before sending `available_commands_update`. For `session/load`,
-history replay may happen before the response as required by ACP, but command
-availability must still be sent once the client can apply it to the session.
+requested history replay happens before the response, but command availability
+must still be sent once the client can apply it to the session.
 
 When an ACP prompt starts with `/`, the ACP layer resolves it through the shared
 command parser before starting a model-backed runtime invocation. Known
@@ -249,14 +268,23 @@ must not send a plain assistant text fallback. The update is display-only and
 must not append runtime messages, affect model context, session export content,
 or usage/accounting statistics.
 
-ACP `/steer <text>` uses Gateway active-turn semantics: if an agent turn is
-running, the text is injected through Gateway into the active runtime control
-handle; if runtime is still in pending setup, it is queued; if idle, the text
-is submitted as a normal prompt. ACP `/queue <text>` appends to a session-local
-FIFO and does not start a turn by itself when idle. Queued prompts drain after
-the current or next normal prompt. `/pending cancel` cancels unsent steers and
-clears queued prompts. ACP queue state follows Gateway first-slice semantics
-and is session-scoped but not durable.
+ACP `/steer <text>` uses the Framework `TurnHandle` control surface: if an
+Agent Turn is running, the text is queued on that accepted Turn; if the first
+Turn is still in admission before its handle is published, it is retained for
+that Turn in FIFO order under the same control-input count and byte limits owned
+by [004 Runtime Contract](../004-runtime-contract/spec.md); the newest input is
+rejected at capacity. Publication transfers every retained input to the first
+handle before a later steer can pass it. Cancel or close during admission
+clears the retained inputs and cannot replay them into a later Turn. An actor
+removed by transport lifecycle cannot transfer retained input, and disruptive
+actor-reset commands remain unavailable until admission reaches a terminal
+state.
+If idle, the text is submitted as a normal prompt. ACP `/queue <text>` appends
+to a session-local FIFO and does not start a Turn by itself when idle. Queued
+prompts drain after the current or next normal prompt. `/pending cancel` uses
+the Framework semantic cancellation operation for queued steers and clears the
+ACP prompt FIFO. The FIFO and active handle are session-scoped process state,
+not durable Thread evidence.
 
 ACP `/sessions` lists numbered sessions with title, id, and updated time.
 `/resume` and `/continue` switch the current ACP actor to an existing runtime
@@ -313,10 +341,11 @@ catalogs. ACP model ids use `provider/model`; bare model ids are accepted for
 model switching only when they unambiguously resolve to one configured
 provider.
 
-Mode and config updates call `thread/control/set`. The next turn receives the
-resolved thread preference through normal Thread Application inputs, and the
-selected Adapter applies it before prompt delivery. Unsupported model, mode, or
-config values return bounded protocol errors instead of falling back silently.
+Mode and config updates change the ACP actor's typed future-Turn intent. The
+next `TurnRequest` carries those values through the Framework Interface, and
+the selected Adapter applies them before prompt delivery. Unsupported model,
+mode, or config values return bounded protocol errors instead of falling back
+silently.
 
 ## MCP
 
@@ -353,12 +382,17 @@ always when runtime can persist a safe rule, and deny.
 
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and
   dependency direction.
+- [080 Framework and SDK](../080-sdk/spec.md) defines the public `Client`,
+  `Thread`, `TurnHandle`, history, interaction, and administration surfaces
+  consumed by inbound ACP.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime
   assembly and control wiring.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface
   semantics.
 - [026 Commands](../026-commands/spec.md) defines shared command metadata.
-- [021 Gateway](../021-gateway/spec.md) defines source mapping and thread/turn orchestration.
+- [021 Gateway](../021-gateway/spec.md) defines the Adapter host used for
+  outbound ACP Agents and other Gateway transports; it is not the inbound ACP
+  application owner.
 - [041 Permissions](../041-permissions/spec.md) defines runtime permission
   policy.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines

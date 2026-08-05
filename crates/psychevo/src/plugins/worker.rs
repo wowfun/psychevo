@@ -14,9 +14,9 @@ use psychevo_ai::AbortSignal;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
 #[cfg(not(windows))]
 use tokio::process::Command;
+use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -276,9 +276,7 @@ impl PluginWorkerSession {
             .stderr
             .take()
             .ok_or_else(|| "worker stderr unavailable".to_string())?;
-        let stderr_tail = Arc::new(SyncMutex::new(VecDeque::with_capacity(
-            WORKER_STDERR_LIMIT,
-        )));
+        let stderr_tail = Arc::new(SyncMutex::new(VecDeque::with_capacity(WORKER_STDERR_LIMIT)));
         let stderr_task = tokio::spawn(drain_bounded_stderr(stderr, Arc::clone(&stderr_tail)));
         let session = Arc::new(Self {
             process: Mutex::new(PluginWorkerProcess {
@@ -486,8 +484,7 @@ pub(crate) async fn call_worker_tool(
     let manifest =
         load_plugin_manifest(&record.package_root, true).map_err(|err| err.to_string())?;
     let session = PluginWorkerSession::start(record, &manifest, spec, env).await?;
-    let result =
-        call_worker_tool_in_session(&session, tool_name, tool_call_id, args, None).await;
+    let result = call_worker_tool_in_session(&session, tool_name, tool_call_id, args, None).await;
     let shutdown = session.shutdown().await;
     let result = result?;
     shutdown?;
@@ -563,7 +560,10 @@ async fn send_json_rpc(
         .write_all(&bytes)
         .await
         .map_err(|err| err.to_string())?;
-    stdin.write_all(b"\n").await.map_err(|err| err.to_string())?;
+    stdin
+        .write_all(b"\n")
+        .await
+        .map_err(|err| err.to_string())?;
     stdin.flush().await.map_err(|err| err.to_string())
 }
 
@@ -573,23 +573,17 @@ fn parse_worker_message(line: &str) -> WorkerMessage {
         Err(error) => return WorkerMessage::ProtocolError(error.to_string()),
     };
     if response.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return WorkerMessage::ProtocolError(
-            "worker message must declare jsonrpc 2.0".to_string(),
-        );
+        return WorkerMessage::ProtocolError("worker message must declare jsonrpc 2.0".to_string());
     }
     if response.get("method").is_some() {
         return if response.get("id").is_none() {
             WorkerMessage::Notification
         } else {
-            WorkerMessage::ProtocolError(
-                "worker-initiated requests are not supported".to_string(),
-            )
+            WorkerMessage::ProtocolError("worker-initiated requests are not supported".to_string())
         };
     }
     let Some(id) = response.get("id").and_then(Value::as_u64) else {
-        return WorkerMessage::ProtocolError(
-            "worker response must carry a numeric id".to_string(),
-        );
+        return WorkerMessage::ProtocolError("worker response must carry a numeric id".to_string());
     };
     let result = if let Some(error) = response.get("error") {
         Err(error.to_string())

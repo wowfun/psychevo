@@ -1,9 +1,36 @@
-pub(super) async fn automation_list_result(
+use std::path::Path;
+
+use psychevo::Error;
+use psychevo::application::AutomationTaskInput;
+use psychevo::automations::next_run_at_ms;
+use psychevo::model_state::normalize_reasoning_effort;
+use psychevo::paths::canonicalize_cwd;
+use psychevo::{PermissionMode, RunMode, RunSandboxOverride};
+use psychevo_gateway_protocol as wire;
+use serde_json::Value;
+use uuid::Uuid;
+
+use super::draft::{automation_draft_prompt, parse_automation_draft_response};
+use super::runner::{recover_stale_automation_runs, start_automation_run};
+use super::support::{
+    automation_kind_from_wire, automation_run_view, automation_schedule_from_value,
+    automation_source, automation_task_for_request, automation_task_view, normalize_optional,
+    resolve_automation_target_scope,
+};
+use crate::gateway_now_ms;
+use crate::server::auth_input::authorize_thread;
+use crate::server::binding::{AuthContext, WebState};
+use crate::server::event_delivery::ConnectionSender;
+use crate::server::scope_session::{
+    resolve_optional_scope, resolve_required_scope, resolved_scope_for_thread,
+};
+
+pub(in crate::server) async fn automation_list_result(
     state: &WebState,
     _auth: &AuthContext,
-    params: wire::AutomationListParams,
+    params: wire::automations::AutomationListParams,
 ) -> psychevo::Result<Value> {
-    let store = &state.inner.state;
+    let store = &state.inner.durability;
     let records = match params.cwd {
         Some(cwd) => {
             let cwd = canonicalize_cwd(Path::new(&cwd))?;
@@ -17,15 +44,15 @@ pub(super) async fn automation_list_result(
     for record in records {
         automations.push(automation_task_view(state, record).await?);
     }
-    Ok(serde_json::to_value(wire::AutomationListResult {
-        automations,
-    })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationListResult { automations },
+    )?)
 }
 
-pub(super) async fn automation_draft_result(
+pub(in crate::server) async fn automation_draft_result(
     state: WebState,
     auth: &AuthContext,
-    params: wire::AutomationDraftParams,
+    params: wire::automations::AutomationDraftParams,
 ) -> psychevo::Result<Value> {
     let request = params.request.trim().to_string();
     if request.is_empty() {
@@ -60,60 +87,68 @@ pub(super) async fn automation_draft_result(
         }
     };
 
-    let mut options = state.run_options(cwd.clone(), None);
-    options.prompt = automation_draft_prompt(
+    let prompt = automation_draft_prompt(
         &request,
         &cwd.display().to_string(),
         current_thread_id.as_deref(),
     );
-    options.no_agents = true;
-    options.no_skills = true;
-    options.clarify_enabled = false;
-    options.permission_mode = Some(PermissionMode::Default);
-    options.sandbox_override = Some(RunSandboxOverride::read_only());
-    options.runtime_tools.clear();
-
-    let profile = crate::generated_gateway_runtime_profiles()
-        .into_iter()
-        .find(|profile| profile.runtime == RuntimeProfileKind::Native)
-        .expect("generated Native Agent profile");
+    let mut inherited_env = state.inner.inherited_env.clone();
+    inherited_env
+        .entry("PSYCHEVO_HOME".to_string())
+        .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
+    let turn = psychevo::TurnRequest::new(prompt)
+        .with_identity("automation-draft", None)
+        .with_execution_policy(
+            RunMode::Default,
+            Some(PermissionMode::Default),
+            state.inner.config_path.clone(),
+        )
+        .with_approval(None, false)
+        .with_environment(
+            Some(inherited_env),
+            None,
+            Some(RunSandboxOverride::read_only()),
+        )
+        .with_agent(None, true, true)
+        .with_runtime_tools(Vec::new())
+        .with_framework_context(
+            Some(state.inner.home.join("snapshots")),
+            None,
+            Vec::new(),
+            None,
+        );
+    let mut start = psychevo::StartThreadRequest::new(&cwd);
+    start.source = "automation-draft".to_string();
     let result = state
         .inner
-        .gateway
-        .run_internal_agent_turn(
-            None,
-            profile,
-            None,
-            crate::BackendTurnRequest {
-                options,
-                input: Vec::new(),
-                runtime_source: "automation-draft".to_string(),
-                continue_sources: vec!["automation-draft".to_string()],
-                stream: None,
-                control: None,
-            },
-            Uuid::now_v7().to_string(),
-            None,
-        )
+        .framework
+        .start_thread_with_turn(start, turn)
+        .await?
+        .wait()
         .await?;
     let draft =
         parse_automation_draft_response(&result.final_answer, current_thread_id.as_deref())?;
-    Ok(serde_json::to_value(wire::AutomationDraftResult { draft })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationDraftResult { draft },
+    )?)
 }
 
-pub(super) async fn automation_write_result(
+pub(in crate::server) async fn automation_write_result(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::AutomationWriteParams,
+    params: wire::automations::AutomationWriteParams,
 ) -> psychevo::Result<Value> {
     let automation_id = params
         .automation_id
         .clone()
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| Uuid::now_v7().to_string());
-    let existing = state.inner.state.automation_task(&automation_id).await?;
-    let target =
-        resolve_automation_target_scope(state, auth, params.scope, &params.target).await?;
+    let existing = state
+        .inner
+        .durability
+        .automation_task(&automation_id)
+        .await?;
+    let target = resolve_automation_target_scope(state, auth, params.scope, &params.target).await?;
     let cwd = target.cwd.display().to_string();
     if let Some(existing) = existing.as_ref()
         && existing.cwd != cwd
@@ -148,19 +183,18 @@ pub(super) async fn automation_write_result(
         None
     };
     let source_key = match target.kind {
-        wire::AutomationTaskKind::Project => {
+        wire::automations::AutomationTaskKind::Project => {
             Some(automation_source(&automation_id, &title).source_key().0)
         }
-        wire::AutomationTaskKind::ThreadHeartbeat => None,
+        wire::automations::AutomationTaskKind::ThreadHeartbeat => None,
     };
     let record = state
         .inner
-        .state
-
+        .durability
         .upsert_automation_task(AutomationTaskInput {
             id: Some(automation_id),
             cwd,
-            kind: automation_kind_str(target.kind).to_string(),
+            kind: automation_kind_from_wire(target.kind),
             target_thread_id: target.target_thread_id,
             title,
             prompt,
@@ -173,15 +207,17 @@ pub(super) async fn automation_write_result(
             next_run_at_ms,
         })
         .await?;
-    Ok(serde_json::to_value(wire::AutomationMutationResult {
-        automation: automation_task_view(state, record).await?,
-    })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationMutationResult {
+            automation: automation_task_view(state, record).await?,
+        },
+    )?)
 }
 
-pub(super) async fn automation_set_enabled_result(
+pub(in crate::server) async fn automation_set_enabled_result(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::AutomationIdParams,
+    params: wire::automations::AutomationIdParams,
     enabled: bool,
 ) -> psychevo::Result<Value> {
     let existing = automation_task_for_request(state, auth, &params.automation_id).await?;
@@ -198,8 +234,7 @@ pub(super) async fn automation_set_enabled_result(
     };
     let record = state
         .inner
-        .state
-
+        .durability
         .upsert_automation_task(AutomationTaskInput {
             id: Some(existing.id),
             cwd: existing.cwd,
@@ -216,33 +251,36 @@ pub(super) async fn automation_set_enabled_result(
             next_run_at_ms,
         })
         .await?;
-    Ok(serde_json::to_value(wire::AutomationMutationResult {
-        automation: automation_task_view(state, record).await?,
-    })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationMutationResult {
+            automation: automation_task_view(state, record).await?,
+        },
+    )?)
 }
 
-pub(super) async fn automation_delete_result(
+pub(in crate::server) async fn automation_delete_result(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::AutomationIdParams,
+    params: wire::automations::AutomationIdParams,
 ) -> psychevo::Result<Value> {
     let _record = automation_task_for_request(state, auth, &params.automation_id).await?;
     let deleted = state
         .inner
-        .state
-
+        .durability
         .delete_automation_task(&params.automation_id)
         .await?;
-    Ok(serde_json::to_value(wire::AutomationDeleteResult {
-        deleted,
-        automation_id: params.automation_id,
-    })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationDeleteResult {
+            deleted,
+            automation_id: params.automation_id,
+        },
+    )?)
 }
 
-pub(super) async fn automation_run_result(
+pub(in crate::server) async fn automation_run_result(
     state: WebState,
     auth: &AuthContext,
-    params: wire::AutomationRunParams,
+    params: wire::automations::AutomationRunParams,
     out_tx: ConnectionSender,
 ) -> psychevo::Result<Value> {
     recover_stale_automation_runs(&state).await?;
@@ -256,14 +294,15 @@ pub(super) async fn automation_run_result(
     let run = start_automation_run(state.clone(), task.clone(), trigger, Some(out_tx)).await?;
     let automation = state
         .inner
-        .state
-
+        .durability
         .automation_task(&task.id)
         .await?
         .unwrap_or(task);
-    Ok(serde_json::to_value(wire::AutomationRunResult {
-        accepted: run.is_some(),
-        automation: automation_task_view(&state, automation).await?,
-        run: run.map(automation_run_view),
-    })?)
+    Ok(serde_json::to_value(
+        wire::automations::AutomationRunResult {
+            accepted: run.is_some(),
+            automation: automation_task_view(&state, automation).await?,
+            run: run.map(automation_run_view),
+        },
+    )?)
 }

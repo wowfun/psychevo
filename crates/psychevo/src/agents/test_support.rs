@@ -1,21 +1,25 @@
-use super::{
-    catalog_surface::*, child_runs::*, definition_policy::*, lifecycle::*, mailbox_tools::*,
-    teams::*, *,
-};
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    pub(crate) use futures::future::BoxFuture;
-    pub(crate) use psychevo_agent_core::{
-        AssistantBlock, ToolBinding, ToolCallBlock, ToolExecutionMode, ToolOutput,
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use futures::future::BoxFuture;
+    use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+    use psychevo_ai::{
+        AbortSignal, DeploymentConfig, Fake, FakeLanguageAdapter, LanguageAdapter,
+        LanguageAdapterEvent, Provider,
     };
-    pub(crate) use psychevo_ai::{
-        AbortSignal, AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, Fake,
-        FakeLanguageAdapter, LanguageAdapter, LanguageAdapterEvent, LanguageRequest, Provider,
+    use serde_json::{Value, json};
+    use tempfile::TempDir;
+
+    use crate::agents::catalog_surface::AgentToolContext;
+    use crate::agents::{
+        AgentCatalog, AgentInvocationRole, AgentRunRecord, AgentRunStatus, AgentSupervisor,
     };
-    pub(crate) use tempfile::TempDir;
-    pub(crate) use tokio::sync::watch;
+    use crate::state::StateRuntime;
+    use crate::store::AgentEdgeStatus;
+    use crate::types::{ModelMetadata, PermissionConfig, PermissionMode, RunMode};
 
     #[derive(Debug, Clone)]
     pub(crate) enum RawStreamEvent {
@@ -239,6 +243,7 @@ mod tests {
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             home: tmp.path().join(".psychevo"),
+            mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
             image_input_enabled: true,
             image_generation: None,
             web_search: Default::default(),

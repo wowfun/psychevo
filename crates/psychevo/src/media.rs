@@ -8,7 +8,9 @@ use reqwest::Url;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::tools::{PublicHttpGetOptions, public_http_get, read_bounded_http_response};
+use crate::tools::web_url_policy::{
+    PublicHttpGetOptions, public_http_get, read_bounded_http_response,
+};
 
 pub const MAX_IMAGE_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
 pub const PSYCHEVO_MEDIA_SCHEME: &str = "psychevo-media";

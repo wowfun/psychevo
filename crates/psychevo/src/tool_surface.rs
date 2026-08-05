@@ -138,9 +138,9 @@ pub(crate) fn assemble_tool_surface_with_warnings(input: ToolSurfaceAssembly) ->
     let mut available_tools = ToolRegistry::default();
     let runtime_context = ToolRuntimeContext {
         task_id: input.task_id,
-        file_reads: crate::tools::FileReadTracker::default(),
+        file_reads: crate::tools::file_mutation::FileReadTracker::default(),
         lsp: input.lsp.clone(),
-        lsp_manager: crate::tools::write_support::default_lsp_manager(),
+        lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
         allow_login_shell: input.allow_login_shell,
         stream_events: input.stream_events.clone(),
         workspace_mutations: input.workspace_mutations.clone(),

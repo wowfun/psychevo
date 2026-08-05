@@ -1,12 +1,42 @@
+use psychevo::application::{
+    GatewayActivityClaimInput, GatewayActivityKind, GatewayActivityTerminalStatus,
+    GatewayControlCommandKind,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::gateway_now_ms;
+use crate::server::binding::{AuthContext, PendingInteractionContext};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::{ResolvedScope, default_resolved_scope};
+use crate::server::session_view::thread_snapshot;
+use crate::server::tests::helpers::web_state;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayEvent, PendingActionView,
+};
+use psychevo_gateway_protocol::source::{
+    GatewaySource, GatewayTurn, GatewayTurnError, GatewayTurnStatus,
+};
+
+async fn start_web_thread(state: &crate::server::binding::WebState) -> String {
+    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    request.source = "web".to_string();
+    state
+        .inner
+        .framework
+        .start_thread(request)
+        .await
+        .expect("thread")
+        .id()
+        .to_string()
+}
+
 #[tokio::test]
 async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
     let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
+    let session_id = start_web_thread(&state).await;
     state
         .inner
         .pending_actions
@@ -41,7 +71,9 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
         source: state.inner.source.clone(),
     };
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
 
     assert_eq!(
         snapshot["pendingActions"]
@@ -63,18 +95,16 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
 #[tokio::test]
 async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
     let (_temp, state) = web_state().await;
-    let store = &state.inner.state;
-    let session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
+    let durability = &state.inner.durability;
+    let session_id = start_web_thread(&state).await;
     let owner_id = "gateway:foreign";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    let activity = durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "activity-1",
             thread_id: Some(&session_id),
             source_key: None,
             turn_id: Some("turn-1"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id,
             owner_surface: Some("tui"),
             lease_expires_at_ms: gateway_now_ms() + 60_000,
@@ -82,7 +112,8 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim activity");
+        .await
+        .expect("claim activity");
     state
         .inner
         .pending_actions
@@ -117,7 +148,9 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
         source: state.inner.source.clone(),
     };
 
-    let running = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("running snapshot");
+    let running = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("running snapshot");
     assert_eq!(
         running["pendingActions"]
             .as_array()
@@ -126,15 +159,18 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
         1
     );
 
-    store
+    durability
         .finish_gateway_activity(
             &activity.activity_id,
             owner_id,
             activity.generation,
-            "failed",
+            GatewayActivityTerminalStatus::Failed,
         )
-        .await.expect("finish activity");
-    let finished = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("finished snapshot");
+        .await
+        .expect("finish activity");
+    let finished = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("finished snapshot");
 
     assert_eq!(
         finished["pendingActions"]
@@ -156,12 +192,7 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
 #[tokio::test]
 async fn turn_completed_event_removes_pending_permission_panel() {
     let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
+    let session_id = start_web_thread(&state).await;
     state.record_event_with_context(
         &GatewayEvent::ActionRequested {
             action: PendingActionView {
@@ -209,7 +240,7 @@ async fn turn_completed_event_removes_pending_permission_panel() {
                 code: None,
                 stage: None,
                 retry_class: None,
-                delivery: crate::AgentDeliveryStatusView::Unknown,
+                delivery: psychevo_gateway_protocol::source::AgentDeliveryStatusView::Unknown,
                 recovery_action: None,
                 diagnostic_ref: None,
             }),
@@ -222,7 +253,9 @@ async fn turn_completed_event_removes_pending_permission_panel() {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
 
     assert_eq!(
         snapshot["pendingActions"]
@@ -249,14 +282,13 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
     let owner_id = "gateway:foreign";
     let activity = state
         .inner
-        .state
-
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "activity-draft-permission",
             thread_id: None,
             source_key: Some(&draft_source_key),
             turn_id: Some("turn-draft"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id,
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 60_000,
@@ -264,7 +296,8 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim activity");
+        .await
+        .expect("claim activity");
     state
         .inner
         .pending_actions
@@ -299,7 +332,9 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let canonical = thread_snapshot(&state, &canonical_scope, None).await.expect("canonical snapshot");
+    let canonical = thread_snapshot(&state, &canonical_scope, None)
+        .await
+        .expect("canonical snapshot");
     assert_eq!(
         canonical["pendingActions"]
             .as_array()
@@ -320,7 +355,9 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         cwd: state.inner.cwd.clone(),
         source: draft_source,
     };
-    let draft = thread_snapshot(&state, &draft_scope, None).await.expect("draft snapshot");
+    let draft = thread_snapshot(&state, &draft_scope, None)
+        .await
+        .expect("draft snapshot");
     assert_eq!(draft["pendingActions"][0]["actionId"], "permission-draft");
     assert_eq!(draft["pendingActions"][0]["sourceKey"], draft_source_key);
     assert_eq!(draft["pendingActions"][0]["payload"]["allowAlways"], true);
@@ -338,14 +375,13 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
     let owner_id = "gateway:foreign";
     let activity = state
         .inner
-        .state
-
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "activity-draft-clarify",
             thread_id: None,
             source_key: Some(&draft_source_key),
             turn_id: Some("turn-draft"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id,
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 60_000,
@@ -353,7 +389,8 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim activity");
+        .await
+        .expect("claim activity");
     state
         .inner
         .pending_actions
@@ -390,7 +427,9 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let canonical = thread_snapshot(&state, &canonical_scope, None).await.expect("canonical snapshot");
+    let canonical = thread_snapshot(&state, &canonical_scope, None)
+        .await
+        .expect("canonical snapshot");
     assert_eq!(
         canonical["pendingActions"]
             .as_array()
@@ -411,7 +450,9 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         cwd: state.inner.cwd.clone(),
         source: draft_source,
     };
-    let draft = thread_snapshot(&state, &draft_scope, None).await.expect("draft snapshot");
+    let draft = thread_snapshot(&state, &draft_scope, None)
+        .await
+        .expect("draft snapshot");
     assert_eq!(draft["pendingActions"][0]["actionId"], "clarify-draft");
     assert_eq!(draft["pendingActions"][0]["sourceKey"], draft_source_key);
 }
@@ -419,24 +460,18 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
 #[tokio::test]
 async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
     let (_temp, state) = web_state().await;
-    let thread_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
-        .await.expect("thread");
+    let thread_id = start_web_thread(&state).await;
     let source_key = state.inner.source.source_key().0;
     let owner_id = "gateway:foreign";
     let activity = state
         .inner
-        .state
-
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "activity-draft-route",
             thread_id: Some(&thread_id),
             source_key: Some(&source_key),
             turn_id: Some("turn-draft"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id,
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 60_000,
@@ -444,7 +479,8 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim activity");
+        .await
+        .expect("claim activity");
     for (action_id, kind) in [
         ("permission-draft", GatewayActionKind::Permission),
         ("clarify-draft", GatewayActionKind::Clarify),
@@ -481,7 +517,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/interaction/respond".to_string(),
             params: Some(json!({
@@ -502,7 +538,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(11)),
             method: "thread/interaction/respond".to_string(),
             params: Some(json!({
@@ -527,7 +563,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "thread/interaction/respond".to_string(),
             params: Some(json!({
@@ -549,17 +585,20 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
 
     let commands = state
         .inner
-        .state
-
-        .pending_gateway_control_commands(owner_id, 10)
-        .await.expect("pending control commands");
+        .durability
+        .claim_pending_gateway_control_commands(owner_id, 10)
+        .await
+        .expect("pending control commands");
     assert_eq!(commands.len(), 2);
     assert_eq!(commands[0].activity_id, "activity-draft-route");
-    assert_eq!(commands[0].command_kind, "permission");
+    assert_eq!(
+        commands[0].command_kind,
+        GatewayControlCommandKind::Permission
+    );
     assert_eq!(commands[0].payload["requestId"], "permission-draft");
     assert_eq!(commands[0].payload["decision"], "allow_once");
     assert_eq!(commands[1].activity_id, "activity-draft-route");
-    assert_eq!(commands[1].command_kind, "clarify");
+    assert_eq!(commands[1].command_kind, GatewayControlCommandKind::Clarify);
     assert_eq!(commands[1].payload["requestId"], "clarify-draft");
     assert_eq!(commands[1].payload["answers"][0][0], "Local");
 }

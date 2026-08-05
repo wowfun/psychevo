@@ -1,3 +1,13 @@
+use psychevo::application::RunStreamEvent;
+use serde_json::{Value, json};
+
+use crate::projection::GatewayLiveProjector;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntryRole,
+};
+
+use super::hidden_helpers::{assert_exec_event, gateway_entry};
+
 #[test]
 fn assistant_tool_call_text_projects_as_assistant_phase_text() {
     let mut projector = GatewayLiveProjector::default();
@@ -313,8 +323,18 @@ fn live_projector_does_not_collapse_missing_tool_call_ids_by_tool_name() {
     assert_ne!(second_id, "exec_command");
     assert_ne!(first_id, second_id);
     assert_eq!(second_entry.blocks.len(), 2);
-    assert!(second_entry.blocks.iter().any(|block| block.id == first_block.id));
-    assert!(second_entry.blocks.iter().any(|block| block.id == second_block.id));
+    assert!(
+        second_entry
+            .blocks
+            .iter()
+            .any(|block| block.id == first_block.id)
+    );
+    assert!(
+        second_entry
+            .blocks
+            .iter()
+            .any(|block| block.id == second_block.id)
+    );
 }
 
 #[test]
@@ -419,36 +439,60 @@ fn live_projector_keeps_positioned_parallel_same_name_tool_calls_distinct() {
     );
 
     for (value, expected_statuses) in [
-        (json!({
-            "type": "tool_execution_start",
-            "tool_name": "web_search",
-            "tool_call_id": "call-search-en",
-            "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10}
-        }), [TranscriptBlockStatus::Running, TranscriptBlockStatus::Pending]),
-        (json!({
-            "type": "tool_execution_start",
-            "tool_name": "web_search",
-            "tool_call_id": "call-search-zh",
-            "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10}
-        }), [TranscriptBlockStatus::Running, TranscriptBlockStatus::Running]),
-        (json!({
-            "type": "tool_execution_end",
-            "tool_name": "web_search",
-            "tool_call_id": "call-search-en",
-            "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10},
-            "result": {"query": "trending Rust projects July 2026 GitHub", "provider": "exa"},
-            "outcome": "normal",
-            "elapsed_ms": 3_223
-        }), [TranscriptBlockStatus::Completed, TranscriptBlockStatus::Running]),
-        (json!({
-            "type": "tool_execution_end",
-            "tool_name": "web_search",
-            "tool_call_id": "call-search-zh",
-            "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10},
-            "result": {"query": "Rust 开源项目 2026年7月 热门", "provider": "exa"},
-            "outcome": "normal",
-            "elapsed_ms": 4_106
-        }), [TranscriptBlockStatus::Completed, TranscriptBlockStatus::Completed]),
+        (
+            json!({
+                "type": "tool_execution_start",
+                "tool_name": "web_search",
+                "tool_call_id": "call-search-en",
+                "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10}
+            }),
+            [
+                TranscriptBlockStatus::Running,
+                TranscriptBlockStatus::Pending,
+            ],
+        ),
+        (
+            json!({
+                "type": "tool_execution_start",
+                "tool_name": "web_search",
+                "tool_call_id": "call-search-zh",
+                "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10}
+            }),
+            [
+                TranscriptBlockStatus::Running,
+                TranscriptBlockStatus::Running,
+            ],
+        ),
+        (
+            json!({
+                "type": "tool_execution_end",
+                "tool_name": "web_search",
+                "tool_call_id": "call-search-en",
+                "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10},
+                "result": {"query": "trending Rust projects July 2026 GitHub", "provider": "exa"},
+                "outcome": "normal",
+                "elapsed_ms": 3_223
+            }),
+            [
+                TranscriptBlockStatus::Completed,
+                TranscriptBlockStatus::Running,
+            ],
+        ),
+        (
+            json!({
+                "type": "tool_execution_end",
+                "tool_name": "web_search",
+                "tool_call_id": "call-search-zh",
+                "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10},
+                "result": {"query": "Rust 开源项目 2026年7月 热门", "provider": "exa"},
+                "outcome": "normal",
+                "elapsed_ms": 4_106
+            }),
+            [
+                TranscriptBlockStatus::Completed,
+                TranscriptBlockStatus::Completed,
+            ],
+        ),
     ] {
         let projected = projector
             .project("turn-1", &RunStreamEvent::value(value))
@@ -587,8 +631,7 @@ fn live_projector_streams_write_preview_through_identity_migration_and_success()
         )
         .expect("write started");
     assert_eq!(
-        gateway_entry(&started).blocks[0].metadata.as_ref().unwrap()
-            ["write_argument_preview"]["phase"],
+        gateway_entry(&started).blocks[0].metadata.as_ref().unwrap()["write_argument_preview"]["phase"],
         "writing"
     );
 
@@ -773,7 +816,12 @@ fn live_projector_message_end_tool_call_does_not_downgrade_completed_tool_block(
         })
         .expect("tool block");
     assert_eq!(block.status, TranscriptBlockStatus::Completed);
-    assert!(block.body.as_deref().is_some_and(|body| body.contains("done")));
+    assert!(
+        block
+            .body
+            .as_deref()
+            .is_some_and(|body| body.contains("done"))
+    );
     let metadata = block.metadata.as_ref().expect("metadata");
     assert_eq!(metadata["result"]["exit_code"], 0);
     assert_eq!(metadata["result"]["output"], "done\n");
@@ -980,7 +1028,10 @@ fn live_projector_projects_message_update_before_terminal_message_end() {
     };
     assert_eq!(turn_id, "turn-1");
     assert_eq!(entry.status, TranscriptBlockStatus::Completed);
-    assert_eq!(entry.blocks[0].body.as_deref(), Some("streaming hello done"));
+    assert_eq!(
+        entry.blocks[0].body.as_deref(),
+        Some("streaming hello done")
+    );
     assert_eq!(entry.blocks[0].status, TranscriptBlockStatus::Completed);
 }
 
@@ -1065,7 +1116,8 @@ fn live_projector_replaces_running_message_update_snapshot_when_content_position
         entry
             .blocks
             .iter()
-            .filter(|block| block.kind == TranscriptBlockKind::Text && block.body.as_deref() == Some(table))
+            .filter(|block| block.kind == TranscriptBlockKind::Text
+                && block.body.as_deref() == Some(table))
             .count(),
         1
     );

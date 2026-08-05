@@ -1,5 +1,17 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+
+use serde_json::{Value, json};
+
+use super::config_cli_views::config_show_value;
+use super::config_file_env::{CONFIG_FILE_NAME, load_toml_config_file, write_toml_config_file};
+use super::config_parse::parse_run_config;
+use crate::types::{
+    ConfigScope, ExecPolicyDecision, ExecPolicyPatternToken, PermissionAccess, PermissionConfig,
+    RunOptions,
+};
+use crate::{Error, Result};
 
 pub fn permission_rules_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
     let document = config_show_value(options, scope)?;
@@ -419,35 +431,6 @@ pub(crate) fn set_string_entry(
     Ok(true)
 }
 
-#[allow(dead_code)]
-pub(crate) fn remove_exec_policy_rule(
-    parsed: &mut Value,
-    prefix: &[String],
-    decision: ExecPolicyDecision,
-) -> Result<bool> {
-    let Some(rules) = parsed
-        .get_mut("exec_policy")
-        .and_then(Value::as_object_mut)
-        .and_then(|value| value.get_mut("rules"))
-        .and_then(Value::as_array_mut)
-    else {
-        return Ok(false);
-    };
-    let before = rules.len();
-    rules.retain(|value| {
-        let same_prefix = value
-            .get("prefix")
-            .and_then(Value::as_array)
-            .map(|values| exec_prefix_strings_from_value(values))
-            .as_ref()
-            == Some(&prefix.to_vec());
-        let same_decision =
-            value.get("decision").and_then(Value::as_str) == Some(decision.as_str());
-        !(same_prefix && same_decision)
-    });
-    Ok(rules.len() != before)
-}
-
 pub(crate) fn exec_prefix_strings_from_value(values: &[Value]) -> Vec<String> {
     values
         .iter()
@@ -552,16 +535,6 @@ pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-#[allow(dead_code)]
-pub(crate) fn permission_decision_for_legacy_kind(kind: &str) -> ExecPolicyDecision {
-    match kind {
-        "allow" => ExecPolicyDecision::Allow,
-        "ask" => ExecPolicyDecision::Prompt,
-        "deny" => ExecPolicyDecision::Deny,
-        _ => ExecPolicyDecision::Prompt,
-    }
-}
-
 pub(crate) fn access_for_legacy_kind(kind: &str) -> PermissionAccess {
     match kind {
         "allow" => PermissionAccess::Allow,
@@ -594,7 +567,17 @@ pub(crate) fn normalize_permission_rule(rule: &str) -> Result<String> {
 
 #[cfg(test)]
 pub(crate) mod permission_rule_tests {
-    pub(crate) use super::*;
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::{
+        append_local_exec_policy_rule, append_local_filesystem_grant,
+        append_local_permission_allow_rule,
+    };
+    use crate::config::config_file_env::CONFIG_FILE_NAME;
+    use crate::config::config_parse::parse_run_config;
+    use crate::types::{ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, PermissionAccess};
 
     #[test]
     fn legacy_exec_permission_mutation_is_deprecated() {

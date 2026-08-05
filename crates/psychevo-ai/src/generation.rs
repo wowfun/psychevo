@@ -10,12 +10,13 @@ use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
+use crate::control::abort_pair;
 use crate::{
     AbortHandle, AbortSignal, AdapterCall, AdapterContext, CredentialBindings, CredentialRequest,
     CredentialResolver, GenerationEvent, GenerationOutcome, GenerationOutput, GenerationSnapshot,
     LanguageAdapter, LanguageAdapterEvent, LanguageRequest, ModelDescriptor, ModelProfile,
     ProviderError, ProviderTool, RequestHeaders, TimeoutPolicy, ToolArgumentError,
-    ToolArgumentErrorKind, ToolCall, Usage, Warning, abort_pair,
+    ToolArgumentErrorKind, ToolCall, Usage, Warning,
 };
 use crate::{AssistantContent, AssistantMessage, ErrorKind, ErrorPhase, Extensions, TextContent};
 
@@ -1282,9 +1283,17 @@ fn content_lifecycle_error(action: &str, content_index: usize) -> ProviderError 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    use super::{
+        AcceptedEvent, GenerationAccumulator, MAX_PENDING_GENERATION_BYTES,
+        MAX_PENDING_GENERATION_EVENTS, QueuedEvent, event_channel,
+    };
+    use crate::{
+        AssistantContent, GenerationEvent, LanguageAdapterEvent, ModelDescriptor,
+        ToolArgumentError, ToolArgumentErrorKind,
+    };
 
     struct MeasurementAllocator;
 

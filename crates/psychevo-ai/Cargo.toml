@@ -12,8 +12,11 @@ documentation = "https://docs.rs/psychevo-ai"
 keywords = ["ai", "agent", "llm"]
 categories = ["api-bindings", "development-tools"]
 
+[package.metadata.psychevo]
+architecture-layer = 0
+
 [features]
-default = ["openai", "anthropic", "xiaomi"]
+default = []
 openai = ["dep:image"]
 anthropic = []
 xiaomi = []
@@ -30,6 +33,5 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-pretty_assertions.workspace = true
 tempfile.workspace = true
 tiktoken.workspace = true

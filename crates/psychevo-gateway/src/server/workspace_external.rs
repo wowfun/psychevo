@@ -9,15 +9,15 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use psychevo::{
-    __product::platform::ExecutableResolveOptions, __product::platform::HostPlatform,
-    __product::platform::ProcessEnvOptions, __product::platform::apply_tokio_process_env,
-    __product::platform::effective_process_env, __product::platform::resolve_executable_path,
-    __product::platform::tokio_host_process_command, Error,
+    Error, host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
+    host_paths::resolve_executable_path, process_env::ProcessEnvOptions,
+    process_env::apply_tokio_process_env, process_env::effective_process_env,
+    process_env::tokio_host_process_command,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
-use super::ResolvedScope;
+use super::scope_session::ResolvedScope;
 use super::workspace::{path_from_root, resolve_workspace_relative_path};
 use file_types::{
     IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, OFFICE_EXTENSIONS, TEXT_EXTENSIONS,
@@ -33,7 +33,7 @@ const EARLY_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Clone)]
 pub(super) struct WorkspaceExternalState {
-    platform: wire::WorkspaceExternalHostPlatform,
+    platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
     environment: BTreeMap<String, String>,
     detection_cwd: PathBuf,
     vscode_launcher: Arc<OnceLock<Option<PathBuf>>>,
@@ -70,7 +70,7 @@ impl WorkspaceExternalState {
 
     #[cfg(test)]
     fn for_test(
-        platform: wire::WorkspaceExternalHostPlatform,
+        platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
         vscode_launcher: Option<PathBuf>,
         launcher: Arc<dyn WorkspaceExternalLauncher>,
     ) -> Self {
@@ -90,7 +90,7 @@ impl WorkspaceExternalState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkspaceExternalLaunchRequest {
-    action: wire::WorkspaceExternalFileAction,
+    action: wire::settings_workspace_context::WorkspaceExternalFileAction,
     workspace_root: PathBuf,
     file: PathBuf,
     vscode_launcher: Option<PathBuf>,
@@ -104,7 +104,7 @@ trait WorkspaceExternalLauncher: Send + Sync {
 }
 
 struct ProductionWorkspaceExternalLauncher {
-    platform: wire::WorkspaceExternalHostPlatform,
+    platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
     environment: BTreeMap<String, String>,
 }
 
@@ -115,7 +115,7 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
     ) -> BoxFuture<'_, psychevo::Result<()>> {
         Box::pin(async move {
             match request.action {
-                wire::WorkspaceExternalFileAction::Vscode => {
+                wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode => {
                     let vscode = request.vscode_launcher.as_deref().ok_or_else(|| {
                         Error::Message("VS Code is not available on the workspace host".to_string())
                     })?;
@@ -130,8 +130,8 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
                     )
                     .await
                 }
-                wire::WorkspaceExternalFileAction::SystemDefault => match self.platform {
-                    wire::WorkspaceExternalHostPlatform::Macos => {
+                wire::settings_workspace_context::WorkspaceExternalFileAction::SystemDefault => match self.platform {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Macos => {
                         spawn_host_command(
                             Path::new("/usr/bin/open"),
                             &[request.file.clone().into_os_string()],
@@ -142,7 +142,7 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
                         )
                         .await
                     }
-                    wire::WorkspaceExternalHostPlatform::Linux => {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux => {
                         let opener = required_host_executable(
                             "xdg-open",
                             &request.workspace_root,
@@ -159,12 +159,12 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
                         )
                         .await
                     }
-                    wire::WorkspaceExternalHostPlatform::Windows => {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows => {
                         windows_open_default(request.file).await
                     }
                 },
-                wire::WorkspaceExternalFileAction::Reveal => match self.platform {
-                    wire::WorkspaceExternalHostPlatform::Macos => {
+                wire::settings_workspace_context::WorkspaceExternalFileAction::Reveal => match self.platform {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Macos => {
                         spawn_host_command(
                             Path::new("/usr/bin/open"),
                             &[OsString::from("-R"), request.file.clone().into_os_string()],
@@ -175,11 +175,11 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
                         )
                         .await
                     }
-                    wire::WorkspaceExternalHostPlatform::Linux => {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux => {
                         reveal_linux_file(&request.file, &request.workspace_root, &self.environment)
                             .await
                     }
-                    wire::WorkspaceExternalHostPlatform::Windows => {
+                    wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows => {
                         windows_reveal_file(request.file).await
                     }
                 },
@@ -196,17 +196,18 @@ pub(super) fn workspace_file_external_actions_value(
     let resolved = resolve_regular_workspace_file(scope, path)?;
     let classification = classify_external_file(&resolved)?;
     let vscode_available = classification.text_like && state.vscode_launcher().is_some();
-    let preferred_action = if classification.category == wire::WorkspaceExternalFileCategory::Text
+    let preferred_action = if classification.category
+        == wire::settings_workspace_context::WorkspaceExternalFileCategory::Text
         && vscode_available
     {
-        wire::WorkspaceExternalFileAction::Vscode
+        wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode
     } else {
-        wire::WorkspaceExternalFileAction::SystemDefault
+        wire::settings_workspace_context::WorkspaceExternalFileAction::SystemDefault
     };
     let available_actions =
         available_actions(preferred_action, classification.text_like, vscode_available);
     Ok(serde_json::to_value(
-        wire::WorkspaceFileExternalActionsResult {
+        wire::settings_workspace_context::WorkspaceFileExternalActionsResult {
             path: workspace_relative_path(&scope.cwd, &resolved)?,
             category: classification.category,
             text_like: classification.text_like,
@@ -220,7 +221,7 @@ pub(super) fn workspace_file_external_actions_value(
 pub(super) async fn workspace_file_open_external_value(
     state: &WorkspaceExternalState,
     scope: &ResolvedScope,
-    params: wire::WorkspaceFileOpenExternalParams,
+    params: wire::settings_workspace_context::WorkspaceFileOpenExternalParams,
 ) -> psychevo::Result<Value> {
     let resolved = resolve_regular_workspace_file(scope, &params.path)?;
     let classification = classify_external_file(&resolved)?;
@@ -229,12 +230,13 @@ pub(super) async fn workspace_file_open_external_value(
     } else {
         None
     };
-    let preferred_action = if classification.category == wire::WorkspaceExternalFileCategory::Text
+    let preferred_action = if classification.category
+        == wire::settings_workspace_context::WorkspaceExternalFileCategory::Text
         && vscode_launcher.is_some()
     {
-        wire::WorkspaceExternalFileAction::Vscode
+        wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode
     } else {
-        wire::WorkspaceExternalFileAction::SystemDefault
+        wire::settings_workspace_context::WorkspaceExternalFileAction::SystemDefault
     };
     let actions = available_actions(
         preferred_action,
@@ -257,7 +259,7 @@ pub(super) async fn workspace_file_open_external_value(
         })
         .await?;
     Ok(serde_json::to_value(
-        wire::WorkspaceFileOpenExternalResult {
+        wire::settings_workspace_context::WorkspaceFileOpenExternalResult {
             path: result_path,
             action: params.action,
         },
@@ -281,7 +283,7 @@ fn workspace_relative_path(root: &Path, file: &Path) -> psychevo::Result<String>
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExternalFileClassification {
-    category: wire::WorkspaceExternalFileCategory,
+    category: wire::settings_workspace_context::WorkspaceExternalFileCategory,
     text_like: bool,
 }
 
@@ -305,23 +307,35 @@ fn classify_external_file_with_probe(
         .to_ascii_lowercase();
 
     let (fixed_category, text_like) = if is_extension(&extension, WEBPAGE_EXTENSIONS) {
-        (Some(wire::WorkspaceExternalFileCategory::Webpage), true)
+        (
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Webpage),
+            true,
+        )
     } else if is_extension(&extension, IMAGE_EXTENSIONS) {
         (
-            Some(wire::WorkspaceExternalFileCategory::Image),
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Image),
             extension == "svg",
         )
     } else if is_extension(&extension, MEDIA_EXTENSIONS) {
-        (Some(wire::WorkspaceExternalFileCategory::Media), false)
+        (
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Media),
+            false,
+        )
     } else if extension == "pdf" {
-        (Some(wire::WorkspaceExternalFileCategory::Pdf), false)
+        (
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Pdf),
+            false,
+        )
     } else if is_extension(&extension, OFFICE_EXTENSIONS) {
         (
-            Some(wire::WorkspaceExternalFileCategory::Office),
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Office),
             is_extension(&extension, TEXTUAL_OFFICE_EXTENSIONS),
         )
     } else if is_extension(&extension, TEXT_EXTENSIONS) || is_text_filename(&filename) {
-        (Some(wire::WorkspaceExternalFileCategory::Text), true)
+        (
+            Some(wire::settings_workspace_context::WorkspaceExternalFileCategory::Text),
+            true,
+        )
     } else {
         (None, false)
     };
@@ -335,26 +349,26 @@ fn classify_external_file_with_probe(
     let text_like = probe(path).unwrap_or(false);
     ExternalFileClassification {
         category: if text_like {
-            wire::WorkspaceExternalFileCategory::Text
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Text
         } else {
-            wire::WorkspaceExternalFileCategory::Other
+            wire::settings_workspace_context::WorkspaceExternalFileCategory::Other
         },
         text_like,
     }
 }
 
 fn available_actions(
-    preferred: wire::WorkspaceExternalFileAction,
+    preferred: wire::settings_workspace_context::WorkspaceExternalFileAction,
     text_like: bool,
     vscode_available: bool,
-) -> Vec<wire::WorkspaceExternalFileAction> {
+) -> Vec<wire::settings_workspace_context::WorkspaceExternalFileAction> {
     let mut actions = vec![preferred];
-    if preferred == wire::WorkspaceExternalFileAction::Vscode {
-        actions.push(wire::WorkspaceExternalFileAction::SystemDefault);
+    if preferred == wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode {
+        actions.push(wire::settings_workspace_context::WorkspaceExternalFileAction::SystemDefault);
     } else if text_like && vscode_available {
-        actions.push(wire::WorkspaceExternalFileAction::Vscode);
+        actions.push(wire::settings_workspace_context::WorkspaceExternalFileAction::Vscode);
     }
-    actions.push(wire::WorkspaceExternalFileAction::Reveal);
+    actions.push(wire::settings_workspace_context::WorkspaceExternalFileAction::Reveal);
     actions
 }
 
@@ -384,7 +398,7 @@ fn bounded_text_probe(path: &Path) -> psychevo::Result<bool> {
 }
 
 fn detect_vscode_launcher(
-    platform: wire::WorkspaceExternalHostPlatform,
+    platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
     environment: &BTreeMap<String, String>,
     cwd: &Path,
 ) -> Option<PathBuf> {
@@ -394,7 +408,7 @@ fn detect_vscode_launcher(
         env: environment,
     };
     let well_known = vscode_well_known_paths(platform, environment);
-    if platform == wire::WorkspaceExternalHostPlatform::Windows
+    if platform == wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows
         && let Some(path) = well_known
             .iter()
             .filter(|candidate| {
@@ -417,11 +431,11 @@ fn detect_vscode_launcher(
 }
 
 fn vscode_well_known_paths(
-    platform: wire::WorkspaceExternalHostPlatform,
+    platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
     environment: &BTreeMap<String, String>,
 ) -> Vec<PathBuf> {
     match platform {
-        wire::WorkspaceExternalHostPlatform::Macos => {
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Macos => {
             let mut paths = vec![PathBuf::from(
                 "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
             )];
@@ -434,7 +448,7 @@ fn vscode_well_known_paths(
             }
             paths
         }
-        wire::WorkspaceExternalHostPlatform::Windows => {
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows => {
             let mut paths = Vec::new();
             if let Some(local_app_data) = env_value(environment, "LOCALAPPDATA") {
                 let install = PathBuf::from(local_app_data).join(r"Programs\Microsoft VS Code");
@@ -450,7 +464,7 @@ fn vscode_well_known_paths(
             }
             paths
         }
-        wire::WorkspaceExternalHostPlatform::Linux => vec![
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux => vec![
             PathBuf::from("/usr/local/bin/code"),
             PathBuf::from("/snap/bin/code"),
         ],
@@ -465,20 +479,26 @@ fn env_value<'a>(environment: &'a BTreeMap<String, String>, key: &str) -> Option
         .filter(|value| !value.trim().is_empty())
 }
 
-fn current_external_host_platform() -> wire::WorkspaceExternalHostPlatform {
+fn current_external_host_platform()
+-> wire::settings_workspace_context::WorkspaceExternalHostPlatform {
     if cfg!(target_os = "macos") {
-        wire::WorkspaceExternalHostPlatform::Macos
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Macos
     } else if cfg!(windows) {
-        wire::WorkspaceExternalHostPlatform::Windows
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows
     } else {
-        wire::WorkspaceExternalHostPlatform::Linux
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux
     }
 }
 
-fn host_platform(platform: wire::WorkspaceExternalHostPlatform) -> HostPlatform {
+fn host_platform(
+    platform: wire::settings_workspace_context::WorkspaceExternalHostPlatform,
+) -> HostPlatform {
     match platform {
-        wire::WorkspaceExternalHostPlatform::Windows => HostPlatform::Windows,
-        wire::WorkspaceExternalHostPlatform::Macos | wire::WorkspaceExternalHostPlatform::Linux => {
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Windows => {
+            HostPlatform::Windows
+        }
+        wire::settings_workspace_context::WorkspaceExternalHostPlatform::Macos
+        | wire::settings_workspace_context::WorkspaceExternalHostPlatform::Linux => {
             HostPlatform::Posix
         }
     }

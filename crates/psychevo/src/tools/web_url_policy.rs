@@ -1,12 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
 };
 
 use futures::{Stream, StreamExt};
+use psychevo_ai::AbortSignal;
+
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedWebUrl {
@@ -277,8 +278,7 @@ fn bearer_token(value: &str) -> bool {
     let non_padding_len = value.bytes().take_while(|byte| *byte != b'=').count();
     non_padding_len >= 16
         && value[..non_padding_len].bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/')
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/')
         })
         && value[non_padding_len..].bytes().all(|byte| byte == b'=')
 }
@@ -366,18 +366,12 @@ mod tests {
         let nested_once = wrap_nested_url(
             "https://nested.example/callback?auth=sk-abcdefghijklmnopqrstuvwxyz012345",
         );
-        assert!(
-            validate_url_text(&nested_once).is_err(),
-            "one nested URL"
-        );
+        assert!(validate_url_text(&nested_once).is_err(), "one nested URL");
 
         let nested_twice = wrap_nested_url(&wrap_nested_url(
             "https://nested.example/callback?auth=Bearer%20abcdefghijklmnop%2B%2F%3D",
         ));
-        assert!(
-            validate_url_text(&nested_twice).is_err(),
-            "two nested URLs"
-        );
+        assert!(validate_url_text(&nested_twice).is_err(), "two nested URLs");
 
         let nested_userinfo = wrap_nested_url("https://user:password@nested.example/callback");
         assert!(

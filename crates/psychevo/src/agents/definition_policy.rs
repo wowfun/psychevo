@@ -1,17 +1,12 @@
-use super::{
-    AbortSignal, BTreeMap, BTreeSet, BoxFuture, Error, Path, PathBuf, Result, RunMode, ToolBinding,
-    ToolDisplaySpec, ToolExecutionMode, ToolOutput, Value, fs, json,
-};
-use super::{
-    Arc,
-    catalog_surface::{
-        AgentBackendRef, AgentContribution, AgentDefinition, AgentDiagnostic, AgentEntrypoint,
-        AgentPermissionMode, AgentSource, AgentToolContext, AgentToolPolicy, MAX_AGENT_NAME_LEN,
-        MAX_AGENT_SPAWN_DEPTH_CAP, RawAgentFrontmatter, default_peer_agent_entrypoints,
-        default_subagent_entrypoints,
-    },
-    child_runs::{SpawnAgentArgs, spawn_subagent},
-};
+mod tools;
+mod validation;
 
-include!("definition_policy/validation.rs");
-include!("definition_policy/tests.rs");
+pub(super) use tools::{HookedTool, SpawnAgentTool};
+#[cfg(test)]
+pub(super) use validation::built_in_agent;
+pub(super) use validation::{
+    agent_allows_tool, agent_catalog_for_policy, agent_policy_allows_agent_catalog,
+    agent_policy_allows_skill_catalog, ancestor_compatible_agent_dirs, built_in_agents,
+    clamp_agent_spawn_depth, existing_agent_path, home_path, parse_agent_file, split_frontmatter,
+};
+pub use validation::{parse_agent_definition_text, valid_agent_name};

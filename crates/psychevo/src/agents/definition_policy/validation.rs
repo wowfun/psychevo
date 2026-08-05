@@ -1,3 +1,19 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+
+use crate::error::{Error, Result};
+use crate::types::RunMode;
+
+use super::super::catalog_surface::{
+    AgentBackendRef, AgentContribution, AgentDefinition, AgentDiagnostic, AgentEntrypoint,
+    AgentPermissionMode, AgentSource, AgentToolPolicy, MAX_AGENT_NAME_LEN,
+    MAX_AGENT_SPAWN_DEPTH_CAP, RawAgentFrontmatter, default_peer_agent_entrypoints,
+    default_subagent_entrypoints,
+};
+
 pub(crate) fn parse_agent_file(path: &Path, source: AgentSource) -> Result<AgentDefinition> {
     let content = fs::read_to_string(path)?;
     parse_agent_definition_text(
@@ -22,13 +38,7 @@ pub fn parse_agent_definition_text(
             .map_err(|err| Error::Config(format!("agent frontmatter failed: {err}")))?,
         None => RawAgentFrontmatter::default(),
     };
-    agent_from_raw(
-        raw,
-        default_name,
-        instructions,
-        file_path,
-        source,
-    )
+    agent_from_raw(raw, default_name, instructions, file_path, source)
 }
 
 pub(crate) fn agent_from_raw(
@@ -842,19 +852,4 @@ pub(crate) fn built_in_agent(
         effort: None,
         diagnostics: Vec::new(),
     }
-}
-
-pub(crate) struct SpawnAgentTool {
-    pub(crate) context: AgentToolContext,
-}
-
-impl SpawnAgentTool {
-    pub(crate) fn new(context: AgentToolContext) -> Self {
-        Self { context }
-    }
-}
-
-pub(crate) struct HookedTool {
-    pub(crate) inner: Arc<dyn ToolBinding>,
-    pub(crate) hook_runtime: crate::hooks::HookRuntime,
 }

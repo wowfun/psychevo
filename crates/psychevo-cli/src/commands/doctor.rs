@@ -3,16 +3,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::{
-    __product::configuration::auth_status_value, __product::configuration::config_show_value,
-    __product::configuration::fetch_model_catalog,
-    __product::configuration::model_catalog_providers,
-    __product::configuration::selected_configured_model,
-};
+use psychevo::{Configuration, config::ConfigScope};
 use serde_json::{Value, json};
 
 use crate::args::DoctorArgs;
-use crate::commands::common::base_run_options;
+use crate::commands::common::CommandConfiguration;
 use crate::commands::gateway::managed_status_for_home;
 use crate::commands::model::model_value;
 use crate::commands::serve::{
@@ -39,27 +34,34 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
     let home_config = home.join("config.toml");
     let home_initialized = home_config.exists();
 
-    let options = base_run_options(&env_map, &home, &cwd).await;
-    let config = match &options {
-        Ok(options) => capture_value(|| {
-            Ok(config_show_value(
-                options,
-                psychevo::__product::runtime::ConfigScope::Effective,
-            )?)
-        }),
-        Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-    };
-    let model = match &options {
-        Ok(options) => capture_value(|| {
-            Ok(json!({
-                "model": selected_configured_model(options)?.as_ref().map(model_value),
-            }))
-        }),
-        Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
-    };
-    let auth = match &options {
-        Ok(options) => capture_value(|| Ok(auth_status_value(options, None)?)),
-        Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
+    let configuration = CommandConfiguration::open(&env_map, &home, &cwd).await;
+    let (config, model, auth, live) = match configuration {
+        Ok(context) => {
+            let configuration = context.configuration();
+            let config = capture_value(|| Ok(configuration.config_value(ConfigScope::Effective)?));
+            let model = capture_value(|| {
+                Ok(json!({
+                    "model": configuration.selected_model()?.as_ref().map(model_value),
+                }))
+            });
+            let auth = capture_value(|| Ok(configuration.auth_status(None)?));
+            let live = if args.live {
+                live_checks(configuration).await
+            } else {
+                json!({ "enabled": false })
+            };
+            context.finish(Ok(())).await?;
+            (config, model, auth, live)
+        }
+        Err(err) => {
+            let unavailable = json!({ "ok": false, "error": format!("{err:#}") });
+            let live = if args.live {
+                json!({ "enabled": true, "ok": false, "error": "local configuration is not available" })
+            } else {
+                json!({ "enabled": false })
+            };
+            (unavailable.clone(), unavailable.clone(), unavailable, live)
+        }
     };
 
     let assets = resolve_static_dir_diagnostic(None, &env_map, &cwd)?;
@@ -80,12 +82,6 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
         "rg": tool_value("rg", &env_map),
         "pnpm": tool_value("pnpm", &env_map),
     });
-    let live = if args.live {
-        live_checks(options.as_ref().ok()).await
-    } else {
-        json!({ "enabled": false })
-    };
-
     let ok = home_initialized
         && config["ok"].as_bool().unwrap_or(false)
         && model["ok"].as_bool().unwrap_or(false)
@@ -125,11 +121,8 @@ fn capture_value(f: impl FnOnce() -> Result<Value>) -> Value {
     }
 }
 
-async fn live_checks(options: Option<&psychevo::__product::runtime::RunOptions>) -> Value {
-    let Some(options) = options else {
-        return json!({ "enabled": true, "ok": false, "error": "local configuration is not available" });
-    };
-    let providers = match model_catalog_providers(options) {
+async fn live_checks(configuration: &Configuration) -> Value {
+    let providers = match configuration.model_catalog_providers() {
         Ok(providers) => providers,
         Err(err) => {
             return json!({ "enabled": true, "ok": false, "error": format!("{err:#}") });
@@ -140,7 +133,7 @@ async fn live_checks(options: Option<&psychevo::__product::runtime::RunOptions>)
         .into_iter()
         .filter(|provider| provider.fetchable())
     {
-        match fetch_model_catalog(&provider).await {
+        match configuration.fetch_model_catalog(&provider).await {
             Ok(models) => rows.push(json!({
                 "provider": provider.provider,
                 "ok": true,

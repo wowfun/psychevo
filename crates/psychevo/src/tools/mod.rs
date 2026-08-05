@@ -1,37 +1,20 @@
-pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-pub(crate) use std::fs;
-pub(crate) use std::io::{Read, Write};
-pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::process::Stdio;
-pub(crate) use std::sync::{Arc, Condvar, LazyLock, Mutex};
-pub(crate) use std::thread;
-pub(crate) use std::time::{Duration, Instant, SystemTime};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
-pub(crate) use futures::future::BoxFuture;
-pub(crate) use psychevo_agent_core::{ToolAttachment, ToolBinding, ToolExecutionMode, ToolOutput};
-pub(crate) use psychevo_ai::AbortSignal;
-pub(crate) use serde::Deserialize;
-pub(crate) use serde_json::{Value, json};
-pub(crate) use similar::TextDiff;
-pub(crate) use tokio::time;
+use psychevo_agent_core::ToolBinding;
 
-pub(crate) use crate::config::{
+use crate::config::{
     CustomToolsetConfig, LspConfig, ResolvedImageGenerationConfig, ToolSelectionConfig,
     WebSearchConfig,
 };
-pub(crate) use crate::error::{Error, Result};
-pub(crate) use crate::prompt_templates;
-pub(crate) use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
+use crate::prompt_templates;
+use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 #[cfg(test)]
-pub(crate) use crate::skills::SkillDiscoveryOptions;
-pub(crate) use crate::skills::{
-    InstallOptions, ListSkillsOptions, SkillRuntime, SkillTarget, create_skill, install_skill,
-    list_skills_value_with_options, patch_skill, remove_skill, set_skill_config_value,
-    set_skill_enabled, view_skill_value,
-};
-pub(crate) use crate::types::{
-    RunMode, RunStreamEvent, RunStreamSink, WorkspaceMutation, WorkspaceMutationSink,
-};
+use crate::skills::SkillDiscoveryOptions;
+use crate::skills::SkillRuntime;
+use crate::types::{RunMode, RunStreamSink, WorkspaceMutationSink};
 
 pub(crate) const READ_MAX_BYTES: usize = 50 * 1024;
 pub(crate) const READ_MAX_LINES: usize = 2000;
@@ -58,7 +41,7 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) task_id: String,
     pub(crate) file_reads: FileReadTracker,
     pub(crate) lsp: LspConfig,
-    pub(crate) lsp_manager: Arc<crate::tools::write_support::LspManager>,
+    pub(crate) lsp_manager: Arc<crate::tools::write_support::patch_lsp::LspManager>,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
@@ -78,7 +61,7 @@ impl Default for ToolRuntimeContext {
             task_id: "default".to_string(),
             file_reads: FileReadTracker::default(),
             lsp: LspConfig::default(),
-            lsp_manager: crate::tools::write_support::default_lsp_manager(),
+            lsp_manager: crate::tools::write_support::patch_lsp::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: None,
             workspace_mutations: None,
@@ -524,64 +507,30 @@ pub(crate) fn mode_instruction_for_tool_availability(
     }
 }
 
-// Tool implementations are split by tool family and included in this module.
-#[path = "cwd.rs"]
-pub(crate) mod cwd;
-#[allow(unused_imports)]
-pub(crate) use cwd::*;
-#[path = "file_mutation.rs"]
-pub(crate) mod file_mutation;
-#[allow(unused_imports)]
-pub(crate) use file_mutation::*;
-#[path = "write_support.rs"]
-pub(crate) mod write_support;
-#[allow(unused_imports)]
-pub(crate) use write_support::*;
-#[path = "read.rs"]
-pub(crate) mod read;
-#[allow(unused_imports)]
-pub(crate) use read::*;
-#[path = "write.rs"]
-pub(crate) mod write;
-#[allow(unused_imports)]
-pub(crate) use write::*;
-#[path = "edit.rs"]
-pub(crate) mod edit;
-#[allow(unused_imports)]
-pub(crate) use edit::*;
-#[path = "exec_command.rs"]
-pub(crate) mod exec_command;
-#[allow(unused_imports)]
-pub(crate) use exec_command::*;
-#[path = "clarify.rs"]
-pub(crate) mod clarify;
-#[allow(unused_imports)]
-pub(crate) use clarify::*;
-#[path = "skills.rs"]
-pub(crate) mod skills;
-#[allow(unused_imports)]
-pub(crate) use skills::*;
-#[path = "args.rs"]
+// Tool implementations are split by tool family.
 pub(crate) mod args;
-#[allow(unused_imports)]
-pub(crate) use args::*;
-#[path = "truncation.rs"]
-pub(crate) mod truncation;
-#[allow(unused_imports)]
-pub(crate) use truncation::*;
-#[path = "web_fetch.rs"]
-pub(crate) mod web_fetch;
-#[allow(unused_imports)]
-pub(crate) use web_fetch::*;
-#[path = "web_search.rs"]
-pub(crate) mod web_search;
-#[allow(unused_imports)]
-pub(crate) use web_search::*;
-#[path = "web_url_policy.rs"]
-pub(crate) mod web_url_policy;
-#[allow(unused_imports)]
-pub(crate) use web_url_policy::*;
-#[path = "image_tools.rs"]
+pub(crate) mod clarify;
+pub(crate) mod cwd;
+pub(crate) mod edit;
+pub(crate) mod exec_command;
+pub(crate) mod file_mutation;
 pub(crate) mod image_tools;
-#[allow(unused_imports)]
-pub(crate) use image_tools::*;
+pub(crate) mod read;
+pub(crate) mod skills;
+pub(crate) mod truncation;
+pub(crate) mod web_fetch;
+pub(crate) mod web_search;
+pub(crate) mod web_url_policy;
+pub(crate) mod write;
+pub(crate) mod write_support;
+
+use clarify::ClarifyTool;
+use edit::EditTool;
+use exec_command::sessions::session_manager::{ExecCommandTool, WriteStdinTool};
+use file_mutation::FileReadTracker;
+use image_tools::{ImageGenerateTool, ViewImageTool};
+use read::ReadTool;
+use skills::{ListSkillsTool, SkillConfigTool, SkillHubTool, SkillManageTool, ViewSkillTool};
+use web_fetch::WebFetchTool;
+use web_search::WebSearchTool;
+use write::WriteTool;

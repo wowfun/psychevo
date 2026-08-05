@@ -1,5 +1,24 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+pub(in crate::args) mod basic_profile;
+pub(in crate::args) mod desktop;
+pub(in crate::args) mod gateway;
+pub(in crate::args) mod plugins_hooks;
+pub(in crate::args) mod run_stats_context;
+pub(in crate::args) mod skills;
+pub(in crate::args) mod skills_entry;
+
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+use crate::args::admin_commands::profile_args::{AuthArgs, ConfigArgs, ModelArgs, SessionArgs};
+use crate::args::core_commands::command_variants::{AgentArgs, ToolArgs, TuiArgs};
+use basic_profile::{AcpArgs, DoctorArgs, InitArgs, McpArgs, ProfileArgs, ServeArgs, SetupArgs};
+use desktop::DesktopArgs;
+use gateway::{GatewayArgs, WebArgs};
+use plugins_hooks::{HooksArgs, PluginArgs};
+use run_stats_context::{ContextArgs, RunArgs, StatsArgs};
+use skills_entry::SkillsArgs;
+
 #[derive(Debug, Parser)]
 #[command(name = "pevo", version)]
 #[command(
@@ -105,11 +124,3 @@ pub(crate) enum Commands {
     )]
     Setup(SetupArgs),
 }
-
-include!("global_args/basic_profile.rs");
-include!("global_args/desktop.rs");
-include!("global_args/gateway.rs");
-include!("global_args/run_stats_context.rs");
-include!("global_args/skills_entry.rs");
-include!("global_args/plugins_hooks.rs");
-include!("global_args/skills.rs");

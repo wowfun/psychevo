@@ -1,3 +1,14 @@
+use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
+
+use serde_json::Value;
+
+use crate::config::{
+    ConfigModelEntry, ConfigProviderEntry, Error, ExecPolicyHostExecutable, ModelCost,
+    ModelCostTier, ModelLimits, ModelMetadata, ModelSelection, REASONING_EFFORT_VALUES, Result,
+    model_selection_from_raw, normalize_provider_id, valid_env_name,
+};
+
 pub(crate) fn parse_host_executables(value: &Value) -> Result<Vec<ExecPolicyHostExecutable>> {
     let values = value.as_array().ok_or_else(|| {
         Error::Config("exec_policy.host_executables must be an array".to_string())
@@ -280,7 +291,6 @@ pub(crate) fn optional_string_field(
         .transpose()
 }
 
-#[allow(dead_code)]
 pub(crate) fn optional_string_alias_field(
     object: &serde_json::Map<String, Value>,
     primary: &str,

@@ -1,3 +1,28 @@
+use super::super::{
+    AbortSignal, AgentEdgeStatus, CompactSessionOptions, CompactionReason, ControlHandle, Error,
+    ExternalAgentDelegateRequest, LanguageModel, Message, Result, ToolOutput, Uuid, Value,
+    compact_session, json,
+};
+use super::super::{
+    Deserialize,
+    catalog_surface::{
+        AgentContribution, AgentDefinition, AgentEntrypoint, AgentInvocationRole, AgentRunRecord,
+        AgentRunStatus, AgentToolContext,
+    },
+    definition_policy::clamp_agent_spawn_depth,
+    lifecycle::{agent_child_session_summary_value, model_content_string, subagent_summary_value},
+    mailbox_tools::{
+        append_parent_agent_start_notification, fork_messages, now_ms, update_run_child_session,
+        update_run_completed, update_run_failed,
+    },
+    teams::AgentTeamMember,
+};
+use super::ActiveAgentRunGuard;
+use super::policy::{
+    ChildAgentMetadataInput, ExternalAgentSessionStart, agent_path, bind_child_model,
+    child_agent_metadata, default_task_name, emit_external_agent_session_start, run_child_agent,
+};
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SpawnAgentArgs {
@@ -26,8 +51,8 @@ fn child_concurrency_limit(context: &AgentToolContext) -> usize {
         .active_team
         .as_ref()
         .map(|team| team.max_parallel_agents as usize)
-        .unwrap_or(super::supervisor::DEFAULT_CHILD_CONCURRENCY)
-        .min(super::supervisor::DEFAULT_CHILD_CONCURRENCY)
+        .unwrap_or(super::super::supervisor::DEFAULT_CHILD_CONCURRENCY)
+        .min(super::super::supervisor::DEFAULT_CHILD_CONCURRENCY)
 }
 
 pub(crate) async fn spawn_subagent(
@@ -85,8 +110,7 @@ pub(crate) async fn spawn_subagent(
         return spawn_external_subagent(context, args, tool_call_id, abort, agent, team_member)
             .await;
     }
-    let (child_model, child_provider) =
-        bind_child_model(&context, &agent, args.model.as_deref())?;
+    let (child_model, child_provider) = bind_child_model(&context, &agent, args.model.as_deref())?;
     let id = Uuid::now_v7().to_string();
     let task_name = args.task_name.trim().to_string();
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
@@ -317,23 +341,27 @@ async fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> 
         context: Some(context),
         parent_tool_call_id: input.parent_tool_call_id,
     });
-    let child_session = context.state.create_child_session_with_metadata(
-        &context.parent_session_id,
-        &context.cwd,
-        "agent",
-        input.model,
-        &context.model_provider,
-        Some(metadata.clone()),
-    )
-    .await?;
+    let child_session = context
+        .state
+        .create_child_session_with_metadata(
+            &context.parent_session_id,
+            &context.cwd,
+            "agent",
+            input.model,
+            &context.model_provider,
+            Some(metadata.clone()),
+        )
+        .await?;
     attach_child_thread_metadata(&mut metadata, &child_session);
-    context.state.upsert_agent_edge(
-        &context.parent_session_id,
-        &child_session,
-        AgentEdgeStatus::Open,
-        Some(metadata),
-    )
-    .await?;
+    context
+        .state
+        .upsert_agent_edge(
+            &context.parent_session_id,
+            &child_session,
+            AgentEdgeStatus::Open,
+            Some(metadata),
+        )
+        .await?;
     Ok(child_session)
 }
 
@@ -360,7 +388,7 @@ fn attach_child_thread_metadata(metadata: &mut Value, child_session: &str) {
     }
 }
 
-fn external_agent_runtime_ref(
+pub(super) fn external_agent_runtime_ref(
     agent: &AgentDefinition,
     team_member: Option<&AgentTeamMember>,
 ) -> Option<String> {
@@ -371,12 +399,9 @@ fn external_agent_runtime_ref(
     {
         return (runtime_ref != "native").then(|| runtime_ref.to_string());
     }
-    agent
-        .backend
-        .as_ref()
-        .map(|backend| {
-            crate::config::generated_runtime_profile_id_for_backend(backend.name.as_str())
-        })
+    agent.backend.as_ref().map(|backend| {
+        crate::config::generated_runtime_profile_id_for_backend(backend.name.as_str())
+    })
 }
 
 async fn spawn_external_subagent(
@@ -490,23 +515,27 @@ async fn spawn_external_subagent(
         .as_deref()
         .map(|backend| format!("acp:{backend}"))
         .unwrap_or_else(|| runtime_ref.clone());
-    let child_session = context.state.create_child_session_with_metadata(
-        &context.parent_session_id,
-        &context.cwd,
-        "peer_agent",
-        model.as_deref().unwrap_or(&agent.name),
-        &child_provider,
-        Some(metadata.clone()),
-    )
-    .await?;
+    let child_session = context
+        .state
+        .create_child_session_with_metadata(
+            &context.parent_session_id,
+            &context.cwd,
+            "peer_agent",
+            model.as_deref().unwrap_or(&agent.name),
+            &child_provider,
+            Some(metadata.clone()),
+        )
+        .await?;
     attach_child_thread_metadata(&mut metadata, &child_session);
-    context.state.upsert_agent_edge(
-        &context.parent_session_id,
-        &child_session,
-        AgentEdgeStatus::Open,
-        Some(metadata),
-    )
-    .await?;
+    context
+        .state
+        .upsert_agent_edge(
+            &context.parent_session_id,
+            &child_session,
+            AgentEdgeStatus::Open,
+            Some(metadata),
+        )
+        .await?;
     update_run_child_session(&context.supervisor, &id, &child_session);
     record.child_session_id = Some(child_session.clone());
     emit_external_agent_session_start(ExternalAgentSessionStart {
@@ -562,8 +591,7 @@ async fn spawn_external_subagent(
                     .expect("external Agent run exists")
             };
             context.supervisor.finish(&context.state, &id).await?;
-            let model_value =
-                subagent_summary_value(Some(&context.state), &record, false).await;
+            let model_value = subagent_summary_value(Some(&context.state), &record, false).await;
             return Ok(ToolOutput::error(model_content_string(&model_value)));
         }
     };
@@ -854,12 +882,9 @@ pub(crate) async fn spawn_child_agent_background(
     }
     update_run_child_session(&context.supervisor, &id, &child_session);
     record.child_session_id = Some(child_session.clone());
-    if let Err(error) = append_parent_agent_start_notification(
-        &context.state,
-        &context.parent_session_id,
-        &record,
-    )
-    .await
+    if let Err(error) =
+        append_parent_agent_start_notification(&context.state, &context.parent_session_id, &record)
+            .await
     {
         let _ = context
             .state

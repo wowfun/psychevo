@@ -1,11 +1,6 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use serde_json::Value;
 
-pub(crate) fn exec_timeout_output_text(value: &Value) -> Option<String> {
-    if value.get("tool_name").and_then(Value::as_str) != Some("exec_command") {
-        return None;
-    }
-    let result = value.get("result").unwrap_or(&Value::Null);
+pub(crate) fn exec_timeout_result_output_text(result: &Value) -> Option<String> {
     let error = result.get("error").and_then(Value::as_str)?;
     if !error.starts_with("command timed out after ") {
         return None;

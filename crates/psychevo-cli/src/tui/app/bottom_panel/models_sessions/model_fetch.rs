@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, FullscreenUi, ModelCatalogFetchResult, ModelCatalogStatus,
+    ModelMetadataCacheTarget, ModelMetadataRefreshTask, Result, TuiApp, format_model_spec,
+    push_model_metadata_target, push_raw_model_metadata_target, short_fetch_error,
+};
+use std::collections::BTreeMap;
 
 impl TuiApp {
     pub(crate) fn start_missing_model_metadata_cache_warmup(&mut self) {
@@ -34,10 +38,12 @@ impl TuiApp {
         if targets.is_empty() {
             return;
         }
-        let home = self.home.clone();
-        let env_map = self.env_map.clone();
+        let configuration = self
+            .configuration()
+            .map_err(|err| short_fetch_error(&err.to_string()));
         let task = tokio::spawn(async move {
-            refresh_model_metadata_cache(home, env_map, targets)
+            configuration?
+                .refresh_model_metadata_cache(targets)
                 .await
                 .map_err(|err| short_fetch_error(&err.to_string()))
         });
@@ -51,8 +57,10 @@ impl TuiApp {
         let _ = self.sync_model_catalog_providers();
         let mut targets = Vec::new();
         let mut seen = BTreeMap::new();
-        if let Some(model) = selected_configured_model(&self.run_options(String::new()))
+        if let Some(model) = self
+            .configuration()
             .ok()
+            .and_then(|configuration| configuration.selected_model().ok())
             .flatten()
         {
             push_model_metadata_target(&mut targets, &mut seen, &model, &self.model_catalog);
@@ -70,7 +78,10 @@ impl TuiApp {
                 &self.model_catalog,
             );
         }
-        if let Ok(models) = configured_models(&self.run_options(String::new())) {
+        if let Ok(models) = self
+            .configuration()
+            .and_then(|configuration| configuration.configured_models().map_err(Into::into))
+        {
             let mut by_spec = BTreeMap::new();
             for model in &models {
                 by_spec.insert(format_model_spec(model), model);
@@ -211,11 +222,17 @@ impl TuiApp {
         state.status = ModelCatalogStatus::Fetching;
         let provider_config = state.provider.clone();
         let provider_id = provider_config.provider.clone();
-        let home = self.home.clone();
+        let configuration = self
+            .configuration()
+            .map_err(|err| short_fetch_error(&err.to_string()));
         let task = tokio::spawn(async move {
-            let result = fetch_and_cache_model_catalog(&home, &provider_config)
-                .await
-                .map_err(|err| short_fetch_error(&err.to_string()));
+            let result = match configuration {
+                Ok(configuration) => configuration
+                    .fetch_and_cache_model_catalog(&provider_config)
+                    .await
+                    .map_err(|err| short_fetch_error(&err.to_string())),
+                Err(error) => Err(error),
+            };
             ModelCatalogFetchResult {
                 provider: provider_id,
                 result,

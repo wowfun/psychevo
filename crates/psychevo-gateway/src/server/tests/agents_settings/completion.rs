@@ -1,3 +1,13 @@
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{web_state, write_agent_definition};
+
 #[tokio::test]
 async fn completion_list_returns_cwd_files() {
     let (_temp, state) = web_state().await;
@@ -14,7 +24,7 @@ async fn completion_list_returns_cwd_files() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -63,7 +73,7 @@ async fn completion_list_returns_agent_mentions_for_at_prefix() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "completion/list".to_string(),
             params: Some(json!({

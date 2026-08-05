@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, TranscriptHitTarget, TranscriptRow, rect_contains, refresh_transcript_layout,
+    row_visible, toggle_transcript_row_details, transcript_render_blocks,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn ensure_selection(&mut self) {

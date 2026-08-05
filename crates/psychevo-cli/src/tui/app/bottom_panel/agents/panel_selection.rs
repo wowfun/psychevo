@@ -1,3 +1,12 @@
+use crate::tui::ui_types::AgentEditorPanel;
+use crate::tui::{
+    BottomPanel, BottomSelectionValue, ClarifyAnswer, ClarifyInputMode, ClarifyPanel,
+    ClarifyResponse, ClarifyResult, ConfigScope, FullscreenUi, KeyCode, KeyEvent, KeyModifiers,
+    ModelPanel, PermissionApprovalChoice, PermissionApprovalDecision, ProviderSetupPresetId,
+    RunningTask, SessionListView, TuiApp, provider_setup_preset,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) async fn handle_bottom_panel_key(
         &mut self,
@@ -136,21 +145,19 @@ impl TuiApp {
             KeyCode::Esc | KeyCode::Char('d') | KeyCode::Char('D') => {
                 ui.resolve_permission_approval(panel, PermissionApprovalDecision::deny());
             }
-            KeyCode::Enter => {
-                match panel.selected_choice() {
-                    PermissionApprovalChoice::Decision(decision) => {
-                        ui.resolve_permission_approval(panel, decision);
-                    }
-                    PermissionApprovalChoice::ExpandScopes => {
-                        panel.set_scope_expanded(true);
-                        ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
-                    }
-                    PermissionApprovalChoice::CollapseScopes => {
-                        panel.set_scope_expanded(false);
-                        ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
-                    }
+            KeyCode::Enter => match panel.selected_choice() {
+                PermissionApprovalChoice::Decision(decision) => {
+                    ui.resolve_permission_approval(panel, decision);
                 }
-            }
+                PermissionApprovalChoice::ExpandScopes => {
+                    panel.set_scope_expanded(true);
+                    ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+                }
+                PermissionApprovalChoice::CollapseScopes => {
+                    panel.set_scope_expanded(false);
+                    ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+                }
+            },
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_once());
             }
@@ -221,11 +228,7 @@ impl TuiApp {
             ClarifyInputMode::Options => match key.code {
                 KeyCode::Esc => {
                     if self
-                        .submit_active_clarify(
-                            ui,
-                            &panel.request.call_id,
-                            ClarifyResult::Cancelled,
-                        )
+                        .submit_active_clarify(ui, &panel.request.call_id, ClarifyResult::Cancelled)
                         .await
                     {
                         restore = true;
@@ -401,12 +404,13 @@ impl TuiApp {
             .filter(|running| matches!(running.task, RunningTask::Agent(_)))
             && running.selector.is_none()
         {
-            return running.control.submit_clarify_result(call_id, result);
+            return running.control.submit_clarify_result(call_id, result).await;
         }
         let Some((selector, _)) = self.active_gateway_turn_selector(ui) else {
             return false;
         };
-        self.gateway
+        self.runtime
+            .gateway()
             .submit_clarify(selector, call_id, result)
             .await
     }
@@ -428,7 +432,12 @@ impl TuiApp {
                     .and_then(BottomPanel::session_view)
                     .is_some_and(|view| view == SessionListView::Archived);
                 if archived {
-                    self.state_runtime.restore_session(&session_id).await?;
+                    self.runtime
+                        .client()
+                        .resume_thread(session_id.clone())
+                        .await?
+                        .restore()
+                        .await?;
                 }
                 self.open_session_direct(ui, &session_id).await?;
             }
@@ -444,8 +453,7 @@ impl TuiApp {
                     .copied()
                     .unwrap_or(20)
                     .saturating_add(20);
-                self.session_browser_limits
-                    .insert(cwd.clone(), next_limit);
+                self.session_browser_limits.insert(cwd.clone(), next_limit);
                 self.rebuild_session_panel(
                     ui,
                     view,
@@ -567,8 +575,8 @@ impl TuiApp {
                     );
                     return Ok(());
                 }
-                set_local_toolset_enabled(
-                    self.cwd.join(".psychevo"),
+                self.configuration()?.set_toolset_enabled(
+                    ConfigScope::Local,
                     self.current_mode,
                     &name,
                     !enabled,
@@ -599,12 +607,9 @@ impl TuiApp {
                         _ => None,
                     })
                     .unwrap_or(false);
-                let status = self.set_model_default_from_picker(
-                    model.clone(),
-                    reasoning_effort.clone(),
-                    global,
-                )
-                .await?;
+                let status = self
+                    .set_model_default_from_picker(model.clone(), reasoning_effort.clone(), global)
+                    .await?;
                 ui.bottom_panel = None;
                 ui.push_status(status);
                 ui.refresh_sidebar(self);

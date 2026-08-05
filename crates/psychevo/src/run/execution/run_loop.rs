@@ -1,7 +1,73 @@
-#[allow(unused_imports)]
-use super::*;
-use crate::agents::{apply_hook_runtime, build_hook_runtime};
-use crate::config::resolve_title_generation_provider;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use psychevo_agent_core::{AgentLoopRequest, ControlHandle, Message, run_agent_loop};
+use psychevo_ai::{Outcome, Provider};
+use serde_json::{Value, json};
+
+use super::super::entrypoints::DEFAULT_AGENT_MAX_TURNS;
+use super::super::titles::{
+    WebFirstTurnTitleGuard, emit_warning_events, ensure_new_visible_session_fallback_title,
+    ensure_new_visible_session_title, spawn_visible_session_title_task,
+};
+use super::completion::{
+    prompt_prefix_invalidation_reason, record_missed_required_agents, required_agent_mentions,
+    smart_approval_handler, smart_reviewer_model, take_prompt_prefix_notice,
+};
+use super::helpers::{
+    first_use_empty_visible_session, main_agent_input_from_sources,
+    materialize_first_use_empty_session, maybe_preflight_compact_session,
+    selected_agent_for_result, selected_skills_for_run, should_title_visible_first_turn,
+};
+use crate::agents::{
+    AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
+    agent_catalog_for_selected_policy, agent_mailbox_event_message,
+    agent_project_instructions_enabled, apply_agent_tool_policy, apply_hook_runtime,
+    build_hook_runtime, discover_agents, effective_run_mode, effective_tool_names,
+    main_agent_metadata, narrow_permission_mode_for_agent, resolve_agent_definition,
+    resolve_agents_home, skill_catalog_visible_for_tools,
+};
+use crate::compaction::{
+    CompactSessionOptions, CompactionReason, compact_session, is_context_overflow_error,
+    load_projected_messages,
+};
+use crate::config::{load_run_config, resolve_run_provider, resolve_title_generation_provider};
+use crate::context_usage::{
+    ContextRecorder, ContextRecordingAdapter, LiveContextProfile, context_counting_metadata,
+};
+use crate::error::{Error, Result};
+use crate::events::PersistenceSink;
+use crate::managed_tools::ensure_rg;
+use crate::messages::assistant_text;
+use crate::paths::canonical_cwd;
+use crate::permissions::PermissionRuntime;
+use crate::project_instructions::load_project_instructions;
+use crate::prompt_assembly::{
+    MainPromptPrefixInput, PromptPrefixRecordInput, RuntimeTimeContext,
+    assemble_main_prompt_prefix, assembly_from_prefix_record, context_evidence_for_request,
+    developer_provider_role, prompt_prefix_record, skill_contextual_user_messages,
+    tool_declarations_hash_with_search, turn_prefix_notice_instruction,
+    turn_required_agent_instruction, turn_runtime_time_instruction,
+};
+use crate::prompt_image::prompt_message_from_inputs_with_options;
+use crate::session_trace::SessionTraceSink;
+use crate::skills::{
+    SkillDiscoveryOptions, SkillRuntime, discover_skills_with_settings, load_skill_settings,
+    resolve_skills_home, skill_context_fragments,
+    skills_visible_for_prompt_with_tools_and_toolsets,
+};
+use crate::snapshot::SnapshotStore;
+use crate::tool_surface::{
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
+};
+use crate::tools::exec_command::process::{
+    detach_exec_sessions_for_task, interrupt_exec_sessions_for_task,
+};
+use crate::types::{
+    RunControl, RunMode, RunOptions, RunResult, RunStreamEvent, RunStreamSink, RunWarning,
+    RuntimeTool,
+};
 
 pub(crate) async fn run_live_internal(
     options: RunOptions,
@@ -531,6 +597,11 @@ pub(crate) async fn run_live_internal(
     let _turn_filesystem_grant_guard = options
         .state
         .turn_filesystem_grant_guard(session_id.clone());
+    let mcp_oauth_credentials = options
+        .mcp_runtime
+        .as_ref()
+        .map(crate::mcp::McpRuntime::mcp_oauth_credentials)
+        .unwrap_or_else(|| Arc::new(crate::config::SystemMcpOAuthCredentialStore));
     let agent_tools = if !options.no_agents {
         Some(AgentToolContext {
             provider: provider.clone(),
@@ -563,6 +634,7 @@ pub(crate) async fn run_live_internal(
             path_prefixes: managed_tools.path_prefixes.clone(),
             sandbox_policy: sandbox_policy.clone(),
             home: home.clone(),
+            mcp_oauth_credentials: Arc::clone(&mcp_oauth_credentials),
             image_input_enabled,
             image_generation: image_generation.clone(),
             web_search: effective_web_search.clone(),
@@ -888,8 +960,6 @@ pub(crate) async fn run_live_internal(
         started: invocation_started,
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: Some(control_handle.clone()),
         events: Some(Arc::clone(&events)),
         stream_events: main_stream_events,
         trace: trace.clone(),
@@ -1196,5 +1266,3 @@ fn hook_context_block(value: &Value) -> Option<psychevo_agent_core::ContextualUs
         text.to_string(),
     ))
 }
-
-include!("run_loop/helpers.rs");

@@ -1,11 +1,66 @@
+use tempfile::tempdir;
+
+use crate::tui::tests::fixtures::test_app;
+use crate::tui::tests::{
+    insert_tui_message, insert_tui_message_with_metadata, start_thread_fixture,
+};
+use crate::tui::{
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, SlashCommand, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptKind, textarea_text, textarea_with_text,
+};
+
+use super::support::gateway_test_entry;
+
+#[tokio::test]
+pub(crate) async fn history_reload_applies_every_bounded_page_in_session_order() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    app.current_session = Some(session_id.clone());
+    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
+    for session_seq in 1..=205 {
+        insert_tui_message(
+            &conn,
+            &session_id,
+            session_seq,
+            "user",
+            session_seq,
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": format!("prompt-{session_seq}")}],
+                "timestamp_ms": session_seq
+            }),
+        );
+    }
+    drop(conn);
+
+    let mut ui = FullscreenUi::new(&app);
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("paged history");
+
+    let prompts = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Prompt)
+        .collect::<Vec<_>>();
+    assert_eq!(ui.loaded_session_message_count, 205);
+    assert_eq!(prompts.len(), 205);
+    assert_eq!(
+        prompts.first().map(|row| row.text.as_str()),
+        Some("prompt-1")
+    );
+    assert_eq!(
+        prompts.last().map(|row| row.text.as_str()),
+        Some("prompt-205")
+    );
+}
+
 #[tokio::test]
 pub(crate) async fn message_history_completed_assistant_restores_turn_meta() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     insert_tui_message_with_metadata(
         &app.db_path,
@@ -28,7 +83,9 @@ pub(crate) async fn message_history_completed_assistant_restores_turn_meta() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let answer = ui
         .transcript
@@ -51,10 +108,7 @@ pub(crate) async fn message_history_completed_assistant_restores_turn_meta() {
 pub(crate) async fn message_history_merges_write_stdin_into_exec_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -138,7 +192,9 @@ pub(crate) async fn message_history_merges_write_stdin_into_exec_command_row() {
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let rows = ui
         .transcript
@@ -266,13 +322,8 @@ pub(crate) async fn typed_write_stdin_completion_uses_cached_args_and_hides_row(
 pub(crate) async fn sessions_panel_switches_without_status_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let first = store
-        .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
-        .await.expect("first");
-    let second = store
-        .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
-        .await.expect("second");
+    let first = start_thread_fixture(&app, &app.cwd, "tui", "model-a", "mock", None).await;
+    let second = start_thread_fixture(&app, &app.cwd, "tui", "model-b", "mock", None).await;
     app.current_session = Some(first.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -307,7 +358,8 @@ pub(crate) async fn sessions_panel_switches_without_status_row() {
 
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui)
-        .await.expect("first history");
+        .await
+        .expect("first history");
     assert_eq!(ui.history.as_slice(), ["first prompt"]);
     ui.push_submitted_history("/sessions".to_string());
     app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
@@ -318,10 +370,12 @@ pub(crate) async fn sessions_panel_switches_without_status_row() {
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
-        .await.expect("query");
+        .await
+        .expect("query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .await.expect("select");
+        .await
+        .expect("select");
 
     assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
     assert!(ui.bottom_panel.is_none());

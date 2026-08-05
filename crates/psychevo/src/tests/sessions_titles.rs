@@ -1,5 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::config::ResolvedRunProvider;
+use crate::paths::canonical_cwd;
+use crate::run::{
+    SESSION_TITLE_MAX_CHARS, ensure_new_visible_session_title, run_live_internal,
+    run_live_streaming_controlled, run_live_streaming_controlled_with_provider,
+    visible_session_source_allows_auto_title,
+};
+use crate::session_lookup::latest_run_session_for_cwd;
+use crate::state::StateRuntime;
+use crate::tests::{base_options, home_dir, read_http_request, write_config};
+use crate::types::{RunStreamSink, run_control};
+use psychevo_agent_core::{AssistantBlock, Message};
+use psychevo_ai::Outcome;
+use serde_json::{Value, json};
+use std::{fs, io::Write, net::TcpListener, path::PathBuf, sync::Arc, thread, time::Duration};
+use tempfile::tempdir;
 
 fn title_model(text: &str) -> psychevo_ai::LanguageModel {
     psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text(text))
@@ -856,8 +870,10 @@ model = "title"
             let _ = title_event_tx.send(value.clone());
         }
     });
-    let run =
-        tokio::spawn(async move { run_live_streaming(options, "web", &["web"], stream).await });
+    let run = tokio::spawn(async move {
+        let (_control_handle, control) = run_control();
+        run_live_streaming_controlled(options, "web", &["web"], stream, control).await
+    });
 
     tokio::time::timeout(Duration::from_secs(2), main_started_rx)
         .await
@@ -980,8 +996,10 @@ model = "title"
             let _ = title_event_tx.send(value.clone());
         }
     });
-    let run =
-        tokio::spawn(async move { run_live_streaming(options, "run", &["run"], stream).await });
+    let run = tokio::spawn(async move {
+        let (_control_handle, control) = run_control();
+        run_live_streaming_controlled(options, "run", &["run"], stream, control).await
+    });
 
     let result = tokio::time::timeout(Duration::from_secs(5), run)
         .await

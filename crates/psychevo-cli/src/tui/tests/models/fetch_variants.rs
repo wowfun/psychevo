@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::test_app_with_models;
+use crate::tui::{
+    BottomPanel, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, ModelCatalogEntry,
+    ModelCatalogFetchResult, ModelCatalogStatus, ModelPanel, SlashCommand, TuiApp,
+};
+use std::fs;
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
@@ -13,7 +19,7 @@ pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
         .expect("mock provider")
         .provider
         .clone();
-    psychevo::__product::configuration::write_cached_model_catalog(
+    psychevo::config::write_cached_model_catalog(
         &app.home,
         &provider,
         &[ModelCatalogEntry {
@@ -64,7 +70,11 @@ pub(crate) async fn model_catalog_fetch_writes_persistent_provider_cache() {
     app.start_model_catalog_fetch_task("mock");
     drain_catalog_until_idle(&mut app, &mut ui).await;
 
-    let cached = read_cached_model_catalog(&app.home, &provider).expect("cached models");
+    let cached = app
+        .configuration()
+        .expect("configuration")
+        .cached_model_catalog(&provider)
+        .expect("cached models");
     assert_eq!(cached[0].id, "remote-live");
 }
 

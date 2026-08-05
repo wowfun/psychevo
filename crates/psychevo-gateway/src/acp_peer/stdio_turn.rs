@@ -1,46 +1,134 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use agent_client_protocol::schema::v1::{
+    CancelNotification, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+};
+use psychevo::{
+    Error,
+    application::{ImageInput, ResolvedMcpServerInput, RunStreamSink, WorkspaceMutationSink},
+};
+use serde_json::{Value, json};
+use tokio::sync::watch;
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+use psychevo_gateway_protocol as wire;
+
+use super::acp_backend_effective_env;
+use super::capability_packs::project_codex_prompt_quota;
+use super::lifecycle::{
+    acp_agent_not_delivered_error, mcp_declaration_fingerprint, remove_acp_context, safe_acp_error,
+};
+use super::mcp_handoff;
+use super::metadata_permissions::{
+    emit_runtime_event, peer_allows_fs_read, peer_allows_fs_write, peer_allows_terminal,
+};
+use super::process_pool::{
+    ACP_PROCESS_FORCE_SHUTDOWN_MESSAGE, AcpDeliveryMarker, AcpProcessGeneration, AcpProcessPool,
+    AcpSessionReadyCallback, acp_unknown_delivery_error,
+};
+use super::prompt_input;
+use super::session_controls;
+use super::session_projection::{
+    AcpBarrierProjection, AcpNotificationSubscription, AcpResidentSession, AcpResidentSessionInput,
+    AcpSessionSnapshot, acp_notification_is_for_session_or_barrier,
+    acp_response_with_projection_barrier, acp_session_response_with_legacy_models,
+    acp_session_snapshot, effective_legacy_models, new_acp_resident_session,
+    next_acp_session_epoch, reduce_acp_inbound_notification,
+    reduce_acp_notifications_through_barrier,
+};
+use super::stream_state::{
+    AcpHistoryReplayProjection, AcpPeerStreamState, AcpSessionLoadOutput, AcpTurnOutput,
+};
+use super::turn::{ACP_PEER_ABORT_MESSAGE, AcpClientContext};
+
 #[derive(Clone)]
-struct AcpPeerTurnContext {
-    cwd: PathBuf,
-    home: PathBuf,
-    local_session_id: String,
-    native_session_id: Option<String>,
-    native_session_slot: Arc<std::sync::Mutex<Option<String>>>,
-    input: Vec<wire::GatewayInputPart>,
-    prompt: String,
-    images: Vec<ImageInput>,
-    instructions: Option<String>,
-    peer_model: Option<String>,
-    peer_reasoning_effort: Option<String>,
-    peer_runtime_options: BTreeMap<String, String>,
-    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
-    stream: Option<RunStreamSink>,
-    workspace_mutations: Option<WorkspaceMutationSink>,
-    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
-    clarify_control: Option<RunControlHandle>,
-    abort: Option<AbortSignal>,
-    before_prompt: AcpBeforePromptCallback,
-    delivery_observer: crate::AgentDeliveryObserver,
+pub(super) struct AcpPeerTurnContext {
+    pub(super) cwd: PathBuf,
+    pub(super) home: PathBuf,
+    pub(super) local_session_id: String,
+    pub(super) native_session_id: Option<String>,
+    pub(super) native_session_slot: Arc<std::sync::Mutex<Option<String>>>,
+    pub(super) input: Vec<wire::source::GatewayInputPart>,
+    pub(super) prompt: String,
+    pub(super) images: Vec<ImageInput>,
+    pub(super) instructions: Option<String>,
+    pub(super) peer_model: Option<String>,
+    pub(super) peer_reasoning_effort: Option<String>,
+    pub(super) peer_runtime_options: BTreeMap<String, String>,
+    pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
+    pub(super) stream: Option<RunStreamSink>,
+    pub(super) workspace_mutations: Option<WorkspaceMutationSink>,
+    pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(super) turn_control: psychevo::TurnControl,
+    pub(super) before_prompt: AcpBeforePromptCallback,
+    pub(super) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
 }
 
-type AcpBeforePromptCallback = Arc<
-    dyn Fn(
-            AcpHistoryReplayProjection,
-        ) -> futures::future::BoxFuture<'static, psychevo::Result<()>>
+pub(super) type AcpBeforePromptCallback = Arc<
+    dyn Fn(AcpHistoryReplayProjection) -> futures::future::BoxFuture<'static, psychevo::Result<()>>
         + Send
         + Sync,
 >;
 
+pub(super) struct AcpResidentTurnInput {
+    pub(super) peer: ResolvedPeerTurn,
+    pub(super) turn: AcpPeerTurnContext,
+    pub(super) session_ready: AcpSessionReadyCallback,
+    pub(super) delivery: AcpDeliveryMarker,
+}
+
+pub(super) struct AcpSessionLoadInput {
+    pub(super) local_session_id: String,
+    pub(super) native_session_id: String,
+    pub(super) cwd: PathBuf,
+    pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
+}
+
+pub(super) struct AcpSessionPrepareInput {
+    pub(super) local_session_id: String,
+    pub(super) cwd: PathBuf,
+    pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
+}
+
+pub(super) struct AcpResidentControlInput {
+    pub(super) session: AcpSessionLoadInput,
+    pub(super) control_id: String,
+    pub(super) value: Value,
+}
+
+struct AcpSessionAttachment<'a> {
+    local_session_id: &'a str,
+    native_session_id: Option<&'a str>,
+    cwd: &'a Path,
+    mcp_servers: &'a [ResolvedMcpServerInput],
+}
+
+struct AcpEnsureSessionInput<'a> {
+    peer: &'a ResolvedPeerTurn,
+    attachment: AcpSessionAttachment<'a>,
+    approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    turn_control: Option<psychevo::TurnControl>,
+    stream: Option<RunStreamSink>,
+    active_state: Option<&'a mut AcpPeerStreamState>,
+}
+
 pub(crate) async fn resolve_peer_mcp_server_handoffs(
     peer: &ResolvedPeerTurn,
-    options: &psychevo::__product::runtime::RunOptions,
-) -> psychevo::Result<Vec<psychevo::__product::runtime::ResolvedMcpServerInput>> {
-    let names = mcp_handoff::requested_peer_mcp_server_names(peer)?;
-    resolve_mcp_server_handoffs(options, &names)
+    configuration: &psychevo::Configuration,
+) -> psychevo::Result<Vec<ResolvedMcpServerInput>> {
+    let names = requested_peer_mcp_server_names(peer)?;
+    configuration
+        .resolve_mcp_server_handoffs(&names)
         .await
         .map_err(|error| {
-            crate::agent_session_error(
+            agent_session_error(
                 "acp_mcp_configuration_invalid",
-                crate::AgentErrorStage::Binding,
+                AgentErrorStage::Binding,
                 "user_action",
                 "not_delivered",
                 error.to_string(),
@@ -49,7 +137,13 @@ pub(crate) async fn resolve_peer_mcp_server_handoffs(
         })
 }
 
-async fn run_acp_stdio_turn(
+pub(crate) fn requested_peer_mcp_server_names(
+    peer: &ResolvedPeerTurn,
+) -> psychevo::Result<BTreeSet<String>> {
+    mcp_handoff::requested_peer_mcp_server_names(peer)
+}
+
+pub(super) async fn run_acp_stdio_turn(
     pool: &AcpProcessPool,
     peer: &ResolvedPeerTurn,
     context: &AcpPeerTurnContext,
@@ -59,67 +153,68 @@ async fn run_acp_stdio_turn(
         .await
 }
 
-async fn wait_for_optional_abort(abort: Option<AbortSignal>) {
-    if let Some(mut abort) = abort {
-        abort.wait_for_abort().await;
+async fn wait_for_optional_abort(control: Option<psychevo::TurnControl>) {
+    if let Some(control) = control {
+        control.wait_for_interrupt().await;
     } else {
         std::future::pending::<()>().await;
     }
 }
 
-fn is_acp_peer_abort_error(err: &Error) -> bool {
+pub(super) fn is_acp_peer_abort_error(err: &Error) -> bool {
     err.to_string().contains(ACP_PEER_ABORT_MESSAGE)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn ensure_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    local_session_id: &str,
-    requested_native_session_id: Option<&str>,
-    cwd: &Path,
-    resolved_mcp_servers: &[psychevo::__product::runtime::ResolvedMcpServerInput],
-    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
-    clarify_control: Option<RunControlHandle>,
-    stream: Option<RunStreamSink>,
-    abort: Option<AbortSignal>,
-    mut active_state: Option<&mut AcpPeerStreamState>,
+    input: AcpEnsureSessionInput<'_>,
 ) -> psychevo::Result<AcpResidentSession> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let contexts = &process.contexts;
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let next_session_epoch = process.next_session_epoch.as_ref();
+    let generation = process.generation;
+    let AcpEnsureSessionInput {
+        peer,
+        attachment:
+            AcpSessionAttachment {
+                local_session_id,
+                native_session_id: requested_native_session_id,
+                cwd,
+                mcp_servers: resolved_mcp_servers,
+            },
+        approval_handler,
+        turn_control,
+        stream,
+        mut active_state,
+    } = input;
     let mcp_servers = mcp_handoff::acp_mcp_server_declarations(
         peer,
         resolved_mcp_servers,
         &initialized.agent_capabilities,
     )
-    .map_err(|error| {
-        acp_not_delivered_error("acp_mcp_configuration_invalid", error.to_string())
-    })?;
+    .map_err(|error| acp_not_delivered_error("acp_mcp_configuration_invalid", error.to_string()))?;
     let mcp_declaration_fingerprint = mcp_declaration_fingerprint(&mcp_servers)?;
     let client_context = Arc::new(AcpClientContext {
         cwd: cwd.to_path_buf(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler,
-        clarify_control,
+        turn_control,
         terminal: peer_allows_terminal(peer),
         terminal_env: acp_backend_effective_env(peer),
-        stream: stream.clone(),
-        abort,
     });
     let existing_session = sessions.lock().await.get(local_session_id).cloned();
     if let Some(session) = existing_session {
         if requested_native_session_id
             .is_some_and(|requested| requested != session.native_session_id)
         {
-            return Err(crate::agent_session_error(
+            return Err(agent_session_error(
                 "acp_session_identity_mismatch",
-                crate::AgentErrorStage::Binding,
+                AgentErrorStage::Binding,
                 "never",
                 "not_delivered",
                 "The resident ACP process owns a different native session for this thread.",
@@ -127,9 +222,9 @@ async fn ensure_resident_acp_session(
             ));
         }
         if session.mcp_servers != mcp_servers {
-            return Err(crate::agent_session_error(
+            return Err(agent_session_error(
                 "acp_mcp_binding_changed",
-                crate::AgentErrorStage::Binding,
+                AgentErrorStage::Binding,
                 "never",
                 "not_delivered",
                 "The resident ACP session was created with a different MCP declaration set; create a new Thread.",
@@ -144,12 +239,14 @@ async fn ensure_resident_acp_session(
         let barrier = notification_ingress.barrier()?;
         reduce_acp_notifications_through_barrier(
             notification_rx,
-            sessions,
-            generation,
-            barrier,
-            None,
-            Some(&session.native_session_id),
-            active_state.as_deref_mut(),
+            AcpBarrierProjection {
+                sessions,
+                generation,
+                barrier_sequence: barrier,
+                replay_native_session_id: None,
+                active_native_session_id: Some(&session.native_session_id),
+                active_state: active_state.as_deref_mut(),
+            },
         )
         .await?;
         return sessions
@@ -165,9 +262,9 @@ async fn ensure_resident_acp_session(
     let loaded_from_agent = requested_native_session_id.is_some();
     let (session, response_barrier) = if let Some(native_session_id) = requested_native_session_id {
         if !initialized.agent_capabilities.load_session {
-            return Err(crate::agent_session_error(
+            return Err(agent_session_error(
                 "acp_session_not_resumable",
-                crate::AgentErrorStage::History,
+                AgentErrorStage::History,
                 "user_action",
                 "not_delivered",
                 format!(
@@ -221,15 +318,15 @@ async fn ensure_resident_acp_session(
     } else {
         let (created, legacy_models, response_barrier) =
             acp_session_response_with_legacy_models::<NewSessionResponse, _>(
-            cx,
-            "session/new",
-            NewSessionRequest::new(cwd).mcp_servers(mcp_servers.clone()),
-            notification_ingress,
-        )
-        .await
-        .map_err(|error| {
-            acp_agent_not_delivered_error("acp_session_create_failed", "session/new", &error)
-        })?;
+                cx,
+                "session/new",
+                NewSessionRequest::new(cwd).mcp_servers(mcp_servers.clone()),
+                notification_ingress,
+            )
+            .await
+            .map_err(|error| {
+                acp_agent_not_delivered_error("acp_session_create_failed", "session/new", &error)
+            })?;
         let native_session_id = created.session_id.to_string();
         let modes = created.modes;
         let config_options = created.config_options.unwrap_or_default();
@@ -275,12 +372,14 @@ async fn ensure_resident_acp_session(
         .insert(local_session_id.to_string(), session.clone());
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        loaded_from_agent.then_some(native_session_id.as_str()),
-        Some(&native_session_id),
-        active_state.as_deref_mut(),
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: loaded_from_agent.then_some(native_session_id.as_str()),
+            active_native_session_id: Some(&native_session_id),
+            active_state: active_state.as_deref_mut(),
+        },
     )
     .await?;
     let replay_complete = active_state
@@ -299,22 +398,23 @@ async fn ensure_resident_acp_session(
         })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn execute_resident_acp_turn(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn execute_resident_acp_turn(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
     force_rx: &mut watch::Receiver<bool>,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    turn: AcpPeerTurnContext,
-    session_ready: AcpSessionReadyCallback,
-    delivery: AcpDeliveryMarker,
+    input: AcpResidentTurnInput,
 ) -> psychevo::Result<AcpTurnOutput> {
+    let cx = &process.cx;
+    let initialized = process.initialized.as_ref();
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let generation = process.generation;
+    let AcpResidentTurnInput {
+        peer,
+        turn,
+        session_ready,
+        delivery,
+    } = input;
     emit_runtime_event(
         &turn.stream,
         json!({
@@ -331,40 +431,39 @@ async fn execute_resident_acp_turn(
         turn.local_session_id.clone(),
     );
     let mut session = ensure_resident_acp_session(
-        cx,
-        initialized,
-        peer,
-        contexts,
-        sessions,
-        notification_ingress,
+        process,
         notification_rx,
-        next_session_epoch,
-        generation,
-        &turn.local_session_id,
-        turn.native_session_id.as_deref(),
-        &turn.cwd,
-        &turn.mcp_servers,
-        turn.approval_handler.clone(),
-        turn.clarify_control.clone(),
-        turn.stream.clone(),
-        turn.abort.clone(),
-        Some(&mut state),
+        AcpEnsureSessionInput {
+            peer: &peer,
+            attachment: AcpSessionAttachment {
+                local_session_id: &turn.local_session_id,
+                native_session_id: turn.native_session_id.as_deref(),
+                cwd: &turn.cwd,
+                mcp_servers: &turn.mcp_servers,
+            },
+            approval_handler: turn.approval_handler.clone(),
+            turn_control: Some(turn.turn_control.clone()),
+            stream: turn.stream.clone(),
+            active_state: Some(&mut state),
+        },
     )
     .await?;
     let native_session_id = session.native_session_id.clone();
     if let Ok(mut slot) = turn.native_session_slot.lock() {
         *slot = Some(native_session_id.clone());
     }
-    session_ready(native_session_id.clone()).await.map_err(|error| {
-        crate::agent_session_error(
-            "acp_session_binding_failed",
-            crate::AgentErrorStage::Binding,
-            "never",
-            "not_delivered",
-            format!("Failed to persist ACP native session identity before prompt: {error}"),
-            Some(format!("acp-session:{}", turn.local_session_id)),
-        )
-    })?;
+    session_ready(native_session_id.clone())
+        .await
+        .map_err(|error| {
+            agent_session_error(
+                "acp_session_binding_failed",
+                AgentErrorStage::Binding,
+                "never",
+                "not_delivered",
+                format!("Failed to persist ACP native session identity before prompt: {error}"),
+                Some(format!("acp-session:{}", turn.local_session_id)),
+            )
+        })?;
     (turn.before_prompt)(state.history_replay.clone())
         .await
         .map_err(|error| {
@@ -396,25 +495,30 @@ async fn execute_resident_acp_turn(
     let config_barrier = notification_ingress.barrier()?;
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        config_barrier,
-        None,
-        Some(&native_session_id),
-        Some(&mut state),
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: config_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: Some(&native_session_id),
+            active_state: Some(&mut state),
+        },
     )
     .await?;
 
-    let prompt = prompt_input::acp_prompt_blocks(peer, &turn, &initialized.agent_capabilities)
+    let prompt = prompt_input::acp_prompt_blocks(&peer, &turn, &initialized.agent_capabilities)
         .await
         .map_err(|error| acp_not_delivered_error("acp_input_rejected", error.to_string()))?;
 
-    turn.delivery_observer.mark_unknown().await.map_err(|error| {
-        acp_not_delivered_error(
-            "delivery_intent_persistence_failed",
-            format!("Failed to persist ACP delivery intent before dispatch: {error}"),
-        )
-    })?;
+    turn.persistence
+        .mark_delivery_unknown()
+        .await
+        .map_err(|error| {
+            acp_not_delivered_error(
+                "delivery_intent_persistence_failed",
+                format!("Failed to persist ACP delivery intent before dispatch: {error}"),
+            )
+        })?;
     state.begin_prompt();
     let sent = cx.send_request(PromptRequest::new(native_session_id.clone(), prompt));
     delivery.mark_sent();
@@ -424,7 +528,7 @@ async fn execute_resident_acp_turn(
         sent,
         notification_ingress,
     ));
-    let mut abort = Box::pin(wait_for_optional_abort(turn.abort.clone()));
+    let mut abort = Box::pin(wait_for_optional_abort(Some(turn.turn_control.clone())));
     let mut observed_response_barriers = std::collections::BTreeSet::new();
     let prompt_response = loop {
         tokio::select! {
@@ -453,7 +557,7 @@ async fn execute_resident_acp_turn(
                         "ACP prompt delivery is unknown after a connection error: {}",
                         safe_acp_error(&error)
                     )))?;
-                turn.delivery_observer.confirm().await.map_err(|error| {
+                turn.persistence.confirm_delivery().await.map_err(|error| {
                     acp_unknown_delivery_error(format!(
                         "ACP prompt response was observed but delivery confirmation could not be persisted: {error}"
                     ))
@@ -461,12 +565,14 @@ async fn execute_resident_acp_turn(
                 if !observed_response_barriers.contains(&barrier) {
                     reduce_acp_notifications_through_barrier(
                         notification_rx,
-                        sessions,
-                        generation,
-                        barrier,
-                        None,
-                        Some(&native_session_id),
-                        Some(&mut state),
+                        AcpBarrierProjection {
+                            sessions,
+                            generation,
+                            barrier_sequence: barrier,
+                            replay_native_session_id: None,
+                            active_native_session_id: Some(&native_session_id),
+                            active_state: Some(&mut state),
+                        },
                     )
                     .await?;
                 }
@@ -492,7 +598,7 @@ async fn execute_resident_acp_turn(
                         )
                     };
                         if reduction.active_session_observed {
-                            turn.delivery_observer.confirm().await.map_err(|error| {
+                            turn.persistence.confirm_delivery().await.map_err(|error| {
                                 acp_unknown_delivery_error(format!(
                                     "ACP delivery was observed but could not be persisted: {error}"
                                 ))
@@ -545,173 +651,147 @@ async fn execute_resident_acp_turn(
         tools,
         prompt_usage,
         usage_update,
-        events: state.events,
         session_snapshot,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 #[cfg(test)]
-async fn inspect_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn inspect_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    local_session_id: String,
-    native_session_id: String,
-    cwd: PathBuf,
-    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+    input: AcpSessionLoadInput,
 ) -> psychevo::Result<AcpSessionSnapshot> {
+    let AcpSessionLoadInput {
+        local_session_id,
+        native_session_id,
+        cwd,
+        mcp_servers,
+    } = input;
     let session = ensure_resident_acp_session(
-        cx,
-        initialized,
-        peer,
-        contexts,
-        sessions,
-        notification_ingress,
+        process,
         notification_rx,
-        next_session_epoch,
-        generation,
-        &local_session_id,
-        Some(&native_session_id),
-        &cwd,
-        &mcp_servers,
-        None,
-        None,
-        None,
-        None,
-        None,
+        AcpEnsureSessionInput {
+            peer: &process.peer,
+            attachment: AcpSessionAttachment {
+                local_session_id: &local_session_id,
+                native_session_id: Some(&native_session_id),
+                cwd: &cwd,
+                mcp_servers: &mcp_servers,
+            },
+            approval_handler: None,
+            turn_control: None,
+            stream: None,
+            active_state: None,
+        },
     )
     .await?;
-    Ok(acp_session_snapshot(&session, generation))
+    Ok(acp_session_snapshot(&session, process.generation))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn load_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn load_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    local_session_id: String,
-    native_session_id: String,
-    cwd: PathBuf,
-    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+    input: AcpSessionLoadInput,
 ) -> psychevo::Result<AcpSessionLoadOutput> {
+    let AcpSessionLoadInput {
+        local_session_id,
+        native_session_id,
+        cwd,
+        mcp_servers,
+    } = input;
     let mut state = AcpPeerStreamState::new(None, None, local_session_id.clone());
     let session = ensure_resident_acp_session(
-        cx,
-        initialized,
-        peer,
-        contexts,
-        sessions,
-        notification_ingress,
+        process,
         notification_rx,
-        next_session_epoch,
-        generation,
-        &local_session_id,
-        Some(&native_session_id),
-        &cwd,
-        &mcp_servers,
-        None,
-        None,
-        None,
-        None,
-        Some(&mut state),
+        AcpEnsureSessionInput {
+            peer: &process.peer,
+            attachment: AcpSessionAttachment {
+                local_session_id: &local_session_id,
+                native_session_id: Some(&native_session_id),
+                cwd: &cwd,
+                mcp_servers: &mcp_servers,
+            },
+            approval_handler: None,
+            turn_control: None,
+            stream: None,
+            active_state: Some(&mut state),
+        },
     )
     .await?;
     state.finish();
     Ok(AcpSessionLoadOutput {
-        snapshot: acp_session_snapshot(&session, generation),
+        snapshot: acp_session_snapshot(&session, process.generation),
         replay: state.history_replay,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn prepare_resident_acp_session(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn prepare_resident_acp_session(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    local_session_id: String,
-    cwd: PathBuf,
-    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+    input: AcpSessionPrepareInput,
 ) -> psychevo::Result<AcpSessionSnapshot> {
+    let AcpSessionPrepareInput {
+        local_session_id,
+        cwd,
+        mcp_servers,
+    } = input;
     let session = ensure_resident_acp_session(
-        cx,
-        initialized,
-        peer,
-        contexts,
-        sessions,
-        notification_ingress,
+        process,
         notification_rx,
-        next_session_epoch,
-        generation,
-        &local_session_id,
-        None,
-        &cwd,
-        &mcp_servers,
-        None,
-        None,
-        None,
-        None,
-        None,
+        AcpEnsureSessionInput {
+            peer: &process.peer,
+            attachment: AcpSessionAttachment {
+                local_session_id: &local_session_id,
+                native_session_id: None,
+                cwd: &cwd,
+                mcp_servers: &mcp_servers,
+            },
+            approval_handler: None,
+            turn_control: None,
+            stream: None,
+            active_state: None,
+        },
     )
     .await?;
-    Ok(acp_session_snapshot(&session, generation))
+    Ok(acp_session_snapshot(&session, process.generation))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn set_resident_acp_control(
-    cx: &ConnectionTo<Agent>,
-    initialized: &InitializeResponse,
-    peer: &ResolvedPeerTurn,
-    contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
-    sessions: &AcpResidentSessions,
-    notification_ingress: &AcpNotificationIngress,
+pub(super) async fn set_resident_acp_control(
+    process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
-    next_session_epoch: &AtomicU64,
-    generation: u64,
-    local_session_id: String,
-    native_session_id: String,
-    cwd: PathBuf,
-    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
-    control_id: String,
-    value: Value,
+    input: AcpResidentControlInput,
 ) -> psychevo::Result<AcpSessionSnapshot> {
+    let cx = &process.cx;
+    let sessions = &process.sessions;
+    let notification_ingress = &process.notification_ingress;
+    let generation = process.generation;
+    let AcpResidentControlInput {
+        session:
+            AcpSessionLoadInput {
+                local_session_id,
+                native_session_id,
+                cwd,
+                mcp_servers,
+            },
+        control_id,
+        value,
+    } = input;
     let mut session = ensure_resident_acp_session(
-        cx,
-        initialized,
-        peer,
-        contexts,
-        sessions,
-        notification_ingress,
+        process,
         notification_rx,
-        next_session_epoch,
-        generation,
-        &local_session_id,
-        Some(&native_session_id),
-        &cwd,
-        &mcp_servers,
-        None,
-        None,
-        None,
-        None,
-        None,
+        AcpEnsureSessionInput {
+            peer: &process.peer,
+            attachment: AcpSessionAttachment {
+                local_session_id: &local_session_id,
+                native_session_id: Some(&native_session_id),
+                cwd: &cwd,
+                mcp_servers: &mcp_servers,
+            },
+            approval_handler: None,
+            turn_control: None,
+            stream: None,
+            active_state: None,
+        },
     )
     .await?;
     let option = session
@@ -721,7 +801,8 @@ async fn set_resident_acp_control(
         .cloned();
     if option.is_none()
         && control_id == "model"
-        && effective_legacy_models(&session.config_options, session.legacy_models.as_ref()).is_some()
+        && effective_legacy_models(&session.config_options, session.legacy_models.as_ref())
+            .is_some()
     {
         let requested_model = value
             .as_str()
@@ -748,12 +829,14 @@ async fn set_resident_acp_control(
             .insert(local_session_id.clone(), session);
         reduce_acp_notifications_through_barrier(
             notification_rx,
-            sessions,
-            generation,
-            response_barrier,
-            None,
-            Some(&native_session_id),
-            None,
+            AcpBarrierProjection {
+                sessions,
+                generation,
+                barrier_sequence: response_barrier,
+                replay_native_session_id: None,
+                active_native_session_id: Some(&native_session_id),
+                active_state: None,
+            },
         )
         .await?;
         let session = sessions
@@ -800,12 +883,14 @@ async fn set_resident_acp_control(
         })?;
         reduce_acp_notifications_through_barrier(
             notification_rx,
-            sessions,
-            generation,
-            response_barrier,
-            None,
-            Some(&native_session_id),
-            None,
+            AcpBarrierProjection {
+                sessions,
+                generation,
+                barrier_sequence: response_barrier,
+                replay_native_session_id: None,
+                active_native_session_id: Some(&native_session_id),
+                active_state: None,
+            },
         )
         .await?;
         let session = sessions
@@ -844,12 +929,14 @@ async fn set_resident_acp_control(
         .insert(local_session_id.clone(), session);
     reduce_acp_notifications_through_barrier(
         notification_rx,
-        sessions,
-        generation,
-        response_barrier,
-        None,
-        Some(&native_session_id),
-        None,
+        AcpBarrierProjection {
+            sessions,
+            generation,
+            barrier_sequence: response_barrier,
+            replay_native_session_id: None,
+            active_native_session_id: Some(&native_session_id),
+            active_state: None,
+        },
     )
     .await?;
     let session = sessions
@@ -863,10 +950,10 @@ async fn set_resident_acp_control(
     Ok(acp_session_snapshot(&session, generation))
 }
 
-fn acp_not_delivered_error(code: &str, message: impl Into<String>) -> Error {
-    crate::agent_session_error(
+pub(super) fn acp_not_delivered_error(code: &str, message: impl Into<String>) -> Error {
+    agent_session_error(
         code,
-        crate::AgentErrorStage::Delivery,
+        AgentErrorStage::Delivery,
         "user_action",
         "not_delivered",
         message,

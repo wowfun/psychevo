@@ -1,3 +1,17 @@
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
+use super::super::validation::{
+    optional_bool_field, optional_string_field, optional_u64_field, required_bool_field,
+    validate_permission_profile_name,
+};
+use super::exec_policy::parse_exec_policy_config;
+use crate::config::{
+    ApprovalPolicy, ApprovalsReviewer, AutoReviewConfig, Error, GranularApprovalConfig,
+    PermissionAccess, PermissionConfig, PermissionProfileConfig, Result,
+};
+
 pub(crate) fn parse_permission_config(
     root: &serde_json::Map<String, Value>,
 ) -> Result<PermissionConfig> {
@@ -167,7 +181,9 @@ pub(crate) fn parse_web_search_queries(
     profile: &str,
 ) -> Result<BTreeMap<String, PermissionAccess>> {
     let object = value.as_object().ok_or_else(|| {
-        Error::Config(format!("permissions.{profile}.web_search must be an object"))
+        Error::Config(format!(
+            "permissions.{profile}.web_search must be an object"
+        ))
     })?;
     object
         .get("queries")

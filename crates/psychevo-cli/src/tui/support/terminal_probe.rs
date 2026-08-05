@@ -1,5 +1,7 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalDefaultColors {
     pub(crate) foreground: (u8, u8, u8),
@@ -56,7 +58,7 @@ pub(crate) fn parse_hex_color_component(value: &str) -> Option<u8> {
 
 #[cfg(unix)]
 pub(crate) mod unix_terminal_probe {
-    pub(crate) use super::*;
+    use super::{Duration, Instant, TerminalDefaultColors, parse_terminal_default_colors};
     use std::fs::File;
     use std::fs::OpenOptions;
     use std::io;

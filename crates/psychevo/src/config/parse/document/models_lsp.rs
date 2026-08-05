@@ -1,3 +1,16 @@
+use std::collections::HashSet;
+
+use serde_json::Value;
+
+use super::super::validation::{
+    optional_bool_field, optional_f64_field, optional_string_field, optional_u64_field,
+    parse_model_selection, validate_reasoning_effort,
+};
+use crate::config::{
+    AuxiliaryConfig, AuxiliaryTaskConfig, CompressionConfig, Error, LspConfig, Result,
+    normalize_provider_id,
+};
+
 pub(crate) fn parse_compression_config(
     value: &Value,
     configured_keys: &HashSet<String>,

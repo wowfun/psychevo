@@ -4,9 +4,25 @@ use uuid::Uuid;
 
 use crate::error::{Error, Result};
 
+use super::store_undo_state::{
+    ensure_native_history_fork_boundary, ensure_native_history_fork_eligible,
+};
 use super::{NativeSessionForkInput, StateRuntime};
 
 impl StateRuntime {
+    #[cfg(test)]
+    pub(crate) fn set_native_history_fork_barrier_for_test(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        *self
+            .inner
+            .native_history_fork_barrier
+            .lock()
+            .expect("Native history fork barrier poisoned") = Some((entered, release));
+    }
+
     /// Copies the durable conversation prefix into a new root Framework Thread.
     ///
     /// The transaction deliberately omits source bindings, activities, live
@@ -17,6 +33,20 @@ impl StateRuntime {
         &self,
         input: NativeSessionForkInput<'_>,
     ) -> Result<String> {
+        #[cfg(test)]
+        {
+            let barrier = self
+                .inner
+                .native_history_fork_barrier
+                .lock()
+                .expect("Native history fork barrier poisoned")
+                .take();
+            if let Some((entered, release)) = barrier {
+                entered.notify_one();
+                release.notified().await;
+            }
+        }
+
         let child_session_id = Uuid::now_v7().to_string();
         let now = now_ms();
         let metadata_json = serde_json::to_string(&json!({
@@ -27,28 +57,7 @@ impl StateRuntime {
 
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
-            let eligible = sqlx::query_scalar::<_, i64>(
-                r#"
-                SELECT 1
-                FROM sessions s
-                WHERE s.id = ?1
-                  AND s.parent_session_id IS NULL
-                  AND COALESCE(json_extract(s.metadata_json, '$.side_conversation'), 0) = 0
-                  AND json_type(s.metadata_json, '$.revert') IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1 FROM agent_edges e WHERE e.child_session_id = s.id
-                  )
-                "#,
-            )
-            .bind(source_session_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .is_some();
-            if !eligible {
-                return Err(Error::Message(format!(
-                    "session is not an eligible root Thread: {source_session_id}"
-                )));
-            }
+            ensure_native_history_fork_eligible(&mut tx, source_session_id).await?;
 
             let active = sqlx::query_scalar::<_, i64>(
                 r#"
@@ -73,25 +82,24 @@ impl StateRuntime {
             .await?
             .is_some();
             if active {
-                return Err(Error::Message(format!(
-                    "running Thread cannot be forked: {source_session_id}"
-                )));
+                return Err(Error::structured(
+                    format!("Thread `{source_session_id}` is busy with durable Gateway activity"),
+                    json!({
+                        "kind": "thread_busy",
+                        "threadId": source_session_id,
+                        "blockingOperation": "gateway_activity",
+                        "retryable": true,
+                    }),
+                ));
             }
 
             if let Some(requested_boundary) = input.before_session_seq {
-                let valid_boundary = sqlx::query_scalar::<_, i64>(
-                    "SELECT 1 FROM messages WHERE session_id = ?1 AND session_seq = ?2 AND role = 'user'",
+                ensure_native_history_fork_boundary(
+                    &mut tx,
+                    source_session_id,
+                    requested_boundary,
                 )
-                .bind(source_session_id)
-                .bind(requested_boundary)
-                .fetch_optional(&mut *tx)
-                .await?
-                .is_some();
-                if !valid_boundary {
-                    return Err(Error::Message(format!(
-                        "fork boundary is not a durable user message: {requested_boundary}"
-                    )));
-                }
+                .await?;
             }
 
             let inserted = sqlx::query(
@@ -251,18 +259,15 @@ impl StateRuntime {
                 r#"
                 INSERT INTO gateway_turn_terminals (
                     turn_id, thread_id, status, outcome, error_message,
-                    started_at_ms, completed_at_ms, metadata_json
+                    started_at_ms, completed_at_ms, boundary_session_seq, metadata_json
                 )
                 SELECT 'fork:' || ?1 || ':' || turn_id, ?1, status, outcome, error_message,
-                       started_at_ms, completed_at_ms, metadata_json
+                       started_at_ms, completed_at_ms, boundary_session_seq, metadata_json
                 FROM gateway_turn_terminals
                 WHERE thread_id = ?2
                   AND (
                     ?3 = 9223372036854775807
-                    OR COALESCE(
-                        json_extract(metadata_json, '$.firstCommittedSeq'),
-                        json_extract(metadata_json, '$.first_committed_seq')
-                    ) < ?3
+                    OR boundary_session_seq < ?3
                   )
                 "#,
             )

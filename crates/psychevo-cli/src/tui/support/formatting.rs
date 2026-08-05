@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(test)]
+use anyhow::{Result, anyhow};
+#[cfg(test)]
+use psychevo::ThreadSummary;
+use psychevo::config::ConfiguredModel;
+
 pub(crate) fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {
     if let Some(index) = value
         && *index >= inserted_at
@@ -60,7 +64,7 @@ pub(crate) fn variant_description(variant: &str) -> &'static str {
 
 #[cfg(test)]
 pub(crate) fn resolve_session_ref_from_summaries(
-    sessions: &[SessionSummary],
+    sessions: &[ThreadSummary],
     reference: &str,
 ) -> Result<String> {
     if reference == "latest" {

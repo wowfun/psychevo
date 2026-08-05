@@ -1,5 +1,20 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+use agent_client_protocol::Error;
+use agent_client_protocol::schema::v2::{
+    ContentBlock, EmbeddedResource, EmbeddedResourceResource, EnvVariable, McpServer,
+    McpServerHttp, McpServerStdio, ResourceLink, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOption, SessionUpdate, StopReason, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolKind, Usage,
+};
+use psychevo::config::ConfiguredModel;
+use psychevo::mcp::McpTransportInput;
+use psychevo::{ImageInput, McpServerInput, RunMode};
+use serde_json::{Value, json};
+
+use super::session_updates::{Pipe, resolve_path};
 
 pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdate> {
     let event_type = value.get("type").and_then(Value::as_str)?;
@@ -112,10 +127,7 @@ pub(crate) fn tool_timing_meta(
 ) -> Option<serde_json::Map<String, Value>> {
     let field_value = field_value?;
     let mut timing = serde_json::Map::new();
-    timing.insert(
-        "source".to_string(),
-        Value::String("psychevo".to_string()),
-    );
+    timing.insert("source".to_string(), Value::String("psychevo".to_string()));
     timing.insert(field_name.to_string(), field_value);
     let mut psychevo = serde_json::Map::new();
     psychevo.insert("toolTiming".to_string(), Value::Object(timing));
@@ -145,7 +157,10 @@ pub(crate) fn single_text_prompt(prompt: &[ContentBlock]) -> Option<&str> {
     }
 }
 
-pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>, cwd: &Path) -> (String, Vec<ImageInput>) {
+pub(crate) fn prompt_parts(
+    prompt: Vec<ContentBlock>,
+    cwd: &Path,
+) -> Result<(String, Vec<ImageInput>), Error> {
     let mut text = Vec::new();
     let mut images = Vec::new();
     for block in prompt {
@@ -160,35 +175,34 @@ pub(crate) fn prompt_parts(prompt: Vec<ContentBlock>, cwd: &Path) -> (String, Ve
                         content.mime_type, content.data
                     )));
                 } else {
-                    text.push("[image omitted: empty ACP image block]".to_string());
+                    return Err(invalid_prompt("image content is empty"));
                 }
             }
             ContentBlock::ResourceLink(link) => {
-                process_resource_link(link, cwd, &mut text, &mut images)
+                process_resource_link(link, cwd, &mut text, &mut images)?;
             }
             ContentBlock::Resource(resource) => {
-                process_embedded_resource(resource, &mut text, &mut images)
+                process_embedded_resource(resource, &mut text, &mut images)?;
             }
             ContentBlock::Audio(_) => {
-                text.push("[audio omitted: Psychevo ACP does not support audio input]".to_string());
+                return Err(invalid_prompt("audio content is not supported"));
             }
-            other => {
-                if let Ok(serialized) = serde_json::to_string(&other) {
-                    text.push(serialized);
-                }
+            _ => {
+                return Err(invalid_prompt("ACP content block is not supported"));
             }
         }
     }
-    (text.join("\n\n"), images)
+    Ok((text.join("\n\n"), images))
 }
 
 fn process_embedded_resource(
     resource: EmbeddedResource,
     text: &mut Vec<String>,
     images: &mut Vec<ImageInput>,
-) {
+) -> Result<(), Error> {
     match resource.resource {
         EmbeddedResourceResource::TextResourceContents(resource) => {
+            ensure_text_resource_size(resource.text.len())?;
             text.push(format!(
                 "[resource: {}]\n{}",
                 resource.uri,
@@ -206,16 +220,16 @@ fn process_embedded_resource(
                     resource.blob
                 )));
             } else {
-                text.push(format!(
-                    "[resource omitted: embedded blob {} has unsupported MIME type {}]",
-                    resource.uri, mime_type
+                return Err(invalid_prompt(
+                    "embedded resource MIME type is not supported",
                 ));
             }
         }
         _ => {
-            text.push("[resource omitted: unsupported embedded ACP resource]".to_string());
+            return Err(invalid_prompt("embedded ACP resource is not supported"));
         }
     }
+    Ok(())
 }
 
 fn process_resource_link(
@@ -223,67 +237,59 @@ fn process_resource_link(
     cwd: &Path,
     text: &mut Vec<String>,
     images: &mut Vec<ImageInput>,
-) {
+) -> Result<(), Error> {
     if is_remote_uri(&link.uri) {
-        text.push(format!(
-            "[resource omitted: remote ResourceLink was not fetched: {}]",
-            link.uri
-        ));
-        return;
+        return Err(invalid_prompt("remote ResourceLink is not supported"));
     }
-    let Some(path) = local_resource_path(&link.uri, cwd) else {
-        text.push(format!(
-            "[resource omitted: unsupported ResourceLink URI: {}]",
-            link.uri
-        ));
-        return;
-    };
+    let path = local_resource_path(&link.uri, cwd)?;
     let mime_type = link.mime_type.as_deref().unwrap_or_default();
     if mime_type.starts_with("image/") {
         images.push(ImageInput::LocalPath(path));
-        return;
+        return Ok(());
     }
-    match read_capped_text_resource(&path) {
-        Ok(contents) => text.push(format!("[resource: {}]\n{}", link.uri, contents)),
-        Err(err) => text.push(format!(
-            "[resource omitted: failed to read {}: {err}]",
-            link.uri
-        )),
-    }
+    let contents = read_capped_text_resource(&path)?;
+    text.push(format!("[resource: {}]\n{}", link.uri, contents));
+    Ok(())
 }
 
-const ACP_TEXT_RESOURCE_MAX_BYTES: usize = 512 * 1024;
+pub(crate) const ACP_TEXT_RESOURCE_MAX_BYTES: usize = 512 * 1024;
 const ACP_TEXT_RESOURCE_MAX_LINES: usize = 2_000;
 
 fn capped_text_resource(value: String) -> String {
     truncate_text_resource(&value)
 }
 
-fn read_capped_text_resource(path: &Path) -> std::io::Result<String> {
-    let bytes = std::fs::read(path)?;
-    let truncated_by_bytes = bytes.len() > ACP_TEXT_RESOURCE_MAX_BYTES;
-    let slice = &bytes[..bytes.len().min(ACP_TEXT_RESOURCE_MAX_BYTES)];
-    let mut text = String::from_utf8_lossy(slice).into_owned();
-    if truncated_by_bytes {
-        text.push_str("\n[truncated: ACP text resource byte cap reached]");
-    }
+fn read_capped_text_resource(path: &Path) -> Result<String, Error> {
+    let file = std::fs::File::open(path)
+        .map_err(|_| invalid_prompt("local ResourceLink could not be read"))?;
+    let mut bytes = Vec::with_capacity(ACP_TEXT_RESOURCE_MAX_BYTES.saturating_add(1));
+    file.take(ACP_TEXT_RESOURCE_MAX_BYTES.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid_prompt("local ResourceLink could not be read"))?;
+    ensure_text_resource_size(bytes.len())?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| invalid_prompt("text ResourceLink is not valid UTF-8"))?;
     Ok(truncate_text_resource(&text))
 }
 
 fn truncate_text_resource(value: &str) -> String {
-    let mut lines = value
-        .lines()
-        .take(ACP_TEXT_RESOURCE_MAX_LINES)
-        .collect::<Vec<_>>();
-    let truncated_by_lines = value.lines().count() > ACP_TEXT_RESOURCE_MAX_LINES;
-    let mut text = lines.join("\n");
-    if truncated_by_lines {
+    let mut lines = value.lines();
+    let mut text = String::with_capacity(value.len());
+    for index in 0..ACP_TEXT_RESOURCE_MAX_LINES {
+        let Some(line) = lines.next() else {
+            return text;
+        };
+        if index > 0 {
+            text.push('\n');
+        }
+        text.push_str(line);
+    }
+    if lines.next().is_some() {
         if !text.is_empty() {
             text.push('\n');
         }
         text.push_str("[truncated: ACP text resource line cap reached]");
     }
-    lines.clear();
     text
 }
 
@@ -291,23 +297,54 @@ fn is_remote_uri(uri: &str) -> bool {
     uri.starts_with("http://") || uri.starts_with("https://")
 }
 
-fn local_resource_path(uri: &str, cwd: &Path) -> Option<PathBuf> {
+fn local_resource_path(uri: &str, cwd: &Path) -> Result<PathBuf, Error> {
     let value = uri.trim();
     if value.is_empty() {
-        return None;
+        return Err(local_resource_boundary_error());
     }
     let path = if let Some(rest) = value.strip_prefix("file://") {
-        PathBuf::from(rest)
+        let path = PathBuf::from(rest);
+        if !path.is_absolute() {
+            return Err(local_resource_boundary_error());
+        }
+        path
     } else if value.contains("://") {
-        return None;
+        return Err(local_resource_boundary_error());
     } else {
         PathBuf::from(value)
     };
-    Some(if path.is_absolute() {
+    let cwd = std::fs::canonicalize(cwd).map_err(|_| local_resource_boundary_error())?;
+    let candidate = if path.is_absolute() {
         path
     } else {
         cwd.join(path)
-    })
+    };
+    let path = std::fs::canonicalize(candidate).map_err(|_| local_resource_boundary_error())?;
+    let is_file = path
+        .metadata()
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false);
+    if !is_file || !path.starts_with(&cwd) {
+        return Err(local_resource_boundary_error());
+    }
+    Ok(path)
+}
+
+fn ensure_text_resource_size(bytes: usize) -> Result<(), Error> {
+    if bytes > ACP_TEXT_RESOURCE_MAX_BYTES {
+        return Err(invalid_prompt(
+            "text resource exceeds the 524288-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+fn local_resource_boundary_error() -> Error {
+    invalid_prompt("local ResourceLink must resolve to a file inside the session cwd")
+}
+
+fn invalid_prompt(message: &'static str) -> Error {
+    Error::invalid_params().data(message)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -339,18 +376,6 @@ struct AcpAccountingAccumulator {
 }
 
 impl AcpUsageAccumulator {
-    pub(crate) fn record_stream_event(&mut self, event: &RunStreamEvent) {
-        match event {
-            RunStreamEvent::Event(value) => self.record_runtime_value(value.as_value()),
-            RunStreamEvent::Scoped { event, .. } => self.record_stream_event(event),
-            RunStreamEvent::AssistantTextDelta { .. }
-            | RunStreamEvent::ReasoningDelta { .. }
-            | RunStreamEvent::ReasoningEnd
-            | RunStreamEvent::ClarifyRequest(_)
-            | RunStreamEvent::ClarifyResolved(_) => {}
-        }
-    }
-
     pub(crate) fn add_warning(&mut self, warning: impl Into<String>) {
         let warning = warning.into();
         if !warning.trim().is_empty() && !self.warnings.contains(&warning) {
@@ -417,7 +442,7 @@ impl AcpUsageAccumulator {
             .map(|usage| usage.total_tokens)
     }
 
-    fn record_runtime_value(&mut self, value: &Value) {
+    pub(crate) fn record_runtime_value(&mut self, value: &Value) {
         let Some(event_type) = value.get("type").and_then(Value::as_str) else {
             return;
         };

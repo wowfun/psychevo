@@ -1,3 +1,14 @@
+use psychevo::model_state::ModelState;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::settings_observability::{display_cwd, display_relative_to_home};
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn settings_read_returns_workbench_project_and_controls() {
     let (_temp, state) = web_state().await;
@@ -8,7 +19,7 @@ async fn settings_read_returns_workbench_project_and_controls() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/read".to_string(),
             params: None,
@@ -84,7 +95,7 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-state-set")),
             method: "model/state/set".to_string(),
             params: Some(json!({
@@ -106,7 +117,7 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-state-read")),
             method: "model/state/read".to_string(),
             params: Some(json!({ "cwd": state.inner.cwd.display().to_string() })),
@@ -122,7 +133,7 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("settings-read")),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": state.inner.cwd.display().to_string() })),
@@ -151,12 +162,15 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
 async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
-    let session_id = state
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "web".to_string();
+    let thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "old-model", "old", None)
-        .await.expect("session");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("thread");
+    let session_id = thread.id().to_string();
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let saved = handle_rpc(
@@ -164,7 +178,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-state-thread-set")),
             method: "model/state/set".to_string(),
             params: Some(json!({
@@ -180,33 +194,24 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     assert_eq!(saved["model"], "mock/model-b");
     assert_eq!(saved["reasoningEffort"], "low");
 
-    let summary = state
-        .inner
-        .state
-
-        .session_summary(&session_id)
-        .await.expect("summary")
-        .expect("session");
+    let summary = thread.snapshot().await.expect("snapshot").summary;
     assert_eq!(summary.provider, "mock");
     assert_eq!(summary.model, "model-b");
-    let metadata = state
-        .inner
-        .state
-
-        .session_metadata(&session_id)
-        .await.expect("metadata")
-        .expect("metadata");
-    assert_eq!(
-        metadata[SESSION_COMPOSER_MODEL_METADATA_KEY]["reasoningEffort"],
-        "low"
-    );
+    let selection = thread
+        .model_selection()
+        .await
+        .expect("model selection")
+        .expect("selected model");
+    assert_eq!(selection.provider, "mock");
+    assert_eq!(selection.model, "model-b");
+    assert_eq!(selection.reasoning_effort.as_deref(), Some("low"));
 
     let settings = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("settings-read-thread")),
             method: "settings/read".to_string(),
             params: Some(json!({ "threadId": session_id })),

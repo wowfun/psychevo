@@ -4,11 +4,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    __product::configuration::ChannelSetupInput, __product::configuration::channel_doctor_value,
-    __product::configuration::channel_list_value, __product::configuration::channel_summary_value,
-    __product::configuration::set_channel_enabled,
-    __product::configuration::setup_channel_connection,
-    __product::configuration::upsert_channel_connection,
+    Configuration, config::ChannelSetupInput, config::set_channel_enabled,
+    config::setup_channel_connection, config::upsert_channel_connection,
 };
 use psychevo_gateway::im::ImAdapter;
 use psychevo_gateway::im::adapters::{
@@ -18,7 +15,7 @@ use psychevo_gateway::im::adapters::{
 use serde_json::{Value, json};
 
 use crate::args::GatewaySetupArgs;
-use crate::commands::common::{print_json_error, read_secret_from_stdin};
+use crate::commands::common::{CommandConfiguration, print_json_error, read_secret_from_stdin};
 use crate::commands::serve::resolve_static_dir_diagnostic;
 
 use super::context::GatewayContext;
@@ -38,115 +35,119 @@ pub(super) async fn gateway_setup(args: GatewaySetupArgs) -> Result<ExitCode> {
 
 async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load_for_setup()?;
-    if args.channel.is_none() {
-        args = gateway_setup_wizard(&ctx).await?;
-    }
-    let channel = args
-        .channel
-        .clone()
-        .ok_or_else(|| anyhow!("pevo gateway setup requires --channel in non-interactive mode"))?;
-    let id = args.id.clone().unwrap_or_else(|| channel.clone());
-    let mut credential = read_secret_from_stdin(args.credential_stdin)?;
-    let mut account_id = args.account_id.clone();
-    let mut ilink_base_url = args.ilink_base_url.clone();
-    if args.qr {
-        if channel != "wechat" {
-            return Err(anyhow!("--qr is only supported for --channel wechat"));
+    let configuration = CommandConfiguration::open(&ctx.env_map, &ctx.home, &ctx.cwd).await?;
+    let result = async {
+        if args.channel.is_none() {
+            args = gateway_setup_wizard(configuration.configuration())?;
         }
-        let qr = run_wechat_qr_login(
-            args.ilink_base_url
-                .as_deref()
-                .unwrap_or(WECHAT_ILINK_BASE_URL),
-        )
-        .await?;
-        credential = Some(qr.token);
-        account_id = Some(qr.account_id);
-        ilink_base_url = Some(qr.base_url);
-        if args.allow_users.is_empty() {
-            if let Some(user_id) = qr.user_id {
-                eprintln!("Adding WeChat QR login user to allowlist: {user_id}");
-                args.allow_users.push(user_id);
-            } else if io::stdin().is_terminal()
-                && prompt_yes_no_default(
-                    "No WeChat user id was returned. Pair first direct-message sender now? [Y/n]: ",
-                    true,
-                )?
-                && let Some(user_id) = discover_wechat_dm_sender(
-                    credential.as_deref().unwrap_or_default(),
-                    account_id.as_deref().unwrap_or_default(),
-                    ilink_base_url.as_deref().unwrap_or(WECHAT_ILINK_BASE_URL),
-                    &id,
-                )
-                .await?
-            {
-                args.allow_users.push(user_id);
+        let channel = args.channel.clone().ok_or_else(|| {
+            anyhow!("pevo gateway setup requires --channel in non-interactive mode")
+        })?;
+        let id = args.id.clone().unwrap_or_else(|| channel.clone());
+        let mut credential = read_secret_from_stdin(args.credential_stdin)?;
+        let mut account_id = args.account_id.clone();
+        let mut ilink_base_url = args.ilink_base_url.clone();
+        if args.qr {
+            if channel != "wechat" {
+                return Err(anyhow!("--qr is only supported for --channel wechat"));
+            }
+            let qr = run_wechat_qr_login(
+                args.ilink_base_url
+                    .as_deref()
+                    .unwrap_or(WECHAT_ILINK_BASE_URL),
+            )
+            .await?;
+            credential = Some(qr.token);
+            account_id = Some(qr.account_id);
+            ilink_base_url = Some(qr.base_url);
+            if args.allow_users.is_empty() {
+                if let Some(user_id) = qr.user_id {
+                    eprintln!("Adding WeChat QR login user to allowlist: {user_id}");
+                    args.allow_users.push(user_id);
+                } else if io::stdin().is_terminal()
+                    && prompt_yes_no_default(
+                        "No WeChat user id was returned. Pair first direct-message sender now? [Y/n]: ",
+                        true,
+                    )?
+                    && let Some(user_id) = discover_wechat_dm_sender(
+                        credential.as_deref().unwrap_or_default(),
+                        account_id.as_deref().unwrap_or_default(),
+                        ilink_base_url.as_deref().unwrap_or(WECHAT_ILINK_BASE_URL),
+                        &id,
+                    )
+                    .await?
+                {
+                    args.allow_users.push(user_id);
+                }
             }
         }
+        let setup_input = ChannelSetupInput {
+            config_dir: ctx.home.clone(),
+            id: id.clone(),
+            channel: channel.clone(),
+            label: args.label.clone(),
+            credential_env: args.credential_env.clone(),
+            credential,
+            account_env: args.account_env.clone(),
+            account_id,
+            base_url_env: matches!(args.channel.as_deref(), Some("wechat"))
+                .then(|| "WECHAT_ILINK_BASE_URL".to_string()),
+            base_url: ilink_base_url,
+            allow_users: args.allow_users.clone(),
+            allow_groups: args.allow_groups.clone(),
+        };
+        let setup = if args.qr && channel == "wechat" {
+            upsert_channel_connection(setup_input)?
+        } else {
+            setup_channel_connection(setup_input)?
+        };
+        if setup
+            .get("wrote_env")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || args.credential_stdin
+            || args.qr
+        {
+            crate::profiles::protect_env_file(&ctx.home.join(".env"))?;
+        }
+        let enabled = if args.enable || args.disable {
+            Some(set_channel_enabled(ctx.home.clone(), &id, args.enable)?)
+        } else {
+            None
+        };
+        let doctor = configuration
+            .configuration()
+            .diagnose_channels(Some(&id), false)?;
+        let summary = configuration.configuration().channel_summary()?;
+        let gateway = setup_gateway_action(&ctx, &args).await?;
+        let output = json!({
+            "ok": true,
+            "channel": setup,
+            "enabled": enabled,
+            "doctor": doctor,
+            "summary": summary,
+            "gateway": gateway,
+            "profile": ctx.profile_name,
+            "profileHome": ctx.home,
+        });
+        if args.json {
+            print_json(output)
+        } else {
+            print_gateway_setup_human(&output);
+            Ok(ExitCode::SUCCESS)
+        }
     }
-    let setup_input = ChannelSetupInput {
-        config_dir: ctx.home.clone(),
-        id: id.clone(),
-        channel: channel.clone(),
-        label: args.label.clone(),
-        credential_env: args.credential_env.clone(),
-        credential,
-        account_env: args.account_env.clone(),
-        account_id,
-        base_url_env: matches!(args.channel.as_deref(), Some("wechat"))
-            .then(|| "WECHAT_ILINK_BASE_URL".to_string()),
-        base_url: ilink_base_url,
-        allow_users: args.allow_users.clone(),
-        allow_groups: args.allow_groups.clone(),
-    };
-    let setup = if args.qr && channel == "wechat" {
-        upsert_channel_connection(setup_input)?
-    } else {
-        setup_channel_connection(setup_input)?
-    };
-    if setup
-        .get("wrote_env")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || args.credential_stdin
-        || args.qr
-    {
-        crate::profiles::protect_env_file(&ctx.home.join(".env"))?;
-    }
-    let enabled = if args.enable || args.disable {
-        Some(set_channel_enabled(ctx.home.clone(), &id, args.enable)?)
-    } else {
-        None
-    };
-    let options = ctx.run_options(ctx.cwd.clone()).await?;
-    let doctor = channel_doctor_value(&options, Some(&id), false)?;
-    let summary = channel_summary_value(&options)?;
-    let gateway = setup_gateway_action(&ctx, &args).await?;
-    let output = json!({
-        "ok": true,
-        "channel": setup,
-        "enabled": enabled,
-        "doctor": doctor,
-        "summary": summary,
-        "gateway": gateway,
-        "profile": ctx.profile_name,
-        "profileHome": ctx.home,
-    });
-    if args.json {
-        print_json(output)
-    } else {
-        print_gateway_setup_human(&output);
-        Ok(ExitCode::SUCCESS)
-    }
+    .await;
+    configuration.finish(result).await
 }
 
-async fn gateway_setup_wizard(ctx: &GatewayContext) -> Result<GatewaySetupArgs> {
+fn gateway_setup_wizard(configuration: &Configuration) -> Result<GatewaySetupArgs> {
     if !io::stdin().is_terminal() {
         return Err(anyhow!(
             "pevo gateway setup requires --channel in non-interactive mode"
         ));
     }
-    let options = ctx.run_options(ctx.cwd.clone()).await?;
-    let existing = channel_list_value(&options)?;
+    let existing = configuration.channels()?;
     println!("Configured channels:");
     if existing
         .get("channels")

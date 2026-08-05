@@ -1,5 +1,5 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::time::Duration;
+
 pub(crate) fn activity_spinner_frame(elapsed: Duration) -> &'static str {
     animated_spinner_frame(elapsed)
 }

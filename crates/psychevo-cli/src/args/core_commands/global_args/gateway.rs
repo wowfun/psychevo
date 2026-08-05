@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
 #[derive(Debug, Parser)]
 pub(crate) struct GatewayArgs {
     #[command(subcommand)]

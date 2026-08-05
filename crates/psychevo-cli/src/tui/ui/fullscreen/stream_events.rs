@@ -1,14 +1,29 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::support_turn_event::{
+    turn_event_clarify_request, turn_event_clarify_resolution, turn_event_presentation_value,
+};
+use crate::tui::{
+    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason, FullscreenUi, Outcome,
+    TranscriptKind, TranscriptRow, TurnEvent, Value, active_tool_title, agent_child_latest_tokens,
+    agent_child_status_text, agent_target_from_tool_event, assistant_message_has_tool_calls,
+    assistant_text_from_event, clarify_no_answer_result, completed_live_tool_elapsed,
+    evidence_kind_for_value, exec_result_completed, exec_result_running, exec_session_id_from_args,
+    exec_session_id_from_result, format_tool_summary, outcome_from_value,
+    reasoning_only_message_receives_meta, running_agent_tool_full_text, scoped_tool_position_key,
+    selected_skill_names_from_event, tool_event_interrupted, tool_id_key, tool_output_text,
+    tool_position_key, tool_result_output, tool_started_instant, tool_title, tool_title_for_update,
+    usage_context_tokens, visible_answer_message_receives_meta, write_argument_preview_from_args,
+};
+use std::time::{Duration, Instant};
+
 impl<'a> FullscreenUi<'a> {
-    pub(crate) fn apply_stream_event(
+    pub(crate) fn apply_turn_event(
         &mut self,
-        event: RunStreamEvent,
+        event: TurnEvent,
         _thinking_visible: bool,
         debug: bool,
     ) -> bool {
         match event {
-            RunStreamEvent::AssistantTextDelta { text } => {
+            TurnEvent::MessageDelta { text } => {
                 if text.is_empty() {
                     return false;
                 }
@@ -28,7 +43,7 @@ impl<'a> FullscreenUi<'a> {
                 self.remove_turn_meta();
                 false
             }
-            RunStreamEvent::ReasoningDelta { text } => {
+            TurnEvent::ReasoningDelta { text } => {
                 if !text.trim().is_empty() {
                     self.turn_had_reasoning = true;
                     self.remove_turn_meta();
@@ -47,30 +62,65 @@ impl<'a> FullscreenUi<'a> {
                 self.append_thinking_text(idx, &text);
                 false
             }
-            RunStreamEvent::ReasoningEnd => {
+            TurnEvent::ReasoningCompleted { text } => {
+                if self.reasoning_row.is_none()
+                    && let Some(text) = text.filter(|text| !text.trim().is_empty())
+                {
+                    let mut row = TranscriptRow::with_title(
+                        TranscriptKind::Thinking,
+                        "Thinking",
+                        String::new(),
+                    );
+                    row.tool_started = Some(Instant::now());
+                    let idx = self.insert_evidence_row(row);
+                    self.reasoning_row = Some(idx);
+                    self.append_thinking_text(idx, &text);
+                }
                 if let Some(idx) = self.reasoning_row.take() {
                     self.finish_thinking_row(idx);
                 }
                 false
             }
-            RunStreamEvent::ClarifyRequest(request) => {
-                self.open_clarify_panel(request);
-                true
+            event @ TurnEvent::InteractionRequested { .. } => {
+                if let Some(request) = turn_event_clarify_request(&event) {
+                    self.open_clarify_panel(request);
+                    true
+                } else {
+                    false
+                }
             }
-            RunStreamEvent::ClarifyResolved(event) => {
-                self.apply_clarify_resolved(event);
+            event @ TurnEvent::InteractionResolved { .. } => {
+                if let Some(resolved) = turn_event_clarify_resolution(&event) {
+                    self.apply_clarify_resolved(resolved);
+                }
                 false
             }
-            RunStreamEvent::Event(value) => self.apply_value_event(value.as_value(), debug),
-            RunStreamEvent::Scoped { event, .. } => {
-                self.apply_stream_event(*event, _thinking_visible, debug)
+            event @ (TurnEvent::Runtime { .. }
+            | TurnEvent::Message { .. }
+            | TurnEvent::Tool { .. }
+            | TurnEvent::Warning { .. }) => turn_event_presentation_value(&event)
+                .is_some_and(|value| self.apply_value_event(value.as_ref(), debug)),
+            TurnEvent::Scoped { event, .. } => {
+                self.apply_turn_event(*event, _thinking_visible, debug)
             }
+            TurnEvent::ResyncRequired { missed } => {
+                self.turn_projection_invalid = true;
+                self.push_status(format!(
+                    "warning: missed {missed} live turn events; reloading authoritative history"
+                ));
+                false
+            }
+            TurnEvent::ActivityChanged { .. }
+            | TurnEvent::Accepted { .. }
+            | TurnEvent::Started { .. }
+            | TurnEvent::Completed { .. }
+            | TurnEvent::Failed { .. } => false,
         }
     }
 
-    pub(crate) fn apply_stream_event_for_session(
+    pub(crate) fn apply_turn_event_for_session(
         &mut self,
-        event: RunStreamEvent,
+        event: TurnEvent,
         thinking_visible: bool,
         debug: bool,
         session_id: Option<&str>,
@@ -79,7 +129,7 @@ impl<'a> FullscreenUi<'a> {
         if let Some(session_id) = session_id {
             self.active_event_session_id = Some(session_id.to_string());
         }
-        let result = self.apply_stream_event(event, thinking_visible, debug);
+        let result = self.apply_turn_event(event, thinking_visible, debug);
         self.active_event_session_id = previous;
         result
     }

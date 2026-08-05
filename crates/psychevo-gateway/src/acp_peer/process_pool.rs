@@ -1,5 +1,69 @@
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
+
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{
+    CancelNotification, CloseSessionRequest, CreateElicitationRequest, CreateTerminalRequest,
+    KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionRequest,
+    Response as AcpJsonRpcResponse, SessionNotification, TerminalOutputRequest,
+    WaitForTerminalExitRequest, WriteTextFileRequest,
+};
+use agent_client_protocol::{
+    Agent, BoxFuture, ByteStreams, Channel, Client, ConnectTo, ConnectionTo, Dispatch, Handled,
+    RawJsonRpcMessage, Role, UntypedMessage,
+};
+use agent_client_protocol_schema::v1::InitializeResponse;
+use futures::{StreamExt, channel::mpsc};
+use psychevo::{Error, application::ResolvedMcpServerInput};
+use serde_json::{Value, json};
+use sha2::Digest as _;
+use tokio::sync::{mpsc as tokio_mpsc, oneshot as tokio_oneshot, watch};
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+
+use super::capability_packs::{AcpCapabilityPackKind, reviewed_initialize_capability_pack};
+use super::elicitation::create_elicitation;
+use super::lifecycle::{
+    AcpCloseSessionInput, AcpDeleteSessionInput, AcpForkSessionInput, AcpLifecycleCapability,
+    AcpListSessionsInput, AcpResidentSessionRef, AcpResumeSessionInput, AcpSessionListPage,
+    acp_agent_not_delivered_error, acp_lifecycle_error, close_resident_acp_session,
+    cooperative_acp_session_cancel, delete_acp_session, fork_resident_acp_session,
+    listed_acp_sessions, remove_resident_session_resources, require_acp_lifecycle_capability,
+    resume_resident_acp_session, safe_acp_error, validate_delete_session_ref,
+    validate_lifecycle_session_identity, validate_resident_session_ref,
+};
+use super::metadata_permissions::{
+    acp_request_context, read_text_file, request_permission, write_text_file,
+};
+use super::runtime_options::{AcpV1Initialization, initialize_acp_v1};
+use super::session_projection::{
+    AcpNotificationIngress, AcpNotificationRouter, AcpPeerInboundPayload, AcpResidentSessions,
+    AcpSessionSnapshot, acp_response_with_projection_barrier, acp_session_snapshot,
+    drain_acp_notification_subscription, reduce_idle_acp_notification,
+};
+#[cfg(test)]
+use super::stdio_turn::inspect_resident_acp_session;
+use super::stdio_turn::{
+    AcpPeerTurnContext, AcpResidentControlInput, AcpResidentTurnInput, AcpSessionLoadInput,
+    AcpSessionPrepareInput, execute_resident_acp_turn, load_resident_acp_session,
+    prepare_resident_acp_session, set_resident_acp_control,
+};
+use super::stream_state::{AcpSessionLoadOutput, AcpTurnOutput};
+use super::terminal_callbacks::{
+    AcpTerminalRegistry, create_terminal, kill_terminal, release_terminal, terminal_output,
+    wait_for_terminal_exit,
+};
+use super::turn::AcpClientContext;
+use super::{acp_backend_command, acp_backend_effective_env, resolve_acp_backend_launch};
+
 const ACP_PROCESS_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-const ACP_PROCESS_FORCE_SHUTDOWN_MESSAGE: &str = "ACP process forced shutdown";
+pub(super) const ACP_PROCESS_FORCE_SHUTDOWN_MESSAGE: &str = "ACP process forced shutdown";
 const ACP_PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const ACP_AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const ACP_AUTH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -13,25 +77,40 @@ pub(crate) struct AcpSetControlInput {
     pub(crate) cwd: PathBuf,
     pub(crate) local_session_id: String,
     pub(crate) native_session_id: String,
-    pub(crate) mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+    pub(crate) mcp_servers: Vec<ResolvedMcpServerInput>,
     pub(crate) control_id: String,
     pub(crate) value: Value,
 }
 
+/// Immutable ownership bundle for one live ACP process generation.
+/// Session operations borrow this context and add only their semantic input.
+#[derive(Clone)]
+pub(super) struct AcpProcessGeneration {
+    pub(super) cx: ConnectionTo<Agent>,
+    pub(super) initialized: Arc<InitializeResponse>,
+    pub(super) peer: ResolvedPeerTurn,
+    pub(super) contexts: Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
+    pub(super) sessions: AcpResidentSessions,
+    pub(super) terminals: AcpTerminalRegistry,
+    pub(super) notification_ingress: AcpNotificationIngress,
+    pub(super) next_session_epoch: Arc<AtomicU64>,
+    pub(super) generation: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AcpProcessKey {
+pub(super) struct AcpProcessKey {
     backend_fingerprint: String,
     canonical_cwd: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AcpAuthObservationKey {
+pub(super) struct AcpAuthObservationKey {
     launch_fingerprint: String,
     canonical_cwd: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum AcpObservedAuthState {
+pub(super) enum AcpObservedAuthState {
     #[default]
     Unchecked,
     Required,
@@ -150,7 +229,7 @@ impl Default for AcpProcessPool {
 }
 
 impl AcpProcessPool {
-    fn new(idle_timeout: Duration) -> Self {
+    pub(super) fn new(idle_timeout: Duration) -> Self {
         Self {
             inner: Arc::new(AcpProcessPoolInner {
                 actors: Mutex::new(HashMap::new()),
@@ -162,7 +241,19 @@ impl AcpProcessPool {
         }
     }
 
-    async fn run_turn(
+    #[cfg(test)]
+    pub(super) fn actor_counts(&self) -> (usize, usize) {
+        let process_count = self.inner.actors.lock().expect("ACP actors poisoned").len();
+        let resident_count = self
+            .inner
+            .resident_actors
+            .lock()
+            .expect("ACP resident actors poisoned")
+            .len();
+        (process_count, resident_count)
+    }
+
+    pub(super) async fn run_turn(
         &self,
         peer: ResolvedPeerTurn,
         context: AcpPeerTurnContext,
@@ -202,7 +293,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         local_session_id: String,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         self.inner
@@ -241,7 +332,9 @@ impl AcpProcessPool {
             .get(&old_local_session_id)
             .filter(|handle| !*handle.done_rx.borrow())
             .cloned()
-            .ok_or_else(|| acp_process_unavailable_error("prepared ACP session is no longer resident"))?;
+            .ok_or_else(|| {
+                acp_process_unavailable_error("prepared ACP session is no longer resident")
+            })?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
         handle
             .command_tx
@@ -272,7 +365,7 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -299,10 +392,14 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionLoadOutput> {
         let handle = self.actor(&peer, &cwd)?;
         let resident_local_session_id = local_session_id.clone();
+        let resident = AcpResidentSessionRef {
+            local_session_id: local_session_id.clone(),
+            native_session_id: native_session_id.clone(),
+        };
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
         handle
             .command_tx
@@ -314,15 +411,28 @@ impl AcpProcessPool {
                 reply: reply_tx,
             })
             .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
-        let result = reply_rx.await.map_err(|_| {
-            acp_process_unavailable_error("ACP process ended while loading Agent history")
-        })?;
-        if result.is_ok() {
-            self.inner
-                .resident_actors
-                .lock()
-                .map_err(|_| Error::Message("ACP resident actor registry poisoned".to_string()))?
-                .insert(resident_local_session_id, handle.clone());
+        self.inner
+            .resident_actors
+            .lock()
+            .map_err(|_| Error::Message("ACP resident actor registry poisoned".to_string()))?
+            .insert(resident_local_session_id.clone(), handle.clone());
+        let result = match reply_rx.await {
+            Ok(result) => result,
+            Err(_) => {
+                self.inner
+                    .resident_actors
+                    .lock()
+                    .map_err(|_| {
+                        Error::Message("ACP resident actor registry poisoned".to_string())
+                    })?
+                    .remove(&resident_local_session_id);
+                return Err(acp_process_unavailable_error(
+                    "ACP process ended while loading Agent history",
+                ));
+            }
+        };
+        if result.is_err() {
+            let _ = self.release_session(resident).await;
         }
         observe_acp_auth_result(&handle.auth_observation, &result, false);
         result
@@ -354,7 +464,9 @@ impl AcpProcessPool {
             })
             .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
         reply_rx.await.map_err(|_| {
-            acp_process_unavailable_error("ACP process ended while reading its resident session projection")
+            acp_process_unavailable_error(
+                "ACP process ended while reading its resident session projection",
+            )
         })?
     }
 
@@ -421,7 +533,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         session: AcpResidentSessionRef,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let local_session_id = session.local_session_id.clone();
@@ -660,11 +772,7 @@ impl AcpProcessPool {
         Ok(())
     }
 
-    fn actor(
-        &self,
-        peer: &ResolvedPeerTurn,
-        cwd: &Path,
-    ) -> psychevo::Result<AcpProcessHandle> {
+    fn actor(&self, peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpProcessHandle> {
         let key = acp_process_key(peer, cwd)?;
         let mut actors = self
             .inner
@@ -749,7 +857,10 @@ fn remove_finished_acp_actor(
     }
 }
 
-fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpProcessKey> {
+pub(super) fn acp_process_key(
+    peer: &ResolvedPeerTurn,
+    cwd: &Path,
+) -> psychevo::Result<AcpProcessKey> {
     let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let launch = resolve_acp_backend_launch(peer, &canonical_cwd)?;
     let mut digest = sha2::Sha256::new();
@@ -767,13 +878,13 @@ fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpP
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo::__product::platform::normalized_native_path(&launch.program)
+        psychevo::host_paths::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo::__product::platform::normalized_native_path(&launch.cwd)
+        psychevo::host_paths::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -783,7 +894,7 @@ fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpP
     })
 }
 
-fn acp_auth_observation_key(
+pub(super) fn acp_auth_observation_key(
     peer: &ResolvedPeerTurn,
     cwd: &Path,
 ) -> psychevo::Result<AcpAuthObservationKey> {
@@ -805,13 +916,13 @@ fn acp_auth_observation_key(
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo::__product::platform::normalized_native_path(&launch.program)
+        psychevo::host_paths::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo::__product::platform::normalized_native_path(&launch.cwd)
+        psychevo::host_paths::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -821,7 +932,7 @@ fn acp_auth_observation_key(
     })
 }
 
-fn observe_acp_auth_result<T>(
+pub(super) fn observe_acp_auth_result<T>(
     observation: &Arc<Mutex<AcpObservedAuthState>>,
     result: &psychevo::Result<T>,
     clear_on_success: bool,
@@ -847,10 +958,10 @@ fn observe_acp_auth_result<T>(
 }
 
 #[derive(Clone, Default)]
-struct AcpDeliveryMarker(Arc<std::sync::atomic::AtomicBool>);
+pub(super) struct AcpDeliveryMarker(Arc<std::sync::atomic::AtomicBool>);
 
 impl AcpDeliveryMarker {
-    fn mark_sent(&self) {
+    pub(super) fn mark_sent(&self) {
         self.0.store(true, Ordering::Release);
     }
 
@@ -875,7 +986,7 @@ enum AcpProcessCommand {
     Prepare {
         local_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     Promote {
@@ -889,14 +1000,14 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     LoadSession {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionLoadOutput>>,
     },
     InspectCached {
@@ -908,7 +1019,7 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
         control_id: String,
         value: Value,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
@@ -921,7 +1032,7 @@ enum AcpProcessCommand {
     ResumeSession {
         session: AcpResidentSessionRef,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     ForkSession {
@@ -998,8 +1109,7 @@ where
         self,
         client: impl ConnectTo<R::Counterpart>,
     ) -> Result<(), agent_client_protocol::Error> {
-        let (channel, serve_self) =
-            <Self as ConnectTo<R>>::into_channel_and_future(self);
+        let (channel, serve_self) = <Self as ConnectTo<R>>::into_channel_and_future(self);
         match futures::future::select(Box::pin(client.connect_to(channel)), serve_self).await {
             futures::future::Either::Left((result, _))
             | futures::future::Either::Right((result, _)) => result,
@@ -1156,14 +1266,14 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdin".to_string(),
         ));
-        psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
+        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let Some(stdout) = child.stdout.take() else {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdout".to_string(),
         ));
-        psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
+        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let transport = AcpProtocolObservingTransport::new(
@@ -1434,6 +1544,17 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
             let notification_router = AcpNotificationRouter::default();
             let session_locks: AcpSessionLocks = Arc::new(Mutex::new(HashMap::new()));
             let next_session_epoch = Arc::new(AtomicU64::new(1));
+            let process_generation = AcpProcessGeneration {
+                cx: cx.clone(),
+                initialized: Arc::clone(&initialized),
+                peer: peer_for_connection.clone(),
+                contexts: Arc::clone(&contexts),
+                sessions: Arc::clone(&sessions),
+                terminals: terminals.clone(),
+                notification_ingress: notification_ingress.clone(),
+                next_session_epoch: Arc::clone(&next_session_epoch),
+                generation,
+            };
             let mut command_rx = command_rx;
             let mut notification_rx = notification_rx;
             let mut force_rx = force_rx;
@@ -1512,34 +1633,25 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
+                                let process = process_generation.clone();
                                 let mut task_force_rx = force_rx.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = execute_resident_acp_turn(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
                                         &mut task_force_rx,
-                                        &next_session_epoch,
-                                        generation,
-                                        context,
-                                        session_ready,
-                                        delivery,
+                                        AcpResidentTurnInput {
+                                            peer,
+                                            turn: context,
+                                            session_ready,
+                                            delivery,
+                                        },
                                     ).await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     ).await;
                                     let _ = reply.send(result);
                                 });
@@ -1559,33 +1671,22 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = prepare_resident_acp_session(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        &next_session_epoch,
-                                        generation,
-                                        local_session_id,
-                                        cwd,
-                                        mcp_servers,
+                                        AcpSessionPrepareInput {
+                                            local_session_id,
+                                            cwd,
+                                            mcp_servers,
+                                        },
                                     ).await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     ).await;
                                     let _ = reply.send(result);
                                 });
@@ -1604,9 +1705,9 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let result = async {
                                         let mut sessions = sessions.lock().await;
                                         if sessions.contains_key(&new_local_session_id) {
-                                            return Err(crate::agent_session_error(
+                                            return Err(agent_session_error(
                                                 "acp_session_promotion_conflict",
-                                                crate::AgentErrorStage::Binding,
+                                                AgentErrorStage::Binding,
                                                 "never",
                                                 "not_delivered",
                                                 "ACP draft promotion destination is already resident.",
@@ -1618,9 +1719,9 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         })?;
                                         if session.native_session_id != native_session_id {
                                             sessions.insert(old_local_session_id, session);
-                                            return Err(crate::agent_session_error(
+                                            return Err(agent_session_error(
                                                 "acp_session_identity_mismatch",
-                                                crate::AgentErrorStage::Binding,
+                                                AgentErrorStage::Binding,
                                                 "never",
                                                 "not_delivered",
                                                 "Prepared ACP session identity changed before promotion.",
@@ -1651,34 +1752,23 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = inspect_resident_acp_session(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        &next_session_epoch,
-                                        generation,
-                                        local_session_id,
-                                        native_session_id,
-                                        cwd,
-                                        mcp_servers,
+                                        AcpSessionLoadInput {
+                                            local_session_id,
+                                            native_session_id,
+                                            cwd,
+                                            mcp_servers,
+                                        },
                                     ).await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     ).await;
                                     let _ = reply.send(result);
                                 });
@@ -1700,34 +1790,23 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = load_resident_acp_session(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        &next_session_epoch,
-                                        generation,
-                                        local_session_id,
-                                        native_session_id,
-                                        cwd,
-                                        mcp_servers,
+                                        AcpSessionLoadInput {
+                                            local_session_id,
+                                            native_session_id,
+                                            cwd,
+                                            mcp_servers,
+                                        },
                                     ).await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     ).await;
                                     let _ = reply.send(result);
                                 });
@@ -1766,36 +1845,27 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = set_resident_acp_control(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        &next_session_epoch,
-                                        generation,
-                                        local_session_id,
-                                        native_session_id,
-                                        cwd,
-                                        mcp_servers,
-                                        control_id,
-                                        value,
+                                        AcpResidentControlInput {
+                                            session: AcpSessionLoadInput {
+                                                local_session_id,
+                                                native_session_id,
+                                                cwd,
+                                                mcp_servers,
+                                            },
+                                            control_id,
+                                            value,
+                                        },
                                     ).await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     ).await;
                                     let _ = reply.send(result);
                                 });
@@ -1815,18 +1885,11 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let result = listed_acp_sessions(
-                                        &cx,
-                                        &initialized,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        generation,
                                         AcpListSessionsInput {
                                             cwd: cwd_filter,
                                             cursor,
@@ -1835,8 +1898,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     .await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     )
                                     .await;
                                     let _ = reply.send(result);
@@ -1869,34 +1932,23 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = resume_resident_acp_session(
-                                        &cx,
-                                        &initialized,
-                                        &peer,
-                                        &contexts,
-                                        &sessions,
-                                        &notification_ingress,
+                                        &process,
                                         &mut subscription,
-                                        &next_session_epoch,
-                                        generation,
-                                        session,
-                                        cwd,
-                                        mcp_servers,
+                                        AcpResumeSessionInput {
+                                            session,
+                                            cwd,
+                                            mcp_servers,
+                                        },
                                     )
                                     .await;
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     )
                                     .await;
                                     let _ = reply.send(result);
@@ -1944,56 +1996,37 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let peer = peer_for_connection.clone();
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let notification_ingress = notification_ingress.clone();
-                                let next_session_epoch = Arc::clone(&next_session_epoch);
+                                let process = process_generation.clone();
                                 let source_first = source.local_session_id < fork_local_session_id;
                                 tasks.spawn(async move {
+                                    let input = AcpForkSessionInput {
+                                        source,
+                                        fork_local_session_id,
+                                        cwd,
+                                    };
                                     let result = if source_first {
                                         let _source_guard = source_lock.lock().await;
                                         let _fork_guard = fork_lock.lock().await;
                                         fork_resident_acp_session(
-                                            &cx,
-                                            &initialized,
-                                            &peer,
-                                            &contexts,
-                                            &sessions,
-                                            &notification_ingress,
+                                            &process,
                                             &mut subscription,
-                                            &next_session_epoch,
-                                            generation,
-                                            source,
-                                            fork_local_session_id,
-                                            cwd,
+                                            input,
                                         )
                                         .await
                                     } else {
                                         let _fork_guard = fork_lock.lock().await;
                                         let _source_guard = source_lock.lock().await;
                                         fork_resident_acp_session(
-                                            &cx,
-                                            &initialized,
-                                            &peer,
-                                            &contexts,
-                                            &sessions,
-                                            &notification_ingress,
+                                            &process,
                                             &mut subscription,
-                                            &next_session_epoch,
-                                            generation,
-                                            source,
-                                            fork_local_session_id,
-                                            cwd,
+                                            input,
                                         )
                                         .await
                                     };
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     )
                                     .await;
                                     let _ = reply.send(result);
@@ -2059,22 +2092,17 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let terminals = terminals.clone();
-                                let notification_ingress = notification_ingress.clone();
+                                let process = process_generation.clone();
                                 let session_locks = Arc::clone(&session_locks);
                                 tasks.spawn(async move {
                                     let result = match validate_resident_session_ref(
-                                        &sessions,
+                                        &process.sessions,
                                         &session,
                                     )
                                     .await
                                     .and_then(|()| {
                                         cooperative_acp_session_cancel(
-                                            &cx,
+                                            &process.cx,
                                             &session.native_session_id,
                                         )
                                     }) {
@@ -2082,23 +2110,19 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         Ok(()) => {
                                             let _session_guard = session_lock.lock().await;
                                             close_resident_acp_session(
-                                                &cx,
-                                                &initialized,
-                                                &contexts,
-                                                &sessions,
-                                                &terminals,
-                                                &notification_ingress,
+                                                &process,
                                                 &mut subscription,
-                                                generation,
-                                                session.clone(),
+                                                AcpCloseSessionInput {
+                                                    session: session.clone(),
+                                                },
                                             )
                                             .await
                                         }
                                     };
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     )
                                     .await;
                                     if result.is_ok() {
@@ -2139,45 +2163,39 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         continue;
                                     }
                                 };
-                                let cx = cx.clone();
-                                let initialized = Arc::clone(&initialized);
-                                let contexts = Arc::clone(&contexts);
-                                let sessions = Arc::clone(&sessions);
-                                let terminals = terminals.clone();
-                                let notification_ingress = notification_ingress.clone();
+                                let process = process_generation.clone();
                                 let session_locks = Arc::clone(&session_locks);
                                 tasks.spawn(async move {
                                     let result = match validate_delete_session_ref(
-                                        &sessions,
+                                        &process.sessions,
                                         &native_session_id,
                                         resident.as_ref(),
                                     )
                                     .await
                                     .and_then(|()| {
-                                        cooperative_acp_session_cancel(&cx, &native_session_id)
+                                        cooperative_acp_session_cancel(
+                                            &process.cx,
+                                            &native_session_id,
+                                        )
                                     }) {
                                         Err(error) => Err(error),
                                         Ok(()) => {
                                             let _session_guard = session_lock.lock().await;
                                             delete_acp_session(
-                                                &cx,
-                                                &initialized,
-                                                &contexts,
-                                                &sessions,
-                                                &terminals,
-                                                &notification_ingress,
+                                                &process,
                                                 &mut subscription,
-                                                generation,
-                                                native_session_id,
-                                                resident,
+                                                AcpDeleteSessionInput {
+                                                    native_session_id,
+                                                    resident,
+                                                },
                                             )
                                             .await
                                         }
                                     };
                                     drain_acp_notification_subscription(
                                         &mut subscription,
-                                        &sessions,
-                                        generation,
+                                        &process.sessions,
+                                        process.generation,
                                     )
                                     .await;
                                     if result.is_ok() {
@@ -2220,7 +2238,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
     }
     let _ = teardown_terminals.terminate_all();
 
-    psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
+    psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
 }
 
@@ -2326,9 +2344,9 @@ async fn close_resident_acp_sessions(
 }
 
 fn acp_process_unavailable_error(message: impl Into<String>) -> Error {
-    crate::agent_session_error(
+    agent_session_error(
         "acp_process_unavailable",
-        crate::AgentErrorStage::Delivery,
+        AgentErrorStage::Delivery,
         "safe",
         "not_delivered",
         message,
@@ -2336,9 +2354,7 @@ fn acp_process_unavailable_error(message: impl Into<String>) -> Error {
     )
 }
 
-fn acp_startup_or_exit_error(
-    startup_rx: &watch::Receiver<AcpProcessStartupStatus>,
-) -> Error {
+fn acp_startup_or_exit_error(startup_rx: &watch::Receiver<AcpProcessStartupStatus>) -> Error {
     match startup_rx.borrow().clone() {
         AcpProcessStartupStatus::Protocol(AcpProtocolDoctorStatus::Incompatible {
             expected_version,
@@ -2356,10 +2372,10 @@ fn acp_startup_or_exit_error(
     }
 }
 
-fn acp_unknown_delivery_error(message: impl Into<String>) -> Error {
-    crate::agent_session_error(
+pub(super) fn acp_unknown_delivery_error(message: impl Into<String>) -> Error {
+    agent_session_error(
         "acp_unknown_delivery",
-        crate::AgentErrorStage::Delivery,
+        AgentErrorStage::Delivery,
         "unknown_delivery",
         "unknown",
         message,

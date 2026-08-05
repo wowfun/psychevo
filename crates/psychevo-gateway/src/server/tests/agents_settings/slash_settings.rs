@@ -1,3 +1,12 @@
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn slash_settings_read_update_writes_profile_config_and_preserves_project_overrides() {
     let (_temp, state) = web_state().await;
@@ -27,7 +36,7 @@ label = "Keep Provider"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("before")),
             method: "slash/settings/read".to_string(),
             params: Some(json!({
@@ -45,7 +54,7 @@ label = "Keep Provider"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("update")),
             method: "slash/settings/update".to_string(),
             params: Some(json!({
@@ -170,7 +179,7 @@ async fn slash_settings_update_rejects_invalid_rows_and_conflicts() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(id)),
                 method: "slash/settings/update".to_string(),
                 params: Some(params),

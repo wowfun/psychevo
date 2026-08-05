@@ -1,3 +1,5 @@
+use clap::{Parser, Subcommand};
+
 #[derive(Debug, Parser)]
 pub(crate) struct PluginArgs {
     #[command(subcommand)]
@@ -46,7 +48,9 @@ pub(crate) enum PluginCommand {
     Doctor(PluginDoctorArgs),
     #[command(about = "Inspect a plugin package without installing it")]
     Inspect(PluginInspectArgs),
-    #[command(about = "Install a plugin package from a local directory, Git source, or npm package")]
+    #[command(
+        about = "Install a plugin package from a local directory, Git source, or npm package"
+    )]
     Install(PluginInstallArgs),
     #[command(about = "Uninstall a plugin from the selected scope")]
     Uninstall(PluginNameScopeArgs),
@@ -87,7 +91,10 @@ pub(crate) struct PluginDoctorArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginInspectArgs {
-    #[arg(value_name = "SOURCE", help = "Local plugin directory, Git source, or npm package")]
+    #[arg(
+        value_name = "SOURCE",
+        help = "Local plugin directory, Git source, or npm package"
+    )]
     pub(crate) source: String,
     #[arg(long, value_name = "local|git|npm", help = "Source kind")]
     pub(crate) kind: Option<String>,
@@ -97,7 +104,11 @@ pub(crate) struct PluginInspectArgs {
         help = "Git ref to checkout for Git sources"
     )]
     pub(crate) git_ref: Option<String>,
-    #[arg(long = "npm-version", value_name = "VERSION", help = "Npm package version")]
+    #[arg(
+        long = "npm-version",
+        value_name = "VERSION",
+        help = "Npm package version"
+    )]
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
@@ -107,7 +118,10 @@ pub(crate) struct PluginInspectArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginInstallArgs {
-    #[arg(value_name = "SOURCE", help = "Local plugin directory, Git source, or npm package")]
+    #[arg(
+        value_name = "SOURCE",
+        help = "Local plugin directory, Git source, or npm package"
+    )]
     pub(crate) source: String,
     #[arg(long, value_name = "local|git|npm", help = "Source kind")]
     pub(crate) kind: Option<String>,
@@ -117,7 +131,11 @@ pub(crate) struct PluginInstallArgs {
         help = "Git ref to checkout for Git sources"
     )]
     pub(crate) git_ref: Option<String>,
-    #[arg(long = "npm-version", value_name = "VERSION", help = "Npm package version")]
+    #[arg(
+        long = "npm-version",
+        value_name = "VERSION",
+        help = "Npm package version"
+    )]
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
@@ -208,7 +226,11 @@ pub(crate) struct PluginMarketplaceAddArgs {
     pub(crate) kind: String,
     #[arg(long = "ref", value_name = "REF", help = "Optional Git ref")]
     pub(crate) git_ref: Option<String>,
-    #[arg(long = "npm-version", value_name = "VERSION", help = "Npm package version")]
+    #[arg(
+        long = "npm-version",
+        value_name = "VERSION",
+        help = "Npm package version"
+    )]
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,

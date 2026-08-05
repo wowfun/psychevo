@@ -1,3 +1,20 @@
+use std::sync::Arc;
+
+use axum::Router;
+use axum::response::Json;
+use axum::routing::get;
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+
+use crate::composition::GatewayApplication;
+use crate::server::GatewayWebServerConfig;
+use crate::server::binding::{AuthContext, WebState};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
     let (_temp, state) = web_state().await;
@@ -10,7 +27,7 @@ async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-save")),
             method: "model/provider/save".to_string(),
             params: Some(json!({
@@ -47,7 +64,7 @@ async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-assignment")),
             method: "model/assignment/set".to_string(),
             params: Some(json!({
@@ -85,7 +102,7 @@ async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
         AuthContext::Bearer,
         mpsc::unbounded_channel().0,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-settings-read")),
             method: "model/settings/read".to_string(),
             params: Some(json!({ "scope": "global" })),
@@ -126,7 +143,7 @@ async fn model_provider_catalog_rpc_fetches_fake_catalog() {
         axum::serve(listener, router).await.expect("serve");
     });
 
-    let (_temp, state) = web_state().await;
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -147,7 +164,7 @@ no_auth = true
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("catalog")),
             method: "model/provider/catalog".to_string(),
             params: Some(json!({
@@ -164,17 +181,22 @@ no_auth = true
     assert_eq!(result["models"][0]["value"], "localmodels/alpha-free");
     assert_eq!(result["models"][1]["value"], "localmodels/beta");
     assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let cache_path = psychevo::__product::configuration::provider_models_cache_path_for_home(&state.inner.home);
+    let cache_path = psychevo::config::provider_models_cache_path_for_home(&state.inner.home);
     let cache = std::fs::read_to_string(cache_path).expect("provider cache");
     assert!(cache.contains("alpha-free"));
     assert!(!cache.contains("gateway-mock-key"));
 
-    let fresh_state = WebState::new(GatewayWebServerConfig::new(
-        Gateway::new(state.inner.state.clone()),
+    let runtime = GatewayApplication::open(
         state.inner.home.clone(),
-        state.inner.cwd.clone(),
+        temp.path().join("state.db"),
         state.inner.config_path.clone(),
         state.inner.inherited_env.clone(),
+    )
+    .await
+    .expect("fresh test composition");
+    let fresh_state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        state.inner.cwd.clone(),
         state
             .inner
             .static_dir
@@ -187,7 +209,7 @@ no_auth = true
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("settings")),
             method: "settings/read".to_string(),
             params: None,
@@ -209,7 +231,7 @@ no_auth = true
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-settings")),
             method: "model/settings/read".to_string(),
             params: Some(json!({ "scope": "global" })),
@@ -248,7 +270,7 @@ format = "webp"
         AuthContext::Bearer,
         mpsc::unbounded_channel().0,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-settings-read")),
             method: "model/settings/read".to_string(),
             params: Some(json!({ "scope": "global" })),
@@ -303,7 +325,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-settings")),
             method: "model/settings/read".to_string(),
             params: Some(json!({
@@ -322,7 +344,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("assignment")),
             method: "model/assignment/set".to_string(),
             params: Some(json!({
@@ -348,7 +370,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("model-settings-after-save")),
             method: "model/settings/read".to_string(),
             params: Some(json!({
@@ -370,7 +392,7 @@ reasoning_effort = "high"
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("settings")),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": model_settings["cwd"].as_str().expect("cwd") })),

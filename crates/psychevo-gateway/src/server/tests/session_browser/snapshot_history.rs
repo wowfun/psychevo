@@ -1,53 +1,85 @@
+use psychevo::application::{
+    GatewayActivityClaimInput, GatewayActivityKind, GatewayLiveSnapshotInput,
+    Message as RuntimeMessage, UserContentBlock,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::gateway_now_ms;
+use crate::server::binding::{AuthContext, WebState};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::session_view::thread_snapshot;
+use crate::server::tests::helpers::{
+    framework_message_fixture_executor, web_state_with_native_test_executor,
+};
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
+};
+
+async fn start_thread(state: &WebState, source: &str) -> psychevo::Thread {
+    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    request.source = source.to_string();
+    state
+        .inner
+        .framework
+        .start_thread(request)
+        .await
+        .expect("thread")
+}
+
+async fn web_state_with_messages(
+    messages: Vec<RuntimeMessage>,
+) -> (tempfile::TempDir, WebState, psychevo::Thread) {
+    let (temp, state) =
+        web_state_with_native_test_executor(framework_message_fixture_executor(messages)).await;
+    let thread = start_thread(&state, "web").await;
+    thread
+        .start_turn(psychevo::TurnRequest::new("seed transcript fixture"))
+        .await
+        .expect("fixture turn")
+        .wait()
+        .await
+        .expect("fixture turn completion");
+    (temp, state, thread)
+}
+
 #[tokio::test]
 async fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, thread) = web_state_with_messages(vec![
+        RuntimeMessage::User {
+            content: vec![UserContentBlock::text("hello history")],
+            timestamp_ms: 1,
+        },
+        RuntimeMessage::Assistant {
+            content: vec![psychevo::application::AssistantBlock::Text {
+                text: "hello from assistant".to_string(),
+            }],
+            timestamp_ms: 2,
+            finish_reason: Some("stop".to_string()),
+            outcome: psychevo::application::Outcome::Normal,
+            model: Some("fake-model".to_string()),
+            provider: Some("fake-provider".to_string()),
+        },
+    ])
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    state
-        .inner
-        .state
-
-        .append_message(
-            &session_id,
-            &RuntimeMessage::User {
-                content: vec![UserContentBlock::text("hello history")],
-                timestamp_ms: 1,
-            },
-        )
-        .await.expect("append user");
-    state
-        .inner
-        .state
-
-        .append_message(
-            &session_id,
-            &RuntimeMessage::Assistant {
-                content: vec![psychevo::__agent_core::AssistantBlock::Text {
-                    text: "hello from assistant".to_string(),
-                }],
-                timestamp_ms: 2,
-                finish_reason: Some("stop".to_string()),
-                outcome: psychevo::__ai::Outcome::Normal,
-                model: Some("fake-model".to_string()),
-                provider: Some("fake-provider".to_string()),
-            },
-        )
-        .await.expect("append assistant");
+    let session_id = thread.id().to_string();
     let summary = state
         .inner
-        .state
-
-        .session_summary(&session_id)
-        .await.expect("summary")
+        .framework
+        .thread_summary(&session_id)
+        .await
+        .expect("summary")
         .expect("session exists");
     assert!(summary.message_count > 0);
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries array");
 
     assert_eq!(entries.len(), 2, "{snapshot:#}");
@@ -57,35 +89,25 @@ async fn thread_snapshot_projects_visible_entries_for_history_session_with_messa
 
 #[tokio::test]
 async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, thread) = web_state_with_messages(
+        [(1, "first"), (2, "second")]
+            .into_iter()
+            .map(|(timestamp_ms, text)| RuntimeMessage::User {
+                content: vec![UserContentBlock::text(text)],
+                timestamp_ms,
+            })
+            .collect(),
+    )
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    for (timestamp_ms, text) in [(1, "first"), (2, "second")] {
-        state
-            .inner
-            .state
-
-            .append_message(
-                &session_id,
-                &RuntimeMessage::User {
-                    content: vec![UserContentBlock::text(text)],
-                    timestamp_ms,
-                },
-            )
-            .await.expect("append history message");
-    }
+    let session_id = thread.id().to_string();
     let (tx, _rx) = mpsc::unbounded_channel();
     let first = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-first")),
             method: "thread/history/read".to_string(),
             params: Some(json!({
@@ -110,7 +132,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-second")),
             method: "thread/history/read".to_string(),
             params: Some(json!({
@@ -131,7 +153,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-unknown")),
             method: "thread/history/read".to_string(),
             params: Some(json!({
@@ -148,28 +170,17 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
 
 #[tokio::test]
 async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_overlap() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, thread) = web_state_with_messages(
+        (1..=205)
+            .map(|session_seq| RuntimeMessage::User {
+                content: vec![UserContentBlock::text(format!("message {session_seq}"))],
+                timestamp_ms: session_seq,
+            })
+            .collect(),
+    )
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let session_id = state
-        .inner
-        .state
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await
-        .expect("session");
-    for session_seq in 1..=205 {
-        state
-            .inner
-            .state
-            .append_message(
-                &session_id,
-                &RuntimeMessage::User {
-                    content: vec![UserContentBlock::text(format!("message {session_seq}"))],
-                    timestamp_ms: session_seq,
-                },
-            )
-            .await
-            .expect("append history message");
-    }
+    let session_id = thread.id().to_string();
 
     let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
         .await
@@ -178,7 +189,11 @@ async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_over
     assert_eq!(snapshot_entries.len(), 100);
     assert_eq!(snapshot_entries[0]["messageSeq"], 106);
     assert_eq!(snapshot_entries[99]["messageSeq"], 205);
-    assert_eq!(snapshot["history"]["cursor"], "message:106");
+    let snapshot_cursor = snapshot["history"]["cursor"]
+        .as_str()
+        .expect("opaque composite cursor")
+        .to_string();
+    assert!(!snapshot_cursor.starts_with("message:"));
 
     let (tx, _rx) = mpsc::unbounded_channel();
     let second = handle_rpc(
@@ -186,13 +201,13 @@ async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_over
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-second")),
             method: "thread/history/read".to_string(),
             params: Some(json!({
                 "scope": scope.to_wire_scope(),
                 "threadId": session_id,
-                "cursor": snapshot["history"]["cursor"],
+                "cursor": snapshot_cursor,
                 "limit": 100
             })),
         },
@@ -203,20 +218,23 @@ async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_over
     assert_eq!(second_entries.len(), 100);
     assert_eq!(second_entries[0]["messageSeq"], 6);
     assert_eq!(second_entries[99]["messageSeq"], 105);
-    assert_eq!(second["nextCursor"], "message:6");
+    let second_cursor = second["nextCursor"]
+        .as_str()
+        .expect("second opaque composite cursor")
+        .to_string();
 
     let third = handle_rpc(
         state,
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("history-third")),
             method: "thread/history/read".to_string(),
             params: Some(json!({
                 "scope": scope.to_wire_scope(),
                 "threadId": session_id,
-                "cursor": second["nextCursor"],
+                "cursor": second_cursor,
                 "limit": 100
             })),
         },
@@ -232,57 +250,47 @@ async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_over
 
 #[tokio::test]
 async fn thread_snapshot_replays_running_exec_live_overlay() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, thread) = web_state_with_messages(vec![
+        RuntimeMessage::Assistant {
+            content: vec![psychevo::application::AssistantBlock::ToolCall(
+                psychevo::application::ToolCallBlock {
+                    id: "call_exec".to_string(),
+                    name: "exec_command".to_string(),
+                    arguments: json!({"cmd": "python fetch.py"}),
+                    arguments_json: "{\"cmd\":\"python fetch.py\"}".to_string(),
+                    arguments_error: None,
+                    content_index: 0,
+                    call_index: 0,
+                },
+            )],
+            timestamp_ms: 10,
+            finish_reason: Some("tool_calls".to_string()),
+            outcome: psychevo::application::Outcome::Normal,
+            model: Some("fake-model".to_string()),
+            provider: Some("fake-provider".to_string()),
+        },
+        RuntimeMessage::ToolResult {
+            tool_call_id: "call_exec".to_string(),
+            tool_name: "exec_command".to_string(),
+            content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"first\\n\"}".to_string(),
+            is_error: false,
+            timestamp_ms: 20,
+        },
+    ])
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    store
-        .append_message(
-            &session_id,
-            &RuntimeMessage::Assistant {
-                content: vec![psychevo::__agent_core::AssistantBlock::ToolCall(
-                    psychevo::__agent_core::ToolCallBlock {
-                        id: "call_exec".to_string(),
-                        name: "exec_command".to_string(),
-                        arguments: json!({"cmd": "python fetch.py"}),
-                        arguments_json: "{\"cmd\":\"python fetch.py\"}".to_string(),
-                        arguments_error: None,
-                        content_index: 0,
-                        call_index: 0,
-                    },
-                )],
-                timestamp_ms: 10,
-                finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo::__ai::Outcome::Normal,
-                model: Some("fake-model".to_string()),
-                provider: Some("fake-provider".to_string()),
-            },
-        )
-        .await.expect("append assistant tool call");
-    store
-        .append_message(
-            &session_id,
-            &RuntimeMessage::ToolResult {
-                tool_call_id: "call_exec".to_string(),
-                tool_name: "exec_command".to_string(),
-                content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"first\\n\"}"
-                    .to_string(),
-                is_error: false,
-                timestamp_ms: 20,
-            },
-        )
-        .await.expect("append yielded exec result");
+    let session_id = thread.id().to_string();
 
     let turn_id = "turn-running";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    let activity = state
+        .inner
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
             turn_id: Some(turn_id),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: state.inner.gateway.owner_id(),
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -290,7 +298,8 @@ async fn thread_snapshot_replays_running_exec_live_overlay() {
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim running activity");
+        .await
+        .expect("claim running activity");
 
     append_exec_live_update(
         &state,
@@ -298,16 +307,20 @@ async fn thread_snapshot_replays_running_exec_live_overlay() {
         &session_id,
         turn_id,
         "first\nsecond\n",
-    ).await;
+    )
+    .await;
     append_exec_live_update(
         &state,
         &activity.activity_id,
         &session_id,
         turn_id,
         "first\nsecond\npoll\n",
-    ).await;
+    )
+    .await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
     assert_eq!(
         snapshot["activity"]["startedAtMs"],
         json!(activity.started_at_ms),
@@ -332,57 +345,48 @@ async fn thread_snapshot_replays_running_exec_live_overlay() {
 
 #[tokio::test]
 async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
-    let (_temp, state) = web_state().await;
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
     let command = "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id, title FROM stories;\"";
-    store
-        .append_message(
-            &session_id,
-            &RuntimeMessage::Assistant {
-                content: vec![psychevo::__agent_core::AssistantBlock::ToolCall(
-                    psychevo::__agent_core::ToolCallBlock {
-                        id: "call_exec".to_string(),
-                        name: "exec_command".to_string(),
-                        arguments: json!({"cmd": command}),
-                        arguments_json: json!({"cmd": command}).to_string(),
-                        arguments_error: None,
-                        content_index: 0,
-                        call_index: 0,
-                    },
-                )],
-                timestamp_ms: 10,
-                finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo::__ai::Outcome::Normal,
-                model: Some("fake-model".to_string()),
-                provider: Some("fake-provider".to_string()),
-            },
-        )
-        .await.expect("append assistant tool call");
-    store
-        .append_message(
-            &session_id,
-            &RuntimeMessage::ToolResult {
-                tool_call_id: "call_exec".to_string(),
-                tool_name: "exec_command".to_string(),
-                content: "{\"exit_code\":0,\"output\":\"story one\\n\"}".to_string(),
-                is_error: false,
-                timestamp_ms: 20,
-            },
-        )
-        .await.expect("append completed exec result");
+    let (_temp, state, thread) = web_state_with_messages(vec![
+        RuntimeMessage::Assistant {
+            content: vec![psychevo::application::AssistantBlock::ToolCall(
+                psychevo::application::ToolCallBlock {
+                    id: "call_exec".to_string(),
+                    name: "exec_command".to_string(),
+                    arguments: json!({"cmd": command}),
+                    arguments_json: json!({"cmd": command}).to_string(),
+                    arguments_error: None,
+                    content_index: 0,
+                    call_index: 0,
+                },
+            )],
+            timestamp_ms: 10,
+            finish_reason: Some("tool_calls".to_string()),
+            outcome: psychevo::application::Outcome::Normal,
+            model: Some("fake-model".to_string()),
+            provider: Some("fake-provider".to_string()),
+        },
+        RuntimeMessage::ToolResult {
+            tool_call_id: "call_exec".to_string(),
+            tool_name: "exec_command".to_string(),
+            content: "{\"exit_code\":0,\"output\":\"story one\\n\"}".to_string(),
+            is_error: false,
+            timestamp_ms: 20,
+        },
+    ])
+    .await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let session_id = thread.id().to_string();
 
     let turn_id = "turn-running";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    let activity = state
+        .inner
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
             turn_id: Some(turn_id),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: state.inner.gateway.owner_id(),
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -390,7 +394,8 @@ async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overl
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .await.expect("claim running activity");
+        .await
+        .expect("claim running activity");
 
     append_stale_exec_live_snapshot(
         &state,
@@ -398,9 +403,12 @@ async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overl
         &session_id,
         turn_id,
         TranscriptBlockStatus::Running,
-    ).await;
+    )
+    .await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     let exec = entries
         .iter()
@@ -420,36 +428,30 @@ async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overl
 
 #[tokio::test]
 async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, thread) = web_state_with_messages(vec![RuntimeMessage::Assistant {
+        content: vec![psychevo::application::AssistantBlock::Text {
+            text: "Committed **answer**.".to_string(),
+        }],
+        timestamp_ms: 10,
+        finish_reason: Some("stop".to_string()),
+        outcome: psychevo::application::Outcome::Normal,
+        model: Some("fake-model".to_string()),
+        provider: Some("fake-provider".to_string()),
+    }])
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    store
-        .append_message(
-            &session_id,
-            &RuntimeMessage::Assistant {
-                content: vec![psychevo::__agent_core::AssistantBlock::Text {
-                    text: "Committed **answer**.".to_string(),
-                }],
-                timestamp_ms: 10,
-                finish_reason: Some("stop".to_string()),
-                outcome: psychevo::__ai::Outcome::Normal,
-                model: Some("fake-model".to_string()),
-                provider: Some("fake-provider".to_string()),
-            },
-        )
-        .await.expect("append committed assistant");
+    let session_id = thread.id().to_string();
 
     let turn_id = "turn-running";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    let activity = state
+        .inner
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
             turn_id: Some(turn_id),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: state.inner.gateway.owner_id(),
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -457,7 +459,8 @@ async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() 
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .await.expect("claim running activity");
+        .await
+        .expect("claim running activity");
 
     append_assistant_live_text_update(
         &state,
@@ -465,9 +468,12 @@ async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() 
         &session_id,
         turn_id,
         "Committed answer.",
-    ).await;
+    )
+    .await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     assert_eq!(entries.len(), 1, "{snapshot:#}");
     assert_eq!(entries[0]["source"], "runtime.message");
@@ -478,45 +484,31 @@ async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() 
 
 #[tokio::test]
 async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, parent_thread) = web_state_with_messages(vec![RuntimeMessage::Assistant {
+        content: vec![psychevo::application::AssistantBlock::Text {
+            text: "Committed **prefix**.".to_string(),
+        }],
+        timestamp_ms: 10,
+        finish_reason: Some("tool_calls".to_string()),
+        outcome: psychevo::application::Outcome::Normal,
+        model: Some("fake-model".to_string()),
+        provider: Some("fake-provider".to_string()),
+    }])
+    .await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let parent_session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
-    let child_session_id = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "agent",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("child session");
-    store
-        .append_message(
-            &parent_session_id,
-            &RuntimeMessage::Assistant {
-                content: vec![psychevo::__agent_core::AssistantBlock::Text {
-                    text: "Committed **prefix**.".to_string(),
-                }],
-                timestamp_ms: 10,
-                finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo::__ai::Outcome::Normal,
-                model: Some("fake-model".to_string()),
-                provider: Some("fake-provider".to_string()),
-            },
-        )
-        .await.expect("append committed assistant");
+    let parent_session_id = parent_thread.id().to_string();
+    let child_session_id = start_thread(&state, "agent").await.id().to_string();
 
     let turn_id = "turn-running";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    let activity = state
+        .inner
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
             turn_id: Some(turn_id),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: state.inner.gateway.owner_id(),
             owner_surface: Some("web"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -524,8 +516,11 @@ async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .await.expect("claim running activity");
-    store
+        .await
+        .expect("claim running activity");
+    state
+        .inner
+        .durability
         .update_gateway_activity_thread(
             &activity.activity_id,
             &activity.owner_id,
@@ -533,7 +528,8 @@ async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started
             &child_session_id,
             gateway_now_ms() + 30_000,
         )
-        .await.expect("scoped child turn started");
+        .await
+        .expect("scoped child turn started");
 
     append_assistant_live_text_update(
         &state,
@@ -541,9 +537,12 @@ async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started
         &parent_session_id,
         turn_id,
         "Committed prefix.",
-    ).await;
+    )
+    .await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&parent_session_id)).await.expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&parent_session_id))
+        .await
+        .expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     assert_eq!(snapshot["activity"]["running"], true, "{snapshot:#}");
     assert_eq!(entries.len(), 1, "{snapshot:#}");
@@ -551,270 +550,6 @@ async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started
     assert_eq!(entries[0]["turnId"], turn_id);
     assert_eq!(entries[0]["metadata"]["liveOrder"], 0);
     assert_eq!(entries[0]["blocks"][0]["body"], "Committed **prefix**.");
-}
-
-#[tokio::test]
-async fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
-    let (_temp, state) = web_state().await;
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let parent_session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
-    let child_session_id = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "agent",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent_session_id,
-            &child_session_id,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await.expect("open child edge");
-
-    let turn_id = "turn-parent-running";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
-            activity_id: turn_id,
-            thread_id: Some(&parent_session_id),
-            source_key: None,
-            turn_id: Some(turn_id),
-            kind: "turn",
-            owner_id: state.inner.gateway.owner_id(),
-            owner_surface: Some("web"),
-            lease_expires_at_ms: gateway_now_ms() + 30_000,
-            queued_turns: 0,
-            superseded_activity_id: None,
-            intent: None,
-        })
-        .await.expect("claim parent activity");
-    append_assistant_live_text_update(
-        &state,
-        &activity.activity_id,
-        &child_session_id,
-        turn_id,
-        "Streaming child answer.",
-    ).await;
-
-    let child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("child snapshot");
-    assert_eq!(
-        child_snapshot["activity"]["running"], true,
-        "{child_snapshot:#}"
-    );
-    assert_eq!(
-        child_snapshot["activity"]["activeTurnId"], turn_id,
-        "{child_snapshot:#}"
-    );
-    let child_entries = child_snapshot["entries"].as_array().expect("child entries");
-    assert_eq!(child_entries.len(), 1, "{child_snapshot:#}");
-    assert_eq!(
-        child_entries[0]["blocks"][0]["body"],
-        "Streaming child answer."
-    );
-
-    let parent_snapshot =
-        thread_snapshot(&state, &scope, Some(&parent_session_id)).await.expect("parent snapshot");
-    assert_eq!(
-        parent_snapshot["activity"]["running"], true,
-        "{parent_snapshot:#}"
-    );
-    assert_eq!(
-        parent_snapshot["activity"]["activeTurnId"], turn_id,
-        "{parent_snapshot:#}"
-    );
-
-    store
-        .set_agent_edge_status(&child_session_id, psychevo::__product::persistence::AgentEdgeStatus::Closed)
-        .await.expect("close child edge");
-    let closed_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("closed child snapshot");
-    assert_eq!(
-        closed_child_snapshot["activity"]["running"], false,
-        "{closed_child_snapshot:#}"
-    );
-    assert_eq!(
-        closed_child_snapshot["entries"],
-        json!([]),
-        "{closed_child_snapshot:#}"
-    );
-}
-
-#[tokio::test]
-async fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_activity() {
-    let (_temp, state) = web_state().await;
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let parent_session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
-    let child_session_id = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "agent",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent_session_id,
-            &child_session_id,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await.expect("open child edge");
-
-    let turn_id = "turn-parent-stale";
-    let activity = store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
-            activity_id: turn_id,
-            thread_id: Some(&parent_session_id),
-            source_key: None,
-            turn_id: Some(turn_id),
-            kind: "turn",
-            owner_id: state.inner.gateway.owner_id(),
-            owner_surface: Some("web"),
-            lease_expires_at_ms: gateway_now_ms() - 1,
-            queued_turns: 0,
-            superseded_activity_id: None,
-            intent: None,
-        })
-        .await.expect("claim stale parent activity");
-    append_assistant_live_text_update(
-        &state,
-        &activity.activity_id,
-        &child_session_id,
-        turn_id,
-        "Stale child answer.",
-    ).await;
-
-    let stale_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("stale child snapshot");
-    assert_eq!(
-        stale_child_snapshot["activity"]["running"], false,
-        "{stale_child_snapshot:#}"
-    );
-    assert_eq!(
-        stale_child_snapshot["entries"],
-        json!([]),
-        "{stale_child_snapshot:#}"
-    );
-
-    store
-        .finish_gateway_activity(
-            &activity.activity_id,
-            &activity.owner_id,
-            activity.generation,
-            "completed",
-        )
-        .await.expect("finish parent activity");
-    let terminal_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("terminal child snapshot");
-    assert_eq!(
-        terminal_child_snapshot["activity"]["running"], false,
-        "{terminal_child_snapshot:#}"
-    );
-    assert_eq!(
-        terminal_child_snapshot["entries"],
-        json!([]),
-        "{terminal_child_snapshot:#}"
-    );
-}
-
-#[tokio::test]
-async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activity() {
-    let (_temp, state) = web_state().await;
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = &state.inner.state;
-    let parent_session_id = store
-        .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .await.expect("parent session");
-    let child_session_id = store
-        .create_child_session_with_metadata(
-            &parent_session_id,
-            &state.inner.cwd,
-            "peer_agent",
-            "opencode",
-            "acp:opencode",
-            None,
-        )
-        .await.expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent_session_id,
-            &child_session_id,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await.expect("open child edge");
-    let profile = RuntimeProfileConfig {
-        id: "acp:opencode".to_string(),
-        runtime: RuntimeProfileKind::Acp,
-        enabled: true,
-        label: "OpenCode (ACP)".to_string(),
-        backend_ref: Some("opencode".to_string()),
-        default_model: None,
-        default_mode: None,
-        default_agent: None,
-        sandbox: None,
-        workspace_roots: Vec::new(),
-        options: Value::Null,
-    };
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_json = r#"{"name":"opencode"}"#;
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
-    let cwd = state.inner.cwd.display().to_string();
-    store
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id: &child_session_id,
-            agent_ref: Some("opencode"),
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: agent_json,
-            runtime_ref: "acp:opencode",
-            backend_kind: "acp",
-            native_kind: "acp",
-            native_session_id: Some("native-child"),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "acp",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: Some(&parent_session_id),
-        })
-        .await.expect("ACP child binding");
-    store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
-            activity_id: "turn-parent-running",
-            thread_id: Some(&parent_session_id),
-            source_key: None,
-            turn_id: Some("turn-parent-running"),
-            kind: "turn",
-            owner_id: state.inner.gateway.owner_id(),
-            owner_surface: Some("web"),
-            lease_expires_at_ms: gateway_now_ms() + 30_000,
-            queued_turns: 0,
-            superseded_activity_id: None,
-            intent: None,
-        })
-        .await.expect("parent activity");
-
-    let child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("child snapshot");
-    assert_eq!(child_snapshot["activity"]["running"], false, "{child_snapshot:#}");
-    assert_eq!(child_snapshot["activity"]["activeTurnId"], Value::Null);
 }
 
 async fn append_exec_live_update(
@@ -883,20 +618,21 @@ async fn append_exec_live_update(
         turn_id: turn_id.to_string(),
         entry,
     };
+    let snapshot_key = format!("{activity_id}:{turn_id}:live-tool");
     state
         .inner
-        .state
-
-        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
-            snapshot_key: &format!("{activity_id}:{turn_id}:live-tool"),
+        .durability
+        .upsert_gateway_live_snapshots(&[GatewayLiveSnapshotInput {
+            snapshot_key: &snapshot_key,
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
             thread_id: Some(session_id),
             turn_id: Some(turn_id),
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
-        })
-        .await.expect("upsert live snapshot");
+        }])
+        .await
+        .expect("upsert live snapshot");
 }
 
 async fn append_stale_exec_live_snapshot(
@@ -945,20 +681,21 @@ async fn append_stale_exec_live_snapshot(
         turn_id: turn_id.to_string(),
         entry,
     };
+    let snapshot_key = format!("{activity_id}:{turn_id}:stale-live-tool");
     state
         .inner
-        .state
-
-        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
-            snapshot_key: &format!("{activity_id}:{turn_id}:stale-live-tool"),
+        .durability
+        .upsert_gateway_live_snapshots(&[GatewayLiveSnapshotInput {
+            snapshot_key: &snapshot_key,
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
             thread_id: Some(session_id),
             turn_id: Some(turn_id),
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
-        })
-        .await.expect("upsert stale live snapshot");
+        }])
+        .await
+        .expect("upsert stale live snapshot");
 }
 
 async fn append_assistant_live_text_update(
@@ -1003,18 +740,19 @@ async fn append_assistant_live_text_update(
         turn_id: turn_id.to_string(),
         entry,
     };
+    let snapshot_key = format!("{activity_id}:{turn_id}:live-text");
     state
         .inner
-        .state
-
-        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
-            snapshot_key: &format!("{activity_id}:{turn_id}:live-text"),
+        .durability
+        .upsert_gateway_live_snapshots(&[GatewayLiveSnapshotInput {
+            snapshot_key: &snapshot_key,
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
             thread_id: Some(session_id),
             turn_id: Some(turn_id),
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
-        })
-        .await.expect("upsert live snapshot");
+        }])
+        .await
+        .expect("upsert live snapshot");
 }

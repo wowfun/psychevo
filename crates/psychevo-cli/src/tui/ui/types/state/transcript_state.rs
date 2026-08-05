@@ -1,7 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    Color, PendingImageAttachment, QueuedSteerId, TextArea, ThreadEditableInputPart,
+    WriteArgumentPreview, default_title, foldable_evidence_body, foldable_tool_title,
+    ledger_body_collapse_policy,
+};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 pub(crate) const TUI_ROLE_ACCENT: Color = Color::Cyan;
 pub(crate) const TUI_ROLE_IDENTITY: Color = Color::Magenta;
@@ -28,7 +31,7 @@ pub(crate) enum TranscriptKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct TranscriptRowId(u64);
 
-pub(crate) static NEXT_TRANSCRIPT_ROW_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_TRANSCRIPT_ROW_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum TranscriptHitTarget {
@@ -38,7 +41,7 @@ pub(crate) enum TranscriptHitTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PendingInputRef {
-    Steer(PendingInputId),
+    Steer(QueuedSteerId),
     Queue(u64),
 }
 
@@ -301,7 +304,11 @@ impl TranscriptRow {
         phase: &str,
         terminal_detail: Option<&str>,
     ) {
-        if let Some(path) = preview.path.as_deref().filter(|path| !path.trim().is_empty()) {
+        if let Some(path) = preview
+            .path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+        {
             self.title = format!("write {path}");
         }
         let first_content = !preview.text.is_empty() && !self.write_preview_auto_opened;
@@ -358,7 +365,11 @@ fn format_write_argument_preview(
         "cancelled" => "Cancelled",
         _ => "Generating",
     };
-    let line_label = if preview.lines_seen == 1 { "line" } else { "lines" };
+    let line_label = if preview.lines_seen == 1 {
+        "line"
+    } else {
+        "lines"
+    };
     let mut full = format!(
         "{phase} · {} bytes · {} {line_label}",
         preview.bytes_seen, preview.lines_seen

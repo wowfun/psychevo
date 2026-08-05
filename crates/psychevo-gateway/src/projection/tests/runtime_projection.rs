@@ -1,8 +1,6 @@
-use serde_json::json;
-
-include!("runtime_projection/run_terminal.rs");
-include!("runtime_projection/scoped_agents.rs");
-include!("runtime_projection/assistant_tools.rs");
-include!("runtime_projection/exec_write_stdin.rs");
-include!("runtime_projection/hidden_helpers.rs");
-include!("runtime_projection/transcript_runtime_ledger.rs");
+mod assistant_tools;
+mod exec_write_stdin;
+mod hidden_helpers;
+mod run_terminal;
+mod scoped_agents;
+mod transcript_runtime_ledger;

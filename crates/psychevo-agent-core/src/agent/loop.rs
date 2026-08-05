@@ -1,5 +1,16 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::sync::Arc;
+
+use psychevo_ai::{LanguageModel, Outcome};
+use serde_json::json;
+
+use super::stream::{emit, stream_assistant};
+use super::tools::{assistant_outcome, assistant_tool_calls, execute_tool_batch};
+use crate::Result;
+use crate::control::ControlReceivers;
+use crate::events::{AgentEvent, EventSink};
+use crate::request::{AgentCompletion, AgentLoopRequest};
+use crate::tool_router::ToolRouter;
+use crate::types::{Message, TerminalReason};
 pub async fn run_agent_loop(
     model: LanguageModel,
     request: AgentLoopRequest,

@@ -329,6 +329,7 @@ impl MessageAccounting {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SanitizedMessageSummary {
     pub message: Message,
@@ -446,26 +447,54 @@ impl std::ops::Deref for SessionEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionEventPayload {
-    SessionConfigured { data: Value },
-    TurnStarted { data: Value },
-    TurnCompleted { data: Value },
-    MessageStarted { message: Value },
-    MessageUpdated { message: Value },
+    SessionConfigured {
+        data: Value,
+    },
+    TurnStarted {
+        data: Value,
+    },
+    TurnCompleted {
+        data: Value,
+    },
+    MessageStarted {
+        message: Value,
+    },
+    MessageUpdated {
+        message: Value,
+    },
     MessageCompleted {
         message: Value,
         usage: Option<Value>,
         metadata: Option<Value>,
         accounting: Option<Value>,
     },
-    ReasoningDelta { text: String },
-    ReasoningCompleted { text: Option<String> },
-    ToolCallPending { data: Value },
-    ToolExecutionStarted { data: Value },
-    ToolExecutionUpdated { data: Value },
-    ToolExecutionCompleted { data: Value },
-    AgentSessionStarted { data: Value },
-    ContextSnapshot { data: Value },
-    Warning { data: Value },
+    ReasoningDelta {
+        text: String,
+    },
+    ReasoningCompleted {
+        text: Option<String>,
+    },
+    ToolCallPending {
+        data: Value,
+    },
+    ToolExecutionStarted {
+        data: Value,
+    },
+    ToolExecutionUpdated {
+        data: Value,
+    },
+    ToolExecutionCompleted {
+        data: Value,
+    },
+    AgentSessionStarted {
+        data: Value,
+    },
+    ContextSnapshot {
+        data: Value,
+    },
+    Warning {
+        data: Value,
+    },
     BlockingActionRequested {
         action_id: String,
         kind: BlockingActionKind,
@@ -490,7 +519,10 @@ pub enum SessionEventPayload {
         status: DeliveryDiagnosticStatus,
         data: Value,
     },
-    Diagnostic { kind: String, data: Value },
+    Diagnostic {
+        kind: String,
+        data: Value,
+    },
 }
 
 impl SessionEventPayload {
@@ -502,11 +534,9 @@ impl SessionEventPayload {
             "agent_start" | "task_started" | "turn_started" => Self::TurnStarted {
                 data: value.clone(),
             },
-            "task_complete" | "turn_complete" | "agent_end" | "run_end" => {
-                Self::TurnCompleted {
-                    data: value.clone(),
-                }
-            }
+            "task_complete" | "turn_complete" | "agent_end" | "run_end" => Self::TurnCompleted {
+                data: value.clone(),
+            },
             "message_start" => Self::MessageStarted {
                 message: value.get("message").cloned().unwrap_or(Value::Null),
             },
@@ -764,6 +794,27 @@ pub enum BlockingActionKind {
     UserInput,
 }
 
+impl BlockingActionKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Permission => "permission",
+            Self::Clarify => "clarify",
+            Self::CustomTool => "custom_tool",
+            Self::UserInput => "user_input",
+        }
+    }
+
+    pub(crate) fn parse_persisted(value: &str) -> Option<Self> {
+        match value {
+            "permission" => Some(Self::Permission),
+            "clarify" => Some(Self::Clarify),
+            "custom_tool" => Some(Self::CustomTool),
+            "user_input" => Some(Self::UserInput),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryDiagnosticStatus {
@@ -991,11 +1042,7 @@ impl ClarifyControl {
             .remove(call_id)
     }
 
-    pub(crate) fn restore(
-        &self,
-        call_id: String,
-        sender: oneshot::Sender<ClarifyResult>,
-    ) -> bool {
+    pub(crate) fn restore(&self, call_id: String, sender: oneshot::Sender<ClarifyResult>) -> bool {
         if sender.is_closed() {
             return false;
         }
@@ -1055,6 +1102,10 @@ impl RunControlHandle {
 
     pub fn cancel_pending_user_message(&self, id: PendingInputId) -> bool {
         self.inner.cancel_pending_user_message(id)
+    }
+
+    pub(crate) fn cancel_all_pending_user_messages(&self) -> usize {
+        self.inner.cancel_all_pending_user_messages()
     }
 
     pub fn submit_clarify_result(&self, call_id: &str, result: ClarifyResult) -> bool {
@@ -1196,3 +1247,17 @@ pub fn run_control() -> (RunControlHandle, RunControl) {
         },
     )
 }
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use psychevo_agent_core::{
+    ControlHandle, ControlInputError, ControlReceivers, Message, PendingInputId,
+};
+use psychevo_ai::AbortSignal;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::sync::oneshot;
+
+use super::run_options::results::ModelCatalogProvider;

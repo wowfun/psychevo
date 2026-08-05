@@ -1,7 +1,44 @@
-pub(super) async fn command_execute_value(
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use psychevo::agents::{
+    AgentDiscoveryOptions, discover_agent_teams_with_catalog, discover_agents,
+    resolve_agent_team_definition,
+};
+use psychevo::application::{
+    AgentMissionRegistration, AgentTeamRegistration, SideConversationAgentBindingSnapshot,
+    SideConversationSurface, StartSideConversationRequest, ThreadAgentBinding,
+    ThreadModelSelection,
+};
+use psychevo::command_registry::{
+    SlashCommandAction, SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
+    command_presentation, dynamic_slash_command_effect, parse_session_export_command_args,
+    parse_slash_command_line, slash_command_spec, slash_invocation_effect,
+};
+use psychevo::session_export::{SessionArtifactKind, SessionExportFormat};
+use psychevo::{Error, PermissionMode, RunMode};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+use super::super::binding::WebState;
+use super::super::runtime_profiles::{
+    thread_context_read_result_live, validate_and_capture_team_runtime_members,
+};
+use super::super::scope_session::{ResolvedScope, ensure_turn_start_thread};
+use super::super::settings_observability::{dynamic_slash_commands, session_control_agent};
+use super::super::voice::{update_voice_policy_for_source, voice_policy_for_source};
+use super::super::workspace::workspace_diff_result;
+use super::presentation::{
+    command_alternate_action, gateway_command_capabilities, web_desktop_action_visible,
+};
+use super::settings::effective_slash_config;
+use super::{SIDE_CONVERSATION_NO_SESSION_MESSAGE, SIDE_CONVERSATION_NO_TARGET_MESSAGE};
+
+pub(in super::super) async fn command_execute_value(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::CommandExecuteParams,
+    params: wire::thread_command_turn::CommandExecuteParams,
 ) -> psychevo::Result<Value> {
     let raw = params.command.trim().to_string();
     let thread_id = params.thread_id.clone();
@@ -15,7 +52,10 @@ pub(super) async fn command_execute_value(
     let slash_config = effective_slash_config(state, scope)?;
     let expanded = slash_config.expand_alias_line(&raw);
     let parse_line = expanded.as_deref().unwrap_or(&raw);
-    let active_turn = state.activity(&scope.source, thread_id.as_deref()).await.running;
+    let active_turn = state
+        .activity(&scope.source, thread_id.as_deref())
+        .await
+        .running;
     let dynamic = dynamic_slash_commands(state, scope)?;
     let result = match parse_slash_command_line(parse_line) {
         SlashCommandParse::Known(invocation) => {
@@ -108,7 +148,7 @@ async fn command_result_from_effect(
     action: SlashCommandAction,
     effect: SlashCommandEffect,
     thread_id: Option<String>,
-) -> psychevo::Result<wire::CommandExecuteResult> {
+) -> psychevo::Result<wire::thread_command_turn::CommandExecuteResult> {
     match effect {
         SlashCommandEffect::LocalText => match action {
             SlashCommandAction::Help => Ok(command_action(
@@ -224,17 +264,18 @@ async fn command_result_from_effect(
             command_side_conversation_start(state, scope, raw, action, thread_id, prompt).await
         }
         SlashCommandEffect::SandboxShow => {
-            let options = state.run_options(scope.cwd.clone(), thread_id.clone());
-            let status = psychevo::__product::platform::sandbox_status_text(&options, RunMode::Default)?;
+            let mut query = psychevo::ConfigurationQuery::new(&scope.cwd);
+            query.inherited_env = Some(state.inner.inherited_env.clone());
+            let status = state
+                .inner
+                .framework
+                .configuration(query)?
+                .sandbox_status_text(RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
-        SlashCommandEffect::Voice(mode) => Ok(command_voice_result(
-            state,
-            scope,
-            raw,
-            action,
-            &mode,
-        )),
+        SlashCommandEffect::Voice(mode) => {
+            Ok(command_voice_result(state, scope, raw, action, &mode))
+        }
         SlashCommandEffect::Undo => {
             Ok(command_session_undo(state, scope, raw, action, thread_id).await)
         }
@@ -271,9 +312,8 @@ async fn record_gateway_mission_metadata(
 ) -> psychevo::Result<String> {
     let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)
         .await?
-        .ok_or_else(|| {
-        Error::Message("mission requires a thread context".to_string())
-        })?;
+        .0
+        .ok_or_else(|| Error::Message("mission requires a thread context".to_string()))?;
     record_gateway_mission_metadata_for_parent(
         state,
         scope,
@@ -296,83 +336,58 @@ pub(crate) async fn record_gateway_mission_metadata_for_parent(
 ) -> psychevo::Result<()> {
     let mission_id = Uuid::now_v7().to_string();
     let metadata = Some(json!({"source": source}));
-    if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
-        let options = AgentDiscoveryOptions {
-            home: state.inner.home.clone(),
-            cwd: scope.cwd.clone(),
-            env: state.inner.inherited_env.clone(),
-            explicit_inputs: Vec::new(),
-            no_agents: false,
+    let (team, lead_agent_name) =
+        if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+            let options = AgentDiscoveryOptions {
+                home: state.inner.home.clone(),
+                cwd: scope.cwd.clone(),
+                env: state.inner.inherited_env.clone(),
+                explicit_inputs: Vec::new(),
+                no_agents: false,
+            };
+            let agents = discover_agents(&options)?;
+            let teams = discover_agent_teams_with_catalog(&options, &agents)?;
+            let team = resolve_agent_team_definition(&teams, team_name)?;
+            let team_id = Uuid::now_v7().to_string();
+            let members =
+                validate_and_capture_team_runtime_members(state, scope, &agents, &team.members)?;
+            let members = serde_json::to_value(&members)?;
+            let source_path = team
+                .file_path
+                .as_ref()
+                .map(|path| path.display().to_string());
+            let lead_agent_name = team.leader.clone();
+            (
+                Some(AgentTeamRegistration {
+                    id: team_id,
+                    name: team.name,
+                    description: Some(team.description),
+                    source_path,
+                    leader_agent_name: lead_agent_name.clone(),
+                    members,
+                    max_parallel_agents: team.max_parallel_agents,
+                }),
+                lead_agent_name,
+            )
+        } else {
+            let lead_agent = session_control_agent(state, Some(parent_thread_id))
+                .await?
+                .unwrap_or_else(|| "general".to_string());
+            (None, lead_agent)
         };
-        let agents = discover_agents(&options)?;
-        let teams = discover_agent_teams_with_catalog(&options, &agents)?;
-        let team = resolve_agent_team_definition(&teams, team_name)?;
-        let team_id = Uuid::now_v7().to_string();
-        let members = validate_and_capture_team_runtime_members(
-            state,
-            scope,
-            &agents,
-            &team.members,
-        )?;
-        let members = serde_json::to_value(&members)?;
-        let source_path = team
-            .file_path
-            .as_ref()
-            .map(|path| path.display().to_string());
-        state
-            .inner
-            .state
-
-            .create_agent_team_run(AgentTeamRunInput {
-                id: &team_id,
-                parent_session_id: parent_thread_id,
-                mission_run_id: Some(&mission_id),
-                team_name: &team.name,
-                description: Some(&team.description),
-                source_path: source_path.as_deref(),
-                leader_agent_name: &team.leader,
-                members,
-                max_parallel_agents: team.max_parallel_agents,
-                status: "running",
-                metadata: metadata.clone(),
-            })
-            .await?;
-        state
-            .inner
-            .state
-
-            .create_agent_mission_run(AgentMissionRunInput {
-                id: &mission_id,
-                parent_session_id: parent_thread_id,
-                team_run_id: Some(&team_id),
-                team_name: Some(&team.name),
-                goal,
-                lead_agent_name: &team.leader,
-                status: "running",
-                metadata,
-            })
-            .await?;
-    } else {
-        let lead_agent = session_control_agent(state, Some(parent_thread_id))
-            .await?
-            .unwrap_or_else(|| "general".to_string());
-        state
-            .inner
-            .state
-
-            .create_agent_mission_run(AgentMissionRunInput {
-                id: &mission_id,
-                parent_session_id: parent_thread_id,
-                team_run_id: None,
-                team_name: None,
-                goal,
-                lead_agent_name: &lead_agent,
-                status: "running",
-                metadata,
-            })
-            .await?;
-    }
-    Ok(())
+    state
+        .inner
+        .framework
+        .resume_thread(parent_thread_id.to_string())
+        .await?
+        .register_agent_mission(AgentMissionRegistration {
+            id: mission_id,
+            goal: goal.to_string(),
+            lead_agent_name,
+            team,
+            metadata,
+        })
+        .await
 }
 
 fn command_voice_result(
@@ -381,33 +396,43 @@ fn command_voice_result(
     raw: &str,
     action: SlashCommandAction,
     mode: &str,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     let policy = match mode {
         "status" => voice_policy_for_source(state, &scope.source),
         "on" => {
-            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::VoiceOnly);
-            wire::VoicePolicyMode::VoiceOnly
+            update_voice_policy_for_source(
+                state,
+                &scope.source,
+                wire::voice::VoicePolicyMode::VoiceOnly,
+            );
+            wire::voice::VoicePolicyMode::VoiceOnly
         }
         "tts" => {
-            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::All);
-            wire::VoicePolicyMode::All
+            update_voice_policy_for_source(state, &scope.source, wire::voice::VoicePolicyMode::All);
+            wire::voice::VoicePolicyMode::All
         }
         "off" => {
-            update_voice_policy_for_source(state, &scope.source, wire::VoicePolicyMode::Off);
-            wire::VoicePolicyMode::Off
+            update_voice_policy_for_source(state, &scope.source, wire::voice::VoicePolicyMode::Off);
+            wire::voice::VoicePolicyMode::Off
         }
-        _ => return command_unsupported(raw, action, "usage: /voice <on|tts|off|status>".to_string()),
+        _ => {
+            return command_unsupported(
+                raw,
+                action,
+                "usage: /voice <on|tts|off|status>".to_string(),
+            );
+        }
     };
     command_accepted_message(raw, action, Some(voice_policy_message(policy)))
 }
 
-fn voice_policy_message(mode: wire::VoicePolicyMode) -> String {
+fn voice_policy_message(mode: wire::voice::VoicePolicyMode) -> String {
     match mode {
-        wire::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
-        wire::VoicePolicyMode::VoiceOnly => {
+        wire::voice::VoicePolicyMode::Off => "Voice replies are off.".to_string(),
+        wire::voice::VoicePolicyMode::VoiceOnly => {
             "Voice replies will follow voice inputs. Text fallback remains active.".to_string()
         }
-        wire::VoicePolicyMode::All => {
+        wire::voice::VoicePolicyMode::All => {
             "Voice replies are on for all replies. Text fallback remains active.".to_string()
         }
     }
@@ -419,18 +444,14 @@ fn command_download_action(
     artifact_kind: SessionArtifactKind,
     args: Option<String>,
     thread_id: Option<String>,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     let usage = match action {
-        SlashCommandAction::Export => {
-            psychevo::__product::commands::slash_command_spec("/export")
-                .map(|spec| spec.usage)
-                .unwrap_or("/export [path] [-f|--format markdown|json] [-i|--include list]")
-        }
-        SlashCommandAction::Share => {
-            psychevo::__product::commands::slash_command_spec("/share")
-                .map(|spec| spec.usage)
-                .unwrap_or("/share [path] [-i|--include list]")
-        }
+        SlashCommandAction::Export => slash_command_spec("/export")
+            .map(|spec| spec.usage)
+            .unwrap_or("/export [path] [-f|--format markdown|json] [-i|--include list]"),
+        SlashCommandAction::Share => slash_command_spec("/share")
+            .map(|spec| spec.usage)
+            .unwrap_or("/share [path] [-i|--include list]"),
         _ => unreachable!("download action is only used for export/share"),
     };
     let parsed = match parse_session_export_command_args(
@@ -516,12 +537,12 @@ async fn command_session_undo(
     raw: &str,
     action: SlashCommandAction,
     thread_id: Option<String>,
-) -> wire::CommandExecuteResult {
-    let options = match command_session_undo_options(state, scope, thread_id, "undo").await {
-        Ok(options) => options,
+) -> wire::thread_command_turn::CommandExecuteResult {
+    let thread = match command_session_thread(state, scope, thread_id, "undo").await {
+        Ok(thread) => thread,
         Err(message) => return command_unsupported(raw, action, message),
     };
-    match undo_session(options).await {
+    match thread.undo().await {
         Ok(result) => command_known_result(
             raw,
             action,
@@ -547,12 +568,12 @@ async fn command_session_redo(
     raw: &str,
     action: SlashCommandAction,
     thread_id: Option<String>,
-) -> wire::CommandExecuteResult {
-    let options = match command_session_undo_options(state, scope, thread_id, "redo").await {
-        Ok(options) => options,
+) -> wire::thread_command_turn::CommandExecuteResult {
+    let thread = match command_session_thread(state, scope, thread_id, "redo").await {
+        Ok(thread) => thread,
         Err(message) => return command_unsupported(raw, action, message),
     };
-    match redo_session(options).await {
+    match thread.redo().await {
         Ok(result) => {
             let suffix = if result.complete {
                 "complete"
@@ -579,42 +600,35 @@ async fn command_session_redo(
     }
 }
 
-async fn command_session_undo_options(
+async fn command_session_thread(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<String>,
     verb: &str,
-) -> std::result::Result<SessionUndoOptions, String> {
+) -> std::result::Result<psychevo::Thread, String> {
     let Some(thread_id) = thread_id else {
         return Err(format!("no current session to {verb}"));
     };
-    let summary = state
+    let thread = state
         .inner
-        .state
-
-        .session_summary(&thread_id)
+        .framework
+        .resume_thread(&thread_id)
         .await
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("session not found: {thread_id}"))?;
+        .map_err(|error| error.to_string())?;
+    let summary = thread.summary().await.map_err(|error| error.to_string())?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
         return Err(format!(
             "session {thread_id} does not belong to {}",
             scope.cwd.display()
         ));
     }
-    Ok(SessionUndoOptions {
-        state: state.inner.state.clone(),
-        cwd: scope.cwd.clone(),
-        snapshot_root: state.inner.home.join("snapshots"),
-        session_id: thread_id,
-    })
+    Ok(thread)
 }
-
 fn command_action(
     raw: &str,
     slash_action: SlashCommandAction,
     action: Value,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     command_known_result(raw, slash_action, true, None, Some(action))
 }
 
@@ -622,7 +636,7 @@ fn command_accepted_message(
     raw: &str,
     slash_action: SlashCommandAction,
     message: Option<String>,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     command_known_result(raw, slash_action, true, message, None)
 }
 
@@ -630,7 +644,7 @@ fn command_unsupported(
     raw: &str,
     slash_action: SlashCommandAction,
     message: String,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     command_known_result(raw, slash_action, false, Some(message), None)
 }
 
@@ -640,9 +654,9 @@ fn command_known_result(
     accepted: bool,
     message: Option<String>,
     action: Option<Value>,
-) -> wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
     let presentation = command_presentation(slash_action);
-    wire::CommandExecuteResult {
+    wire::thread_command_turn::CommandExecuteResult {
         accepted,
         command: raw.to_string(),
         known: Some(true),
@@ -658,8 +672,8 @@ fn command_rejected_unknown(
     raw: &str,
     message: Option<String>,
     action: Option<Value>,
-) -> wire::CommandExecuteResult {
-    wire::CommandExecuteResult {
+) -> wire::thread_command_turn::CommandExecuteResult {
+    wire::thread_command_turn::CommandExecuteResult {
         accepted: false,
         command: raw.to_string(),
         known: Some(false),
@@ -671,8 +685,11 @@ fn command_rejected_unknown(
     }
 }
 
-fn command_rejected_known(raw: &str, message: Option<String>) -> wire::CommandExecuteResult {
-    wire::CommandExecuteResult {
+fn command_rejected_known(
+    raw: &str,
+    message: Option<String>,
+) -> wire::thread_command_turn::CommandExecuteResult {
+    wire::thread_command_turn::CommandExecuteResult {
         accepted: false,
         command: raw.to_string(),
         known: Some(true),
@@ -722,7 +739,7 @@ async fn command_side_conversation_start(
     action: SlashCommandAction,
     parent_thread_id: Option<String>,
     prompt: Option<String>,
-) -> psychevo::Result<wire::CommandExecuteResult> {
+) -> psychevo::Result<wire::thread_command_turn::CommandExecuteResult> {
     let Some(parent_thread_id) = parent_thread_id else {
         return Ok(command_unsupported(
             raw,
@@ -730,13 +747,12 @@ async fn command_side_conversation_start(
             SIDE_CONVERSATION_NO_SESSION_MESSAGE.to_string(),
         ));
     };
-    let summary = state
+    let parent_thread = state
         .inner
-        .state
-
-        .session_summary(&parent_thread_id)
-        .await?
-        .ok_or_else(|| Error::Message(format!("session not found: {parent_thread_id}")))?;
+        .framework
+        .resume_thread(&parent_thread_id)
+        .await?;
+    let summary = parent_thread.summary().await?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
         return Ok(command_unsupported(
             raw,
@@ -747,26 +763,22 @@ async fn command_side_conversation_start(
             ),
         ));
     }
-    let parent_binding = state
-        .inner
-        .state
-
-        .gateway_runtime_binding(&parent_thread_id)
-        .await?;
-    if !parent_binding.is_some_and(|binding| {
-        binding.status == GatewayRuntimeBindingStatus::Resolved
-            && binding.ownership == GatewayRuntimeBindingOwnership::ReadWrite
-    }) {
+    let Some(ThreadAgentBinding::Resolved {
+        binding: parent_binding,
+        writable: true,
+        ..
+    }) = parent_thread.agent_binding().await?
+    else {
         return Ok(command_unsupported(
             raw,
             action,
             SIDE_CONVERSATION_NO_TARGET_MESSAGE.to_string(),
         ));
-    }
+    };
     let parent_context = thread_context_read_result_live(
         state,
         scope,
-        wire::ThreadContextReadParams {
+        wire::agents_backend_rpc::ThreadContextReadParams {
             thread_id: Some(parent_thread_id.clone()),
             target: None,
             scope: Some(scope.to_wire_scope()),
@@ -776,51 +788,25 @@ async fn command_side_conversation_start(
     let effective_controls = parent_context
         .controls
         .into_iter()
-        .filter_map(|control| {
-            control
-                .effective_value
-                .map(|value| (control.id, value))
-        })
+        .filter_map(|control| control.effective_value.map(|value| (control.id, value)))
         .collect::<BTreeMap<_, _>>();
-
-    let options = state.run_options(scope.cwd.clone(), Some(parent_thread_id.clone()));
-    let side_thread_id = state
-        .inner
-        .state
-
-        .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
-            parent_session_id: &parent_thread_id,
-            cwd: &scope.cwd,
-            source: WEB_SIDE_CONVERSATION_SESSION_SOURCE,
-            model: &summary.model,
-            provider: &summary.provider,
-            metadata: Some(json!({
-                SIDE_CONVERSATION_METADATA_KEY: {
-                    "ephemeral": true,
-                    "parent_session_id": parent_thread_id.clone(),
-                },
-                "provider_label": summary.provider.clone(),
-            })),
-            max_context_messages: options.max_context_messages,
-            inherited_message_metadata: json!({
-                SIDE_INHERITED_METADATA_KEY: {
-                    "hidden": true,
-                    "parent_session_id": parent_thread_id.clone(),
-                }
-            }),
-            boundary_text: side_conversation_boundary_prompt(),
+    let agent_binding =
+        SideConversationAgentBindingSnapshot::new(&parent_binding, effective_controls);
+    let side_thread = parent_thread
+        .start_side_conversation(StartSideConversationRequest {
+            surface: SideConversationSurface::Web,
+            model: ThreadModelSelection {
+                provider: summary.provider,
+                model: summary.model,
+                reasoning_effort: None,
+            },
+            mode: RunMode::Default,
+            permission_mode: PermissionMode::Default,
+            selected_agent: None,
+            agent_binding: Some(agent_binding),
         })
         .await?;
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding_from_parent_snapshot(
-            &parent_thread_id,
-            &side_thread_id,
-            &effective_controls,
-        )
-        .await?;
+    let side_thread_id = side_thread.id().to_string();
     Ok(command_action(
         raw,
         action,

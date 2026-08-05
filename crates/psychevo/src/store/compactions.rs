@@ -122,6 +122,7 @@ impl StateRuntime {
         session_id: &str,
         lower_session_seq: i64,
         before_session_seq: Option<i64>,
+        before_structural_entry: Option<(i64, &str)>,
         limit: usize,
     ) -> Result<Vec<SessionCompactionRecord>> {
         if limit == 0 {
@@ -132,11 +133,10 @@ impl StateRuntime {
             .await?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
-        let upper_session_seq = before_session_seq
-            .unwrap_or(i64::MAX)
-            .min(revert_boundary);
         self.observe_sqlx(async {
             let mut conn = self.acquire_sqlx().await?;
+            let (before_created_at_ms, before_entry_id) =
+                before_structural_entry.unwrap_or((0, ""));
             let rows = sqlx::query(
                 r#"
             SELECT id, session_id, created_at_ms, reason, summary_text,
@@ -148,13 +148,37 @@ impl StateRuntime {
               AND created_after_session_seq >= ?2
               AND created_after_session_seq < ?3
               AND COALESCE(json_extract(metadata_json, '$.projection_only'), 0) != 1
-            ORDER BY created_after_session_seq DESC, id DESC
-            LIMIT ?4
+              AND (
+                  ?4 IS NULL
+                  OR created_after_session_seq < ?4
+                  OR (
+                      ?5 = 1
+                      AND created_after_session_seq = ?4
+                      AND (
+                          created_at_ms < ?6
+                          OR (
+                              created_at_ms = ?6
+                              AND printf('compaction:%d', id) < ?7
+                          )
+                      )
+                  )
+              )
+            ORDER BY created_after_session_seq DESC, created_at_ms DESC,
+                     printf('compaction:%d', id) DESC
+            LIMIT ?8
             "#,
             )
             .bind(session_id)
             .bind(lower_session_seq)
-            .bind(upper_session_seq)
+            .bind(revert_boundary)
+            .bind(before_session_seq)
+            .bind(if before_structural_entry.is_some() {
+                1_i64
+            } else {
+                0_i64
+            })
+            .bind(before_created_at_ms)
+            .bind(before_entry_id)
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(&mut *conn)
             .await?;

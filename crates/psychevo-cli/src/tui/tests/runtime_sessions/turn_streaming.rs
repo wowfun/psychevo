@@ -1,3 +1,4 @@
-include!("turn_streaming/live_events.rs");
-include!("turn_streaming/gateway_projection.rs");
-include!("turn_streaming/committed_entries.rs");
+mod committed_entries;
+mod gateway_projection;
+mod live_events;
+pub(super) mod support;

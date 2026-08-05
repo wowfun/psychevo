@@ -34,7 +34,9 @@ Define acceptance expectations and validation scenarios for the concrete
   a transcript turn is being submitted.
 - Deterministic terminal visual captures keep running-agent, clarification,
   permission, and tool states observable without depending on real provider
-  latency.
+  latency. The running-agent proof is captured from `/agents` while the child
+  is still active; a filename that says `agents-running` cannot be produced
+  from the later empty Running tab after the parent has completed.
 
 ## Current Implementation Slice
 

@@ -795,7 +795,10 @@ mod tests {
 
     fn assert_windows_path_eq(actual: &Path, expected: &Path) {
         assert_eq!(
-            actual.to_string_lossy().replace('/', "\\").to_ascii_lowercase(),
+            actual
+                .to_string_lossy()
+                .replace('/', "\\")
+                .to_ascii_lowercase(),
             expected
                 .to_string_lossy()
                 .replace('/', "\\")

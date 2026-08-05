@@ -1,22 +1,23 @@
-fn session_summary_value(
-    projection: SessionListProjection,
+use std::path::{Path, PathBuf};
+
+use psychevo::{
+    HumanThreadSummary, ThreadLifecycleActionPresentation, ThreadLifecyclePresentation,
+    ThreadPresentationBackend,
+};
+use serde_json::{Value, json};
+
+use crate::gateway::activity::GatewayActivity;
+use crate::gateway::results::{GatewayShellResult, shell_outcome_wire_value};
+
+use super::super::settings_observability::display_cwd;
+
+pub(in super::super) fn session_summary_value(
+    presentation: HumanThreadSummary,
     activity: GatewayActivity,
 ) -> Value {
-    let lifecycle = session_lifecycle_value(&projection);
-    let summary = projection.summary;
-    let display_title = summary
-        .title
-        .clone()
-        .filter(|title| !title.trim().is_empty())
-        .or_else(|| projection.first_user_text.as_deref().map(compact_display_text))
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| short_thread_id(&summary.id));
+    let lifecycle = session_lifecycle_value(presentation.backend, presentation.lifecycle);
+    let summary = presentation.summary;
     let project = session_project_value(&summary.cwd);
-    let forked_from_thread_id = projection
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("forkedFromThreadId"))
-        .and_then(Value::as_str);
     json!({
         "id": summary.id,
         "cwd": summary.cwd,
@@ -32,127 +33,49 @@ fn session_summary_value(
         "toolCallCount": summary.tool_call_count,
         "activity": activity,
         "title": summary.title,
-        "displayTitle": display_title,
+        "displayTitle": presentation.display_title,
         "lifecycle": lifecycle,
-        "forkedFromThreadId": forked_from_thread_id,
+        "forkedFromThreadId": summary.forked_from_thread_id,
     })
 }
 
-fn session_lifecycle_value(projection: &SessionListProjection) -> Value {
-    if projection.runtime_backend_kind.as_deref() == Some("native") {
-        let staged = projection
-            .metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.get("revert").is_some());
-        let side = projection
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get(psychevo::__product::sessions::SIDE_CONVERSATION_METADATA_KEY))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let eligible = projection.summary.parent_session_id.is_none()
-            && matches!(projection.summary.source.as_str(), "web" | "tui")
-            && !side
-            && !staged;
-        let unavailable_reason = (!eligible).then_some({
-            if staged {
-                "Run, restore, or redo the staged history state before forking."
-            } else {
-                "Only root Workbench and TUI Native Threads can be forked."
-            }
-        });
-        return json!({
-            "targetLabel": "Psychevo (Native)",
-            "actions": [
-                {
-                    "id": "fork",
-                    "enabled": eligible,
-                    "unavailableReason": unavailable_reason
-                },
-                {"id": "delete", "enabled": true}
-            ]
-        });
-    }
-    if projection.runtime_backend_kind.as_deref() != Some("acp") {
-        return json!({
-            "targetLabel": "Psychevo",
-            "actions": [
-                {
-                    "id": "fork",
-                    "enabled": false,
-                    "unavailableReason": "Fork requires a resolved Native or ACP binding."
-                },
-                {"id": "delete", "enabled": true}
-            ]
-        });
-    }
-    let lifecycle = projection
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("agentSessionLifecycle"));
-    let session_projection = projection
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY))
-        .and_then(|peer| peer.get("sessionProjection"));
-    let pending_delete = projection
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("agentSessionDeleteIntent"))
-        .is_some();
-    let target_label = lifecycle
-        .and_then(|value| value.get("targetLabel"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            session_projection
-                .and_then(|projection| projection.get("agent"))
-                .and_then(|agent| agent.get("title").or_else(|| agent.get("name")))
-                .and_then(Value::as_str)
-        })
-        .or(projection.runtime_ref.as_deref());
-    let fork = lifecycle
-        .and_then(|value| value.get("fork"))
-        .and_then(Value::as_bool)
-        .or_else(|| {
-            session_projection
-                .and_then(|projection| projection.pointer("/capabilities/session/fork"))
-                .and_then(Value::as_bool)
-        })
-        .unwrap_or(false);
-    let delete = lifecycle
-        .and_then(|value| value.get("delete"))
-        .and_then(Value::as_bool)
-        .or_else(|| {
-            session_projection
-                .and_then(|projection| projection.pointer("/capabilities/session/delete"))
-                .and_then(Value::as_bool)
-        })
-        .unwrap_or(false)
-        && !pending_delete;
+fn session_lifecycle_value(
+    backend: ThreadPresentationBackend,
+    lifecycle: ThreadLifecyclePresentation,
+) -> Value {
     json!({
-        "targetLabel": target_label,
+        "targetLabel": lifecycle.target_label,
         "actions": [
-            {
-                "id": "fork",
-                "enabled": fork,
-                "unavailableReason": (!fork).then_some(
-                    "This ACP Agent did not advertise session fork."
-                )
-            },
-            {
-                "id": "delete",
-                "enabled": delete,
-                "unavailableReason": (!delete).then_some(if pending_delete {
-                    "Remote deletion is pending reconciliation."
-                } else {
-                    "This ACP Agent did not advertise persistent session deletion."
-                })
-            }
+            session_lifecycle_action_value("fork", lifecycle.fork, true),
+            session_lifecycle_action_value(
+                "delete",
+                lifecycle.delete,
+                backend == ThreadPresentationBackend::Acp,
+            ),
         ]
     })
 }
 
-fn session_project_value(cwd: &str) -> Value {
+fn session_lifecycle_action_value(
+    id: &'static str,
+    action: ThreadLifecycleActionPresentation,
+    include_unavailable_reason: bool,
+) -> Value {
+    if include_unavailable_reason || action.unavailable_reason.is_some() {
+        json!({
+            "id": id,
+            "enabled": action.enabled,
+            "unavailableReason": action.unavailable_reason,
+        })
+    } else {
+        json!({
+            "id": id,
+            "enabled": action.enabled,
+        })
+    }
+}
+
+pub(super) fn session_project_value(cwd: &str) -> Value {
     let path = PathBuf::from(cwd);
     json!({
         "cwd": cwd,
@@ -162,35 +85,76 @@ fn session_project_value(cwd: &str) -> Value {
 }
 
 fn project_label(cwd: &Path) -> String {
-    cwd
-        .file_name()
+    cwd.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or("cwd")
         .to_string()
 }
 
-fn compact_display_text(text: &str) -> String {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_CHARS: usize = 120;
-    if collapsed.chars().count() <= MAX_CHARS {
-        return collapsed;
-    }
-    let mut out = collapsed.chars().take(MAX_CHARS - 1).collect::<String>();
-    out.push('…');
-    out
-}
-
-fn short_thread_id(id: &str) -> String {
-    id.chars().take(8).collect()
-}
-
-fn gateway_shell_result_value(result: GatewayShellResult) -> Value {
+pub(in super::super) fn gateway_shell_result_value(result: GatewayShellResult) -> Value {
     json!({
         "thread": result.thread,
         "command": result.result.command,
-        "outcome": result.result.outcome.as_str(),
+        "outcome": shell_outcome_wire_value(result.result.outcome),
         "toolFailures": result.result.tool_failures,
         "committedEntries": result.committed_entries,
     })
+}
+
+#[cfg(test)]
+mod shell_result_tests {
+    use psychevo::{
+        ShellCommandOutcome, ThreadLifecycleActionPresentation, ThreadLifecyclePresentation,
+        ThreadPresentationBackend,
+    };
+    use serde_json::Value;
+
+    use crate::gateway::results::shell_outcome_wire_value;
+
+    use super::session_lifecycle_value;
+
+    #[test]
+    fn typed_shell_outcomes_preserve_the_existing_wire_values() {
+        assert_eq!(
+            shell_outcome_wire_value(ShellCommandOutcome::Completed),
+            "normal"
+        );
+        assert_eq!(
+            shell_outcome_wire_value(ShellCommandOutcome::Failed),
+            "failed"
+        );
+        assert_eq!(
+            shell_outcome_wire_value(ShellCommandOutcome::Interrupted),
+            "aborted"
+        );
+    }
+
+    #[test]
+    fn typed_lifecycle_keeps_the_existing_action_wire_shape() {
+        let action = || ThreadLifecycleActionPresentation {
+            enabled: true,
+            unavailable_reason: None,
+        };
+        let native = session_lifecycle_value(
+            ThreadPresentationBackend::Native,
+            ThreadLifecyclePresentation {
+                target_label: Some("Psychevo (Native)".to_string()),
+                fork: action(),
+                delete: action(),
+            },
+        );
+        assert_eq!(native["actions"][0]["unavailableReason"], Value::Null);
+        assert!(native["actions"][1].get("unavailableReason").is_none());
+
+        let acp = session_lifecycle_value(
+            ThreadPresentationBackend::Acp,
+            ThreadLifecyclePresentation {
+                target_label: Some("Agent".to_string()),
+                fork: action(),
+                delete: action(),
+            },
+        );
+        assert_eq!(acp["actions"][1]["unavailableReason"], Value::Null);
+    }
 }

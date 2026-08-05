@@ -1,7 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{draw_fullscreen_for_test, test_app};
+use crate::tui::tests::line_text;
+use crate::tui::tests::selection_clipboard::wait_for_clipboard_task;
+use crate::tui::{
+    FocusMode, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, LEDGER_BODY_COLLAPSE_HEAD_LINES,
+    LEDGER_BODY_COLLAPSE_TAIL_LINES, LEDGER_BODY_COLLAPSE_TOKENS, LEDGER_BODY_COLLAPSE_WIDTH,
+    Modifier, MouseButton, MouseEvent, MouseEventKind, Rect, Style, TranscriptHitTarget,
+    TranscriptKind, TranscriptRow, TuiApp, UnicodeWidthStr, answer_lines, display_token_count,
+    format_duration_compact, status_lines, streaming_tool_calls_from_event, thinking_lines,
+    toggle_transcript_row_details, tool_lines, transcript_lines, transcript_render_blocks,
+    tui_theme, visible_transcript_message_count,
+};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn transcript_selection_toggles_expandable_output() {

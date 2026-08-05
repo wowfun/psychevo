@@ -3,10 +3,11 @@ use serde_json::{Value, json};
 use sqlx::Row;
 
 use crate::error::Result;
+use crate::types::BlockingActionKind;
 
 use super::{
-    FrameworkInteractionRecord, GatewayTurnTerminalInput, StateRuntime,
-    store_turn_delivery::scrub_gateway_activity_turn_input,
+    FrameworkInteractionRecord, FrameworkInteractionStatus, GatewayTurnTerminalInput, StateRuntime,
+    invalid_persisted_domain_value, store_turn_delivery::scrub_gateway_activity_turn_input,
 };
 
 impl StateRuntime {
@@ -22,7 +23,7 @@ impl StateRuntime {
         interaction_id: &str,
         thread_id: &str,
         turn_id: &str,
-        kind: &str,
+        kind: BlockingActionKind,
         payload: Value,
     ) -> Result<bool> {
         let requested_at_ms = now_ms();
@@ -45,7 +46,7 @@ impl StateRuntime {
             .bind(interaction_id)
             .bind(thread_id)
             .bind(turn_id)
-            .bind(kind)
+            .bind(kind.as_str())
             .bind(payload_json)
             .bind(requested_at_ms)
             .execute(&mut *tx)
@@ -62,12 +63,15 @@ impl StateRuntime {
         interaction_id: &str,
         thread_id: &str,
         turn_id: &str,
-        kind: &str,
-        status: &str,
+        kind: BlockingActionKind,
+        status: FrameworkInteractionStatus,
         resolution: Value,
     ) -> Result<bool> {
         let resolved_at_ms = now_ms();
-        debug_assert!(matches!(status, "resolved" | "cancelled"));
+        debug_assert!(matches!(
+            status,
+            FrameworkInteractionStatus::Resolved | FrameworkInteractionStatus::Cancelled
+        ));
         let resolution_json = serde_json::to_string(&resolution)?;
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
@@ -87,8 +91,8 @@ impl StateRuntime {
             .bind(interaction_id)
             .bind(thread_id)
             .bind(turn_id)
-            .bind(kind)
-            .bind(status)
+            .bind(kind.as_str())
+            .bind(status.as_str())
             .bind(resolution_json)
             .bind(resolved_at_ms)
             .execute(&mut *tx)
@@ -105,10 +109,10 @@ impl StateRuntime {
         interaction_id: &str,
         thread_id: &str,
         turn_id: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<BlockingActionKind>> {
         self.observe_sqlx(async {
             let mut conn = self.acquire_sqlx().await?;
-            Ok(sqlx::query_scalar(
+            let kind = sqlx::query_scalar::<_, String>(
                 r#"
                 SELECT kind
                 FROM framework_interactions
@@ -122,7 +126,13 @@ impl StateRuntime {
             .bind(thread_id)
             .bind(turn_id)
             .fetch_optional(&mut *conn)
-            .await?)
+            .await?;
+            kind.map(|kind| {
+                BlockingActionKind::parse_persisted(&kind).ok_or_else(|| {
+                    invalid_persisted_domain_value("framework_interactions", "kind", &kind)
+                })
+            })
+            .transpose()
         })
         .await
     }
@@ -148,16 +158,23 @@ impl StateRuntime {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
-        let resolution_json =
-            serde_json::to_string(&json!({ "reason": interaction_reason }))?;
+        let resolution_json = serde_json::to_string(&json!({ "reason": interaction_reason }))?;
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
             sqlx::query(
                 r#"
                 INSERT INTO gateway_turn_terminals (
                     turn_id, thread_id, status, outcome, error_message,
-                    started_at_ms, completed_at_ms, metadata_json
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    started_at_ms, completed_at_ms, boundary_session_seq, metadata_json
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    COALESCE(
+                        ?8,
+                        (SELECT COALESCE(MAX(session_seq), 0)
+                         FROM messages WHERE session_id = ?2)
+                    ),
+                    ?9
+                )
                 ON CONFLICT(turn_id) DO UPDATE SET
                     thread_id = excluded.thread_id,
                     status = excluded.status,
@@ -168,16 +185,18 @@ impl StateRuntime {
                         gateway_turn_terminals.started_at_ms
                     ),
                     completed_at_ms = excluded.completed_at_ms,
+                    boundary_session_seq = excluded.boundary_session_seq,
                     metadata_json = excluded.metadata_json
                 "#,
             )
             .bind(input.turn_id)
             .bind(input.thread_id)
-            .bind(input.status)
-            .bind(input.outcome)
+            .bind(input.status.as_str())
+            .bind(input.outcome.map(|outcome| outcome.as_str()))
             .bind(input.error_message)
             .bind(input.started_at_ms)
             .bind(input.completed_at_ms)
+            .bind(input.boundary_session_seq)
             .bind(metadata_json)
             .execute(&mut *tx)
             .await?;
@@ -196,12 +215,8 @@ impl StateRuntime {
             .await?
             .rows_affected();
             if delivery_changed > 0 {
-                scrub_gateway_activity_turn_input(
-                    &mut tx,
-                    input.turn_id,
-                    input.completed_at_ms,
-                )
-                .await?;
+                scrub_gateway_activity_turn_input(&mut tx, input.turn_id, input.completed_at_ms)
+                    .await?;
             }
             sqlx::query(
                 r#"
@@ -252,12 +267,18 @@ impl StateRuntime {
 fn interaction_from_row(row: sqlx::sqlite::SqliteRow) -> Result<FrameworkInteractionRecord> {
     let payload_json = row.try_get::<String, _>(5)?;
     let resolution_json = row.try_get::<Option<String>, _>(6)?;
+    let kind: String = row.try_get(3)?;
+    let status: String = row.try_get(4)?;
     Ok(FrameworkInteractionRecord {
         interaction_id: row.try_get(0)?,
         thread_id: row.try_get(1)?,
         turn_id: row.try_get(2)?,
-        kind: row.try_get(3)?,
-        status: row.try_get(4)?,
+        kind: BlockingActionKind::parse_persisted(&kind).ok_or_else(|| {
+            invalid_persisted_domain_value("framework_interactions", "kind", &kind)
+        })?,
+        status: FrameworkInteractionStatus::parse(&status).ok_or_else(|| {
+            invalid_persisted_domain_value("framework_interactions", "status", &status)
+        })?,
         payload: serde_json::from_str(&payload_json)?,
         resolution: resolution_json
             .as_deref()

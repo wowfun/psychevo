@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.psychevo]
+architecture-layer = 4
+
 [features]
 default = ["native-channels"]
 native-channels = ["psychevo-gateway/native-channels", "dep:qrcode"]
@@ -22,7 +25,8 @@ futures.workspace = true
 ignore.workspace = true
 psychevo-acp = { path = "../psychevo-acp" }
 psychevo-gateway = { path = "../psychevo-gateway", default-features = false }
-psychevo = { path = "../psychevo", features = ["product"] }
+psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
+psychevo = { path = "../psychevo", features = ["native-keyring"] }
 pulldown-cmark.workspace = true
 qrcode = { workspace = true, optional = true }
 ratatui.workspace = true
@@ -46,7 +50,5 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
-pretty_assertions.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
-tungstenite = "0.28"

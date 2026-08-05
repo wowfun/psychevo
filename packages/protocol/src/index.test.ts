@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import publicPythonWireFixtures from "../fixtures/app-python-wire.json";
 import {
   ClientRequestSchema,
   GatewayEventSchema,
@@ -10,6 +11,32 @@ import {
   gatewayResponseResultSchema,
   gatewaySchemas
 } from "./index";
+import { validateGatewaySchema } from "./schema-validator";
+
+describe("public Python wire decoder corpus", () => {
+  it("accepts, rejects, and canonically preserves every shared wire shape", () => {
+    expect(publicPythonWireFixtures.schemaVersion).toBe(1);
+    expect(Object.keys(publicPythonWireFixtures.decoders)).toHaveLength(11);
+    for (const [decoder, cases] of Object.entries(publicPythonWireFixtures.decoders)) {
+      expect(Object.hasOwn(gatewaySchemas, cases.schema), decoder).toBe(true);
+      const schema = cases.schema as keyof typeof gatewaySchemas;
+      for (const fixture of cases.valid) {
+        const decoded: unknown = JSON.parse(JSON.stringify(fixture.value));
+        expect(
+          validateGatewaySchema(schema, decoded),
+          `${decoder}: ${fixture.name}`
+        ).toBeNull();
+        expect(decoded, `${decoder}: ${fixture.name}`).toEqual(fixture.value);
+      }
+      for (const fixture of cases.invalid) {
+        expect(
+          validateGatewaySchema(schema, fixture.value),
+          `${decoder}: ${fixture.name}`
+        ).not.toBeNull();
+      }
+    }
+  });
+});
 
 describe("ClientRequestSchema", () => {
   it("validates every corrected generated request signature", () => {

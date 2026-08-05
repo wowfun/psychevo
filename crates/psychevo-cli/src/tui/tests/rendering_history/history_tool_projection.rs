@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::test_app;
+use crate::tui::tests::line_text;
+use crate::tui::{FullscreenUi, TranscriptKind, tool_lines};
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn extension_tool_records_render_with_generic_tool_style() {
@@ -712,7 +715,8 @@ pub(crate) async fn history_aborted_tool_result_renders_interrupted_without_fail
             "tool_name": "exec_command",
             "tool_call_id": "call_find",
             "content": "{\"output\":\"(no output)\",\"exit_code\":null,\"error\":\"aborted\",\"truncated\":false}",
-            "is_error": true
+            "is_error": true,
+            "timestamp_ms": 3
         }),
         None,
         Some(&serde_json::json!({ "elapsed_ms": 4_000 })),
@@ -771,7 +775,8 @@ pub(crate) async fn history_bash_timeout_renders_timeout_before_partial_output()
             "tool_name": "exec_command",
             "tool_call_id": "call_fetch",
             "content": "{\"output\":\"[fetch] 29 rows done\",\"exit_code\":null,\"error\":\"command timed out after 120 seconds\",\"truncated\":false}",
-            "is_error": true
+            "is_error": true,
+            "timestamp_ms": 3
         }),
         None,
         Some(&serde_json::json!({ "elapsed_ms": 120_000 })),

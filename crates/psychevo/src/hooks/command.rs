@@ -32,7 +32,7 @@ pub(crate) async fn run_hook_command(
     let timeout = Duration::from_secs(timeout_secs.max(1));
     let deadline = tokio::time::Instant::now() + timeout;
     let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
-    let shell = match crate::tools::default_shell_for_env(&inherited_env) {
+    let shell = match crate::tools::exec_command::process::default_shell_for_env(&inherited_env) {
         Ok(shell) => shell,
         Err(err) => return failed_execution(started, err.to_string()),
     };

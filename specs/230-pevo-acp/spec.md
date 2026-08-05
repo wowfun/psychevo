@@ -104,6 +104,12 @@ turn queueing, steering, interrupt, permission, clarify, and source-to-Thread
 binding use Framework Client semantics. Transport-local state is not durable
 Thread evidence.
 
+An ACP session has at most one optional Framework `Thread`; that value is the
+source of truth for its runtime binding. `/new` clears the binding itself, so
+the next model-backed prompt creates and stores a distinct Framework Thread.
+It must not merely clear a duplicate id while retaining and reusing the old
+Thread. `/resume` replaces the same optional binding with the selected Thread.
+
 ACP request handling uses the SDK ACP v2 agent builder and v2 typed handlers.
 Initialize responses return protocol version `V2` to v2 clients, while v1
 clients are handled through the SDK compatibility layer when a v2 operation has

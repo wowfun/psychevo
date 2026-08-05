@@ -1,9 +1,21 @@
-const DEFAULT_REASONING_ORDER: i64 = 0;
-const DEFAULT_TEXT_ORDER: i64 = 100;
+use std::collections::BTreeMap;
+
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
+};
+
+use super::LiveEntryState;
+use super::tool_helpers::{compact_text, set_metadata_field};
+
+pub(super) const DEFAULT_REASONING_ORDER: i64 = 0;
+pub(super) const DEFAULT_TEXT_ORDER: i64 = 100;
 const TOOL_PLACEHOLDER_ORDER: i64 = 1000;
 
 impl LiveEntryState {
-    fn new(segment: usize) -> Self {
+    pub(super) fn new(segment: usize) -> Self {
         let now = crate::gateway_now_ms();
         Self {
             segment,
@@ -15,7 +27,7 @@ impl LiveEntryState {
         }
     }
 
-    fn upsert_block(&mut self, block: TranscriptBlock) {
+    pub(super) fn upsert_block(&mut self, block: TranscriptBlock) {
         let block = self
             .blocks
             .get(&block.id)
@@ -25,7 +37,7 @@ impl LiveEntryState {
         self.blocks.insert(block.id.clone(), block);
     }
 
-    fn replace_blocks(&mut self, blocks: BTreeMap<String, TranscriptBlock>) {
+    pub(super) fn replace_blocks(&mut self, blocks: BTreeMap<String, TranscriptBlock>) {
         let mut replaced = BTreeMap::new();
         for (id, block) in blocks {
             let block = self
@@ -39,7 +51,7 @@ impl LiveEntryState {
         self.updated_at_ms = crate::gateway_now_ms();
     }
 
-    fn tool_block_order(&self, tool_call_id: &str) -> Option<i64> {
+    pub(super) fn tool_block_order(&self, tool_call_id: &str) -> Option<i64> {
         self.blocks.values().find_map(|block| {
             block
                 .metadata
@@ -51,7 +63,7 @@ impl LiveEntryState {
         })
     }
 
-    fn to_entry(
+    pub(super) fn to_entry(
         &self,
         turn_id: &str,
         stream_seq: u64,
@@ -87,7 +99,10 @@ impl LiveEntryState {
     }
 }
 
-fn merge_live_block(existing: &TranscriptBlock, next: TranscriptBlock) -> TranscriptBlock {
+pub(super) fn merge_live_block(
+    existing: &TranscriptBlock,
+    next: TranscriptBlock,
+) -> TranscriptBlock {
     let metadata = merge_live_block_metadata(existing, &next);
     TranscriptBlock {
         id: existing.id.clone(),
@@ -147,10 +162,7 @@ fn merge_json_metadata(left: Option<Value>, right: Option<Value>) -> Option<Valu
     }
 }
 
-fn merge_live_block_metadata(
-    existing: &TranscriptBlock,
-    next: &TranscriptBlock,
-) -> Option<Value> {
+fn merge_live_block_metadata(existing: &TranscriptBlock, next: &TranscriptBlock) -> Option<Value> {
     if block_is_spawn_agent(existing) || block_is_spawn_agent(next) {
         return merge_agent_block_metadata(existing.metadata.clone(), next.metadata.clone());
     }
@@ -278,7 +290,7 @@ fn aggregate_entry_status(blocks: &[TranscriptBlock]) -> TranscriptBlockStatus {
     TranscriptBlockStatus::Completed
 }
 
-fn live_block(
+pub(super) fn live_block(
     id: String,
     kind: TranscriptBlockKind,
     status: TranscriptBlockStatus,
@@ -307,23 +319,23 @@ fn live_block(
     }
 }
 
-fn live_assistant_entry_id(turn_id: &str, segment: usize) -> String {
+pub(super) fn live_assistant_entry_id(turn_id: &str, segment: usize) -> String {
     format!("live:{turn_id}:assistant:{segment}")
 }
 
-fn live_reasoning_block_id(turn_id: &str, segment: usize) -> String {
+pub(super) fn live_reasoning_block_id(turn_id: &str, segment: usize) -> String {
     format!("live:{turn_id}:assistant:{segment}:reasoning")
 }
 
-fn live_text_block_id(turn_id: &str, segment: usize, index: usize) -> String {
+pub(super) fn live_text_block_id(turn_id: &str, segment: usize, index: usize) -> String {
     format!("live:{turn_id}:assistant:{segment}:text:{index}")
 }
 
-fn live_tool_block_id(turn_id: &str, tool_call_id: &str) -> String {
+pub(super) fn live_tool_block_id(turn_id: &str, tool_call_id: &str) -> String {
     format!("live:{turn_id}:tool:{tool_call_id}")
 }
 
-fn temporary_tool_call_id_for_value(
+pub(super) fn temporary_tool_call_id_for_value(
     tool_name: &str,
     segment: usize,
     value: &Value,
@@ -334,27 +346,27 @@ fn temporary_tool_call_id_for_value(
         .unwrap_or_else(|| format!("live-temp:{tool_name}:event:{event_seq}"))
 }
 
-fn temporary_tool_call_id(tool_call_id: &str) -> bool {
+pub(super) fn temporary_tool_call_id(tool_call_id: &str) -> bool {
     tool_call_id.starts_with("live-temp:")
 }
 
-fn tool_position_key(segment: usize, value: &Value) -> Option<String> {
+pub(super) fn tool_position_key(segment: usize, value: &Value) -> Option<String> {
     let content_index = value
         .get("content_index")
         .or_else(|| value.get("content_array_index"))
         .and_then(Value::as_i64)?;
-    let call_index = value
-        .get("call_index")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
+    let call_index = value.get("call_index").and_then(Value::as_i64).unwrap_or(0);
     Some(format!("{segment}:{content_index}:{call_index}"))
 }
 
-fn content_block_order(_block: &Value, index: usize, _fallback: i64) -> i64 {
+pub(super) fn content_block_order(_block: &Value, index: usize, _fallback: i64) -> i64 {
     index as i64
 }
 
-fn tool_message_block_metadata(block: &Value, index: usize) -> Option<(String, String, Value)> {
+pub(super) fn tool_message_block_metadata(
+    block: &Value,
+    index: usize,
+) -> Option<(String, String, Value)> {
     let tool_name = block
         .get("name")
         .or_else(|| block.get("tool_name"))
@@ -416,7 +428,7 @@ fn tool_message_block_metadata(block: &Value, index: usize) -> Option<(String, S
     Some((tool_call_id, tool_name, metadata))
 }
 
-fn event_thread_id(event: &GatewayEvent) -> Option<String> {
+pub(super) fn event_thread_id(event: &GatewayEvent) -> Option<String> {
     match event {
         GatewayEvent::TurnStarted {
             thread_id: Some(thread_id),
@@ -445,7 +457,7 @@ fn event_thread_id(event: &GatewayEvent) -> Option<String> {
     }
 }
 
-fn runtime_message_role(message: Option<&Value>) -> Option<&str> {
+pub(super) fn runtime_message_role(message: Option<&Value>) -> Option<&str> {
     message
         .and_then(|message| message.get("role"))
         .and_then(Value::as_str)

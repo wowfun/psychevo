@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::config::{
+    RuntimeProfileKind, load_agent_backend_configs, load_project_context_instruction_mode,
+    load_run_config, load_runtime_profile_configs, resolve_default_workspace_cwd,
+    resolve_run_provider, resolve_workspace_root,
+};
+use crate::paths::canonical_cwd;
+use crate::tests::{base_options, home_dir, write_config};
+use crate::types::ProjectContextInstructionMode;
+use serde_json::json;
+use std::{collections::BTreeMap, fs};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn aliases_and_auto_resolution_use_local_env_map() {
@@ -306,7 +315,7 @@ pub(crate) async fn project_cannot_configure_or_enable_codex_authority() {
 
 #[tokio::test]
 pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
-    let profiles = crate::config::parse_runtime_profile_configs(&json!({
+    let profiles = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "cursor-acp": {
             "runtime": "acp",
             "backendRef": "cursor"
@@ -320,7 +329,7 @@ pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
         Some("cursor")
     );
 
-    let missing = crate::config::parse_runtime_profile_configs(&json!({
+    let missing = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "cursor-acp": { "runtime": "acp" }
     }))
     .expect_err("ACP backend_ref is required");
@@ -330,7 +339,7 @@ pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
             .contains("runtime_profiles.cursor-acp.backend_ref is required")
     );
 
-    let removed = crate::config::parse_runtime_profile_configs(&json!({
+    let removed = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "codex-local": {
             "runtime": "codex",
             "backend_ref": "legacy-codex"
@@ -339,13 +348,13 @@ pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
     .expect_err("direct adapter is removed");
     assert!(removed.to_string().contains("adapter_removed"));
 
-    let inferred_removed = crate::config::parse_runtime_profile_configs(&json!({
+    let inferred_removed = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "opencode": { "label": "Legacy OpenCode" }
     }))
     .expect_err("legacy inferred direct adapter is removed");
     assert!(inferred_removed.to_string().contains("adapter_removed"));
 
-    let launch = crate::config::parse_runtime_profile_configs(&json!({
+    let launch = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "cursor-acp": {
             "runtime": "acp",
             "backend_ref": "cursor",
@@ -355,7 +364,7 @@ pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
     .expect_err("profile launch config moved to the backend");
     assert!(launch.to_string().contains("profile_launch_config_removed"));
 
-    let approval = crate::config::parse_runtime_profile_configs(&json!({
+    let approval = crate::config::config_parse::parse_runtime_profile_configs(&json!({
         "cursor-acp": {
             "runtime": "acp",
             "backend_ref": "cursor",

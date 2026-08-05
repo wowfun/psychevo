@@ -149,6 +149,9 @@ latest context usage meets the configured threshold or reserve-space rule. If no
 bounded latest context usage is available, automatic TUI compaction is not
 scheduled. If a prompt is submitted while compaction is running, the prompt is
 queued until compaction completes.
+The TUI asks the owning Framework Thread whether the typed context snapshot is
+due; it supplies only model/reasoning and environment intent. It does not build
+an internal compaction option bag or obtain persistence to evaluate the rule.
 
 Gateway schedules native post-turn compaction after a completed native Psychevo
 turn when the bounded latest context usage meets the configured threshold or

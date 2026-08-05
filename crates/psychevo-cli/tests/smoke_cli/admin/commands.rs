@@ -1,7 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::fixtures::{
+    CatalogJsonServer, insert_export_fixture_messages, insert_session,
+    set_export_fixture_session_metadata,
+};
+use crate::smoke_cli_skills::init_skill_home;
+use crate::{pevo_cmd, read_http_request};
+use rusqlite::Connection;
+use serde_json::Value;
+use std::collections::VecDeque;
+use std::io::Write;
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use tempfile::tempdir;
 
 pub(crate) fn admin_cmd(test_home: &Path, psychevo_home: &Path, cwd: &Path) -> Command {
     let mut command = pevo_cmd(test_home);
@@ -529,7 +541,7 @@ pub(crate) async fn cli_session_commands_manage_active_and_archived_sessions() {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
+    let canonical = psychevo::paths::canonicalize_cwd(&cwd).expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "older", &canonical, "run", 1_000, 1_000);
@@ -587,7 +599,7 @@ pub(crate) async fn cli_session_export_and_share_emit_local_artifacts() {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
-    let canonical = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
+    let canonical = psychevo::paths::canonicalize_cwd(&cwd).expect("canonical");
     let db = psychevo_home.join("state.db");
     let conn = Connection::open(&db).expect("db");
     insert_session(&conn, "exported-session", &canonical, "tui", 1_000, 2_000);

@@ -1,14 +1,38 @@
+use agent_client_protocol::schema::v2::SessionId;
+use agent_client_protocol::{Client, ConnectionTo, Error};
+use psychevo::StartThreadRequest;
+use psychevo::agents::{
+    AgentDiscoveryOptions, discover_agent_teams_with_catalog, discover_agents, list_agents_value,
+    resolve_agent_team_definition,
+};
+use psychevo::application::{AgentMissionRegistration, AgentTeamRegistration, UsageQuery};
+use psychevo::command_registry::{SlashCommandAction, SlashCommandEffect};
+use psychevo::config::{
+    ConfigScope, append_local_permission_rule, remove_local_permission_rule,
+    set_local_toolset_enabled,
+};
+use psychevo::context_usage::{ContextFormatOptions, format_context_snapshot_text_with_options};
+use psychevo::session_export::SessionArtifactKind;
+use psychevo::workspace_diff::collect_workspace_diff;
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+use crate::commands::{
+    SlashPromptAction, available_command_lines_from, available_commands_from, send_diff_tool_call,
+    send_slash_text,
+};
+use crate::protocol::acp_internal_error;
+use crate::stdio::{AcpSession, PsychevoAcpAgent};
+
 impl PsychevoAcpAgent {
     pub(crate) async fn apply_slash_effect(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
-        effect: psychevo::__product::commands::SlashCommandEffect,
-        action: Option<psychevo::__product::commands::SlashCommandAction>,
+        effect: SlashCommandEffect,
+        action: Option<SlashCommandAction>,
         cx: &ConnectionTo<Client>,
     ) -> Result<SlashPromptAction, Error> {
-        use psychevo::__product::commands::{SlashCommandAction, SlashCommandEffect};
-
         match effect {
             SlashCommandEffect::LocalText => {
                 let text = match action {
@@ -17,12 +41,8 @@ impl PsychevoAcpAgent {
                         self.status_command_text(session_id, session).await
                     }
                     Some(SlashCommandAction::Usage) => self.usage_command_text(session).await?,
-                    Some(SlashCommandAction::Context) => {
-                        self.context_command_text(session).await?
-                    }
-                    Some(SlashCommandAction::Refresh) => {
-                        self.refresh_command_text(session).await?
-                    }
+                    Some(SlashCommandAction::Context) => self.context_command_text(session).await?,
+                    Some(SlashCommandAction::Refresh) => self.refresh_command_text(session).await?,
                     _ => "Command completed.".to_string(),
                 };
                 Ok(send_slash_text(cx, session_id, text))
@@ -61,9 +81,9 @@ impl PsychevoAcpAgent {
                 let Some(session) = sessions.get_mut(&session_id.to_string()) else {
                     return Err(Error::resource_not_found(Some(session_id.to_string())));
                 };
-                session.runtime_session_id = None;
+                session.thread = None;
+                session.clear_pending_admission_steers();
                 session.queued_prompts.clear();
-                session.pending_steers.clear();
                 session.last_session_list.clear();
                 Ok(send_slash_text(
                     cx,
@@ -199,15 +219,10 @@ impl PsychevoAcpAgent {
                 ))
             }
             SlashCommandEffect::Rename(title) => {
-                let Some(runtime_session_id) = session.runtime_session_id.as_deref() else {
+                let Some(thread) = session.thread.as_ref() else {
                     return Ok(send_slash_text(cx, session_id, "no runtime session yet"));
                 };
-                let title = self
-                    .state
-
-                    .set_session_title(runtime_session_id, &title)
-                    .await
-                    .map_err(acp_internal_error)?;
+                let title = thread.set_title(&title).await.map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
                     session_id,
@@ -215,10 +230,10 @@ impl PsychevoAcpAgent {
                 ))
             }
             SlashCommandEffect::Undo => {
-                let result =
-                    undo_session(self.undo_options(session)?)
-                        .await
-                        .map_err(acp_internal_error)?;
+                let Some(thread) = session.thread.as_ref() else {
+                    return Ok(send_slash_text(cx, session_id, "no runtime session yet"));
+                };
+                let result = thread.undo().await.map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
                     session_id,
@@ -229,10 +244,10 @@ impl PsychevoAcpAgent {
                 ))
             }
             SlashCommandEffect::Redo => {
-                let result =
-                    redo_session(self.undo_options(session)?)
-                        .await
-                        .map_err(acp_internal_error)?;
+                let Some(thread) = session.thread.as_ref() else {
+                    return Ok(send_slash_text(cx, session_id, "no runtime session yet"));
+                };
+                let result = thread.redo().await.map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
                     session_id,
@@ -285,12 +300,9 @@ impl PsychevoAcpAgent {
                 {
                     return Ok(send_slash_text(cx, session_id, "permission denied"));
                 }
-                let text = self.write_artifact_text(
-                    session,
-                    SessionArtifactKind::Export,
-                    args.as_deref(),
-                )
-                .await?;
+                let text = self
+                    .write_artifact_text(session, SessionArtifactKind::Export, args.as_deref())
+                    .await?;
                 Ok(send_slash_text(cx, session_id, text))
             }
             SlashCommandEffect::Share { args } => {
@@ -329,99 +341,78 @@ impl PsychevoAcpAgent {
         }
     }
 
-    async fn record_acp_mission_metadata(
+    pub(super) async fn record_acp_mission_metadata(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
         team: Option<&str>,
         goal: &str,
     ) -> Result<(), Error> {
-        let runtime_session_id = if let Some(runtime_session_id) = session.runtime_session_id.clone()
-        {
-            runtime_session_id
+        let thread = if let Some(thread) = session.thread.clone() {
+            thread
         } else {
-            let runtime_session_id = self
-                .state
-
-                .create_session_with_metadata(&session.cwd, "acp", "pending", "pending", None)
+            let mut start = StartThreadRequest::new(&session.cwd);
+            start.source = "acp".to_string();
+            let thread = self
+                .framework
+                .start_thread(start)
                 .await
                 .map_err(acp_internal_error)?;
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
             let Some(current) = sessions.get_mut(&session_id.to_string()) else {
                 return Err(Error::resource_not_found(Some(session_id.to_string())));
             };
-            current.runtime_session_id = Some(runtime_session_id.clone());
-            runtime_session_id
+            current.thread = Some(thread.clone());
+            thread
         };
         let mission_id = Uuid::now_v7().to_string();
         let metadata = Some(json!({"source": "acp:/mission"}));
-        if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
-            let options = AgentDiscoveryOptions {
-                home: self.options.home.clone(),
-                cwd: session.cwd.clone(),
-                env: self.options.inherited_env.clone(),
-                explicit_inputs: Vec::new(),
-                no_agents: false,
+        let (team, lead_agent_name) =
+            if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+                let options = AgentDiscoveryOptions {
+                    home: self.options.home.clone(),
+                    cwd: session.cwd.clone(),
+                    env: self.options.inherited_env.clone(),
+                    explicit_inputs: Vec::new(),
+                    no_agents: false,
+                };
+                let agents = discover_agents(&options).map_err(acp_internal_error)?;
+                let teams = discover_agent_teams_with_catalog(&options, &agents)
+                    .map_err(acp_internal_error)?;
+                let team =
+                    resolve_agent_team_definition(&teams, team_name).map_err(acp_internal_error)?;
+                let team_id = Uuid::now_v7().to_string();
+                let members = serde_json::to_value(&team.members).map_err(acp_internal_error)?;
+                let source_path = team
+                    .file_path
+                    .as_ref()
+                    .map(|path| path.display().to_string());
+                let lead_agent_name = team.leader.clone();
+                (
+                    Some(AgentTeamRegistration {
+                        id: team_id,
+                        name: team.name,
+                        description: Some(team.description),
+                        source_path,
+                        leader_agent_name: lead_agent_name.clone(),
+                        members,
+                        max_parallel_agents: team.max_parallel_agents,
+                    }),
+                    lead_agent_name,
+                )
+            } else {
+                (None, "general".to_string())
             };
-            let agents = discover_agents(&options).map_err(acp_internal_error)?;
-            let teams =
-                discover_agent_teams_with_catalog(&options, &agents).map_err(acp_internal_error)?;
-            let team =
-                resolve_agent_team_definition(&teams, team_name).map_err(acp_internal_error)?;
-            let team_id = Uuid::now_v7().to_string();
-            let members = serde_json::to_value(&team.members).map_err(acp_internal_error)?;
-            let source_path = team
-                .file_path
-                .as_ref()
-                .map(|path| path.display().to_string());
-            self.state
-
-                .create_agent_team_run(AgentTeamRunInput {
-                    id: &team_id,
-                    parent_session_id: &runtime_session_id,
-                    mission_run_id: Some(&mission_id),
-                    team_name: &team.name,
-                    description: Some(&team.description),
-                    source_path: source_path.as_deref(),
-                    leader_agent_name: &team.leader,
-                    members,
-                    max_parallel_agents: team.max_parallel_agents,
-                    status: "running",
-                    metadata: metadata.clone(),
-                })
-                .await
-                .map_err(acp_internal_error)?;
-            self.state
-
-                .create_agent_mission_run(AgentMissionRunInput {
-                    id: &mission_id,
-                    parent_session_id: &runtime_session_id,
-                    team_run_id: Some(&team_id),
-                    team_name: Some(&team.name),
-                    goal,
-                    lead_agent_name: &team.leader,
-                    status: "running",
-                    metadata,
-                })
-                .await
-                .map_err(acp_internal_error)?;
-        } else {
-            self.state
-
-                .create_agent_mission_run(AgentMissionRunInput {
-                    id: &mission_id,
-                    parent_session_id: &runtime_session_id,
-                    team_run_id: None,
-                    team_name: None,
-                    goal,
-                    lead_agent_name: "general",
-                    status: "running",
-                    metadata,
-                })
-                .await
-                .map_err(acp_internal_error)?;
-        }
-        Ok(())
+        thread
+            .register_agent_mission(AgentMissionRegistration {
+                id: mission_id,
+                goal: goal.to_string(),
+                lead_agent_name,
+                team,
+                metadata,
+            })
+            .await
+            .map_err(acp_internal_error)
     }
 
     pub(crate) async fn status_command_text(
@@ -430,12 +421,16 @@ impl PsychevoAcpAgent {
         session: &AcpSession,
     ) -> String {
         let model = session.model.as_deref().unwrap_or("(configured default)");
-        let runtime_session = session.runtime_session_id.as_deref().unwrap_or("(new)");
+        let runtime_session = session
+            .thread
+            .as_ref()
+            .map(|thread| thread.id())
+            .unwrap_or("(new)");
         format!(
             "ACP session: {session_id}\nruntime session: {runtime_session}\ncwd: {}\nmode: {}\nmodel: {model}\ncommands: {}",
             session.cwd.display(),
             session.mode.as_str(),
-            self.available_commands_for_session_state(session, session.turn.is_some())
+            self.available_commands_for_session_state(session, session.active_turn())
                 .commands
                 .len()
         )
@@ -445,8 +440,9 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
     ) -> Result<String, psychevo::Error> {
-        let options = self.run_options(session, String::new(), Vec::new(), None);
-        let value = toolsets_value(&options, ConfigScope::Effective)?;
+        let value = self
+            .configuration_for_session(session)?
+            .toolsets(ConfigScope::Effective)?;
         let mode_key = session.mode.as_str();
         let tools = value["modes"][mode_key]["effective_tools"]
             .as_array()
@@ -501,8 +497,7 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) fn help_command_text(&self, session: &AcpSession) -> String {
-        let available =
-            self.available_commands_for_session_state(session, session.turn.is_some());
+        let available = self.available_commands_for_session_state(session, session.active_turn());
         let hidden_dynamic = available.hidden_dynamic;
         let mut lines = vec!["Available commands:".to_string()];
         lines.extend(available_command_lines_from(available_commands_from(
@@ -518,34 +513,22 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) async fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let value = usage_stats(psychevo::__product::runtime::StatsOptions {
-            state: self.state.clone(),
-            cwd: session.cwd.clone(),
-            all: false,
-            days: None,
-            limit: 20,
-        })
-        .await
-        .map_err(acp_internal_error)?;
+        let value = self
+            .framework
+            .usage(UsageQuery::new(&session.cwd))
+            .await
+            .map_err(acp_internal_error)?;
         serde_json::to_string_pretty(&value).map_err(acp_internal_error)
     }
 
-    pub(crate) async fn context_command_text(
-        &self,
-        session: &AcpSession,
-    ) -> Result<String, Error> {
-        let Some(runtime_session_id) = session.runtime_session_id.clone() else {
+    pub(crate) async fn context_command_text(&self, session: &AcpSession) -> Result<String, Error> {
+        let Some(thread) = session.thread.as_ref() else {
             return Ok("no runtime session yet".to_string());
         };
-        let snapshot = context_snapshot(ContextOptions {
-            state: self.state.clone(),
-            cwd: session.cwd.clone(),
-            session: runtime_session_id,
-            config_path: self.options.config_path.clone(),
-            inherited_env: Some(self.options.inherited_env.clone()),
-        })
-        .await
-        .map_err(acp_internal_error)?;
+        let snapshot = thread
+            .context_snapshot(Some(self.options.inherited_env.clone()))
+            .await
+            .map_err(acp_internal_error)?;
         Ok(format_context_snapshot_text_with_options(
             &snapshot,
             ContextFormatOptions {

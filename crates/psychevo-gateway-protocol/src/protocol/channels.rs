@@ -1,3 +1,12 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
+};
+use crate::source::GatewayRequestScope;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -99,11 +108,17 @@ pub struct ChannelWechatQrStartResult {
     pub qr_svg: Option<String>,
     pub status: String,
     pub message: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub interval_ms: u64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub expires_at_ms: i64,
@@ -130,7 +145,10 @@ pub struct ChannelWechatQrPollResult {
     #[serde(default)]
     pub channel: Option<ChannelConfigView>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub expires_at_ms: Option<i64>,
@@ -179,11 +197,17 @@ pub struct ChannelSourceBindingView {
     pub thread_title: Option<String>,
     pub cwd: String,
     pub activity_status: String,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub queued_turns: usize,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
@@ -232,27 +256,42 @@ pub struct ChannelRunnerView {
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub last_poll_at_ms: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub last_healthy_poll_at_ms: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub last_inbound_at_ms: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub last_outbound_at_ms: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub last_ilink_errcode: Option<i64>,

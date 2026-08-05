@@ -1,3 +1,46 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use psychevo_agent_core::{ControlHandle, Message, ToolBinding};
+use psychevo_ai::Provider;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::agents::definition_policy::{
+    HookedTool, SpawnAgentTool, agent_allows_tool, agent_catalog_for_policy,
+    agent_policy_allows_agent_catalog, agent_policy_allows_skill_catalog,
+    ancestor_compatible_agent_dirs, built_in_agents, existing_agent_path, home_path,
+    parse_agent_file,
+};
+use crate::agents::lifecycle::{
+    agent_record_from_edge, agent_status_is_final, close_live_descendants_locked,
+    collect_agent_edge_tree, find_agent_edge_for_target, force_stop_agent_id, insert_agent,
+    load_agent_dir, load_agent_file, resolve_live_key_and_record_locked,
+    resolve_live_record_locked, resume_agent_id, send_agent_message, subagent_summary_value,
+};
+use crate::agents::mailbox_tools::{
+    CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendMessageTool, WaitAgentTool, now_ms,
+};
+use crate::agents::supervisor::{AgentRunPhase, AgentSupervisor};
+use crate::agents::teams::{ActiveAgentTeamContext, MAX_TEAM_PARALLEL_AGENTS_CAP};
+use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
+use crate::error::{Error, Result};
+use crate::prompt_templates;
+use crate::state::StateRuntime;
+use crate::store::AgentEdgeStatus;
+use crate::types::{
+    ApprovalHandler, ModelMetadata, PermissionConfig, PermissionMode,
+    ProjectContextInstructionMode, RunMode, RunStreamSink,
+};
+
+use super::views::{
+    AgentBackendConfig, AgentBackendRef, AgentCatalog, AgentDefinition, AgentDiagnostic,
+    AgentDiscoveryOptions, AgentEntrypoint, AgentInvocationRole, AgentMailboxWaitOutcome,
+    AgentPermissionMode, AgentRunStatus, AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP,
+};
+
 impl AgentRunStatus {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -73,11 +116,7 @@ impl AgentControl {
         self.status_value_for(None, false).await
     }
 
-    pub async fn status_value_for(
-        &self,
-        parent_session_id: Option<&str>,
-        all: bool,
-    ) -> Value {
+    pub async fn status_value_for(&self, parent_session_id: Option<&str>, all: bool) -> Value {
         agent_status_value(
             &self.supervisor,
             self.store.as_ref(),
@@ -101,11 +140,7 @@ impl AgentControl {
         .await
     }
 
-    pub async fn wait(
-        &self,
-        id: &str,
-        timeout: Duration,
-    ) -> Result<Option<AgentRunRecord>> {
+    pub async fn wait(&self, id: &str, timeout: Duration) -> Result<Option<AgentRunRecord>> {
         wait_agent_id(&self.supervisor, id, self.store.as_ref(), timeout).await
     }
 
@@ -215,6 +250,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
     pub(crate) home: PathBuf,
+    pub(crate) mcp_oauth_credentials: Arc<dyn crate::config::McpOAuthCredentialStore>,
     pub(crate) image_input_enabled: bool,
     pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
     pub(crate) web_search: crate::config::WebSearchConfig,
@@ -620,10 +656,7 @@ pub(crate) fn narrow_permission_mode_for_agent(
     }
 }
 
-pub(crate) fn effective_run_mode(
-    parent: RunMode,
-    agent: Option<&AgentDefinition>,
-) -> RunMode {
+pub(crate) fn effective_run_mode(parent: RunMode, agent: Option<&AgentDefinition>) -> RunMode {
     if parent == RunMode::Plan
         || agent.is_some_and(|agent| {
             agent.tool_policy.permission_mode == Some(AgentPermissionMode::Plan)
@@ -689,10 +722,7 @@ pub(crate) fn build_hook_runtime(
     if config.sources.is_empty() {
         return None;
     };
-    Some(crate::hooks::HookRuntime::new(
-        cwd.to_path_buf(),
-        config,
-    ))
+    Some(crate::hooks::HookRuntime::new(cwd.to_path_buf(), config))
 }
 
 pub(crate) fn apply_hook_runtime(
@@ -743,8 +773,8 @@ pub(crate) async fn agent_status_value(
     all: bool,
 ) -> Value {
     let records = agent_status_records(supervisor, store, parent_session_id, all).await;
-    let spawning_paused = parent_session_id
-        .is_some_and(|parent| supervisor.spawning_paused(parent));
+    let spawning_paused =
+        parent_session_id.is_some_and(|parent| supervisor.spawning_paused(parent));
     json!({
         "agents": records,
         "control": {
@@ -864,27 +894,21 @@ fn resolve_supervised_record(
     resolve_live_record_locked(&runs, id)
 }
 
-pub async fn wait_agent_mailbox(
+pub(crate) async fn wait_agent_mailbox(
     parent_session_id: &str,
     timeout: Duration,
     store: &StateRuntime,
-) -> Result<Value> {
+) -> Result<AgentMailboxWaitOutcome> {
     let started = Instant::now();
     loop {
         if store
             .has_pending_agent_mailbox_events(parent_session_id)
             .await?
         {
-            return Ok(json!({
-                "message": "Wait completed.",
-                "timed_out": false,
-            }));
+            return Ok(AgentMailboxWaitOutcome::Ready);
         }
         if started.elapsed() >= timeout {
-            return Ok(json!({
-                "message": "Wait timed out.",
-                "timed_out": true,
-            }));
+            return Ok(AgentMailboxWaitOutcome::TimedOut);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -946,7 +970,9 @@ async fn close_persisted_agent(
         && let Some(edge) = find_agent_edge_for_target(store, id).await?
     {
         let previous = agent_record_from_edge(store, edge.clone()).await;
-        store.close_agent_edge_subtree(&edge.child_session_id).await?;
+        store
+            .close_agent_edge_subtree(&edge.child_session_id)
+            .await?;
         return Ok(Some(previous));
     }
     Ok(None)

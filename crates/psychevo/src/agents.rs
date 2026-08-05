@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use psychevo_agent_core::{
-    AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolDisplaySpec,
-    ToolExecutionMode, ToolOutput, user_text_message,
+    AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolExecutionMode,
+    ToolOutput, user_text_message,
 };
-use psychevo_ai::{AbortSignal, LanguageModel, Outcome, Provider};
+use psychevo_ai::{AbortSignal, LanguageModel, Outcome};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -18,7 +18,6 @@ use uuid::Uuid;
 use crate::compaction::{
     CompactSessionOptions, CompactionReason, compact_session, load_projected_messages,
 };
-use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig};
 use crate::context_usage::ContextRecorder;
 use crate::error::{Error, Result};
 use crate::events::PersistenceSink;
@@ -29,7 +28,6 @@ use crate::prompt_assembly::{
     context_evidence_for_request, prompt_prefix_record, tool_declarations_hash_with_search,
     turn_runtime_time_instruction,
 };
-use crate::prompt_templates;
 use crate::skills::resolve_skills_home;
 use crate::state::StateRuntime;
 use crate::store::{
@@ -40,40 +38,32 @@ use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 use crate::types::{
-    ApprovalHandler, ExternalAgentDelegateRequest, ModelMetadata, PermissionConfig, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
-    SelectedAgent, SessionSummary, SmokeControl,
+    ExternalAgentDelegateRequest, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
+    SelectedAgent, SessionSummary,
 };
 
-#[path = "agents/catalog_surface.rs"]
 mod catalog_surface;
 pub use catalog_surface::{
     AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentContribution,
     AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint,
-    AgentInvocationRole, AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus,
-    AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP, agent_source_display_label,
-    discover_agents, format_agents_for_prompt, list_agents_value, resolve_agent_definition,
-    view_agent_value, view_agent_value_with_catalog, wait_agent_mailbox,
+    AgentInvocationRole, AgentMailboxWaitOutcome, AgentPermissionMode, AgentRun, AgentRunRecord,
+    AgentRunStatus, AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP,
+    agent_source_display_label, discover_agents, format_agents_for_prompt, list_agents_value,
+    resolve_agent_definition, view_agent_value, view_agent_value_with_catalog,
 };
 #[path = "agents/supervisor.rs"]
 mod supervisor;
-pub(crate) use supervisor::{
-    AgentRunPhase, AgentRunState, AgentSupervisor, ContinuationAdmission,
-};
 pub(crate) use catalog_surface::{
     AgentToolContext, agent_catalog_for_prompt, agent_catalog_for_selected_policy,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, agent_tools,
     apply_agent_tool_policy, apply_hook_runtime, apply_runtime_hooks, build_hook_runtime,
     default_peer_agent_entrypoints, default_peer_client_capabilities, effective_run_mode,
     effective_tool_names, format_selected_agent_instruction, narrow_permission_mode_for_agent,
-    skill_catalog_visible_for_tools,
+    skill_catalog_visible_for_tools, wait_agent_mailbox,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
-pub(crate) use catalog_surface::{
-    agent_status_records, agent_status_value, close_agent_id, stop_agent_id_with_grace,
-    wait_agent_id,
-};
+pub(crate) use catalog_surface::{close_agent_id, stop_agent_id_with_grace};
+pub(crate) use supervisor::{AgentRunPhase, AgentRunState, AgentSupervisor, ContinuationAdmission};
 #[path = "agents/main_agent.rs"]
 mod main_agent;
 pub use main_agent::{
@@ -84,12 +74,9 @@ pub use main_agent::{
 #[path = "agents/lifecycle.rs"]
 mod lifecycle;
 #[cfg(test)]
-#[allow(unused_imports)]
-pub(crate) use lifecycle::{resume_agent_id, send_agent_message};
-#[path = "agents/definition_policy.rs"]
+pub(crate) use lifecycle::resume_agent_id;
 mod definition_policy;
 pub use definition_policy::{parse_agent_definition_text, valid_agent_name};
-#[path = "agents/child_runs.rs"]
 mod child_runs;
 pub(crate) use child_runs::spawn_child_agent_background;
 #[path = "agents/mailbox_tools.rs"]

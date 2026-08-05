@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use clap::Parser;
+
 #[derive(Debug, Parser, Clone)]
 pub(crate) struct DesktopArgs {
     #[arg(

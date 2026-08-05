@@ -1,5 +1,86 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::transcript_focus::{click_transcript_test_target, transcript_test_target_area};
+use crate::tui::tests::fixtures::{
+    buffer_text, drain_starting_turn_cleanups, draw_fullscreen_for_test, finished_turn_result,
+    install_pending_turn_admission, test_app, test_shell_running_control,
+};
+use crate::tui::tests::input_popups::completion_popups::write_tui_agent;
+use crate::tui::tests::{
+    TuiCatalogServer, insert_tui_message, runtime_turn_event, scoped_turn_event,
+    start_thread_fixture,
+};
+use crate::tui::{
+    AgentRelationship, AgentRelationshipStatus, FocusMode, FullscreenUi, KeyCode, KeyEvent,
+    KeyModifiers, QueuedInput, RunningTask, RunningTurn, RunningTurnEvents, SlashCommand,
+    ThreadListQuery, TranscriptHitTarget, TranscriptKind, TranscriptRow, TuiApp, TurnEvent,
+    wall_now_ms,
+};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+async fn parent_and_target(app: &TuiApp) -> (String, String) {
+    let parent = start_thread_fixture(app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    let target = start_thread_fixture(app, &app.cwd, "agent", "mock-model", "mock", None).await;
+    (parent, target)
+}
+
+async fn parent_and_agent_child(app: &TuiApp) -> (String, String) {
+    write_tui_agent(app, "translate", "Translate user messages");
+    let server = TuiCatalogServer::new(
+        r#"{"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#,
+    );
+    std::fs::write(
+        app.home.join("config.toml"),
+        format!(
+            "[provider.mock]\napi = {:?}\nno_auth = true\n",
+            server.base_url
+        ),
+    )
+    .expect("mock provider config");
+    let parent = start_thread_fixture(app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    let mut request =
+        psychevo::application::StartAgentTaskRequest::new(&app.cwd, "translate", "translate text");
+    request.parent_thread_id = Some(parent.clone());
+    request.model = Some("mock/mock-model".to_string());
+    request.inherited_env = Some(app.env_map.clone());
+    let receipt = app
+        .runtime
+        .client()
+        .start_agent_task(request)
+        .await
+        .expect("start Agent task");
+    let child = receipt
+        .agent
+        .child_session_id
+        .clone()
+        .expect("Agent child Thread");
+    for _ in 0..100 {
+        if !server.requests.lock().expect("mock requests").is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !server.requests.lock().expect("mock requests").is_empty(),
+        "Agent task must use the local fake provider"
+    );
+    app.runtime
+        .application()
+        .agent_control()
+        .stop_with_grace(&receipt.agent.id, Duration::ZERO)
+        .await
+        .expect("stop Agent fixture");
+    (parent, child)
+}
+
+async fn open_running_target_fixture(app: &mut TuiApp, ui: &mut FullscreenUi<'_>, target: &str) {
+    app.open_session_direct(ui, target)
+        .await
+        .expect("open target session");
+    if let Some(agent) = ui.auxiliary_agent_tasks.last_mut() {
+        agent.child_session_id = Some(target.to_string());
+    }
+}
 
 #[tokio::test]
 pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_marking_running() {
@@ -10,31 +91,7 @@ pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_markin
         "general",
         "General-purpose subagent for focused coding tasks.",
     );
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-run-1",
-                    "agent_type": "general",
-                    "task_name": "fetch_failed_articles",
-                    "message": "Fetch the failed articles and comments."
-                }
-            })),
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_target(&app).await;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
         &conn,
@@ -76,12 +133,38 @@ pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_markin
             "provider": "mock"
         }),
     );
-    app.current_session = Some(parent);
+    app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
 
     app.load_current_session_history(&mut ui)
         .await
         .expect("load parent history");
+    ui.reconcile_history_agent_rows(
+        &[AgentRelationship {
+            parent_thread_id: parent.clone(),
+            child_thread_id: child.clone(),
+            status: AgentRelationshipStatus::Open,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            agent: Some(psychevo::application::AgentRelationshipAgent {
+                id: Some("agent-run-1".to_string()),
+                name: Some("general".to_string()),
+                task_name: Some("fetch_failed_articles".to_string()),
+                task: Some("Fetch the failed articles and comments.".to_string()),
+                description: None,
+                parent_tool_call_id: None,
+                team_run_id: None,
+                mission_run_id: None,
+                team_name: None,
+                team_member_id: None,
+                runtime_ref: None,
+                role: None,
+                background: None,
+                fork_context: None,
+            }),
+        }],
+        None,
+    );
 
     let agent_rows = ui
         .transcript
@@ -101,58 +184,7 @@ pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_markin
 }
 
 #[tokio::test]
-pub(crate) async fn agents_status_text_includes_team_mission_member_and_cap_labels() {
-    let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp).await;
-    write_tui_agent(
-        &app,
-        "general",
-        "General-purpose subagent for focused coding tasks.",
-    );
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            Some(serde_json::json!({
-                "teamRunId": "team-run-1",
-                "missionRunId": "mission-run-1",
-                "teamName": "release",
-                "teamMemberId": "reviewer",
-                "agent": {
-                    "id": "agent-run-1",
-                    "task_name": "review_patch",
-                    "name": "general",
-                    "task": "Review patch"
-                }
-            })),
-        )
-        .await
-        .expect("agent edge");
-    app.current_session = Some(parent);
-
-    let text = app.agents_status_text().await;
-
-    assert!(
-        text.contains("Running/Completed (spawning active, cap 4)"),
-        "{text}"
-    );
-    assert!(text.contains("team:release"), "{text}");
-    assert!(text.contains("mission:mission-run-1"), "{text}");
-    assert!(text.contains("member:reviewer"), "{text}");
-}
-
-#[tokio::test]
-pub(crate) async fn mission_metadata_creates_pending_tui_session_for_first_turn() {
+pub(crate) async fn mission_during_starting_turn_queues_without_precreating_a_thread() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(
@@ -180,70 +212,78 @@ pub(crate) async fn mission_metadata_creates_pending_tui_session_for_first_turn(
     )
     .expect("team");
 
-    app.record_mission_metadata(Some("release"), "Ship it")
-        .await
-        .expect("metadata");
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    let release = install_pending_turn_admission(&app, &mut ui, "first pending prompt");
 
-    let parent = app.current_session.clone().expect("pending session");
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let team = store
-        .find_active_agent_team_run(&parent)
-        .await
-        .expect("team lookup")
-        .expect("team run");
-    let mission = store
-        .find_active_agent_mission_run(&parent)
-        .await
-        .expect("mission lookup")
-        .expect("mission run");
-    assert_eq!(team.team_name, "release");
-    assert_eq!(team.max_parallel_agents, 2);
+    app.handle_fullscreen_command(
+        &mut ui,
+        SlashCommand::Mission {
+            team: Some("release".to_string()),
+            goal: "Ship it".to_string(),
+        },
+    )
+    .await
+    .expect("mission");
+
+    assert_eq!(app.current_session, None);
+    let QueuedInput::Prompt {
+        session_id,
+        mission: Some(mission),
+        ..
+    } = ui.queued_inputs.front().expect("queued mission")
+    else {
+        panic!("mission registration was not retained with queued prompt");
+    };
+    assert!(
+        session_id
+            .as_deref()
+            .is_some_and(|owner| owner.starts_with("starting:"))
+    );
     assert_eq!(mission.goal, "Ship it");
+    assert_eq!(
+        mission.team.as_ref().map(|team| team.name.as_str()),
+        Some("release")
+    );
+    assert!(
+        app.runtime
+            .client()
+            .list_threads(ThreadListQuery {
+                cwd: Some(app.cwd.clone()),
+                limit: 10,
+                ..ThreadListQuery::default()
+            })
+            .await
+            .expect("Thread list")
+            .threads
+            .is_empty()
+    );
+
+    assert!(app.request_current_session_interrupt(&mut ui).await);
+    release
+        .send(())
+        .expect("cleanup retained pending admission");
+    drain_starting_turn_cleanups(&mut app, &mut ui).await;
+    assert!(
+        app.runtime
+            .client()
+            .list_threads(ThreadListQuery {
+                cwd: Some(app.cwd.clone()),
+                limit: 10,
+                ..ThreadListQuery::default()
+            })
+            .await
+            .expect("Thread list after cleanup")
+            .threads
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-run-1",
-                    "task_name": "translate-1",
-                    "name": "translate",
-                    "task": "translate text"
-                }
-            })),
-        )
-        .await
-        .expect("agent edge");
-    let child_prompt_ms = wall_now_ms() - 12_500;
-    let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
-    insert_tui_message(
-        &conn,
-        &child,
-        1,
-        "user",
-        child_prompt_ms,
-        serde_json::json!({
-            "role": "user",
-            "content": [{"type": "text", "text": "translate text"}],
-            "timestamp_ms": child_prompt_ms
-        }),
-    );
+    let (parent, child) = parent_and_agent_child(&app).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -259,21 +299,18 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(20)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     ui.start_assistant();
@@ -305,24 +342,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
 pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_target(&app).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -338,27 +358,22 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(60)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .await
-        .expect("open running child session");
+    open_running_target_fixture(&mut app, &mut ui, &child).await;
     assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
     assert!(ui.running.is_none());
     assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
@@ -377,24 +392,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
 pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_return() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_target(&app).await;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     let parent_prompt_ms = wall_now_ms() - 22_500;
     insert_tui_message(
@@ -465,33 +463,25 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(60)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    open_running_target_fixture(&mut app, &mut ui, &child).await;
+    app.open_session_direct(&mut ui, &parent)
         .await
-        .expect("open running child session");
-    app.handle_fullscreen_key(
-        &mut ui,
-        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT),
-    )
-    .await
-    .expect("return to parent");
+        .expect("return to parent");
     assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
     assert!(ui.running.is_none());
     assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
@@ -566,24 +556,7 @@ pub(crate) fn compact_duration_seconds(token: &str) -> Option<u64> {
 pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_agent_child(&app).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -639,25 +612,8 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
 pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
-    app.current_session = Some(parent.clone());
+    let (parent, child) = parent_and_agent_child(&app).await;
+    app.current_session = Some(parent);
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Status,
@@ -676,7 +632,6 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
     )
     .await
     .expect("focus transcript");
-
     app.handle_fullscreen_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
@@ -691,24 +646,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
 pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_target(&app).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -724,30 +662,25 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .await
-        .expect("open child");
-    tx.send(RunStreamEvent::scoped(
+    open_running_target_fixture(&mut app, &mut ui, &child).await;
+    tx.send(scoped_turn_event(
         child.clone(),
-        RunStreamEvent::ReasoningDelta {
+        TurnEvent::ReasoningDelta {
             text: "child is working".to_string(),
         },
     ))
@@ -768,24 +701,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
 pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent session");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child session");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("agent edge");
+    let (parent, child) = parent_and_target(&app).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(
@@ -801,26 +717,23 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
-    tx.send(RunStreamEvent::scoped(
+    tx.send(scoped_turn_event(
         child.clone(),
-        RunStreamEvent::ReasoningDelta {
+        TurnEvent::ReasoningDelta {
             text: "child started before inspection".to_string(),
         },
     ))
@@ -836,9 +749,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
             .contains("child started before inspection")
     );
 
-    app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .await
-        .expect("open child");
+    open_running_target_fixture(&mut app, &mut ui, &child).await;
 
     assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
     assert!(ui.transcript.iter().any(|row| {
@@ -865,26 +776,23 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     ui.transcript.push(row);
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::__product::runtime::RunResult {
-        session_id: parent.clone(),
-        ..finished_run_result(&app)
-    };
+    let result = finished_turn_result(parent.clone());
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
-    tx.send(RunStreamEvent::scoped(
+    tx.send(scoped_turn_event(
         child.clone(),
-        RunStreamEvent::value(serde_json::json!({
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_name": "read",
             "tool_call_id": "read-1",
@@ -894,9 +802,9 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
         })),
     ))
     .expect("send child tool event");
-    tx.send(RunStreamEvent::scoped(
+    tx.send(scoped_turn_event(
         child.clone(),
-        RunStreamEvent::value(serde_json::json!({
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "assistant",
@@ -949,7 +857,7 @@ pub(crate) async fn parent_agent_preview_coalesces_streamed_reasoning_chunks() {
     ] {
         assert!(ui.apply_agent_child_preview_event(
             &child,
-            &RunStreamEvent::ReasoningDelta {
+            &TurnEvent::ReasoningDelta {
                 text: text.to_string(),
             },
         ));
@@ -983,7 +891,7 @@ pub(crate) async fn parent_agent_preview_coalesces_streamed_assistant_chunks() {
     for text in ["hello", " world"] {
         assert!(ui.apply_agent_child_preview_event(
             &child,
-            &RunStreamEvent::AssistantTextDelta {
+            &TurnEvent::MessageDelta {
                 text: text.to_string(),
             },
         ));

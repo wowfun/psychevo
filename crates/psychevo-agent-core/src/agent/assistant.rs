@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+
+use psychevo_ai::{AssistantSource, Outcome};
+use serde_json::{Value, json};
+
+use super::tools::ToolCallBuilder;
+use crate::request::AgentLoopRequest;
+use crate::types::{AssistantBlock, Message, ProviderToolBlock, ToolCallBlock};
 pub(crate) struct AssistantBuildState<'a> {
     pub(crate) text: &'a str,
     pub(crate) reasoning: &'a str,
@@ -66,7 +72,13 @@ pub(crate) fn build_assistant_message(
             .cloned()
             .map(AssistantBlock::ProviderTool),
     );
-    content.extend(state.sources.iter().cloned().map(AssistantBlock::Source));
+    content.extend(
+        state
+            .sources
+            .iter()
+            .cloned()
+            .map(|source| AssistantBlock::Source { source }),
+    );
     Message::Assistant {
         content,
         timestamp_ms: state.timestamp_ms,
@@ -130,7 +142,9 @@ pub(crate) fn build_assistant_message_from_snapshot(
                 }));
             }
             psychevo_ai::AssistantContent::Source { source } => {
-                content.push(AssistantBlock::Source(source.clone()));
+                content.push(AssistantBlock::Source {
+                    source: source.clone(),
+                });
             }
             psychevo_ai::AssistantContent::Extension { .. } => {}
         }

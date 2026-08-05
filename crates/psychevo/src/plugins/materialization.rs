@@ -226,11 +226,7 @@ fn extract_tar_gz_with_limits(
     let decoder = GzDecoder::new(File::open(archive_path)?);
     let mut archive = tar::Archive::new(decoder);
     let mut unpacked_bytes = 0_u64;
-    for (entries_seen, entry) in archive
-        .entries()
-        .map_err(archive_error)?
-        .enumerate()
-    {
+    for (entries_seen, entry) in archive.entries().map_err(archive_error)?.enumerate() {
         let mut entry = entry.map_err(archive_error)?;
         if entries_seen >= limits.max_entries {
             return Err(limit_error("archive entry count", limits.max_entries));
@@ -253,7 +249,10 @@ fn extract_tar_gz_with_limits(
         #[cfg(unix)]
         let archive_mode = entry.header().mode().map_err(archive_error)? & 0o777;
         if declared_size > limits.max_file_bytes {
-            return Err(limit_error("single archive file bytes", limits.max_file_bytes));
+            return Err(limit_error(
+                "single archive file bytes",
+                limits.max_file_bytes,
+            ));
         }
         unpacked_bytes = unpacked_bytes
             .checked_add(declared_size)
@@ -375,9 +374,7 @@ fn run_materialization_command_with_limits(
     };
     let (stdout, truncated) = match output_reader {
         Some(receiver) => {
-            let remaining = limits
-                .subprocess_deadline
-                .saturating_sub(started.elapsed());
+            let remaining = limits.subprocess_deadline.saturating_sub(started.elapsed());
             match receiver.recv_timeout(remaining) {
                 Ok(result) => result?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -459,10 +456,7 @@ pub(crate) fn redact_source(source: &str) -> String {
     )
 }
 
-fn validate_relative_path(
-    relative: &Path,
-    limits: PluginMaterializationLimits,
-) -> Result<()> {
+fn validate_relative_path(relative: &Path, limits: PluginMaterializationLimits) -> Result<()> {
     if relative.as_os_str().is_empty() || relative.is_absolute() {
         return Err(Error::Config(format!(
             "plugin package contains invalid relative path: {}",
@@ -499,7 +493,9 @@ fn archive_error(error: impl std::fmt::Display) -> Error {
 }
 
 fn limit_error(label: &str, limit: impl std::fmt::Display) -> Error {
-    Error::Config(format!("plugin materialization exceeds {label} limit {limit}"))
+    Error::Config(format!(
+        "plugin materialization exceeds {label} limit {limit}"
+    ))
 }
 
 #[cfg(test)]
@@ -520,10 +516,7 @@ mod tests {
         }
     }
 
-    fn write_archive(
-        path: &Path,
-        entries: impl FnOnce(&mut tar::Builder<GzEncoder<File>>),
-    ) {
+    fn write_archive(path: &Path, entries: impl FnOnce(&mut tar::Builder<GzEncoder<File>>)) {
         let encoder = GzEncoder::new(File::create(path).expect("archive"), Compression::fast());
         let mut builder = tar::Builder::new(encoder);
         entries(&mut builder);
@@ -598,8 +591,8 @@ mod tests {
             builder.append(&header, io::empty()).expect("link entry");
         });
         let output = temp.path().join("linked-out");
-        let error = extract_tar_gz_with_limits(&linked, &output, tiny_limits())
-            .expect_err("link rejected");
+        let error =
+            extract_tar_gz_with_limits(&linked, &output, tiny_limits()).expect_err("link rejected");
         assert!(error.to_string().contains("unsupported entry type"));
         assert!(!output.join("package/link").exists());
     }
@@ -642,7 +635,10 @@ mod tests {
             redact_source("file://user:secret@localhost/tmp/plugin.git"),
             "file://localhost/tmp/plugin.git"
         );
-        assert_eq!(redact_source("git@example.test:repo.git"), "git@example.test:repo.git");
+        assert_eq!(
+            redact_source("git@example.test:repo.git"),
+            "git@example.test:repo.git"
+        );
     }
 
     #[test]

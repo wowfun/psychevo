@@ -1,5 +1,16 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, FULLSCREEN_PASSIVE_REDRAW_INTERVAL, FullscreenUi, ModelTab, Result, TuiApp,
+    short_session,
+};
+use crossterm::{
+    event::{DisableBracketedPaste, EnableBracketedPaste, MouseEventKind},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use std::{
+    io::{self, Write},
+    time::Instant,
+};
 pub(crate) const TUI_MOUSE_CAPTURE_ENABLE_ANSI: &str = concat!(
     "\x1b[?1000h",
     "\x1b[?1002h",
@@ -118,7 +129,7 @@ impl TuiApp {
 }
 
 pub(crate) fn fullscreen_has_passive_motion(ui: &FullscreenUi<'_>) -> bool {
-    ui.running.is_some()
+    ui.foreground_turn_active()
         || !ui.auxiliary_agent_tasks.is_empty()
         || !ui.auxiliary_shell_tasks.is_empty()
 }

@@ -91,7 +91,7 @@ function handle(message) {
 
   if (method === "initialize") {
     const isCodex = MODE.startsWith("codex-auth-");
-    const sessionCapabilities = MODE === "none"
+    const sessionCapabilities = ["none", "process-ephemeral"].includes(MODE)
       ? {}
       : { list: {}, delete: {}, fork: {}, resume: {}, close: {} };
     if (MODE === "no-delete") delete sessionCapabilities.delete;
@@ -103,7 +103,7 @@ function handle(message) {
         version: MODE === "codex-auth-future" ? "1.1.3" : (isCodex ? "1.1.2" : "1.0.0"),
       },
       agentCapabilities: {
-        loadSession: MODE !== "resume-only",
+        loadSession: !["resume-only", "process-ephemeral"].includes(MODE),
         promptCapabilities: { image: isCodex, embeddedContext: isCodex },
         sessionCapabilities,
         mcpCapabilities: {},

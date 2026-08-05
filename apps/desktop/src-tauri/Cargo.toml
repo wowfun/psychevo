@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.97.0"
 license = "MIT"
 
+[package.metadata.cargo-machete]
+ignored = ["tauri-build"] # Referenced only from the feature-gated build script.
+
 [workspace]
 resolver = "3"
 

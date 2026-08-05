@@ -22,6 +22,8 @@ export type AppThreadForkParams = { threadId: string, beforeSessionSeq?: number 
 
 export type AppThreadCompactParams = { threadId: string, model?: string | null, reasoningEffort?: string | null, instructions?: string | null, force?: boolean, };
 
+export type AppThreadCompactResult = { threadId: string, compacted: boolean, reason: string, message: string, checkpointId: number | null, firstKeptSessionSeq: number | null, tokensBefore: number | null, tokensAfter: number | null, summary: string | null, summaryProvider: string | null, summaryModel: string | null, };
+
 export type AppThreadListParams = { cwd?: string | null, archived?: boolean, sources?: Array<string>, cursor?: string | null, limit?: number | null, };
 
 export type AppTurnStartParams = { threadId: string, turnId: string, prompt: string, clientTurnId?: string | null, source?: string | null, model?: string | null, reasoningEffort?: string | null, noAgents?: boolean, noSkills?: boolean, inheritedEnv?: { [key in string]?: string } | null, useRegisteredApprovalHandler?: boolean, useRegisteredClarifyHandler?: boolean, };

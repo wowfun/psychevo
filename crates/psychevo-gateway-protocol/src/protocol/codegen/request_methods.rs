@@ -1,4 +1,10 @@
-fn render_request_methods() -> Result<String> {
+use std::collections::BTreeSet;
+
+use anyhow::{Result, bail};
+
+use crate::request_registry::request_contracts;
+
+pub(super) fn render_request_methods() -> Result<String> {
     let contracts = request_contracts();
     let mut methods = BTreeSet::new();
     let mut imports = BTreeSet::new();

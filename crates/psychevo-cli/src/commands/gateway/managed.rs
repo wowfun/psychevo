@@ -16,7 +16,7 @@ use windows_sys::Win32::Foundation::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use psychevo::__product::platform::{
+use psychevo::host_process::{
     ManagedProcess, ProcessIdentityError, atomic_replace_private, instance_lease_is_held,
 };
 use serde::Deserialize;

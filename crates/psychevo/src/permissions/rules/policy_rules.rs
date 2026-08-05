@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo_agent_core::ToolOutput;
+use serde_json::{Value, json};
+
+use super::super::shell::{
+    shell_basename, shell_command_invocations, shell_has_untracked_background,
+    shell_lc_word_only_commands,
+};
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
 
 pub(crate) fn hardline_bash_reason(command: &str) -> Option<String> {
     let compact = command.replace(' ', "");
@@ -21,7 +30,7 @@ pub(crate) fn hardline_bash_reason(command: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn contains_system_destructive_command(command: &str) -> bool {
+pub(super) fn contains_system_destructive_command(command: &str) -> bool {
     shell_command_invocations(command).is_some_and(|commands| {
         commands
             .iter()
@@ -29,7 +38,7 @@ pub(crate) fn contains_system_destructive_command(command: &str) -> bool {
     })
 }
 
-pub(crate) fn is_system_destructive_invocation(command: &[String]) -> bool {
+pub(super) fn is_system_destructive_invocation(command: &[String]) -> bool {
     let Some((name, args)) = effective_system_command(command) else {
         return false;
     };
@@ -174,7 +183,7 @@ pub(crate) fn background_shell_reason(command: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn pipe_to_shell(command: &str) -> bool {
+pub(super) fn pipe_to_shell(command: &str) -> bool {
     command.contains("| sh")
         || command.contains("| bash")
         || command.contains("|sh")
@@ -199,7 +208,7 @@ pub(crate) fn is_known_safe_command(command: &[String]) -> bool {
     })
 }
 
-pub(crate) fn is_safe_to_call_with_exec(command: &[String]) -> bool {
+pub(super) fn is_safe_to_call_with_exec(command: &[String]) -> bool {
     let Some(cmd) = command.first().and_then(|raw| shell_basename(raw)) else {
         return false;
     };
@@ -251,7 +260,7 @@ pub(crate) fn is_inline_interpreter_tokens(command: &[String]) -> bool {
     inline_interpreter_script(command).is_some()
 }
 
-pub(crate) fn inline_interpreter_tokens_review(
+pub(super) fn inline_interpreter_tokens_review(
     command: &[String],
 ) -> Option<InlineInterpreterReview> {
     let (interpreter, script) = inline_interpreter_script(command)?;
@@ -266,7 +275,7 @@ pub(crate) fn inline_interpreter_tokens_review(
     ))
 }
 
-pub(crate) fn inline_interpreter_script(command: &[String]) -> Option<(String, &str)> {
+pub(super) fn inline_interpreter_script(command: &[String]) -> Option<(String, &str)> {
     let interpreter = command.first().and_then(|raw| shell_basename(raw))?;
     let flag = command.get(1).map(String::as_str)?;
     let script = command.get(2).map(String::as_str)?;
@@ -278,13 +287,13 @@ pub(crate) fn inline_interpreter_script(command: &[String]) -> Option<(String, &
     }
 }
 
-pub(crate) fn contains_inline_interpreter(command: &str) -> bool {
+pub(super) fn contains_inline_interpreter(command: &str) -> bool {
     ["python -c", "python3 -c", "node -e", "perl -e", "ruby -e"]
         .iter()
         .any(|needle| command.contains(needle))
 }
 
-pub(crate) fn literal_python_file_reads(script: &str) -> std::result::Result<Vec<String>, String> {
+pub(super) fn literal_python_file_reads(script: &str) -> std::result::Result<Vec<String>, String> {
     let lowered = script.to_ascii_lowercase();
     for risky in [
         "subprocess",
@@ -327,7 +336,7 @@ pub(crate) fn literal_python_file_reads(script: &str) -> std::result::Result<Vec
     Ok(paths)
 }
 
-pub(crate) fn literal_open_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
+pub(super) fn literal_open_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
     let mut paths = Vec::new();
     let mut offset = 0usize;
     while let Some(found) = script[offset..].find("open(") {
@@ -344,7 +353,7 @@ pub(crate) fn literal_open_read_paths(script: &str) -> std::result::Result<Vec<S
     Ok(paths)
 }
 
-pub(crate) fn literal_pathlib_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
+pub(super) fn literal_pathlib_read_paths(script: &str) -> std::result::Result<Vec<String>, String> {
     let mut paths = Vec::new();
     let mut offset = 0usize;
     while let Some(found) = script[offset..].find("Path(") {
@@ -363,7 +372,7 @@ pub(crate) fn literal_pathlib_read_paths(script: &str) -> std::result::Result<Ve
     Ok(paths)
 }
 
-pub(crate) fn parse_literal_string_at(script: &str, start: usize) -> Option<(String, usize)> {
+pub(super) fn parse_literal_string_at(script: &str, start: usize) -> Option<(String, usize)> {
     let bytes = script.as_bytes();
     let mut index = start;
     while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
@@ -389,7 +398,7 @@ pub(crate) fn parse_literal_string_at(script: &str, start: usize) -> Option<(Str
     None
 }
 
-pub(crate) fn python_open_mode_is_mutating(script: &str, after_path: usize) -> bool {
+pub(super) fn python_open_mode_is_mutating(script: &str, after_path: usize) -> bool {
     let end = script[after_path..]
         .find(')')
         .map(|index| after_path + index)
@@ -409,7 +418,7 @@ pub(crate) fn python_open_mode_is_mutating(script: &str, after_path: usize) -> b
         || args.contains('+')
 }
 
-pub(crate) fn safe_rg_args(args: &[String]) -> bool {
+pub(super) fn safe_rg_args(args: &[String]) -> bool {
     !args.iter().any(|arg| {
         matches!(
             arg.as_str(),
@@ -419,7 +428,7 @@ pub(crate) fn safe_rg_args(args: &[String]) -> bool {
     })
 }
 
-pub(crate) fn safe_sed_args(args: &[String]) -> bool {
+pub(super) fn safe_sed_args(args: &[String]) -> bool {
     args.len() <= 3
         && args.first().map(String::as_str) == Some("-n")
         && args
@@ -428,7 +437,7 @@ pub(crate) fn safe_sed_args(args: &[String]) -> bool {
             .is_some_and(is_valid_sed_n_arg)
 }
 
-pub(crate) fn safe_git_command(command: &[String]) -> bool {
+pub(super) fn safe_git_command(command: &[String]) -> bool {
     let Some((index, subcommand)) = git_subcommand(command) else {
         return false;
     };
@@ -492,7 +501,7 @@ pub(crate) fn git_subcommand(command: &[String]) -> Option<(usize, &str)> {
     None
 }
 
-pub(crate) fn git_has_unsafe_global_option(args: &[String]) -> bool {
+pub(super) fn git_has_unsafe_global_option(args: &[String]) -> bool {
     args.iter().any(|arg| {
         matches!(
             arg.as_str(),
@@ -516,7 +525,7 @@ pub(crate) fn git_has_unsafe_global_option(args: &[String]) -> bool {
     })
 }
 
-pub(crate) fn git_args_are_read_only(args: &[String]) -> bool {
+pub(super) fn git_args_are_read_only(args: &[String]) -> bool {
     !args.iter().any(|arg| {
         matches!(
             arg.as_str(),
@@ -526,7 +535,7 @@ pub(crate) fn git_args_are_read_only(args: &[String]) -> bool {
     })
 }
 
-pub(crate) fn git_branch_is_read_only(args: &[String]) -> bool {
+pub(super) fn git_branch_is_read_only(args: &[String]) -> bool {
     if args.is_empty() {
         return true;
     }
@@ -542,7 +551,7 @@ pub(crate) fn git_branch_is_read_only(args: &[String]) -> bool {
     saw_read_only
 }
 
-pub(crate) fn is_valid_sed_n_arg(value: &str) -> bool {
+pub(super) fn is_valid_sed_n_arg(value: &str) -> bool {
     let Some(core) = value.strip_suffix('p') else {
         return false;
     };
@@ -605,49 +614,6 @@ pub(crate) fn permission_error(
         model_content: None,
         attachments: Vec::new(),
         is_error: true,
-    }
-}
-
-#[allow(dead_code)]
-pub(crate) fn parse_rules(rules: Vec<String>) -> Vec<PermissionRule> {
-    rules
-        .into_iter()
-        .filter_map(|raw| parse_rule(&raw))
-        .collect()
-}
-
-#[allow(dead_code)]
-pub(crate) fn parse_rule(raw: &str) -> Option<PermissionRule> {
-    let raw = raw.trim();
-    let (tool, rest) = raw.split_once('(')?;
-    let pattern = rest.strip_suffix(')')?.trim();
-    let tool = match tool.trim() {
-        "ExecCommand" | "exec_command" => "exec_command",
-        "Read" | "read" => "read",
-        "Write" | "write" => "write",
-        "Edit" | "edit" => "edit",
-        "SkillManage" | "skill_manage" => "skill_manage",
-        "SkillHub" | "skill_hub" => "skill_hub",
-        "SkillConfig" | "skill_config" => "skill_config",
-        "McpStartup" | "mcp_startup" => "mcp_startup",
-        "Mcp" | "mcp" => "mcp",
-        "WebFetch" | "web_fetch" => "web_fetch",
-        "WebSearch" | "web_search" => "web_search",
-        _ => return None,
-    };
-    Some(PermissionRule {
-        raw: raw.to_string(),
-        tool: tool.to_string(),
-        pattern: normalize_rule_pattern(pattern, tool),
-    })
-}
-
-#[allow(dead_code)]
-pub(crate) fn normalize_rule_pattern(pattern: &str, tool: &str) -> String {
-    if tool == "exec_command" {
-        normalize_command(pattern)
-    } else {
-        pattern.replace('\\', "/")
     }
 }
 

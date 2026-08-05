@@ -6,8 +6,8 @@ use super::{
 };
 use super::{
     catalog_surface::{
-        AgentRunRecord, AgentRunStatus, AgentToolContext, agent_status_model_value,
-        agent_status_value, close_agent_id, wait_agent_mailbox,
+        AgentMailboxWaitOutcome, AgentRunRecord, AgentRunStatus, AgentToolContext,
+        agent_status_model_value, agent_status_value, close_agent_id, wait_agent_mailbox,
     },
     child_runs::{AGENT_NOTIFICATION_METADATA_KEY, sanitize_task_name},
     lifecycle::{
@@ -305,20 +305,17 @@ impl ToolBinding for WaitAgentTool {
                 .get("timeout_ms")
                 .and_then(Value::as_u64)
                 .unwrap_or(30_000);
-            let value = match wait_agent_mailbox(
+            let outcome = match wait_agent_mailbox(
                 &parent_session_id,
                 Duration::from_millis(timeout_ms),
                 &store,
             )
             .await
             {
-                Ok(value) => value,
+                Ok(outcome) => outcome,
                 Err(err) => return ToolOutput::error(err.to_string()),
             };
-            let timed_out = value
-                .get("timed_out")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let timed_out = outcome == AgentMailboxWaitOutcome::TimedOut;
             if !timed_out {
                 let delivered_after_seq = match store.next_message_seq(&parent_session_id).await {
                     Ok(seq) => seq,
@@ -339,8 +336,7 @@ impl ToolBinding for WaitAgentTool {
                     let messages = delivered
                         .iter()
                         .filter(|record| {
-                            record.delivered_tool_call_id.as_deref()
-                                == Some(tool_call_id.as_str())
+                            record.delivered_tool_call_id.as_deref() == Some(tool_call_id.as_str())
                                 && record.delivered_after_session_seq == Some(delivered_after_seq)
                         })
                         .map(agent_mailbox_event_message)
@@ -365,7 +361,10 @@ impl ToolBinding for WaitAgentTool {
                     }
                 }
             }
-            ToolOutput::ok(value)
+            ToolOutput::ok(json!({
+                "message": if timed_out { "Wait timed out." } else { "Wait completed." },
+                "timed_out": timed_out,
+            }))
         })
     }
 }

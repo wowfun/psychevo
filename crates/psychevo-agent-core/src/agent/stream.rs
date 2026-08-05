@@ -1,5 +1,28 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Instant;
+
+use psychevo_ai::{
+    AbortSignal, AssistantSource, FinishReasonKind, GenerationEvent, GenerationOutcome,
+    LanguageModel, LanguageRequest, LanguageSettings, LanguageTool, Outcome, WebSearchTool,
+};
+use serde_json::{Value, json};
+
+use super::assistant::{
+    AssistantBuildState, InlineThinkParser, build_assistant_message,
+    build_assistant_message_from_snapshot, collect_reasoning_details, combine_reasoning,
+    merge_object, reasoning_provider_evidence, visible_assistant_changed,
+};
+use super::tools::ToolCallBuilder;
+use crate::events::{AgentEvent, EventSink};
+use crate::request::{AgentLoopRequest, PromptInstruction};
+use crate::support::{duration_ms_u64, now_ms};
+use crate::tool_router::ToolRouter;
+use crate::types::{
+    AssistantBlock, ContextualUserMessage, Message, ProviderToolBlock, ToolDisplaySpec,
+    UserContentBlock,
+};
+use crate::{Error, Result};
 
 pub(crate) async fn emit(sink: &Arc<dyn EventSink>, event: AgentEvent) -> Result<()> {
     sink.emit(event)
@@ -724,7 +747,7 @@ pub async fn message_to_ai(message: &Message) -> psychevo_ai::Message {
                             extensions: BTreeMap::new(),
                         })
                     }
-                    AssistantBlock::Source(source) => psychevo_ai::AssistantContent::Source {
+                    AssistantBlock::Source { source } => psychevo_ai::AssistantContent::Source {
                         source: source.clone(),
                     },
                 })

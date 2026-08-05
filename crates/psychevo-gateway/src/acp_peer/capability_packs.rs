@@ -1,3 +1,9 @@
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol_schema::v1::InitializeResponse;
+use serde_json::{Map, Value};
+
+use super::session_projection::AcpSessionSnapshot;
+
 const CODEX_ACP_AGENT_NAME: &str = "@agentclientprotocol/codex-acp";
 const CODEX_ACP_REVIEWED_VERSION: &str = "1.1.2";
 const OPENCODE_ACP_AGENT_NAME: &str = "OpenCode";
@@ -50,20 +56,20 @@ struct CodexQuotaModelUsageProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CodexPromptQuotaProjection {
+pub(super) struct CodexPromptQuotaProjection {
     schema_version: u32,
     token_count: Option<CodexQuotaTokenCountProjection>,
     model_usage: Vec<CodexQuotaModelUsageProjection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexPromptQuotaRejection {
+pub(super) enum CodexPromptQuotaRejection {
     InvalidSchema,
     BoundsExceeded,
 }
 
 impl CodexPromptQuotaRejection {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::InvalidSchema => "invalid_schema",
             Self::BoundsExceeded => "bounds_exceeded",
@@ -95,7 +101,7 @@ fn codex_quota_token_count_is_bounded(token_count: &CodexQuotaTokenCountSource) 
     .all(|value| value <= CODEX_QUOTA_MAX_TOKEN_COUNT)
 }
 
-fn project_codex_prompt_quota(
+pub(super) fn project_codex_prompt_quota(
     initialized: &InitializeResponse,
     meta: Option<&Map<String, Value>>,
 ) -> Result<Option<CodexPromptQuotaProjection>, CodexPromptQuotaRejection> {
@@ -437,7 +443,18 @@ fn direct_only_unavailable_facts() -> Vec<AcpCapabilityPackFact> {
 
 #[cfg(test)]
 mod capability_pack_tests {
-    use super::*;
+    use agent_client_protocol_schema::v1::InitializeResponse;
+    use serde_json::{Value, json};
+
+    use super::{
+        AcpCapabilityPackKind, CODEX_ACP_REVIEWED_VERSION, CODEX_QUOTA_MAX_MODEL_ENTRIES,
+        CodexPromptQuotaRejection, project_acp_capability_pack, project_codex_prompt_quota,
+        reviewed_initialize_capability_pack,
+    };
+    use crate::acp_peer::session_projection::{
+        AcpResidentSessionInput, AcpSessionSnapshot, acp_session_snapshot, new_acp_resident_session,
+    };
+    use crate::acp_peer::stream_state::AcpPeerStreamState;
 
     const CODEX_INITIALIZE_V1_FIXTURE: &str =
         include_str!("../../tests/fixtures/acp_capability_packs/codex_initialize_v1.json");
@@ -528,10 +545,12 @@ mod capability_pack_tests {
                 "source-derived Codex initialize fixture must enable {capability}"
             );
         }
-        assert!(active
-            .facts
-            .iter()
-            .any(|fact| fact.id == "codex.provider.gateway" && fact.enabled));
+        assert!(
+            active
+                .facts
+                .iter()
+                .any(|fact| fact.id == "codex.provider.gateway" && fact.enabled)
+        );
         assert!(
             active
                 .facts
@@ -652,7 +671,9 @@ mod capability_pack_tests {
         assert!(!projected_value.to_string().contains("must-not-cross"));
 
         let mut state = AcpPeerStreamState::new(None, None, "local-quota".to_string());
-        state.handle_usage_update(json!({ "sessionUpdate": "usage_update", "used": 900, "size": 4_000 }));
+        state.handle_usage_update(
+            json!({ "sessionUpdate": "usage_update", "used": 900, "size": 4_000 }),
+        );
         state.handle_prompt_usage(json!({ "totalTokens": 2500 }));
         state.handle_codex_prompt_quota(projected);
         assert_eq!(state.prompt_usage, Some(json!({ "total_tokens": 2500 })));

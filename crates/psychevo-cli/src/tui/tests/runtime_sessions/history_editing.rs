@@ -1,62 +1,76 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{draw_fullscreen_for_test, test_app};
+use crate::tui::{
+    BottomPanel, BottomSelectionValue, FocusMode, FullscreenUi, HistoryMessageAction, ImageInput,
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    PendingImageAttachment, SessionListView, SlashCommand, StartThreadRequest, TranscriptHitTarget,
+    TranscriptKind, TuiApp, TurnRequest, prompt_display_metadata, textarea_text,
+};
+use std::path::PathBuf;
+use std::time::Duration;
+use tempfile::tempdir;
 
-async fn bind_native(app: &TuiApp, session_id: &str) {
-    let cwd = app.cwd.display().to_string();
-    app.state_runtime
-        .create_gateway_runtime_binding(
-            psychevo::__product::persistence::GatewayRuntimeBindingInput {
-                thread_id: session_id,
-                agent_ref: None,
-                agent_fingerprint: "test-agent",
-                agent_definition_json: "null",
-                runtime_ref: "native",
-                backend_kind: "native",
-                native_kind: "native",
-                native_session_id: Some(session_id),
-                cwd: &cwd,
-                profile_fingerprint: "test-profile",
-                profile_revision: "1",
-                profile_config_json: "{}",
-                adapter_kind: "native",
-                adapter_revision: "test",
-                ownership:
-                    psychevo::__product::persistence::GatewayRuntimeBindingOwnership::ReadWrite,
-                parent_thread_id: None,
-            },
+async fn start_bound_thread(app: &TuiApp) -> String {
+    let mut start = StartThreadRequest::new(&app.cwd);
+    start.source = "tui".to_string();
+    let handle = app
+        .runtime
+        .client()
+        .start_thread_with_turn(
+            start,
+            TurnRequest::new("history editing fixture")
+                .with_model(Some("mock/model".to_string()), None),
         )
         .await
-        .expect("Native binding");
+        .expect("bound Thread acceptance");
+    let thread_id = handle.receipt().thread_id.clone();
+    handle.interrupt();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle.wait())
+        .await
+        .expect("bound Thread fixture must settle");
+    let conn = rusqlite::Connection::open(&app.db_path).expect("history fixture connection");
+    conn.execute(
+        "DELETE FROM messages WHERE session_id = ?1",
+        rusqlite::params![&thread_id],
+    )
+    .expect("clear binding fixture message");
+    thread_id
 }
 
 async fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
-    app.state_runtime
-        .append_message_with_undo_snapshot_metadata_and_context_evidence(
+    let message = psychevo::application::Message::User {
+        content: vec![
+            psychevo::application::UserContentBlock::text("before hidden context after"),
+            psychevo::application::UserContentBlock::image_url("https://example.test/history.png"),
+        ],
+        timestamp_ms: 1,
+    };
+    let metadata = serde_json::json!({
+        psychevo::application::EDITABLE_INPUT_METADATA_KEY: {
+            "version": 1,
+            "parts": [
+                {"type": "text", "text": "before "},
+                {"type": "image", "imageBlockIndex": 0},
+                {"type": "text", "text": " after"}
+            ]
+        }
+    });
+    let conn = rusqlite::Connection::open(&app.db_path).expect("history fixture connection");
+    conn.execute(
+        r#"
+            INSERT INTO messages (
+                session_id, session_seq, role, timestamp_ms, message_json,
+                content_text, metadata_json
+            ) VALUES (?1, 1, 'user', 1, ?2, ?3, ?4)
+        "#,
+        rusqlite::params![
             session_id,
-            &psychevo::__agent_core::Message::User {
-                content: vec![
-                    psychevo::__agent_core::UserContentBlock::text("before hidden context after"),
-                    psychevo::__agent_core::UserContentBlock::image_url(
-                        "https://example.test/history.png",
-                    ),
-                ],
-                timestamp_ms: 1,
-            },
-            Some(serde_json::json!({
-                psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
-                    "version": 1,
-                    "parts": [
-                        {"type": "text", "text": "before "},
-                        {"type": "image", "imageBlockIndex": 0},
-                        {"type": "text", "text": " after"}
-                    ]
-                }
-            })),
-            Some("before [Image #1] after".to_string()),
-            &[],
-        )
-        .await
-        .expect("persist history message")
+            serde_json::to_string(&message).expect("message JSON"),
+            "before [Image #1] after",
+            metadata.to_string(),
+        ],
+    )
+    .expect("persist history message");
+    1
 }
 
 #[tokio::test]
@@ -73,7 +87,7 @@ pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope
         },
     ];
     let metadata = prompt_display_metadata(
-        "before [Image #1] middle [Image #2] after".to_string(),
+        "before [Image #1] middle [Image #2] after",
         &attachments,
         &cwd,
     )
@@ -81,19 +95,19 @@ pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope
     assert_eq!(
         metadata.editable_input.expect("exact envelope").parts,
         vec![
-            psychevo::__product::runtime::StoredEditableInputPart::Text {
+            psychevo::application::StoredEditableInputPart::Text {
                 text: "before ".to_string(),
             },
-            psychevo::__product::runtime::StoredEditableInputPart::Image {
+            psychevo::application::StoredEditableInputPart::Image {
                 image_block_index: 0,
             },
-            psychevo::__product::runtime::StoredEditableInputPart::Text {
+            psychevo::application::StoredEditableInputPart::Text {
                 text: " middle ".to_string(),
             },
-            psychevo::__product::runtime::StoredEditableInputPart::Image {
+            psychevo::application::StoredEditableInputPart::Image {
                 image_block_index: 1,
             },
-            psychevo::__product::runtime::StoredEditableInputPart::Text {
+            psychevo::application::StoredEditableInputPart::Text {
                 text: " after".to_string(),
             },
         ]
@@ -104,12 +118,7 @@ pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope
 pub(crate) async fn persisted_user_row_keyboard_and_mouse_open_same_message_actions() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let session_id = app
-        .state_runtime
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
-        .await
-        .expect("session");
-    bind_native(&app, &session_id).await;
+    let session_id = start_bound_thread(&app).await;
     persisted_history_message(&app, &session_id).await;
     app.current_session = Some(session_id);
     let mut ui = FullscreenUi::new(&app);
@@ -183,12 +192,7 @@ pub(crate) async fn persisted_user_row_keyboard_and_mouse_open_same_message_acti
 pub(crate) async fn point_fork_editor_preserves_ordered_images_and_prefills_empty_child() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let source = app
-        .state_runtime
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
-        .await
-        .expect("source");
-    bind_native(&app, &source).await;
+    let source = start_bound_thread(&app).await;
     let message_seq = persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -215,22 +219,33 @@ pub(crate) async fn point_fork_editor_preserves_ordered_images_and_prefills_empt
     let child = app.current_session.clone().expect("child");
     assert_ne!(child, source);
     assert!(
-        app.state_runtime
-            .load_messages(&child)
+        app.runtime
+            .client()
+            .resume_thread(&child)
             .await
-            .expect("child messages")
+            .expect("child Thread")
+            .history()
+            .latest(Some(200))
+            .await
+            .expect("child history")
+            .items
             .is_empty()
     );
     assert_eq!(textarea_text(&ui.textarea), "edited [Image #1] tail");
     assert_eq!(ui.pending_images.len(), 1);
     assert!(ui.sidebar.title.contains("forked from"));
     assert_eq!(
-        app.state_runtime
-            .session_metadata(&child)
+        app.runtime
+            .client()
+            .resume_thread(&child)
             .await
-            .expect("metadata")
-            .and_then(|metadata| metadata.get("forkedFromThreadId").cloned()),
-        Some(serde_json::json!(source))
+            .expect("child Thread")
+            .summary()
+            .await
+            .expect("child summary")
+            .forked_from_thread_id
+            .as_deref(),
+        Some(source.as_str())
     );
 }
 
@@ -238,12 +253,7 @@ pub(crate) async fn point_fork_editor_preserves_ordered_images_and_prefills_empt
 pub(crate) async fn unchanged_tui_update_is_a_structural_no_op() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let source = app
-        .state_runtime
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
-        .await
-        .expect("source");
-    bind_native(&app, &source).await;
+    let source = start_bound_thread(&app).await;
     let message_seq = persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -265,10 +275,11 @@ pub(crate) async fn unchanged_tui_update_is_a_structural_no_op() {
     );
     assert!(ui.history_message_edit.is_none());
     assert!(
-        app.state_runtime
-            .session_revert_state(&source)
+        app.runtime
+            .gateway()
+            .history_editing_state(&source)
             .await
-            .expect("revert")
+            .expect("history editing state")
             .is_none()
     );
     assert!(ui.running.is_none());
@@ -278,12 +289,7 @@ pub(crate) async fn unchanged_tui_update_is_a_structural_no_op() {
 pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let source = app
-        .state_runtime
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
-        .await
-        .expect("source");
-    bind_native(&app, &source).await;
+    let source = start_bound_thread(&app).await;
     persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -306,19 +312,29 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     let child = app.current_session.clone().expect("child");
     assert_ne!(child, source);
     assert_eq!(
-        app.state_runtime
-            .load_messages(&child)
+        app.runtime
+            .client()
+            .resume_thread(&child)
             .await
-            .expect("messages")
+            .expect("child Thread")
+            .history()
+            .latest(Some(200))
+            .await
+            .expect("child history")
+            .items
             .len(),
         1
     );
     assert_eq!(
-        app.state_runtime
-            .session_summary(&child)
+        app.runtime
+            .client()
+            .resume_thread(&child)
             .await
-            .expect("summary")
-            .and_then(|summary| summary.parent_session_id),
+            .expect("child Thread")
+            .summary()
+            .await
+            .expect("child summary")
+            .parent_thread_id,
         None
     );
     let sessions = app

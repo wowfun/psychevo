@@ -1,3 +1,19 @@
+use super::constants::{FULLSCREEN_EVENT_POLL_INTERVAL, MAX_READY_EVENTS_PER_FRAME};
+use crate::tui::app_loop::{
+    fullscreen_has_passive_motion, mouse_event_needs_redraw, normalize_bracketed_paste_text,
+    passive_redraw_due, schedule_next_passive_redraw,
+};
+use crate::tui::ui_types::FocusMode;
+use crate::tui::{
+    CrosstermBackend, CrosstermEvent, FullscreenEventOutcome, FullscreenTerminalGuard,
+    FullscreenUi, ImageInput, KeyEventKind, RunningTask, Terminal, TuiApp,
+    TuiProfileFrameObservation, event, io, resolve_image_source,
+};
+use anyhow::Result;
+use std::io::{BufRead, IsTerminal};
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
+
 impl TuiApp {
     pub(crate) async fn run(&mut self, initial_prompt: String) -> Result<ExitCode> {
         let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
@@ -47,59 +63,84 @@ impl TuiApp {
         terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
         let mut needs_draw = true;
         let mut next_passive_redraw = schedule_next_passive_redraw(Instant::now());
-        if !initial_prompt.trim().is_empty()
-            && self
-                .submit_fullscreen_text(&mut ui, initial_prompt, false)
-                .await?
-        {
-            return Ok(());
-        }
-        loop {
-            needs_draw |= self.drain_fullscreen_events(&mut ui).await?;
-            terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
-            if ui.take_terminal_clear_request() {
-                terminal.clear()?;
-                needs_draw = true;
+        let loop_result = async {
+            if !initial_prompt.trim().is_empty()
+                && self
+                    .submit_fullscreen_text(&mut ui, initial_prompt, false)
+                    .await?
+            {
+                return Ok(());
             }
-            if needs_draw {
-                terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
-                let send_feedback_ready = ui.running.is_some()
-                    && ui.visible_turn_started.is_some()
-                    && ui
-                        .transcript
-                        .iter()
-                        .any(|row| row.transcript_source.as_deref() == Some("tui.optimistic"));
-                self.journey_profile
-                    .observe_frame(TuiProfileFrameObservation {
-                        input_ready: ui.last_composer_input_area.is_some(),
-                        send_feedback_ready,
-                        turn_running: ui.running.is_some(),
-                        composer_focused: ui.focus == FocusMode::Composer,
-                        compaction_running: self.compaction_task.is_some(),
-                    });
-                needs_draw = false;
-                next_passive_redraw = schedule_next_passive_redraw(Instant::now());
-            }
-            if ui.quit_requested && ui.running.is_none() && self.compaction_task.is_none() {
-                break;
-            }
-            if event::poll(FULLSCREEN_EVENT_POLL_INTERVAL)? {
-                let outcome = self
-                    .handle_fullscreen_event_batch(&mut ui, event::read()?)
-                    .await?;
-                needs_draw |= outcome.needs_draw;
-                if outcome.should_quit {
+            loop {
+                needs_draw |= self.drain_fullscreen_events(&mut ui).await?;
+                terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
+                if ui.take_terminal_clear_request() {
+                    terminal.clear()?;
+                    needs_draw = true;
+                }
+                if needs_draw {
+                    terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
+                    let send_feedback_ready = ui.foreground_turn_active()
+                        && ui.visible_turn_started.is_some()
+                        && ui
+                            .transcript
+                            .iter()
+                            .any(|row| row.transcript_source.as_deref() == Some("tui.optimistic"));
+                    self.journey_profile
+                        .observe_frame(TuiProfileFrameObservation {
+                            input_ready: ui.last_composer_input_area.is_some(),
+                            send_feedback_ready,
+                            turn_running: ui.foreground_turn_active(),
+                            composer_focused: ui.focus == FocusMode::Composer,
+                            compaction_running: self.compaction_task.is_some(),
+                        });
+                    needs_draw = false;
+                    next_passive_redraw = schedule_next_passive_redraw(Instant::now());
+                }
+                if ui.quit_requested
+                    && !ui.foreground_turn_active()
+                    && self.compaction_task.is_none()
+                {
                     break;
                 }
-            } else if fullscreen_has_passive_motion(&ui)
-                && passive_redraw_due(Instant::now(), &mut next_passive_redraw)
-            {
-                needs_draw = true;
+                if event::poll(FULLSCREEN_EVENT_POLL_INTERVAL)? {
+                    let outcome = self
+                        .handle_fullscreen_event_batch(&mut ui, event::read()?)
+                        .await?;
+                    needs_draw |= outcome.needs_draw;
+                    if outcome.should_quit {
+                        break;
+                    }
+                } else if fullscreen_has_passive_motion(&ui)
+                    && passive_redraw_due(Instant::now(), &mut next_passive_redraw)
+                {
+                    needs_draw = true;
+                }
             }
+            Ok(())
         }
-        if let Some(running) = ui.running.take() {
+        .await;
+        self.settle_fullscreen_task_owners(&mut ui).await;
+        loop_result
+    }
+
+    pub(crate) async fn settle_fullscreen_task_owners(&mut self, ui: &mut FullscreenUi<'_>) {
+        if let Some(starting) = ui.starting_turn.take() {
+            ui.starting_turn_cleanups.push(starting.into_cleanup());
+        }
+        let running = ui.running.take();
+        if let Some(running) = running.as_ref() {
             running.control.abort();
-            ui.discard_permission_approvals_for_abort();
+        }
+        for agent in &ui.auxiliary_agent_tasks {
+            agent.control.abort();
+        }
+        for shell in &ui.auxiliary_shell_tasks {
+            shell.control.interrupt();
+        }
+        ui.pending_auxiliary_shell_commands.clear();
+        ui.discard_permission_approvals_for_abort();
+        if let Some(running) = running {
             match running.task {
                 RunningTask::Agent(task) => {
                     let _ = task.await;
@@ -108,15 +149,27 @@ impl TuiApp {
                     let _ = task.await;
                 }
             }
-        } else {
-            ui.discard_permission_approvals_for_abort();
+        }
+        for agent in std::mem::take(&mut ui.auxiliary_agent_tasks) {
+            let _ = agent.task.await;
+        }
+        for shell in std::mem::take(&mut ui.auxiliary_shell_tasks) {
+            let _ = shell.task.await;
         }
         if let Some(task) = self.diff_task.take() {
             task.task.abort();
             let _ = task.task.await;
         }
+        for cleanup in std::mem::take(&mut ui.starting_turn_cleanups) {
+            cleanup.join().await;
+        }
+        if let Some(cleanup) = self.side_cleanup_task.take() {
+            let _ = cleanup.task.await;
+        }
+        for cleanup in std::mem::take(&mut self.side_delete_tasks) {
+            let _ = cleanup.task.await;
+        }
         self.model_catalog.abort_unfinished();
-        Ok(())
     }
 
     pub(crate) async fn handle_fullscreen_event_batch(

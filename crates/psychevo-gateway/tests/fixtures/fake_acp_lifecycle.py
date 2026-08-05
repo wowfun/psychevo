@@ -130,7 +130,7 @@ for raw_line in sys.stdin:
     if method == "initialize":
         is_codex = MODE.startswith("codex-auth-")
         session_capabilities = {}
-        if MODE != "none":
+        if MODE not in {"none", "process-ephemeral"}:
             session_capabilities = {
                 "list": {},
                 "delete": {},
@@ -152,7 +152,7 @@ for raw_line in sys.stdin:
                 ),
             },
             "agentCapabilities": {
-                "loadSession": MODE != "resume-only",
+                "loadSession": MODE not in {"resume-only", "process-ephemeral"},
                 "promptCapabilities": {
                     "image": is_codex,
                     "embeddedContext": is_codex,

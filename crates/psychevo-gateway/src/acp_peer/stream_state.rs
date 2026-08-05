@@ -1,29 +1,50 @@
-struct AcpTurnOutput {
-    native_session_id: String,
-    final_answer: String,
-    final_content: Vec<Value>,
-    content_slots: Vec<AcpPeerContentSlot>,
-    latest_plan: Option<AcpPeerPlanProjection>,
-    session_title: Option<String>,
-    tools: BTreeMap<String, Value>,
-    prompt_usage: Option<Value>,
-    usage_update: Option<Value>,
-    events: Vec<Value>,
-    session_snapshot: AcpSessionSnapshot,
+use std::collections::{BTreeMap, BTreeSet};
+
+use agent_client_protocol::schema::v1::{ContentChunk, SessionNotification, SessionUpdate};
+use psychevo::application::{
+    AssistantBlock, Message, RunStreamEvent, RunStreamSink, WorkspaceMutation,
+    WorkspaceMutationSink,
+};
+use serde_json::{Value, json};
+
+use crate::gateway_now_ms;
+
+use super::capability_packs::{CodexPromptQuotaProjection, CodexPromptQuotaRejection};
+use super::metadata_permissions::emit_runtime_event;
+use super::session_projection::{
+    AcpFactOrigin, AcpPeerInboundNotification, AcpPeerInboundPayload, AcpSessionSnapshot,
+};
+use super::tool_projection::{
+    acp_content_chunk_text, acp_merge_tool_update, acp_plan_body, acp_tool_call_block,
+    acp_tool_call_id, acp_tool_output, acp_tool_result, acp_tool_runtime_event,
+    acp_tool_runtime_name, acp_tool_started_after_event, acp_update_kind,
+};
+
+pub(super) struct AcpTurnOutput {
+    pub(super) native_session_id: String,
+    pub(super) final_answer: String,
+    pub(super) final_content: Vec<Value>,
+    pub(super) content_slots: Vec<AcpPeerContentSlot>,
+    pub(super) latest_plan: Option<AcpPeerPlanProjection>,
+    pub(super) session_title: Option<String>,
+    pub(super) tools: BTreeMap<String, Value>,
+    pub(super) prompt_usage: Option<Value>,
+    pub(super) usage_update: Option<Value>,
+    pub(super) session_snapshot: AcpSessionSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct AcpPeerPlanProjection {
-    body: String,
-    update: Value,
+pub(super) struct AcpPeerPlanProjection {
+    pub(super) body: String,
+    pub(super) update: Value,
 }
 
 impl AcpTurnOutput {
-    fn persisted_assistant_content(&self) -> Vec<AssistantBlock> {
+    pub(super) fn persisted_assistant_content(&self) -> Vec<AssistantBlock> {
         persisted_assistant_content(&self.content_slots, &self.tools)
     }
 
-    fn persisted_assistant_message_ids(&self) -> Vec<String> {
+    pub(super) fn persisted_assistant_message_ids(&self) -> Vec<String> {
         self.content_slots
             .iter()
             .filter_map(|slot| match slot {
@@ -38,16 +59,16 @@ impl AcpTurnOutput {
             .collect()
     }
 
-    fn final_message_content(&self) -> Vec<Value> {
+    pub(super) fn final_message_content(&self) -> Vec<Value> {
         self.final_content.clone()
     }
 
-    fn persisted_tool_result_messages(&self) -> Vec<Message> {
-        persisted_tool_result_messages(&self.content_slots, &self.tools)
+    pub(super) fn persisted_tool_result_messages(&self) -> Vec<Message> {
+        persisted_tool_result_messages_at(&self.content_slots, &self.tools, gateway_now_ms())
     }
 }
 
-fn persisted_assistant_content(
+pub(super) fn persisted_assistant_content(
     content_slots: &[AcpPeerContentSlot],
     tools: &BTreeMap<String, Value>,
 ) -> Vec<AssistantBlock> {
@@ -84,9 +105,10 @@ fn persisted_assistant_content(
     content
 }
 
-fn persisted_tool_result_messages(
+pub(super) fn persisted_tool_result_messages_at(
     content_slots: &[AcpPeerContentSlot],
     tools: &BTreeMap<String, Value>,
+    timestamp_ms: i64,
 ) -> Vec<Message> {
     content_slots
         .iter()
@@ -112,36 +134,40 @@ fn persisted_tool_result_messages(
                 tool_name: acp_tool_runtime_name(tool),
                 content,
                 is_error: status == "failed",
-                timestamp_ms: gateway_now_ms(),
+                timestamp_ms,
             })
         })
         .collect()
 }
 
 #[derive(Debug, Clone)]
-struct AcpPeerToolState {
-    value: Value,
+pub(super) struct AcpPeerToolState {
+    pub(super) value: Value,
     started: bool,
     mutation_observed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum AcpPeerContentSlot {
-    Reasoning { text: String },
+pub(super) enum AcpPeerContentSlot {
+    Reasoning {
+        text: String,
+    },
     Text {
         text: String,
         message_id: Option<String>,
     },
-    Tool { tool_call_id: String },
+    Tool {
+        tool_call_id: String,
+    },
 }
 
-const ACP_MAX_HISTORY_REPLAY_MESSAGES: usize = 256;
-const ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS: usize = 262_144;
+pub(super) const ACP_MAX_HISTORY_REPLAY_MESSAGES: usize = 256;
+pub(super) const ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS: usize = 262_144;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct AcpHistoryReplayProjection {
-    entries: Vec<AcpHistoryReplayEntry>,
-    lossy: bool,
+    pub(super) entries: Vec<AcpHistoryReplayEntry>,
+    pub(super) lossy: bool,
     active_assistant_index: Option<usize>,
     tool_entry_indices: BTreeMap<String, usize>,
     plan_entry_index: Option<usize>,
@@ -149,7 +175,7 @@ pub(crate) struct AcpHistoryReplayProjection {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum AcpHistoryReplayEntry {
+pub(super) enum AcpHistoryReplayEntry {
     User {
         replay_id: String,
         delivery_message_id: Option<String>,
@@ -171,7 +197,7 @@ pub(crate) struct AcpSessionLoadOutput {
 }
 
 impl AcpHistoryReplayProjection {
-    fn is_complete(&self) -> bool {
+    pub(super) fn is_complete(&self) -> bool {
         !self.lossy
     }
 
@@ -184,12 +210,10 @@ impl AcpHistoryReplayProjection {
         format!("anonymous:{role}:{}", self.anonymous_fact_sequence)
     }
 
-    fn reduce_update(&mut self, update: SessionUpdate, update_value: Value) {
+    pub(super) fn reduce_update(&mut self, update: SessionUpdate, update_value: Value) {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => self.reduce_user_message_chunk(chunk),
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                self.reduce_assistant_chunk(chunk, false)
-            }
+            SessionUpdate::AgentMessageChunk(chunk) => self.reduce_assistant_chunk(chunk, false),
             SessionUpdate::AgentThoughtChunk(chunk) => self.reduce_assistant_chunk(chunk, true),
             SessionUpdate::ToolCall(_) | SessionUpdate::ToolCallUpdate(_) => {
                 self.reduce_tool(update_value)
@@ -200,7 +224,6 @@ impl AcpHistoryReplayProjection {
             | SessionUpdate::ConfigOptionUpdate(_)
             | SessionUpdate::SessionInfoUpdate(_)
             | SessionUpdate::UsageUpdate(_) => {}
-            #[allow(unreachable_patterns)]
             _ => {}
         }
     }
@@ -229,8 +252,8 @@ impl AcpHistoryReplayProjection {
             && delivery_message_id.is_some()
             && existing_message_id == &delivery_message_id
         {
-            let remaining = ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS
-                .saturating_sub(existing.chars().count());
+            let remaining =
+                ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS.saturating_sub(existing.chars().count());
             if text.chars().count() > remaining {
                 self.lossy = true;
             }
@@ -328,7 +351,14 @@ impl AcpHistoryReplayProjection {
             return;
         }
         let entry_index = match self.active_assistant_index {
-            Some(index) if matches!(self.entries.get(index), Some(AcpHistoryReplayEntry::Assistant { plan: None, .. })) => index,
+            Some(index)
+                if matches!(
+                    self.entries.get(index),
+                    Some(AcpHistoryReplayEntry::Assistant { plan: None, .. })
+                ) =>
+            {
+                index
+            }
             _ => {
                 if self.entries.len() >= ACP_MAX_HISTORY_REPLAY_MESSAGES {
                     self.mark_partial();
@@ -394,14 +424,14 @@ fn replay_message_id(chunk: &ContentChunk) -> Option<String> {
         .filter(|message_id| !message_id.trim().is_empty())
 }
 
-fn replay_entry_identity(entry: &AcpHistoryReplayEntry) -> &str {
+pub(super) fn replay_entry_identity(entry: &AcpHistoryReplayEntry) -> &str {
     match entry {
         AcpHistoryReplayEntry::User { replay_id, .. }
         | AcpHistoryReplayEntry::Assistant { replay_id, .. } => replay_id,
     }
 }
 
-fn replay_entry_delivery_message_ids(entry: &AcpHistoryReplayEntry) -> Vec<String> {
+pub(super) fn replay_entry_delivery_message_ids(entry: &AcpHistoryReplayEntry) -> Vec<String> {
     match entry {
         AcpHistoryReplayEntry::User {
             delivery_message_id: Some(message_id),
@@ -430,17 +460,15 @@ fn append_bounded_replay_slot(
     let used = content_slots
         .iter()
         .map(|slot| match slot {
-            AcpPeerContentSlot::Reasoning { text }
-            | AcpPeerContentSlot::Text { text, .. } => text.chars().count(),
+            AcpPeerContentSlot::Reasoning { text } | AcpPeerContentSlot::Text { text, .. } => {
+                text.chars().count()
+            }
             AcpPeerContentSlot::Tool { .. } => 0,
         })
         .sum::<usize>();
     let remaining = ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS.saturating_sub(used);
     let lossless = text.chars().count() <= remaining;
-    let bounded = text
-        .chars()
-        .take(remaining)
-        .collect::<String>();
+    let bounded = text.chars().take(remaining).collect::<String>();
     if bounded.is_empty() {
         return lossless;
     }
@@ -462,27 +490,27 @@ fn append_bounded_replay_slot(
     lossless
 }
 
-struct AcpPeerStreamState {
+pub(super) struct AcpPeerStreamState {
     stream: Option<RunStreamSink>,
     workspace_mutations: Option<WorkspaceMutationSink>,
     local_session_id: String,
-    final_answer: String,
+    pub(super) final_answer: String,
     reasoning_text: String,
     reasoning_open: bool,
-    content_slots: Vec<AcpPeerContentSlot>,
-    latest_plan: Option<AcpPeerPlanProjection>,
+    pub(super) content_slots: Vec<AcpPeerContentSlot>,
+    pub(super) latest_plan: Option<AcpPeerPlanProjection>,
     tool_slots: BTreeMap<String, usize>,
-    session_title: Option<String>,
-    tools: BTreeMap<String, AcpPeerToolState>,
-    prompt_usage: Option<Value>,
-    usage_update: Option<Value>,
-    events: Vec<Value>,
-    history_replay: AcpHistoryReplayProjection,
+    pub(super) session_title: Option<String>,
+    pub(super) tools: BTreeMap<String, AcpPeerToolState>,
+    pub(super) prompt_usage: Option<Value>,
+    pub(super) usage_update: Option<Value>,
+    pub(super) events: Vec<Value>,
+    pub(super) history_replay: AcpHistoryReplayProjection,
     prompt_active: bool,
 }
 
 impl AcpPeerStreamState {
-    fn new(
+    pub(super) fn new(
         stream: Option<RunStreamSink>,
         workspace_mutations: Option<WorkspaceMutationSink>,
         local_session_id: String,
@@ -507,11 +535,11 @@ impl AcpPeerStreamState {
         }
     }
 
-    fn begin_prompt(&mut self) {
+    pub(super) fn begin_prompt(&mut self) {
         self.prompt_active = true;
     }
 
-    fn reduce_notification(
+    pub(super) fn reduce_notification(
         &mut self,
         envelope: AcpPeerInboundNotification,
         origin: AcpFactOrigin,
@@ -573,7 +601,6 @@ impl AcpPeerStreamState {
             | SessionUpdate::AvailableCommandsUpdate(_)
             | SessionUpdate::CurrentModeUpdate(_)
             | SessionUpdate::ConfigOptionUpdate(_) => {}
-            #[allow(unreachable_patterns)]
             _ => {}
         }
     }
@@ -717,11 +744,8 @@ impl AcpPeerStreamState {
             .is_some_and(|state| state.mutation_observed);
         let runtime_event = acp_tool_runtime_event(&self.local_session_id, &merged, was_started);
         let started = was_started || acp_tool_started_after_event(&runtime_event);
-        let mutation_observed = self.observe_tool_mutation(
-            &runtime_event,
-            started,
-            mutation_was_observed,
-        );
+        let mutation_observed =
+            self.observe_tool_mutation(&runtime_event, started, mutation_was_observed);
         self.tools.insert(
             tool_call_id,
             AcpPeerToolState {
@@ -763,10 +787,9 @@ impl AcpPeerStreamState {
                 text: existing,
                 message_id: existing_message_id,
             }) if *existing_message_id == message_id => existing.push_str(&text),
-            _ => self.content_slots.push(AcpPeerContentSlot::Text {
-                text,
-                message_id,
-            }),
+            _ => self
+                .content_slots
+                .push(AcpPeerContentSlot::Text { text, message_id }),
         }
     }
 
@@ -819,7 +842,7 @@ impl AcpPeerStreamState {
         }
     }
 
-    fn handle_usage_update(&mut self, update_value: Value) {
+    pub(super) fn handle_usage_update(&mut self, update_value: Value) {
         self.usage_update = Some(update_value.clone());
         emit_runtime_event(
             &self.stream,
@@ -832,13 +855,13 @@ impl AcpPeerStreamState {
         );
     }
 
-    fn handle_prompt_usage(&mut self, usage: Value) {
+    pub(super) fn handle_prompt_usage(&mut self, usage: Value) {
         let mut usage = usage;
         strip_acp_reserved_meta(&mut usage);
         self.prompt_usage = normalize_acp_prompt_usage(&usage);
     }
 
-    fn handle_codex_prompt_quota(&mut self, quota: CodexPromptQuotaProjection) {
+    pub(super) fn handle_codex_prompt_quota(&mut self, quota: CodexPromptQuotaProjection) {
         let Ok(quota) = serde_json::to_value(quota) else {
             return;
         };
@@ -861,7 +884,10 @@ impl AcpPeerStreamState {
         emit_runtime_event(&self.stream, event);
     }
 
-    fn handle_codex_prompt_quota_rejection(&mut self, rejection: CodexPromptQuotaRejection) {
+    pub(super) fn handle_codex_prompt_quota_rejection(
+        &mut self,
+        rejection: CodexPromptQuotaRejection,
+    ) {
         let event = json!({
             "type": "acp_peer_capability_metadata_rejected",
             "session_id": self.local_session_id.clone(),
@@ -873,7 +899,7 @@ impl AcpPeerStreamState {
         emit_runtime_event(&self.stream, event);
     }
 
-    fn finish(&mut self) {
+    pub(super) fn finish(&mut self) {
         if self.reasoning_open {
             if let Some(stream) = &self.stream {
                 stream(RunStreamEvent::ReasoningEnd);
@@ -882,7 +908,7 @@ impl AcpPeerStreamState {
         }
     }
 
-    fn final_message_content(&self) -> Vec<Value> {
+    pub(super) fn final_message_content(&self) -> Vec<Value> {
         let mut content = Vec::new();
         for slot in &self.content_slots {
             match slot {
@@ -910,9 +936,18 @@ impl AcpPeerStreamState {
 fn normalize_acp_prompt_usage(usage: &Value) -> Option<Value> {
     let mut normalized = serde_json::Map::new();
     for (target, aliases) in [
-        ("total_tokens", &["total_tokens", "totalTokens", "total"][..]),
-        ("input_tokens", &["input_tokens", "inputTokens", "input"][..]),
-        ("output_tokens", &["output_tokens", "outputTokens", "output"][..]),
+        (
+            "total_tokens",
+            &["total_tokens", "totalTokens", "total"][..],
+        ),
+        (
+            "input_tokens",
+            &["input_tokens", "inputTokens", "input"][..],
+        ),
+        (
+            "output_tokens",
+            &["output_tokens", "outputTokens", "output"][..],
+        ),
         (
             "reasoning_tokens",
             &["reasoning_tokens", "reasoningTokens", "thoughtTokens"][..],
@@ -977,7 +1012,12 @@ fn strip_acp_reserved_meta(value: &mut Value) {
 
 #[cfg(test)]
 mod workspace_mutation_tests {
-    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use psychevo::application::{WorkspaceMutation, WorkspaceMutationSink};
+    use serde_json::json;
+
+    use super::AcpPeerStreamState;
 
     #[test]
     fn acp_mutation_tool_emits_one_opaque_invalidation_when_execution_starts() {

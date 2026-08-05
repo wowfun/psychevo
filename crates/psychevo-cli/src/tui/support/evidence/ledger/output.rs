@@ -1,10 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo::application::{ToolDisplayBodyPolicy, ToolDisplaySpec};
+use serde_json::Value;
+
+use super::{
+    agents::agent_tool_output_text,
+    exec_misc::exec_timeout_result_output_text,
+    titles::{clarify_no_answer_result, tool_display_spec},
+};
+use crate::tui::render_transcript::collapse_ledger_body;
 
 pub(crate) fn tool_output_text(value: &Value) -> (String, Option<String>) {
-    if let Some(timeout) = exec_timeout_output_text(value) {
-        return collapse_ledger_body(&timeout);
-    }
     if value.get("tool_name").and_then(Value::as_str) == Some("spawn_agent")
         && let Some(output) = agent_tool_output_text(value)
     {
@@ -17,8 +21,26 @@ pub(crate) fn tool_output_text(value: &Value) -> (String, Option<String>) {
         .get("tool_name")
         .and_then(Value::as_str)
         .unwrap_or("tool");
+    let outcome = value
+        .get("outcome")
+        .and_then(Value::as_str)
+        .unwrap_or("normal");
     let display = tool_display_spec(tool, value);
     let result = value.get("result").unwrap_or(&Value::Null);
+    tool_result_output_text(tool, outcome, result, &display)
+}
+
+pub(crate) fn tool_result_output_text(
+    tool: &str,
+    outcome: &str,
+    result: &Value,
+    display: &ToolDisplaySpec,
+) -> (String, Option<String>) {
+    if tool == "exec_command"
+        && let Some(timeout) = exec_timeout_result_output_text(result)
+    {
+        return collapse_ledger_body(&timeout);
+    }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return collapse_ledger_body(error);
     }
@@ -27,7 +49,7 @@ pub(crate) fn tool_output_text(value: &Value) -> (String, Option<String>) {
     {
         return collapse_ledger_body(&body);
     }
-    let summary = format_tool_summary(value);
+    let summary = format_tool_result_summary(tool, outcome, result, display);
     let detail = body_text_from_keys(&display.body_keys, result);
     match detail {
         Some(detail) if detail != summary => {
@@ -48,7 +70,16 @@ pub(crate) fn format_tool_summary(value: &Value) -> String {
         .unwrap_or("normal");
     let result = value.get("result").unwrap_or(&Value::Null);
     let display = tool_display_spec(tool, value);
-    let summary = summarize_tool_result(&display, result);
+    format_tool_result_summary(tool, outcome, result, &display)
+}
+
+pub(crate) fn format_tool_result_summary(
+    tool: &str,
+    outcome: &str,
+    result: &Value,
+    display: &ToolDisplaySpec,
+) -> String {
+    let summary = summarize_tool_result(display, result);
     if summary.is_empty() {
         format!("{tool} {outcome}")
     } else {

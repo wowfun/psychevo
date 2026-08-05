@@ -1,3 +1,30 @@
+use super::super::{
+    AgentEdgeStatus, AgentLoopRequest, BTreeMap, ClarifyToolSurface, ContextRecorder, Error,
+    FutureExt, Instant, LanguageModel, Mutex, PersistenceSink, PromptPrefixRecordInput, Result,
+    RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool, SelectedAgent, ToolSurfaceAssembly,
+    Value, json, load_projected_messages, user_text_message,
+};
+use super::super::{
+    Arc, PermissionRuntime, RuntimeTimeContext, assemble_child_prompt_prefix,
+    assemble_tool_surface_with_warnings, assistant_text,
+    catalog_surface::{
+        AgentDefinition, AgentInvocationRole, AgentRunRecord, AgentToolContext,
+        SUBAGENT_DEFAULT_MAX_TURNS, apply_agent_tool_policy, apply_hook_runtime,
+        build_hook_runtime, effective_run_mode, effective_tool_names,
+        narrow_permission_mode_for_agent,
+    },
+    context_evidence_for_request,
+    mailbox_tools::{
+        fork_messages, update_run_child_session, update_run_completed, update_run_failed,
+    },
+    prompt_prefix_record, tool_declarations_hash_with_search, turn_runtime_time_instruction,
+};
+use super::lifecycle::{
+    ChildRun, external_agent_runtime_ref, maybe_preflight_child_compaction,
+    optional_external_agent_contributions,
+};
+use crate::panic_evidence::PanicEvidence;
+
 pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let supervisor = child.context.supervisor.clone();
     let state = child.context.state.clone();
@@ -7,9 +34,11 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .await
     {
         Ok(result) => result,
-        Err(_) => {
-            supervisor.stage_task_panic(&id);
-            Err(Error::Message("Agent task panicked".to_string()))
+        Err(payload) => {
+            let evidence = PanicEvidence::capture(payload.as_ref());
+            let message = evidence.terminal_message("Agent task panicked");
+            supervisor.stage_task_panic(&id, &message);
+            Err(Error::Message(message))
         }
     };
     if let Err(error) = &result {
@@ -40,11 +69,7 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         } else {
             "application shutdown"
         };
-        update_run_failed(
-            &child.context.supervisor,
-            &child.id,
-            reason,
-        );
+        update_run_failed(&child.context.supervisor, &child.id, reason);
         return Err(Error::Message(reason.to_string()));
     }
     let child_model = child.model.clone();
@@ -53,7 +78,6 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         child
             .context
             .state
-
             .set_agent_edge_status(&child_session, AgentEdgeStatus::Open)
             .await?;
         child_session
@@ -61,7 +85,6 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         child
             .context
             .state
-
             .create_child_session_with_metadata(
                 &child.context.parent_session_id,
                 &child.context.cwd,
@@ -88,36 +111,40 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
     update_run_child_session(&child.context.supervisor, &child.id, &child_session);
     emit_agent_session_start(&child, &child_session);
     if child.existing_child_session.is_none() {
-        child.context.state.upsert_agent_edge(
-            &child.context.parent_session_id,
-            &child_session,
-            AgentEdgeStatus::Open,
-            Some(child_agent_metadata(ChildAgentMetadataInput {
-                id: &child.id,
-                task_name: &child.task_name,
-                agent: &child.agent,
-                parent_session_id: &child.context.parent_session_id,
-                role: child.role,
-                task: &child.prompt,
-                background: child.background,
-                fork_context: child.fork_context,
-                spawn_depth_remaining: child.spawn_depth_remaining,
-                team_member_id: child.team_member_id.as_deref(),
-                context: Some(&child.context),
-                parent_tool_call_id: child.parent_tool_call_id.as_deref(),
-            })),
-        )
-        .await?;
+        child
+            .context
+            .state
+            .upsert_agent_edge(
+                &child.context.parent_session_id,
+                &child_session,
+                AgentEdgeStatus::Open,
+                Some(child_agent_metadata(ChildAgentMetadataInput {
+                    id: &child.id,
+                    task_name: &child.task_name,
+                    agent: &child.agent,
+                    parent_session_id: &child.context.parent_session_id,
+                    role: child.role,
+                    task: &child.prompt,
+                    background: child.background,
+                    fork_context: child.fork_context,
+                    spawn_depth_remaining: child.spawn_depth_remaining,
+                    team_member_id: child.team_member_id.as_deref(),
+                    context: Some(&child.context),
+                    parent_tool_call_id: child.parent_tool_call_id.as_deref(),
+                })),
+            )
+            .await?;
     }
     let hook_runtime = child_hook_runtime(&child)?;
     if let Some(runtime) = &hook_runtime {
-        let outcome = runtime.run_subagent_start(&json!({
-            "id": child.id.clone(),
-            "agent": child.agent.name.clone(),
-            "child_session_id": child_session.clone(),
-            "parent_session_id": child.context.parent_session_id.clone(),
-        }))
-        .await;
+        let outcome = runtime
+            .run_subagent_start(&json!({
+                "id": child.id.clone(),
+                "agent": child.agent.name.clone(),
+                "child_session_id": child_session.clone(),
+                "parent_session_id": child.context.parent_session_id.clone(),
+            }))
+            .await;
         if let Some(reason) = outcome.stop_reason {
             update_run_failed(&child.context.supervisor, &child.id, &reason);
             return Err(Error::Message(reason));
@@ -171,8 +198,8 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         Some(runtime) => permission_runtime.with_hook_runtime(runtime),
         None => permission_runtime,
     };
-    let permission_runtime = permission_runtime
-        .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
+    let permission_runtime =
+        permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let mut mcp_manager = crate::mcp::McpConnectionManager::default();
     let mcp_snapshot = mcp_manager
         .snapshot(
@@ -180,6 +207,8 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
             &child.context.cwd,
             Some(&permission_runtime),
             effective_mode == crate::types::RunMode::Plan,
+            Some(&child.context.home),
+            child.context.mcp_oauth_credentials.as_ref(),
         )
         .await;
     if !mcp_snapshot.required_failures.is_empty() {
@@ -292,7 +321,6 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
     let prefix_record = child
         .context
         .state
-
         .upsert_session_prompt_prefix(prefix_record)
         .await?;
     let prompt_prefix_metadata = json!({
@@ -363,8 +391,6 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: child_stream_events,
         trace: None,
@@ -398,13 +424,14 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         Err(err) => {
             update_run_failed(&child.context.supervisor, &child.id, &err.to_string());
             if let Some(runtime) = &hook_runtime {
-                let _ = runtime.run_subagent_stop(&json!({
-                    "id": child.id.clone(),
-                    "agent": child.agent.name.clone(),
-                    "outcome": "failed",
-                    "error": err.to_string(),
-                }))
-                .await;
+                let _ = runtime
+                    .run_subagent_stop(&json!({
+                        "id": child.id.clone(),
+                        "agent": child.agent.name.clone(),
+                        "outcome": "failed",
+                        "error": err.to_string(),
+                    }))
+                    .await;
             }
             return Err(err.into());
         }
@@ -416,13 +443,14 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         .find_map(assistant_text)
         .unwrap_or_default();
     if let Some(runtime) = &hook_runtime {
-        let stop = runtime.run_subagent_stop(&json!({
-            "id": child.id.clone(),
-            "agent": child.agent.name.clone(),
-            "outcome": completion.outcome.as_str(),
-            "final_answer": final_answer.clone(),
-        }))
-        .await;
+        let stop = runtime
+            .run_subagent_stop(&json!({
+                "id": child.id.clone(),
+                "agent": child.agent.name.clone(),
+                "outcome": completion.outcome.as_str(),
+                "final_answer": final_answer.clone(),
+            }))
+            .await;
         if let Some(reason) = stop.block_reason {
             update_run_failed(&child.context.supervisor, &child.id, &reason);
             return Err(Error::Message(reason));
@@ -478,20 +506,20 @@ fn emit_child_warning_events(child: &ChildRun, child_session_id: &str, warnings:
     }
 }
 
-struct ExternalAgentSessionStart<'a> {
-    context: &'a AgentToolContext,
-    agent: &'a AgentDefinition,
-    id: &'a str,
-    task_name: &'a str,
-    task: &'a str,
-    tool_call_id: &'a str,
-    child_session_id: &'a str,
-    spawn_depth_remaining: u8,
-    team_member_id: Option<&'a str>,
-    runtime_ref: Option<&'a str>,
+pub(super) struct ExternalAgentSessionStart<'a> {
+    pub(super) context: &'a AgentToolContext,
+    pub(super) agent: &'a AgentDefinition,
+    pub(super) id: &'a str,
+    pub(super) task_name: &'a str,
+    pub(super) task: &'a str,
+    pub(super) tool_call_id: &'a str,
+    pub(super) child_session_id: &'a str,
+    pub(super) spawn_depth_remaining: u8,
+    pub(super) team_member_id: Option<&'a str>,
+    pub(super) runtime_ref: Option<&'a str>,
 }
 
-fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
+pub(super) fn emit_external_agent_session_start(event: ExternalAgentSessionStart<'_>) {
     let Some(stream) = &event.context.stream_events else {
         return;
     };

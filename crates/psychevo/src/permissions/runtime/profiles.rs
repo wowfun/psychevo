@@ -1,12 +1,21 @@
-pub(crate) fn hardline_deny(action: &PermissionAction) -> Option<String> {
+use std::{collections::BTreeMap, path::Path};
+
+use super::super::rules::{
+    background_shell_reason, dangerous_bash_reason, hardline_bash_reason, wildcard_match,
+};
+use super::actions::{FileTarget, PermissionAction};
+use super::protected_paths::{protected_read_reason, protected_write_reason};
+use super::state::PersistentPermissionGrant;
+use super::tool::ActionPolicyEvaluation;
+use crate::types::{PermissionAccess, PermissionProfileConfig};
+
+pub(super) fn hardline_deny(action: &PermissionAction) -> Option<String> {
     match action {
         PermissionAction::ExecCommand {
             command,
             normalized,
             ..
-        } => {
-            background_shell_reason(command).or_else(|| hardline_bash_reason(normalized))
-        }
+        } => background_shell_reason(command).or_else(|| hardline_bash_reason(normalized)),
         PermissionAction::File {
             paths, mutating, ..
         } => paths.iter().find_map(|target| {
@@ -24,20 +33,13 @@ pub(crate) fn hardline_deny(action: &PermissionAction) -> Option<String> {
     }
 }
 
-pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
+pub(super) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
     match action {
         PermissionAction::ExecCommand {
-            normalized,
-            cwd,
-            ..
+            normalized, cwd, ..
         } => {
-            if cwd
-                .as_ref()
-                .is_some_and(|target| !target.within_cwd)
-            {
-                return Some(
-                    "command cwd outside accepted cwd requires approval".to_string(),
-                );
+            if cwd.as_ref().is_some_and(|target| !target.within_cwd) {
+                return Some("command cwd outside accepted cwd requires approval".to_string());
             }
             dangerous_bash_reason(normalized)
         }
@@ -45,9 +47,7 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         PermissionAction::Skill { tool, action } => Some(format!(
             "{tool} action `{action}` changes skill configuration or files and requires approval"
         )),
-        PermissionAction::McpStartup {
-            server, target, ..
-        } => Some(format!(
+        PermissionAction::McpStartup { server, target, .. } => Some(format!(
             "MCP server `{server}` startup over {} requires approval",
             target.transport_kind()
         )),
@@ -59,7 +59,7 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
     }
 }
 
-pub(crate) fn builtin_profile_decision(
+pub(super) fn builtin_profile_decision(
     profile_name: &str,
     action: &PermissionAction,
 ) -> ActionPolicyEvaluation {
@@ -74,7 +74,7 @@ pub(crate) fn builtin_profile_decision(
     }
 }
 
-pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
+fn workspace_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
     match action {
         PermissionAction::File {
             paths, mutating, ..
@@ -129,9 +129,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
                 target.transport_kind()
             ),
             matched_rule: None,
-            suggested_rule: Some(format!(
-                "mcp_startup:{server}@{descriptor_fingerprint}"
-            )),
+            suggested_rule: Some(format!("mcp_startup:{server}@{descriptor_fingerprint}")),
             persistent_grants: action.persistent_grants(),
         },
         PermissionAction::Mcp { server, tool } => ActionPolicyEvaluation::Ask {
@@ -145,7 +143,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
     }
 }
 
-pub(crate) fn read_only_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
+fn read_only_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
     match action {
         PermissionAction::File {
             mutating: false, ..
@@ -168,7 +166,7 @@ pub(crate) fn read_only_profile_decision(action: &PermissionAction) -> ActionPol
     }
 }
 
-pub(crate) fn explicit_profile_decision(
+pub(super) fn explicit_profile_decision(
     profile_name: &str,
     profile: &PermissionProfileConfig,
     action: &PermissionAction,
@@ -217,9 +215,9 @@ pub(crate) fn explicit_profile_decision(
     }
 }
 
-pub(crate) fn profile_filesystem_decision(
+fn profile_filesystem_decision(
     profile_name: &str,
-    rules: &std::collections::BTreeMap<String, PermissionAccess>,
+    rules: &BTreeMap<String, PermissionAccess>,
     paths: &[FileTarget],
     mutating: bool,
 ) -> Option<ActionPolicyEvaluation> {
@@ -279,10 +277,10 @@ pub(crate) fn profile_filesystem_decision(
     (matched_allow == paths.len() && !paths.is_empty()).then_some(ActionPolicyEvaluation::Allow)
 }
 
-pub(crate) fn profile_access_decision<F, G>(
+fn profile_access_decision<F, G>(
     profile_name: &str,
     category: &str,
-    rules: &std::collections::BTreeMap<String, PermissionAccess>,
+    rules: &BTreeMap<String, PermissionAccess>,
     target: &str,
     prompt_reason: F,
     persistent_grants: G,
@@ -309,8 +307,8 @@ where
     }
 }
 
-pub(crate) fn matching_filesystem_access<'a>(
-    rules: &'a std::collections::BTreeMap<String, PermissionAccess>,
+fn matching_filesystem_access<'a>(
+    rules: &'a BTreeMap<String, PermissionAccess>,
     target: &FileTarget,
 ) -> Option<(&'a str, PermissionAccess)> {
     rules
@@ -320,11 +318,10 @@ pub(crate) fn matching_filesystem_access<'a>(
         .map(|(rule, access)| (rule.as_str(), *access))
 }
 
-pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
+fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
     let rule_path = Path::new(rule);
     if rule_path.is_absolute() {
-        let Ok(normalized) =
-            crate::filesystem_identity::canonicalize_deepest_existing(rule_path)
+        let Ok(normalized) = crate::filesystem_identity::canonicalize_deepest_existing(rule_path)
         else {
             return false;
         };
@@ -341,11 +338,14 @@ pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
 
 fn path_uri_contains(root: &str, target: &str) -> bool {
     let root = root.trim_end_matches('/');
-    target == root || target.strip_prefix(root).is_some_and(|rest| rest.starts_with('/'))
+    target == root
+        || target
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
-pub(crate) fn matching_access<'a>(
-    rules: &'a std::collections::BTreeMap<String, PermissionAccess>,
+fn matching_access<'a>(
+    rules: &'a BTreeMap<String, PermissionAccess>,
     target: &str,
 ) -> Option<(&'a str, PermissionAccess)> {
     rules
@@ -355,7 +355,7 @@ pub(crate) fn matching_access<'a>(
         .map(|(rule, access)| (rule.as_str(), *access))
 }
 
-pub(crate) fn access_rule_matches(rule: &str, target: &str) -> bool {
+fn access_rule_matches(rule: &str, target: &str) -> bool {
     let rule = rule.to_ascii_lowercase();
     let target = target.to_ascii_lowercase();
     if rule == target || wildcard_match(&rule, &target) {
@@ -366,7 +366,7 @@ pub(crate) fn access_rule_matches(rule: &str, target: &str) -> bool {
         .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
-pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
+pub(super) fn web_fetch_host(value: &str) -> Option<String> {
     let rest = value
         .strip_prefix("http://")
         .or_else(|| value.strip_prefix("https://"))
@@ -380,7 +380,8 @@ pub(crate) fn web_fetch_host(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod profile_filesystem_tests {
-    use super::*;
+    use super::filesystem_rule_matches;
+    use crate::permissions::runtime::actions::file_target;
 
     #[test]
     fn relative_filesystem_rule_matches_decoded_space_path() {

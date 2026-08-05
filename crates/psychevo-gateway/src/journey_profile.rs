@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-use crate::{GatewayEvent, TranscriptEntryRole};
+use psychevo_gateway_protocol::events_transcript::{GatewayEvent, TranscriptEntryRole};
 
 const PROFILE_PATH_ENV: &str = "PSYCHEVO_GATEWAY_PROFILE_PATH";
 

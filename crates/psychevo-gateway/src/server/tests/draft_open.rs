@@ -1,3 +1,16 @@
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::runtime_profiles::thread_context_read_result_live;
+use crate::server::scope_session::{
+    ResolvedScope, canonical_source_mutation_key, default_resolved_scope, detached_draft_scope,
+};
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn default_draft_open_returns_one_exact_authoritative_context() {
     let (_temp, state) = web_state().await;
@@ -28,7 +41,7 @@ async fn default_draft_open_returns_one_exact_authoritative_context() {
         },
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({
@@ -77,7 +90,7 @@ entrypoints = ["peer"]
     let discovery = thread_context_read_result_live(
         &state,
         &scope,
-        wire::ThreadContextReadParams {
+        wire::agents_backend_rpc::ThreadContextReadParams {
             thread_id: None,
             target: None,
             scope: Some(scope.to_wire_scope()),
@@ -99,7 +112,7 @@ entrypoints = ["peer"]
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({

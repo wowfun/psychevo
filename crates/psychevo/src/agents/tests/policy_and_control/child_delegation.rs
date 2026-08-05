@@ -1,3 +1,42 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use psychevo_agent_core::{
+    AssistantBlock, ControlHandle, Message, ToolBinding, ToolCallBlock, user_text_message,
+};
+use psychevo_ai::{
+    AbortSignal, AdapterCall, AdapterFuture, AdapterStream, LanguageAdapter, LanguageAdapterEvent,
+    LanguageRequest, Outcome,
+};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use tokio::sync::watch;
+
+use crate::agents::child_runs::{SpawnAgentArgs, default_task_name, spawn_subagent};
+use crate::agents::definition_policy::built_in_agent;
+use crate::agents::lifecycle::subagent_summary_value;
+use crate::agents::mailbox_tools::{WaitAgentTool, append_parent_agent_mailbox_event, now_ms};
+use crate::agents::teams::ActiveAgentTeamContext;
+use crate::agents::{
+    AgentCatalog, AgentContribution, AgentMailboxWaitOutcome, AgentRunPhase, AgentRunStatus,
+    AgentTeamMember, wait_agent_mailbox,
+};
+use crate::error::Error;
+use crate::state::StateRuntime;
+use crate::store::AgentEdgeStatus;
+
+use super::super::{
+    RawStreamEvent, fake_language_model, test_agent_run_record, test_agent_tool_context,
+    test_language_model, test_tool,
+};
+use super::support::{
+    AbortAwareExternalAgentDelegate, AbortAwareProvider, FakeExternalAgentDelegate,
+    backend_backed_agent,
+};
+
 fn exec_command_script(call_id: &str, cmd: &str) -> Vec<RawStreamEvent> {
     vec![
         RawStreamEvent::ToolStart {
@@ -20,12 +59,9 @@ fn exec_command_script(call_id: &str, cmd: &str) -> Vec<RawStreamEvent> {
 }
 
 fn child_runtime_env(tmp: &TempDir, home: &Path) -> BTreeMap<String, String> {
-    let mut env = crate::tools::test_exec_env();
+    let mut env = crate::tools::exec_command::sessions::session_manager::test_exec_env();
     env.insert("HOME".to_string(), tmp.path().display().to_string());
-    env.insert(
-        "PSYCHEVO_HOME".to_string(),
-        home.display().to_string(),
-    );
+    env.insert("PSYCHEVO_HOME".to_string(), home.display().to_string());
     env
 }
 
@@ -69,11 +105,11 @@ impl LanguageAdapter for ChildRequestCaptureProvider {
         self.models.lock().expect("models").push(call.model);
         self.requests.lock().expect("requests").push(call.request);
         Box::pin(async {
-            Ok(Box::pin(futures::stream::iter([Ok(
-                LanguageAdapterEvent::Finish {
+            Ok(
+                Box::pin(futures::stream::iter([Ok(LanguageAdapterEvent::Finish {
                     finish_reason: None,
-                },
-            )])) as AdapterStream<_>)
+                })])) as AdapterStream<_>,
+            )
         })
     }
 }
@@ -124,10 +160,7 @@ pub(crate) async fn child_model_override_rebinds_the_dispatched_sdk_model() {
     .await
     .expect("spawn");
 
-    assert_eq!(
-        models.lock().expect("models").as_slice(),
-        ["child-model"]
-    );
+    assert_eq!(models.lock().expect("models").as_slice(), ["child-model"]);
 }
 
 #[tokio::test]
@@ -203,20 +236,34 @@ pub(crate) async fn invalid_child_model_is_rejected_before_lifecycle_state() {
 #[tokio::test]
 pub(crate) async fn background_completion_records_mailbox_event_without_parent_user_message() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite"))
+        .await
+        .expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let child = store
         .create_child_session_with_metadata(&parent, tmp.path(), "agent", "model", "provider", None)
-        .await.expect("child");
+        .await
+        .expect("child");
     let record = test_agent_run_record(parent.clone(), Some(child));
 
     append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
-        .await.expect("mailbox event");
+        .await
+        .expect("mailbox event");
 
-    assert!(store.load_messages(&parent).await.expect("messages").is_empty());
-    let events = store.load_agent_mailbox_events(&parent).await.expect("events");
+    assert!(
+        store
+            .load_messages(&parent)
+            .await
+            .expect("messages")
+            .is_empty()
+    );
+    let events = store
+        .load_agent_mailbox_events(&parent)
+        .await
+        .expect("events");
     assert_eq!(events.len(), 1);
     assert!(events[0].content_text.contains("mailbox final"));
     assert!(!events[0].content_text.contains("agent_id"));
@@ -242,29 +289,31 @@ pub(crate) async fn background_completion_records_mailbox_event_without_parent_u
 #[tokio::test]
 pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite"))
+        .await
+        .expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let record = test_agent_run_record(parent.clone(), None);
     append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
-        .await.expect("mailbox event");
+        .await
+        .expect("mailbox event");
 
     let value = wait_agent_mailbox(&parent, Duration::from_millis(0), &store)
         .await
         .expect("wait");
-    assert_eq!(value["timed_out"], false);
-    assert_eq!(value["message"], "Wait completed.");
-    assert!(value.get("final_answer").is_none());
-    assert!(value.get("statuses").is_none());
+    assert_eq!(value, AgentMailboxWaitOutcome::Ready);
 
     let empty_parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("empty parent");
+        .await
+        .expect("empty parent");
     let value = wait_agent_mailbox(&empty_parent, Duration::from_millis(0), &store)
         .await
         .expect("timeout");
-    assert_eq!(value["timed_out"], true);
+    assert_eq!(value, AgentMailboxWaitOutcome::TimedOut);
 }
 
 #[tokio::test]
@@ -388,10 +437,13 @@ pub(crate) async fn wait_agent_delivers_one_bounded_mailbox_page() {
 #[tokio::test]
 pub(crate) async fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite"))
+        .await
+        .expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "parent-model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let child = store
         .create_child_session_with_metadata(
             &parent,
@@ -401,7 +453,8 @@ pub(crate) async fn subagent_summary_uses_prompt_task_and_direct_child_tokens() 
             "provider",
             None,
         )
-        .await.expect("child");
+        .await
+        .expect("child");
     store
         .append_message_with_metrics(
             &child,
@@ -428,7 +481,8 @@ pub(crate) async fn subagent_summary_uses_prompt_task_and_direct_child_tokens() 
             })),
             None,
         )
-        .await.expect("assistant tool call");
+        .await
+        .expect("assistant tool call");
     store
         .append_message_with_metrics(
             &child,
@@ -449,7 +503,8 @@ pub(crate) async fn subagent_summary_uses_prompt_task_and_direct_child_tokens() 
             })),
             None,
         )
-        .await.expect("assistant final");
+        .await
+        .expect("assistant final");
 
     let id = "agent-summary-1".to_string();
     let mut record = test_agent_run_record(parent, Some(child));
@@ -481,7 +536,8 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -540,7 +596,8 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
@@ -562,11 +619,9 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
         serde_json::to_string(&project_hooks).expect("project hooks"),
     )
     .expect("write project hooks");
-    let project_sources = crate::hooks::config_hook_sources_for_path(
-        &cwd.join(".psychevo/config.toml"),
-        "project",
-    )
-    .expect("project hook sources");
+    let project_sources =
+        crate::hooks::config_hook_sources_for_path(&cwd.join(".psychevo/config.toml"), "project")
+            .expect("project hook sources");
     write_trusted_hook_config(&home, &cwd, &project_sources);
 
     let marker = cwd.join("child-agent-post-hook");
@@ -649,7 +704,8 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
@@ -671,11 +727,9 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
         serde_json::to_string(&project_hooks).expect("project hooks"),
     )
     .expect("write project hooks");
-    let project_sources = crate::hooks::config_hook_sources_for_path(
-        &cwd.join(".psychevo/config.toml"),
-        "project",
-    )
-    .expect("project hook sources");
+    let project_sources =
+        crate::hooks::config_hook_sources_for_path(&cwd.join(".psychevo/config.toml"), "project")
+            .expect("project hook sources");
     write_trusted_hook_config(&home, &cwd, &project_sources);
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
@@ -747,7 +801,8 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     let plugin_source_root = tmp.path().join("plugin-source");
@@ -922,7 +977,8 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -932,8 +988,14 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
     let provider = ChildRequestCaptureProvider::default();
     let requests = Arc::clone(&provider.requests);
     let (_tx, rx) = watch::channel(false);
-    let mut context =
-        test_agent_tool_context(&tmp, test_language_model(provider), store, db_path, parent, catalog);
+    let mut context = test_agent_tool_context(
+        &tmp,
+        test_language_model(provider),
+        store,
+        db_path,
+        parent,
+        catalog,
+    );
     context
         .extension_inputs
         .runtime_tools
@@ -969,9 +1031,8 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
         .iter()
         .filter_map(|tool| match tool {
             psychevo_ai::LanguageTool::Function { declaration } => Some(declaration.name.clone()),
-            psychevo_ai::LanguageTool::WebSearch(_) | psychevo_ai::LanguageTool::Extension { .. } => {
-                None
-            }
+            psychevo_ai::LanguageTool::WebSearch(_)
+            | psychevo_ai::LanguageTool::Extension { .. } => None,
         })
         .collect::<Vec<_>>();
     assert!(names.contains(&"read".to_string()), "{names:?}");
@@ -986,7 +1047,8 @@ pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt(
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -1030,9 +1092,7 @@ pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt(
     let (runtime_time_index, runtime_time) = messages
         .iter()
         .enumerate()
-        .find(|(_, message)| {
-            message["extensions"]["psychevo"]["prompt_slot"] == "runtime_time"
-        })
+        .find(|(_, message)| message["extensions"]["psychevo"]["prompt_slot"] == "runtime_time")
         .expect("runtime time prompt instruction");
     assert_eq!(runtime_time["role"], "system");
     let mut runtime_time_metadata = runtime_time["extensions"]["psychevo"]
@@ -1070,7 +1130,8 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -1117,7 +1178,8 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     assert_eq!(output.json["session_id"].as_str(), Some(child_session));
     let edge = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge");
     assert_eq!(edge.parent_session_id, parent);
     assert_eq!(edge.child_session_id, child_session);
@@ -1238,7 +1300,8 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -1281,7 +1344,8 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
@@ -1293,7 +1357,8 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -1343,7 +1408,8 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
@@ -1371,7 +1437,8 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
@@ -1418,12 +1485,14 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
         .expect("child session");
     let summary = store
         .session_summary(child_session)
-        .await.expect("summary")
+        .await
+        .expect("summary")
         .expect("child summary");
     assert_eq!(summary.provider, "acp:opencode");
     let edge = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge");
     assert_eq!(edge.parent_session_id, parent);
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
@@ -1616,7 +1685,8 @@ pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_prov
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let mut agent = backend_backed_agent("opencode", "opencode");
     agent.skills = vec!["review-checklist".to_string()];
     agent
@@ -1703,7 +1773,8 @@ pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_prov
         .expect("child session");
     let metadata = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge")
         .metadata
         .expect("metadata");
@@ -1726,7 +1797,8 @@ pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributio
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let mut agent = backend_backed_agent("opencode", "opencode");
     agent.skills = vec!["review-checklist".to_string()];
     let catalog = AgentCatalog {
@@ -1778,7 +1850,8 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
@@ -1831,7 +1904,8 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .await.expect("edge")
+        .await
+        .expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
@@ -1843,7 +1917,8 @@ pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailab
     let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .await.expect("parent");
+        .await
+        .expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),

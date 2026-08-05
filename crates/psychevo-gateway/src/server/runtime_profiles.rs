@@ -1,4 +1,51 @@
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use psychevo::agents::{
+    AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiscoveryOptions, AgentEntrypoint,
+    AgentTeamMember, discover_agents, valid_agent_name,
+};
+use psychevo::application::{GatewaySourceLaneInput, GatewaySourceLaneRecord};
+use psychevo::config::{
+    REASONING_EFFORT_VALUES, RuntimeProfileConfig, RuntimeProfileKind,
+    generated_runtime_profile_id_for_backend, load_agent_backend_configs,
+    load_runtime_profile_configs, remove_config_value, set_config_value,
+};
+use psychevo::host_paths::HostPlatform;
+use psychevo::{
+    AgentBindingSnapshot, ConfigurationQuery, Error, ThreadAgentBinding,
+    UpdateThreadAgentControlState,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+#[cfg(test)]
+use crate::composition::GatewayApplication;
+use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
+use crate::gateway::agent_session_binding::{
+    CapturedAgentPeerInput, agent_definition_matches_runtime_profile,
+    gateway_agent_definition_fingerprint, resolve_captured_agent_peer_at,
+    runtime_profile_config_fingerprint, runtime_profile_config_revision, runtime_session_handle,
+};
+use crate::gateway::peer_runtime::{PeerResolutionContext, ResolvedPeerTurn, resolve_peer_turn};
+use crate::journey_profile::{GatewayProfileFields, gateway_profile_mark};
+use psychevo_gateway_protocol::source::GatewaySource;
+
+use super::agents::active_profile_config_dir;
+use super::binding::WebState;
+#[cfg(test)]
+use super::binding::{AuthContext, GatewayWebServerConfig};
+use super::rpc_dispatch::runtime_rpc_error;
+#[cfg(test)]
+use super::scope_session::default_resolved_scope;
+use super::scope_session::{ResolvedScope, resolved_scope_for_thread};
+use super::settings_observability::native_runtime_mode_option;
+use super::stable_hash::stable_hash_hex;
+use super::thread_application::{
+    action_descriptors as thread_action_descriptors,
+    pending_interactions as thread_pending_interactions,
+};
 
 #[derive(Clone)]
 struct RuntimeProfileRecord {
@@ -6,10 +53,75 @@ struct RuntimeProfileRecord {
     generated: bool,
 }
 
+struct BoundThreadAgentTarget {
+    profile: RuntimeProfileConfig,
+    peer: Option<ResolvedPeerTurn>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedRuntimeBinding {
+    capture: AgentBindingSnapshot,
+    writable: bool,
+    thread_preferences: BTreeMap<String, Value>,
+    runtime_observed: BTreeMap<String, Value>,
+}
+
+impl ResolvedRuntimeBinding {
+    fn from_framework(
+        binding: AgentBindingSnapshot,
+        writable: bool,
+        thread_preferences: BTreeMap<String, Value>,
+        runtime_observed: BTreeMap<String, Value>,
+    ) -> Self {
+        Self {
+            capture: binding,
+            writable,
+            thread_preferences,
+            runtime_observed,
+        }
+    }
+}
+
+async fn resolved_runtime_binding(
+    state: &WebState,
+    thread_id: &str,
+) -> psychevo::Result<Option<ResolvedRuntimeBinding>> {
+    match state
+        .inner
+        .framework
+        .thread_agent_binding(thread_id)
+        .await?
+    {
+        Some(ThreadAgentBinding::Resolved {
+            binding,
+            writable,
+            thread_preferences,
+            runtime_observed,
+        }) => Ok(Some(ResolvedRuntimeBinding::from_framework(
+            *binding,
+            writable,
+            thread_preferences,
+            runtime_observed,
+        ))),
+        Some(ThreadAgentBinding::Unresolved { thread_id, reason }) => Err(Error::structured(
+            "This thread has an unresolved runtime binding.",
+            serde_json::to_value(wire::agents_backend_rpc::RuntimeErrorView {
+                code: "unresolved_binding".to_string(),
+                stage: "binding".to_string(),
+                retry_class: wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
+                message: reason
+                    .unwrap_or_else(|| "Select a Runtime Profile explicitly.".to_string()),
+                diagnostic_ref: Some(format!("runtime-binding:{thread_id}")),
+            })?,
+        )),
+        None => Ok(None),
+    }
+}
+
 pub(super) struct RunnableTargetCatalog {
     profile_records: BTreeMap<String, RuntimeProfileRecord>,
-    profile_views: Vec<wire::RuntimeProfileView>,
-    compatible_targets: Vec<wire::RunnableTargetView>,
+    profile_views: Vec<wire::agents_backend_rpc::RuntimeProfileView>,
+    compatible_targets: Vec<wire::agents_backend_rpc::RunnableTargetView>,
     target_revisions: BTreeMap<String, String>,
 }
 
@@ -30,17 +142,17 @@ fn cache_runnable_target_catalog(
 
 pub(super) struct ThreadDraftPrepareWork {
     pub(super) target_catalog: Arc<RunnableTargetCatalog>,
-    pub(super) target: wire::RunnableTargetView,
-    pub(super) context: wire::ThreadContextReadResult,
-    pub(super) configured: Vec<psychevo::__product::runtime::ConfiguredModel>,
+    pub(super) target: wire::agents_backend_rpc::RunnableTargetView,
+    pub(super) context: wire::agents_backend_rpc::ThreadContextReadResult,
+    pub(super) configured: Vec<psychevo::config::ConfiguredModel>,
     pub(super) source_lane_prepared: bool,
 }
 
 #[derive(Clone)]
 pub(super) struct ImportableAcpProfile {
     pub(super) config: RuntimeProfileConfig,
-    pub(super) view: wire::RuntimeProfileView,
-    pub(super) targets: Vec<wire::RunnableTargetView>,
+    pub(super) view: wire::agents_backend_rpc::RuntimeProfileView,
+    pub(super) targets: Vec<wire::agents_backend_rpc::RunnableTargetView>,
 }
 
 pub(super) fn importable_acp_profiles(
@@ -94,7 +206,7 @@ pub(super) fn importable_acp_profiles(
 pub(super) struct ValidatedRunnableTarget {
     pub(super) agent_ref: Option<String>,
     pub(super) runtime_profile_ref: String,
-    pub(super) backend_kind: wire::BackendKind,
+    pub(super) backend_kind: wire::source::BackendKind,
 }
 
 impl RunnableTargetCatalog {
@@ -165,8 +277,8 @@ impl RunnableTargetCatalog {
 
     fn compatible_pair(
         &self,
-        target: &wire::RunnableTargetInput,
-    ) -> psychevo::Result<&wire::RunnableTargetView> {
+        target: &wire::thread_command_turn::RunnableTargetInput,
+    ) -> psychevo::Result<&wire::agents_backend_rpc::RunnableTargetView> {
         let runtime_profile_ref = target.runtime_profile_ref.trim();
         if runtime_profile_ref.is_empty() {
             return Err(agent_session_error(
@@ -213,7 +325,10 @@ impl RunnableTargetCatalog {
             })
     }
 
-    pub(super) fn by_id(&self, target_id: &str) -> Option<&wire::RunnableTargetView> {
+    pub(super) fn by_id(
+        &self,
+        target_id: &str,
+    ) -> Option<&wire::agents_backend_rpc::RunnableTargetView> {
         self.compatible_targets
             .iter()
             .find(|candidate| candidate.target_id == target_id)
@@ -223,17 +338,17 @@ impl RunnableTargetCatalog {
         &self,
         state: &WebState,
         scope: &ResolvedScope,
-    ) -> psychevo::Result<wire::RunnableTargetView> {
+    ) -> psychevo::Result<wire::agents_backend_rpc::RunnableTargetView> {
         let source_lane = state
             .inner
-            .state
+            .durability
             .gateway_source_lane(&scope.source.source_key().0)
             .await?;
         if let Some(lane) = source_lane.as_ref()
             && let Some(runtime_profile_ref) = lane.draft_profile_ref.as_deref()
         {
             return self
-                .compatible_pair(&wire::RunnableTargetInput {
+                .compatible_pair(&wire::thread_command_turn::RunnableTargetInput {
                     agent_ref: lane.draft_agent_ref.clone(),
                     runtime_profile_ref: runtime_profile_ref.to_string(),
                 })
@@ -254,7 +369,7 @@ impl RunnableTargetCatalog {
 
     fn validate(
         &self,
-        target: &wire::RunnableTargetInput,
+        target: &wire::thread_command_turn::RunnableTargetInput,
     ) -> psychevo::Result<ValidatedRunnableTarget> {
         let compatible = self.compatible_pair(target)?;
         if !compatible.ready {
@@ -282,8 +397,8 @@ impl RunnableTargetCatalog {
                 .config
                 .runtime
             {
-                RuntimeProfileKind::Native => wire::BackendKind::Native,
-                RuntimeProfileKind::Acp => wire::BackendKind::Acp,
+                RuntimeProfileKind::Native => wire::source::BackendKind::Native,
+                RuntimeProfileKind::Acp => wire::source::BackendKind::Acp,
             },
         })
     }
@@ -313,9 +428,9 @@ impl WebState {
 }
 
 pub(super) fn runnable_target_input(
-    target: &wire::RunnableTargetView,
-) -> wire::RunnableTargetInput {
-    wire::RunnableTargetInput {
+    target: &wire::agents_backend_rpc::RunnableTargetView,
+) -> wire::thread_command_turn::RunnableTargetInput {
+    wire::thread_command_turn::RunnableTargetInput {
         agent_ref: target.agent_ref.clone(),
         runtime_profile_ref: target.runtime_profile_ref.clone(),
     }
@@ -325,7 +440,7 @@ pub(super) fn runnable_target_by_id(
     state: &WebState,
     scope: &ResolvedScope,
     target_id: &str,
-) -> psychevo::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RunnableTargetView> {
     RunnableTargetCatalog::load(state, scope)?
         .by_id(target_id)
         .cloned()
@@ -349,7 +464,7 @@ pub(super) async fn runnable_target_for_source(
     scope: &ResolvedScope,
     source: &GatewaySource,
     default_runtime_profile_ref: &str,
-) -> psychevo::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RunnableTargetView> {
     resolve_runnable_target_for_source(state, scope, source, None, default_runtime_profile_ref)
         .await
 }
@@ -359,7 +474,7 @@ pub(super) async fn runnable_target_for_source_profile(
     scope: &ResolvedScope,
     source: &GatewaySource,
     requested_runtime_profile_ref: Option<&str>,
-) -> psychevo::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RunnableTargetView> {
     resolve_runnable_target_for_source(
         state,
         scope,
@@ -376,21 +491,21 @@ async fn resolve_runnable_target_for_source(
     source: &GatewaySource,
     requested_runtime_profile_ref: Option<&str>,
     default_runtime_profile_ref: &str,
-) -> psychevo::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RunnableTargetView> {
     let lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&source.source_key().0)
         .await?;
     let binding = if let Some(thread_id) = lane.as_ref().and_then(|lane| lane.thread_id.as_deref())
     {
-        state.inner.state.gateway_runtime_binding(thread_id).await?
+        resolved_runtime_binding(state, thread_id).await?
     } else {
         None
     };
     let agent_ref = binding
         .as_ref()
-        .and_then(|binding| binding.agent_ref.clone())
+        .and_then(|binding| binding.capture.agent_ref.clone())
         .or_else(|| lane.as_ref().and_then(|lane| lane.draft_agent_ref.clone()));
     let runtime_profile_ref = requested_runtime_profile_ref
         .map(str::trim)
@@ -399,7 +514,7 @@ async fn resolve_runnable_target_for_source(
         .or_else(|| {
             binding
                 .as_ref()
-                .and_then(|binding| binding.runtime_ref.clone())
+                .map(|binding| binding.capture.runtime_ref.clone())
         })
         .or_else(|| {
             lane.as_ref()
@@ -407,7 +522,7 @@ async fn resolve_runnable_target_for_source(
         })
         .unwrap_or_else(|| default_runtime_profile_ref.to_string());
     let catalog = RunnableTargetCatalog::load(state, scope)?;
-    let requested = wire::RunnableTargetInput {
+    let requested = wire::thread_command_turn::RunnableTargetInput {
         agent_ref,
         runtime_profile_ref: runtime_profile_ref.clone(),
     };
@@ -440,12 +555,12 @@ pub(super) async fn thread_context_read_result_for_target_id(
     scope: &ResolvedScope,
     thread_id: Option<String>,
     target_id: &str,
-) -> psychevo::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadContextReadResult> {
     let has_binding = if let Some(thread_id) = thread_id.as_deref() {
         state
             .inner
-            .state
-            .gateway_runtime_binding(thread_id)
+            .framework
+            .thread_agent_binding(thread_id)
             .await?
             .is_some()
     } else {
@@ -458,7 +573,7 @@ pub(super) async fn thread_context_read_result_for_target_id(
     thread_context_read_result_live(
         state,
         scope,
-        wire::ThreadContextReadParams {
+        wire::agents_backend_rpc::ThreadContextReadParams {
             thread_id,
             target,
             scope: Some(scope.to_wire_scope()),
@@ -470,9 +585,9 @@ pub(super) async fn thread_context_read_result_for_target_id(
 pub(super) fn runtime_profile_list_result(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo::Result<wire::RuntimeProfileListResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::RuntimeProfileListResult> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
-    Ok(wire::RuntimeProfileListResult {
+    Ok(wire::agents_backend_rpc::RuntimeProfileListResult {
         profiles: catalog.profile_views.clone(),
     })
 }
@@ -480,23 +595,26 @@ pub(super) fn runtime_profile_list_result(
 pub(super) fn runtime_profile_read_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::RuntimeProfileReadParams,
+    params: wire::agents_backend_rpc::RuntimeProfileReadParams,
 ) -> psychevo::Result<Value> {
     let profiles = runtime_profile_records(state, scope)?;
     let record = profiles
         .get(&params.id)
         .ok_or_else(|| Error::Message(format!("unknown runtime profile: {}", params.id)))?;
-    Ok(serde_json::to_value(wire::RuntimeProfileReadResult {
-        profile: runtime_profile_view(state, scope, record, None)?,
-        options: Some(record.config.options.clone()),
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::RuntimeProfileReadResult {
+            profile: runtime_profile_view(state, scope, record, None)?,
+            options: Some(record.config.options.clone()),
+        },
+    )?)
 }
 
+#[cfg(test)]
 pub(super) async fn thread_context_read_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
-) -> psychevo::Result<wire::ThreadContextReadResult> {
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadContextReadResult> {
     thread_context_read_result_with_configured_models(state, scope, params)
         .await
         .map(|(context, _)| context)
@@ -505,10 +623,10 @@ pub(super) async fn thread_context_read_result(
 async fn thread_context_read_result_with_configured_models(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
 ) -> psychevo::Result<(
-    wire::ThreadContextReadResult,
-    Vec<psychevo::__product::runtime::ConfiguredModel>,
+    wire::agents_backend_rpc::ThreadContextReadResult,
+    Vec<psychevo::config::ConfiguredModel>,
 )> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_with_catalog(state, scope, params, target_catalog).await
@@ -517,11 +635,11 @@ async fn thread_context_read_result_with_configured_models(
 async fn thread_context_read_result_with_catalog(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo::Result<(
-    wire::ThreadContextReadResult,
-    Vec<psychevo::__product::runtime::ConfiguredModel>,
+    wire::agents_backend_rpc::ThreadContextReadResult,
+    Vec<psychevo::config::ConfiguredModel>,
 )> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
@@ -535,39 +653,25 @@ async fn thread_context_read_result_with_catalog(
         }
     };
     let binding = if let Some(thread_id) = thread_id.as_deref() {
-        state.inner.state.gateway_runtime_binding(thread_id).await?
+        resolved_runtime_binding(state, thread_id).await?
     } else {
         None
     };
-    let run_options = state.run_options(scope.cwd.clone(), thread_id.clone());
-    let configured = configured_models(&run_options).unwrap_or_default();
-    if let Some(binding) = binding.as_ref()
-        && binding.status == GatewayRuntimeBindingStatus::Unresolved
-    {
-        return Err(Error::structured(
-            "This thread has an unresolved runtime binding.",
-            serde_json::to_value(wire::RuntimeErrorView {
-                code: "unresolved_binding".to_string(),
-                stage: "binding".to_string(),
-                retry_class: wire::RuntimeRetryClassView::UserAction,
-                message: binding
-                    .unresolved_reason
-                    .clone()
-                    .unwrap_or_else(|| "Select a Runtime Profile explicitly.".to_string()),
-                diagnostic_ref: Some(format!("runtime-binding:{}", binding.thread_id)),
-            })?,
-        ));
-    }
+    let mut query = ConfigurationQuery::new(&scope.cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
+    let configured = configuration.configured_models().unwrap_or_default();
+    let selected_model = configuration.selected_model().ok().flatten();
     if let Some(binding) = binding.as_ref() {
-        validate_bound_agent_snapshot(binding)?;
+        validate_bound_agent_snapshot(&binding.capture)?;
     }
     let bound_profile_record = binding
         .as_ref()
-        .map(bound_runtime_profile_record)
+        .map(|binding| bound_runtime_profile_record(&binding.capture))
         .transpose()?;
     let source_lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&scope.source.source_key().0)
         .await?;
     let requested_target_view = requested_target
@@ -575,21 +679,25 @@ async fn thread_context_read_result_with_catalog(
         .map(|target| target_catalog.compatible_pair(target).cloned())
         .transpose()?;
     if let (Some(binding), Some(requested)) = (binding.as_ref(), requested_target_view.as_ref())
-        && (binding.runtime_ref.as_deref() != Some(requested.runtime_profile_ref.as_str())
-            || binding.agent_ref != requested.agent_ref)
+        && (binding.capture.runtime_ref != requested.runtime_profile_ref
+            || binding.capture.agent_ref != requested.agent_ref)
     {
         return Err(runtime_rpc_error(
             "immutable_binding",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             format!(
                 "Thread `{}` is bound to Agent target `{}` with Runtime Profile `{}`; start a new Thread to use `{}`.",
-                binding.thread_id,
-                binding.agent_ref.as_deref().unwrap_or("Default Agent"),
-                binding.runtime_ref.as_deref().unwrap_or("unresolved"),
+                binding.capture.thread_id,
+                binding
+                    .capture
+                    .agent_ref
+                    .as_deref()
+                    .unwrap_or("Default Agent"),
+                binding.capture.runtime_ref,
                 requested.label,
             ),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
+            Some(format!("runtime-binding:{}", binding.capture.thread_id)),
         ));
     }
     let profile_records = &target_catalog.profile_records;
@@ -617,7 +725,7 @@ async fn thread_context_read_result_with_catalog(
         })
         .map(|(lane, runtime_ref)| {
             target_catalog
-                .compatible_pair(&wire::RunnableTargetInput {
+                .compatible_pair(&wire::thread_command_turn::RunnableTargetInput {
                     agent_ref: lane.draft_agent_ref.clone(),
                     runtime_profile_ref: runtime_ref.clone(),
                 })
@@ -625,13 +733,13 @@ async fn thread_context_read_result_with_catalog(
         })
         .transpose()?;
     let bound_target_view = binding.as_ref().and_then(|binding| {
-        let runtime_profile_ref = binding.runtime_ref.as_deref().unwrap_or("unresolved");
+        let runtime_profile_ref = binding.capture.runtime_ref.as_str();
         target_catalog
             .compatible_targets
             .iter()
             .find(|target| {
                 target.runtime_profile_ref == runtime_profile_ref
-                    && target.agent_ref == binding.agent_ref
+                    && target.agent_ref == binding.capture.agent_ref
             })
             .cloned()
             .or_else(|| {
@@ -641,8 +749,8 @@ async fn thread_context_read_result_with_catalog(
                     .map(|profile| {
                         let ready = matches!(profile.health.status.as_str(), "ready" | "unchecked");
                         runnable_target_view(
-                            binding.agent_ref.clone(),
-                            binding.agent_ref.as_deref().unwrap_or("Psychevo"),
+                            binding.capture.agent_ref.clone(),
+                            binding.capture.agent_ref.as_deref().unwrap_or("Psychevo"),
                             profile,
                             ready,
                             (!ready).then(|| profile.health.summary.clone()),
@@ -674,7 +782,7 @@ async fn thread_context_read_result_with_catalog(
                     runtime_rpc_error(
                         "target_catalog_empty",
                         "configuration",
-                        wire::RuntimeRetryClassView::UserAction,
+                        wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
                         "No compatible Agent targets are configured.".to_string(),
                         None,
                     )
@@ -686,7 +794,7 @@ async fn thread_context_read_result_with_catalog(
         return Err(runtime_rpc_error(
             "runtime_profile_not_found",
             "configuration",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             format!("Unknown Runtime Profile `{runtime_ref}`."),
             None,
         ));
@@ -727,7 +835,11 @@ async fn thread_context_read_result_with_catalog(
         })
         .unwrap_or_default();
     if selected_record.is_some_and(|record| record.config.runtime == RuntimeProfileKind::Native) {
-        populate_native_control_catalog(&run_options, &configured, &mut surface.controls);
+        populate_native_control_catalog(
+            selected_model.as_ref(),
+            &configured,
+            &mut surface.controls,
+        );
     } else {
         decorate_configured_model_control_labels(&configured, &mut surface.controls);
     }
@@ -737,43 +849,39 @@ async fn thread_context_read_result_with_catalog(
         source_lane.as_ref(),
     );
     let binding_view = binding.as_ref().map(|binding| {
-        let binding_runtime_ref = binding.runtime_ref.as_deref().unwrap_or("unresolved");
-        let session_handle = binding
-            .native_session_id
-            .as_deref()
-            .map(|native_session_id| {
-                if binding_runtime_ref == "native" {
-                    binding.thread_id.clone()
-                } else {
-                    crate::runtime_session_handle(
-                        binding_runtime_ref,
-                        Path::new(&binding.cwd),
-                        native_session_id,
-                    )
-                }
-            });
-        wire::RuntimeBindingView {
-            thread_id: binding.thread_id.clone(),
-            agent_ref: binding.agent_ref.clone(),
-            agent_fingerprint: binding.agent_fingerprint.clone().unwrap_or_default(),
+        let binding_runtime_ref = binding.capture.runtime_ref.as_str();
+        let session_handle =
+            binding
+                .capture
+                .native_session_id
+                .as_deref()
+                .map(|native_session_id| {
+                    if binding_runtime_ref == "native" {
+                        binding.capture.thread_id.clone()
+                    } else {
+                        runtime_session_handle(
+                            binding_runtime_ref,
+                            Path::new(&binding.capture.cwd),
+                            native_session_id,
+                        )
+                    }
+                });
+        wire::agents_backend_rpc::RuntimeBindingView {
+            thread_id: binding.capture.thread_id.clone(),
+            agent_ref: binding.capture.agent_ref.clone(),
+            agent_fingerprint: binding.capture.agent_fingerprint.clone(),
             runtime_ref: binding_runtime_ref.to_string(),
-            backend_kind: binding
-                .backend_kind
-                .clone()
-                .unwrap_or_else(|| "unresolved".to_string()),
-            native_kind: binding.native_kind.clone(),
+            backend_kind: binding.capture.backend_kind.clone(),
+            native_kind: Some(binding.capture.native_kind.clone()),
             native_session_id: session_handle,
-            cwd: binding.cwd.clone(),
-            profile_fingerprint: binding.profile_fingerprint.clone().unwrap_or_default(),
-            ownership: match binding.ownership {
-                GatewayRuntimeBindingOwnership::ReadWrite => {
-                    wire::RuntimeBindingOwnershipView::ReadWrite
-                }
-                GatewayRuntimeBindingOwnership::ReadOnly => {
-                    wire::RuntimeBindingOwnershipView::ReadOnly
-                }
+            cwd: binding.capture.cwd.clone(),
+            profile_fingerprint: binding.capture.profile_fingerprint.clone(),
+            ownership: if binding.writable {
+                wire::agents_backend_rpc::RuntimeBindingOwnershipView::ReadWrite
+            } else {
+                wire::agents_backend_rpc::RuntimeBindingOwnershipView::ReadOnly
             },
-            binding_revision: u64::try_from(binding.binding_revision).unwrap_or_default(),
+            binding_revision: u64::try_from(binding.capture.binding_revision).unwrap_or_default(),
         }
     });
     let stability = profiles
@@ -801,7 +909,7 @@ async fn thread_context_read_result_with_catalog(
         thread_pending_interactions(state, scope, thread_id.as_deref()).await?;
     let target_revision = binding
         .as_ref()
-        .map(|binding| public_redacted_bound_target_revision(&selected_target, binding))
+        .map(|binding| public_redacted_bound_target_revision(&selected_target, &binding.capture))
         .or_else(|| {
             target_catalog
                 .target_revision(&selected_target.target_id)
@@ -817,13 +925,13 @@ async fn thread_context_read_result_with_catalog(
         &selected_profile.health.status,
         &binding
             .as_ref()
-            .map(|binding| binding.binding_revision.to_string())
+            .map(|binding| binding.capture.binding_revision.to_string())
             .unwrap_or_default(),
         &preparation_revision,
     ]);
     let control_revision = binding
         .as_ref()
-        .map(|binding| binding.control_revision.to_string())
+        .map(|binding| binding.capture.control_revision.to_string())
         .unwrap_or_else(|| {
             source_draft_control_revision(source_lane.as_ref(), &capability_revision)
         });
@@ -834,9 +942,7 @@ async fn thread_context_read_result_with_catalog(
         .input_capabilities
         .iter()
         .any(|capability| capability.enabled && capability.kind != "agentMention");
-    let read_only = binding
-        .as_ref()
-        .is_some_and(|binding| binding.ownership != GatewayRuntimeBindingOwnership::ReadWrite);
+    let read_only = binding.as_ref().is_some_and(|binding| !binding.writable);
     let unavailable_recovery_action = selected_record
         .filter(|record| {
             record.config.backend_ref.as_deref() == Some(crate::managed_acp::CODEX_ACP_BACKEND_ID)
@@ -893,7 +999,7 @@ async fn thread_context_read_result_with_catalog(
     };
     let projected_target_id = selected_target.target_id;
     Ok((
-        wire::ThreadContextReadResult {
+        wire::agents_backend_rpc::ThreadContextReadResult {
             selected_target_id: explicit_selection.then(|| projected_target_id.clone()),
             suggested_target_id: (!explicit_selection).then_some(projected_target_id),
             runtime_profile_ref: runtime_ref,
@@ -906,7 +1012,7 @@ async fn thread_context_read_result_with_catalog(
             compatible_targets,
             input_capabilities: surface.input_capabilities,
             actions,
-            sendability: wire::ThreadSendabilityView {
+            sendability: wire::agents_backend_rpc::ThreadSendabilityView {
                 allowed: sendable,
                 reason: sendability_reason,
                 recovery_action,
@@ -923,8 +1029,8 @@ async fn thread_context_read_result_with_catalog(
 pub(super) async fn thread_context_read_result_live(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
-) -> psychevo::Result<wire::ThreadContextReadResult> {
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadContextReadResult> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_live_with_catalog(state, scope, params, target_catalog).await
 }
@@ -932,9 +1038,9 @@ pub(super) async fn thread_context_read_result_live(
 pub(super) async fn thread_context_read_result_live_with_catalog(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadContextReadResult> {
     thread_context_read_result_live_with_catalog_and_configured(
         state,
         scope,
@@ -948,11 +1054,11 @@ pub(super) async fn thread_context_read_result_live_with_catalog(
 pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadContextReadParams,
+    params: wire::agents_backend_rpc::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo::Result<(
-    wire::ThreadContextReadResult,
-    Vec<psychevo::__product::runtime::ConfiguredModel>,
+    wire::agents_backend_rpc::ThreadContextReadResult,
+    Vec<psychevo::config::ConfiguredModel>,
 )> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
@@ -979,20 +1085,13 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
         }
         return Ok((context, configured));
     };
-    let Some(binding) = state
-        .inner
-        .state
-        .gateway_runtime_binding(&thread_id)
-        .await?
-    else {
+    let Some(binding) = resolved_runtime_binding(state, &thread_id).await? else {
         return Ok((context, configured));
     };
-    if binding.status != GatewayRuntimeBindingStatus::Resolved
-        || binding.native_kind.as_deref() != Some(RuntimeProfileKind::Acp.as_str())
-    {
+    if binding.capture.native_kind != RuntimeProfileKind::Acp.as_str() {
         return Ok((context, configured));
     }
-    let Some(native_session_id) = binding.native_session_id.clone() else {
+    let Some(native_session_id) = binding.capture.native_session_id.clone() else {
         return Ok((context, configured));
     };
     let resident_snapshot = state
@@ -1047,14 +1146,14 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
     context.context_revision =
         combined_thread_revision(&[&context.context_revision, &snapshot.admission_revision()]);
     context.control_revision = combined_thread_revision(&[
-        &binding.control_revision.to_string(),
+        &binding.capture.control_revision.to_string(),
         &snapshot.control_revision,
     ]);
     if !resident && !snapshot.history.resumable {
         let reason = "This process-ephemeral ACP Thread cannot be resumed after process restart. Start a new Thread.";
-        context.history.fidelity = wire::ThreadHistoryFidelityView::Partial;
+        context.history.fidelity = wire::events_transcript::ThreadHistoryFidelityView::Partial;
         context.history.hint = Some(reason.to_string());
-        context.sendability = wire::ThreadSendabilityView {
+        context.sendability = wire::agents_backend_rpc::ThreadSendabilityView {
             allowed: false,
             reason: Some(reason.to_string()),
             recovery_action: Some("thread/draft/open".to_string()),
@@ -1068,9 +1167,9 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
 async fn apply_prepared_acp_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
-    configured: &[psychevo::__product::runtime::ConfiguredModel],
-    context: &mut wire::ThreadContextReadResult,
-    snapshot: &crate::acp_peer::AcpSessionSnapshot,
+    configured: &[psychevo::config::ConfiguredModel],
+    context: &mut wire::agents_backend_rpc::ThreadContextReadResult,
+    snapshot: &crate::acp_peer::session_projection::AcpSessionSnapshot,
 ) -> psychevo::Result<()> {
     let profile_capability_revision = context
         .profiles
@@ -1084,7 +1183,7 @@ async fn apply_prepared_acp_snapshot(
     decorate_configured_model_control_labels(configured, &mut surface.controls);
     let source_lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&scope.source.source_key().0)
         .await?;
     apply_control_state_precedence(&mut surface.controls, None, source_lane.as_ref());
@@ -1101,11 +1200,11 @@ async fn apply_prepared_acp_snapshot(
 async fn apply_prepared_acp_profile_defaults(
     state: &WebState,
     scope: &ResolvedScope,
-    target: &wire::RunnableTargetView,
+    target: &wire::agents_backend_rpc::RunnableTargetView,
     profile: &RuntimeProfileConfig,
     draft_control_values: &BTreeMap<String, String>,
-    mut snapshot: crate::acp_peer::AcpSessionSnapshot,
-) -> psychevo::Result<crate::acp_peer::AcpSessionSnapshot> {
+    mut snapshot: crate::acp_peer::session_projection::AcpSessionSnapshot,
+) -> psychevo::Result<crate::acp_peer::session_projection::AcpSessionSnapshot> {
     for (control_id, configured_default) in [
         ("model", profile.default_model.as_deref()),
         ("mode", profile.default_mode.as_deref()),
@@ -1156,7 +1255,7 @@ async fn apply_prepared_acp_profile_defaults(
                 runtime_rpc_error(
                     "prepared_session_missing",
                     "binding",
-                    wire::RuntimeRetryClassView::SafeRetry,
+                    wire::agents_backend_rpc::RuntimeRetryClassView::SafeRetry,
                     "The prepared ACP Agent session disappeared while applying Runtime Profile defaults."
                         .to_string(),
                     None,
@@ -1169,10 +1268,14 @@ async fn apply_prepared_acp_profile_defaults(
 pub(super) async fn prepare_draft_source_lane(
     state: &WebState,
     scope: &ResolvedScope,
-    target: &wire::RunnableTargetView,
+    target: &wire::agents_backend_rpc::RunnableTargetView,
 ) -> psychevo::Result<()> {
     let source_key = scope.source.source_key();
-    let existing_lane = state.inner.state.gateway_source_lane(&source_key.0).await?;
+    let existing_lane = state
+        .inner
+        .durability
+        .gateway_source_lane(&source_key.0)
+        .await?;
     let same_target = existing_lane.as_ref().is_some_and(|lane| {
         lane.draft_agent_ref == target.agent_ref
             && lane.draft_profile_ref.as_deref() == Some(target.runtime_profile_ref.as_str())
@@ -1187,7 +1290,7 @@ pub(super) async fn prepare_draft_source_lane(
     };
     state
         .inner
-        .state
+        .durability
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source_key.0,
             source_kind: &scope.source.kind,
@@ -1218,7 +1321,7 @@ async fn ensure_draft_source_unbound(
         return Err(runtime_rpc_error(
             "immutable_binding",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             "Start a new Thread before preparing a different Agent target.".to_string(),
             None,
         ));
@@ -1229,8 +1332,8 @@ async fn ensure_draft_source_unbound(
 pub(super) async fn thread_draft_prepare_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadDraftPrepareParams,
-) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
+    params: wire::agents_backend_rpc::ThreadDraftPrepareParams,
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadDraftPrepareResult> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_draft_prepare_result_with_catalog(state, scope, params, target_catalog).await
 }
@@ -1238,9 +1341,9 @@ pub(super) async fn thread_draft_prepare_result(
 pub(super) async fn thread_draft_prepare_result_with_catalog(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadDraftPrepareParams,
+    params: wire::agents_backend_rpc::ThreadDraftPrepareParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadDraftPrepareResult> {
     ensure_draft_source_unbound(state, scope).await?;
     let target = target_catalog
         .by_id(&params.target_id)
@@ -1264,7 +1367,7 @@ pub(super) async fn thread_draft_prepare_result_with_catalog(
     let (context, configured) = thread_context_read_result_live_with_catalog_and_configured(
         state,
         scope,
-        wire::ThreadContextReadParams {
+        wire::agents_backend_rpc::ThreadContextReadParams {
             thread_id: None,
             target: Some(runnable_target_input(&target)),
             scope: Some(params.scope.clone()),
@@ -1290,9 +1393,9 @@ pub(super) async fn thread_draft_prepare_result_with_catalog(
 pub(super) async fn thread_draft_prepare_result_with_work(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadDraftPrepareParams,
+    params: wire::agents_backend_rpc::ThreadDraftPrepareParams,
     work: ThreadDraftPrepareWork,
-) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadDraftPrepareResult> {
     ensure_draft_source_unbound(state, scope).await?;
     let ThreadDraftPrepareWork {
         target_catalog,
@@ -1312,17 +1415,17 @@ pub(super) async fn thread_draft_prepare_result_with_work(
         ));
     }
     if !target.ready {
-        let problem = wire::RuntimeErrorView {
+        let problem = wire::agents_backend_rpc::RuntimeErrorView {
             code: "runtime_unavailable".to_string(),
             stage: "configuration".to_string(),
-            retry_class: wire::RuntimeRetryClassView::UserAction,
+            retry_class: wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             message: target
                 .unavailable_reason
                 .clone()
                 .unwrap_or_else(|| "The selected Agent target is not ready.".to_string()),
             diagnostic_ref: None,
         };
-        return Ok(wire::ThreadDraftPrepareResult {
+        return Ok(wire::agents_backend_rpc::ThreadDraftPrepareResult {
             context,
             problem: Some(problem),
         });
@@ -1333,7 +1436,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
     let source_key = scope.source.source_key();
     let draft_control_values = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&source_key.0)
         .await?
         .map(|lane| lane.draft_control_values)
@@ -1346,7 +1449,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
             runtime_rpc_error(
                 "runtime_profile_not_found",
                 "configuration",
-                wire::RuntimeRetryClassView::UserAction,
+                wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
                 format!("Unknown Runtime Profile `{}`.", target.runtime_profile_ref),
                 None,
             )
@@ -1375,20 +1478,18 @@ pub(super) async fn thread_draft_prepare_result_with_work(
                 runtime_rpc_error(
                     "runtime_unavailable",
                     "configuration",
-                    wire::RuntimeRetryClassView::UserAction,
+                    wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
                     "The selected ACP Agent target is unavailable.".to_string(),
                     None,
                 )
             })?;
-            let mut options = state.run_options(scope.cwd.clone(), None);
-            options.runtime_ref = Some(target.runtime_profile_ref.clone());
-            options.agent = target.agent_ref.clone();
             let snapshot = state
                 .inner
                 .gateway
                 .prepare_agent_session(
                     peer,
-                    options,
+                    profile.clone(),
+                    scope.cwd.clone(),
                     source_key.0,
                     target.target_id.clone(),
                     target.agent_ref.clone(),
@@ -1431,27 +1532,27 @@ pub(super) async fn thread_draft_prepare_result_with_work(
                 )
                 .await?;
                 apply_draft_preparation_problem(&mut context, &problem);
-                return Ok(wire::ThreadDraftPrepareResult {
+                return Ok(wire::agents_backend_rpc::ThreadDraftPrepareResult {
                     context,
                     problem: Some(problem),
                 });
             }
         }
     }
-    Ok(wire::ThreadDraftPrepareResult {
+    Ok(wire::agents_backend_rpc::ThreadDraftPrepareResult {
         context,
         problem: None,
     })
 }
 
 fn apply_draft_preparation_problem(
-    context: &mut wire::ThreadContextReadResult,
-    problem: &wire::RuntimeErrorView,
+    context: &mut wire::agents_backend_rpc::ThreadContextReadResult,
+    problem: &wire::agents_backend_rpc::RuntimeErrorView,
 ) {
     let preparation_revision = format!("draft-prepare:{}:{}", problem.code, problem.message);
     context.context_revision =
         combined_thread_revision(&[&context.context_revision, &preparation_revision]);
-    context.sendability = wire::ThreadSendabilityView {
+    context.sendability = wire::agents_backend_rpc::ThreadSendabilityView {
         allowed: false,
         reason: Some(problem.message.clone()),
         recovery_action: Some("thread/draft/prepare".to_string()),
@@ -1461,9 +1562,9 @@ fn apply_draft_preparation_problem(
 const DRAFT_PREPARATION_PROBLEM_KEY: &str = "draftPreparationProblem";
 
 fn source_lane_preparation_problem(
-    lane: &psychevo::__product::persistence::GatewaySourceLaneRecord,
-    target: &wire::RunnableTargetView,
-) -> Option<wire::RuntimeErrorView> {
+    lane: &GatewaySourceLaneRecord,
+    target: &wire::agents_backend_rpc::RunnableTargetView,
+) -> Option<wire::agents_backend_rpc::RuntimeErrorView> {
     if lane.draft_agent_ref != target.agent_ref
         || lane.draft_profile_ref.as_deref() != Some(target.runtime_profile_ref.as_str())
     {
@@ -1481,14 +1582,14 @@ fn source_lane_preparation_problem(
 async fn persist_source_lane_preparation_problem(
     state: &WebState,
     scope: &ResolvedScope,
-    target: &wire::RunnableTargetView,
+    target: &wire::agents_backend_rpc::RunnableTargetView,
     draft_control_values: &BTreeMap<String, String>,
-    problem: &wire::RuntimeErrorView,
+    problem: &wire::agents_backend_rpc::RuntimeErrorView,
 ) -> psychevo::Result<()> {
     let source_key = scope.source.source_key();
     state
         .inner
-        .state
+        .durability
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source_key.0,
             source_kind: &scope.source.kind,
@@ -1508,7 +1609,7 @@ async fn persist_source_lane_preparation_problem(
     Ok(())
 }
 
-fn runtime_problem_view(error: &Error) -> wire::RuntimeErrorView {
+fn runtime_problem_view(error: &Error) -> wire::agents_backend_rpc::RuntimeErrorView {
     let data = error.structured_data();
     let nested = data.and_then(|value| value.get("error"));
     let field = |name: &str| {
@@ -1517,17 +1618,19 @@ fn runtime_problem_view(error: &Error) -> wire::RuntimeErrorView {
             .and_then(Value::as_str)
     };
     let retry_class = match field("retryClass") {
-        Some("never") => wire::RuntimeRetryClassView::Never,
-        Some("safeRetry" | "safe_retry" | "retry") => wire::RuntimeRetryClassView::SafeRetry,
-        Some("reconnect") => wire::RuntimeRetryClassView::Reconnect,
+        Some("never") => wire::agents_backend_rpc::RuntimeRetryClassView::Never,
+        Some("safeRetry" | "safe_retry" | "retry") => {
+            wire::agents_backend_rpc::RuntimeRetryClassView::SafeRetry
+        }
+        Some("reconnect") => wire::agents_backend_rpc::RuntimeRetryClassView::Reconnect,
         Some("unknownDelivery" | "unknown_delivery") => {
-            wire::RuntimeRetryClassView::UnknownDelivery
+            wire::agents_backend_rpc::RuntimeRetryClassView::UnknownDelivery
         }
         Some("userAction" | "user_action") | Some(_) | None => {
-            wire::RuntimeRetryClassView::UserAction
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction
         }
     };
-    wire::RuntimeErrorView {
+    wire::agents_backend_rpc::RuntimeErrorView {
         code: field("code").unwrap_or("runtime_unavailable").to_string(),
         stage: field("stage").unwrap_or("configuration").to_string(),
         retry_class,
@@ -1537,13 +1640,13 @@ fn runtime_problem_view(error: &Error) -> wire::RuntimeErrorView {
 }
 
 pub(super) fn selected_context_target_id(
-    context: &wire::ThreadContextReadResult,
+    context: &wire::agents_backend_rpc::ThreadContextReadResult,
 ) -> psychevo::Result<&str> {
     context.selected_target_id.as_deref().ok_or_else(|| {
         runtime_rpc_error(
             "target_not_selected",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             "Select an Agent target before performing this operation.".to_string(),
             None,
         )
@@ -1553,18 +1656,12 @@ pub(super) fn selected_context_target_id(
 async fn persisted_acp_session_snapshot(
     state: &WebState,
     thread_id: &str,
-) -> psychevo::Result<Option<crate::acp_peer::AcpSessionSnapshot>> {
+) -> psychevo::Result<Option<crate::acp_peer::session_projection::AcpSessionSnapshot>> {
     let projection = state
         .inner
-        .state
-        .session_metadata(thread_id)
-        .await?
-        .and_then(|metadata| {
-            metadata
-                .get(ACP_PEER_METADATA_KEY)
-                .and_then(|peer| peer.get("sessionProjection"))
-                .cloned()
-        });
+        .framework
+        .thread_agent_session_projection(thread_id)
+        .await?;
     projection
         .map(serde_json::from_value)
         .transpose()
@@ -1583,32 +1680,27 @@ async fn persisted_acp_session_snapshot(
 pub(super) async fn cached_thread_history_descriptor(
     state: &WebState,
     thread_id: Option<&str>,
-) -> psychevo::Result<wire::ThreadHistoryView> {
+) -> psychevo::Result<wire::events_transcript::ThreadHistoryView> {
     let Some(thread_id) = thread_id else {
         return Ok(unavailable_history(
             "History becomes available after the public Thread is bound.",
         ));
     };
-    let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await? else {
+    let Some(binding) = resolved_runtime_binding(state, thread_id).await? else {
         return Ok(unavailable_history(
             "History is unavailable until the Agent target is bound.",
         ));
     };
-    if binding.status != GatewayRuntimeBindingStatus::Resolved {
-        return Ok(unavailable_history(
-            "History is unavailable until the Agent target binding is resolved.",
-        ));
-    }
-    if binding.backend_kind.as_deref() == Some("acp")
+    if binding.capture.backend_kind == "acp"
         && let Some(snapshot) = persisted_acp_session_snapshot(state, thread_id).await?
     {
         return Ok(acp_session_agent_surface_descriptor(&snapshot, String::new()).history);
     }
-    let profile = bound_runtime_profile_record(&binding)?;
+    let profile = bound_runtime_profile_record(&binding.capture)?;
     Ok(profile_agent_surface_descriptor(
         &profile.config,
         true,
-        binding.adapter_revision.clone().unwrap_or_default(),
+        binding.capture.adapter_revision.clone(),
         true,
         "",
     )
@@ -1618,8 +1710,8 @@ pub(super) async fn cached_thread_history_descriptor(
 pub(super) async fn thread_control_set_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadControlSetParams,
-) -> psychevo::Result<wire::ThreadControlSetResult> {
+    params: wire::agents_backend_rpc::ThreadControlSetParams,
+) -> psychevo::Result<wire::agents_backend_rpc::ThreadControlSetResult> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
         None => {
@@ -1635,19 +1727,19 @@ pub(super) async fn thread_control_set_result(
         None => scope.clone(),
     };
     let binding = if let Some(thread_id) = thread_id.as_deref() {
-        state.inner.state.gateway_runtime_binding(thread_id).await?
+        resolved_runtime_binding(state, thread_id).await?
     } else {
         None
     };
     if let Some(binding) = binding.as_ref()
-        && binding.ownership != GatewayRuntimeBindingOwnership::ReadWrite
+        && !binding.writable
     {
         return Err(runtime_rpc_error(
             "read_only_session",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             "This Runtime session is read-only.".to_string(),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
+            Some(format!("runtime-binding:{}", binding.capture.thread_id)),
         ));
     }
     let prospective_target = binding
@@ -1657,7 +1749,7 @@ pub(super) async fn thread_control_set_result(
     let context = thread_context_read_result_live(
         state,
         &effective_scope,
-        wire::ThreadContextReadParams {
+        wire::agents_backend_rpc::ThreadContextReadParams {
             thread_id: thread_id.clone(),
             target: prospective_target.as_ref().map(runnable_target_input),
             scope: params.scope.clone(),
@@ -1668,7 +1760,7 @@ pub(super) async fn thread_control_set_result(
         return Err(runtime_rpc_error(
             "target_changed",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             "The selected Agent target changed; refresh Thread Context before changing this control."
                 .to_string(),
             thread_id
@@ -1678,22 +1770,22 @@ pub(super) async fn thread_control_set_result(
     }
     let runtime_profile_ref = context.runtime_profile_ref.clone();
     if let Some(binding) = binding.as_ref()
-        && binding.runtime_ref.as_deref() != Some(runtime_profile_ref.as_str())
+        && binding.capture.runtime_ref != runtime_profile_ref
     {
         return Err(runtime_rpc_error(
             "immutable_binding",
             "binding",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             format!(
                 "Thread `{}` is not bound to Runtime Profile `{}`.",
-                binding.thread_id, runtime_profile_ref
+                binding.capture.thread_id, runtime_profile_ref
             ),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
+            Some(format!("runtime-binding:{}", binding.capture.thread_id)),
         ));
     }
     let binding_revision = binding
         .as_ref()
-        .and_then(|binding| u64::try_from(binding.binding_revision).ok())
+        .and_then(|binding| u64::try_from(binding.capture.binding_revision).ok())
         .unwrap_or_default();
     let before = context
         .controls
@@ -1704,7 +1796,7 @@ pub(super) async fn thread_control_set_result(
             runtime_rpc_error(
                 "control_not_found",
                 "control",
-                wire::RuntimeRetryClassView::UserAction,
+                wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
                 format!(
                     "This Thread does not expose control `{}`.",
                     params.control_id
@@ -1718,7 +1810,7 @@ pub(super) async fn thread_control_set_result(
         return Err(runtime_rpc_error(
             "control_unavailable",
             "control",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             before
                 .unavailable_reason
                 .clone()
@@ -1736,7 +1828,7 @@ pub(super) async fn thread_control_set_result(
         return Err(runtime_rpc_error(
             "stale_revision",
             "control",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             "Thread Context changed; refresh it before changing this control.".to_string(),
             thread_id
                 .as_ref()
@@ -1758,7 +1850,11 @@ pub(super) async fn thread_control_set_result(
                 params.value.clone(),
             )
             .await?;
-        let lane = state.inner.state.gateway_source_lane(&source_key.0).await?;
+        let lane = state
+            .inner
+            .durability
+            .gateway_source_lane(&source_key.0)
+            .await?;
         let mut draft_control_values = lane
             .as_ref()
             .map(|lane| lane.draft_control_values.clone())
@@ -1769,7 +1865,7 @@ pub(super) async fn thread_control_set_result(
         );
         state
             .inner
-            .state
+            .durability
             .upsert_gateway_source_lane(GatewaySourceLaneInput {
                 source_key: &source_key.0,
                 source_kind: &effective_scope.source.kind,
@@ -1792,7 +1888,7 @@ pub(super) async fn thread_control_set_result(
         let (mut after_context, configured) = thread_context_read_result_with_configured_models(
             state,
             &effective_scope,
-            wire::ThreadContextReadParams {
+            wire::agents_backend_rpc::ThreadContextReadParams {
                 thread_id: None,
                 target: prospective_target.as_ref().map(runnable_target_input),
                 scope: params.scope,
@@ -1815,14 +1911,14 @@ pub(super) async fn thread_control_set_result(
             .find(|control| control.id == params.control_id)
             .cloned()
             .expect("stored source draft control remains described");
-        return Ok(wire::ThreadControlSetResult {
+        return Ok(wire::agents_backend_rpc::ThreadControlSetResult {
             changed,
             status: if prepared_snapshot.is_some()
                 && after.effective_value.as_ref() == Some(&params.value)
             {
-                wire::ThreadControlReceiptStatusView::Observed
+                wire::agents_backend_rpc::ThreadControlReceiptStatusView::Observed
             } else {
-                wire::ThreadControlReceiptStatusView::Applied
+                wire::agents_backend_rpc::ThreadControlReceiptStatusView::Applied
             },
             control: after,
             binding_revision: 0,
@@ -1836,45 +1932,41 @@ pub(super) async fn thread_control_set_result(
     preferences.insert(params.control_id.clone(), params.value.clone());
     let mut observed = binding.runtime_observed.clone();
     let active_turn = state
-        .activity(&effective_scope.source, Some(&binding.thread_id))
+        .activity(&effective_scope.source, Some(&binding.capture.thread_id))
         .await
         .running;
-    let status = if binding.native_kind.as_deref() == Some(RuntimeProfileKind::Acp.as_str())
-        && active_turn
-    {
-        wire::ThreadControlReceiptStatusView::Stored
-    } else if binding.native_kind.as_deref() == Some(RuntimeProfileKind::Acp.as_str()) {
-        let native_session_id = binding.native_session_id.clone().ok_or_else(|| {
+    let status = if binding.capture.native_kind == RuntimeProfileKind::Acp.as_str() && active_turn {
+        wire::agents_backend_rpc::ThreadControlReceiptStatusView::Stored
+    } else if binding.capture.native_kind == RuntimeProfileKind::Acp.as_str() {
+        let native_session_id = binding.capture.native_session_id.clone().ok_or_else(|| {
             runtime_rpc_error(
                 "runtime_native_session_missing",
                 "binding",
-                wire::RuntimeRetryClassView::UserAction,
+                wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
                 "ACP session controls require a persisted native session.".to_string(),
-                Some(format!("runtime-binding:{}", binding.thread_id)),
+                Some(format!("runtime-binding:{}", binding.capture.thread_id)),
             )
         })?;
-        let peer = resolve_bound_thread_agent_target(state, &binding)
-            .await?
-            .peer
-            .ok_or_else(|| {
-                runtime_rpc_error(
-                    "runtime_unavailable",
-                    "configuration",
-                    wire::RuntimeRetryClassView::UserAction,
-                    format!(
-                        "Runtime Profile `{}` does not resolve to an available ACP backend.",
-                        runtime_profile_ref
-                    ),
-                    None,
-                )
-            })?;
+        let bound = resolve_bound_thread_agent_target(state, &binding.capture).await?;
+        let peer = bound.peer.clone().ok_or_else(|| {
+            runtime_rpc_error(
+                "runtime_unavailable",
+                "configuration",
+                wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
+                format!(
+                    "Runtime Profile `{}` does not resolve to an available ACP backend.",
+                    runtime_profile_ref
+                ),
+                None,
+            )
+        })?;
         let snapshot = state
             .inner
             .gateway
             .set_bound_agent_session_control(
                 peer,
-                state.run_options(PathBuf::from(&binding.cwd), Some(binding.thread_id.clone())),
-                binding.thread_id.clone(),
+                bound.profile,
+                binding.capture.thread_id.clone(),
                 native_session_id,
                 params.control_id.clone(),
                 params.value.clone(),
@@ -1900,33 +1992,32 @@ pub(super) async fn thread_control_set_result(
                 runtime_rpc_error(
                     "control_ack_invalid",
                     "control",
-                    wire::RuntimeRetryClassView::Never,
+                    wire::agents_backend_rpc::RuntimeRetryClassView::Never,
                     "ACP control acknowledgement omitted the changed control.".to_string(),
-                    Some(format!("runtime-binding:{}", binding.thread_id)),
+                    Some(format!("runtime-binding:{}", binding.capture.thread_id)),
                 )
             })?;
         let runtime_observed = observed_control.effective_value == Some(params.value.clone());
         if runtime_observed {
             observed.insert(params.control_id.clone(), params.value.clone());
-            wire::ThreadControlReceiptStatusView::Observed
+            wire::agents_backend_rpc::ThreadControlReceiptStatusView::Observed
         } else {
-            wire::ThreadControlReceiptStatusView::Applied
+            wire::agents_backend_rpc::ThreadControlReceiptStatusView::Applied
         }
     } else {
-        wire::ThreadControlReceiptStatusView::Applied
+        wire::agents_backend_rpc::ThreadControlReceiptStatusView::Applied
     };
     state
         .inner
-        .state
-        .compare_and_set_gateway_runtime_control_state(
-            &binding.thread_id,
-            binding.binding_revision,
-            binding.control_revision,
-            GatewayRuntimeControlStatePatch {
-                thread_preferences: Some(&preferences),
-                runtime_observed: (binding.native_kind.as_deref()
-                    == Some(RuntimeProfileKind::Acp.as_str()))
-                .then_some(&observed),
+        .framework
+        .update_thread_agent_control_state(
+            &binding.capture.thread_id,
+            UpdateThreadAgentControlState {
+                expected_binding_revision: binding.capture.binding_revision,
+                expected_control_revision: binding.capture.control_revision,
+                thread_preferences: Some(preferences),
+                runtime_observed: (binding.capture.native_kind == RuntimeProfileKind::Acp.as_str())
+                    .then_some(observed),
             },
         )
         .await
@@ -1937,14 +2028,14 @@ pub(super) async fn thread_control_set_result(
                 "user_action",
                 "not_delivered",
                 format!("Thread control state changed; refresh and retry: {error}"),
-                Some(format!("runtime-binding:{}", binding.thread_id)),
+                Some(format!("runtime-binding:{}", binding.capture.thread_id)),
             )
         })?;
     let after_context = thread_context_read_result_live(
         state,
         &effective_scope,
-        wire::ThreadContextReadParams {
-            thread_id: Some(binding.thread_id.clone()),
+        wire::agents_backend_rpc::ThreadContextReadParams {
+            thread_id: Some(binding.capture.thread_id.clone()),
             target: None,
             scope: params.scope,
         },
@@ -1959,12 +2050,12 @@ pub(super) async fn thread_control_set_result(
             runtime_rpc_error(
                 "control_ack_invalid",
                 "control",
-                wire::RuntimeRetryClassView::Never,
+                wire::agents_backend_rpc::RuntimeRetryClassView::Never,
                 "The stored control disappeared from Thread Context.".to_string(),
-                Some(format!("runtime-binding:{}", binding.thread_id)),
+                Some(format!("runtime-binding:{}", binding.capture.thread_id)),
             )
         })?;
-    Ok(wire::ThreadControlSetResult {
+    Ok(wire::agents_backend_rpc::ThreadControlSetResult {
         changed,
         status,
         control: after,
@@ -1976,7 +2067,7 @@ pub(super) async fn thread_control_set_result(
 }
 
 fn validate_control_value(
-    control: &wire::ThreadControlDescriptorView,
+    control: &wire::agents_backend_rpc::ThreadControlDescriptorView,
     value: &Value,
 ) -> psychevo::Result<()> {
     let _ = thread_control_override_string_value(value)?;
@@ -1984,7 +2075,7 @@ fn validate_control_value(
         return Err(runtime_rpc_error(
             "invalid_control",
             "control",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             format!(
                 "Control `{}` does not accept the requested value.",
                 control.id
@@ -1996,7 +2087,7 @@ fn validate_control_value(
         return Err(runtime_rpc_error(
             "invalid_control",
             "control",
-            wire::RuntimeRetryClassView::UserAction,
+            wire::agents_backend_rpc::RuntimeRetryClassView::UserAction,
             format!("Control `{}` requires a non-empty value.", control.id),
             None,
         ));
@@ -2008,7 +2099,7 @@ pub(super) fn resolve_runtime_ref_peer_turn(
     state: &WebState,
     scope: &ResolvedScope,
     runtime_ref: &str,
-) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<ResolvedPeerTurn>> {
     resolve_runtime_target_peer_turn(state, scope, runtime_ref, None)
 }
 
@@ -2017,7 +2108,7 @@ pub(super) fn resolve_runtime_target_peer_turn(
     scope: &ResolvedScope,
     runtime_ref: &str,
     agent_ref: Option<&str>,
-) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<ResolvedPeerTurn>> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     resolve_runtime_target_peer_turn_with_catalog(state, scope, runtime_ref, agent_ref, &catalog)
 }
@@ -2028,7 +2119,7 @@ fn resolve_runtime_target_peer_turn_with_catalog(
     runtime_ref: &str,
     agent_ref: Option<&str>,
     catalog: &RunnableTargetCatalog,
-) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<ResolvedPeerTurn>> {
     let runtime_ref = runtime_ref.trim();
     if runtime_ref.is_empty() || runtime_ref == "native" {
         return Ok(None);
@@ -2045,10 +2136,17 @@ fn resolve_runtime_target_peer_turn_with_catalog(
             "ACP runtime profile `{runtime_ref}` is missing backendRef"
         ))
     })?;
-    let mut options = state.run_options(scope.cwd.clone(), None);
-    options.runtime_ref = Some(backend_ref.to_string());
-    options.agent = agent_ref.map(str::to_string);
-    let mut peer = crate::resolve_peer_turn(&options)?;
+    let mut base_env = state.inner.inherited_env.clone();
+    base_env
+        .entry("PSYCHEVO_HOME".to_string())
+        .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
+    let mut peer = resolve_peer_turn(PeerResolutionContext {
+        cwd: &scope.cwd,
+        base_env: &base_env,
+        runtime_ref: Some(backend_ref),
+        agent_ref,
+        no_agents: false,
+    })?;
     if let Some(peer) = peer.as_mut() {
         peer.process_scope_fingerprint = Some(runtime_profile_fingerprint(&record.config));
     }
@@ -2094,7 +2192,7 @@ pub(super) fn ensure_turn_runtime_profile_supported(
 pub(super) fn validate_turn_runnable_target(
     state: &WebState,
     scope: &ResolvedScope,
-    target: &wire::RunnableTargetInput,
+    target: &wire::thread_command_turn::RunnableTargetInput,
 ) -> psychevo::Result<ValidatedRunnableTarget> {
     RunnableTargetCatalog::load(state, scope)?.validate(target)
 }
@@ -2103,7 +2201,7 @@ pub(super) fn runtime_backend_kind(
     state: &WebState,
     scope: &ResolvedScope,
     runtime_ref: &str,
-) -> psychevo::Result<wire::BackendKind> {
+) -> psychevo::Result<wire::source::BackendKind> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     let record = catalog.profile_records.get(runtime_ref).ok_or_else(|| {
         agent_session_error(
@@ -2116,39 +2214,42 @@ pub(super) fn runtime_backend_kind(
         )
     })?;
     Ok(match record.config.runtime {
-        RuntimeProfileKind::Native => wire::BackendKind::Native,
-        RuntimeProfileKind::Acp => wire::BackendKind::Acp,
+        RuntimeProfileKind::Native => wire::source::BackendKind::Native,
+        RuntimeProfileKind::Acp => wire::source::BackendKind::Acp,
     })
 }
 
-pub(super) async fn resolve_bound_thread_agent_target(
+async fn resolve_bound_thread_agent_target(
     state: &WebState,
-    binding: &GatewayRuntimeBindingRecord,
-) -> psychevo::Result<crate::BoundGatewayAgentTarget> {
-    let mut options =
-        state.run_options(PathBuf::from(&binding.cwd), Some(binding.thread_id.clone()));
-    options.runtime_ref = binding.runtime_ref.clone();
-    options.agent = binding.agent_ref.clone();
-    crate::resolve_bound_gateway_agent_target(&options, binding.runtime_ref.as_deref())
-        .await?
-        .ok_or_else(|| {
-            agent_session_error(
-                "bound_target_missing",
-                AgentErrorStage::Binding,
-                "never",
-                "not_delivered",
-                "The Thread binding has no captured Agent target.",
-                Some(format!("agent-binding:{}", binding.thread_id)),
-            )
-        })
+    binding: &AgentBindingSnapshot,
+) -> psychevo::Result<BoundThreadAgentTarget> {
+    let profile = bound_runtime_profile_record(binding)?.config;
+    let fingerprint = binding.profile_fingerprint.clone();
+    let mut env = state.inner.inherited_env.clone();
+    env.entry("PSYCHEVO_HOME".to_string())
+        .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
+    let peer = resolve_captured_agent_peer_at(CapturedAgentPeerInput {
+        cwd: Path::new(&binding.cwd),
+        env: &env,
+        thread_id: &binding.thread_id,
+        agent_ref: binding.agent_ref.as_deref(),
+        encoded: &binding.agent_definition_json,
+        fingerprint: &binding.agent_fingerprint,
+        profile: &profile,
+        profile_fingerprint: &fingerprint,
+    })?;
+    Ok(BoundThreadAgentTarget { profile, peer })
 }
 
 fn compatible_runnable_targets(
     profile_records: &BTreeMap<String, RuntimeProfileRecord>,
-    profile_views: &[wire::RuntimeProfileView],
+    profile_views: &[wire::agents_backend_rpc::RuntimeProfileView],
     agents: &AgentCatalog,
     backends: &BTreeMap<String, AgentBackendConfig>,
-) -> (Vec<wire::RunnableTargetView>, BTreeMap<String, String>) {
+) -> (
+    Vec<wire::agents_backend_rpc::RunnableTargetView>,
+    BTreeMap<String, String>,
+) {
     let profile_views = profile_views
         .iter()
         .map(|profile| (profile.id.as_str(), profile))
@@ -2172,7 +2273,7 @@ fn compatible_runnable_targets(
             targets.push(target);
         }
         for agent in &agents.agents {
-            if crate::agent_definition_matches_runtime_profile(agent, &record.config) {
+            if agent_definition_matches_runtime_profile(agent, &record.config) {
                 let backend = record
                     .config
                     .backend_ref
@@ -2212,12 +2313,12 @@ fn compatible_runnable_targets(
 fn runnable_target_view(
     agent_ref: Option<String>,
     agent_label: &str,
-    profile: &wire::RuntimeProfileView,
+    profile: &wire::agents_backend_rpc::RuntimeProfileView,
     ready: bool,
     unavailable_reason: Option<String>,
-) -> wire::RunnableTargetView {
+) -> wire::agents_backend_rpc::RunnableTargetView {
     let target_id = runnable_target_id(agent_ref.as_deref(), &profile.id);
-    wire::RunnableTargetView {
+    wire::agents_backend_rpc::RunnableTargetView {
         target_id,
         agent_ref,
         runtime_profile_ref: profile.id.clone(),
@@ -2236,11 +2337,11 @@ fn runnable_target_id(agent_ref: Option<&str>, runtime_profile_ref: &str) -> Str
 }
 
 fn runnable_target_context_revision(
-    target: &wire::RunnableTargetView,
+    target: &wire::agents_backend_rpc::RunnableTargetView,
     profile: &RuntimeProfileConfig,
     agent: Option<&AgentDefinition>,
     backend: Option<&AgentBackendConfig>,
-    profile_view: &wire::RuntimeProfileView,
+    profile_view: &wire::agents_backend_rpc::RuntimeProfileView,
 ) -> String {
     let agent_fingerprint = agent
         .map(|agent| {
@@ -2338,13 +2439,11 @@ fn public_redacted_profile_structure(profile: &RuntimeProfileConfig) -> Value {
 }
 
 fn public_redacted_bound_target_revision(
-    selected_target: &wire::RunnableTargetView,
-    binding: &GatewayRuntimeBindingRecord,
+    selected_target: &wire::agents_backend_rpc::RunnableTargetView,
+    binding: &AgentBindingSnapshot,
 ) -> String {
-    let agent_structure = binding
-        .agent_definition_json
-        .as_deref()
-        .and_then(|encoded| serde_json::from_str::<Value>(encoded).ok())
+    let agent_structure = serde_json::from_str::<Value>(&binding.agent_definition_json)
+        .ok()
         .map(|value| public_redacted_agent_structure(&value))
         .unwrap_or_else(|| {
             json!({
@@ -2352,23 +2451,22 @@ fn public_redacted_bound_target_revision(
                 "snapshot": "missing-or-invalid",
             })
         });
-    let profile_structure = binding
-        .profile_config_json
-        .as_deref()
-        .and_then(|encoded| serde_json::from_str::<RuntimeProfileConfig>(encoded).ok())
-        .map(|profile| public_redacted_profile_structure(&profile))
-        .unwrap_or_else(|| {
-            json!({
-                "runtimeRef": binding.runtime_ref,
-                "snapshot": "missing-or-invalid",
-            })
-        });
+    let profile_structure =
+        serde_json::from_str::<RuntimeProfileConfig>(&binding.profile_config_json)
+            .ok()
+            .map(|profile| public_redacted_profile_structure(&profile))
+            .unwrap_or_else(|| {
+                json!({
+                    "runtimeRef": binding.runtime_ref,
+                    "snapshot": "missing-or-invalid",
+                })
+            });
     combined_thread_revision(&[
         &selected_target.target_id,
         &stable_hash_hex(&agent_structure.to_string()),
         &stable_hash_hex(&profile_structure.to_string()),
-        binding.adapter_kind.as_deref().unwrap_or_default(),
-        binding.adapter_revision.as_deref().unwrap_or_default(),
+        &binding.adapter_kind,
+        &binding.adapter_revision,
     ])
 }
 
@@ -2393,7 +2491,7 @@ fn redacted_backend_structure(backend: &AgentBackendConfig) -> Value {
 pub(super) fn write_runtime_profile(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::RuntimeProfileWriteParams,
+    params: wire::agents_backend_rpc::RuntimeProfileWriteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!(
@@ -2419,25 +2517,27 @@ pub(super) fn write_runtime_profile(
             params.id
         ))
     })?;
-    Ok(serde_json::to_value(wire::RuntimeProfileWriteResult {
-        written: true,
-        changed: result.changed,
-        path: result.path.display().to_string(),
-        target,
-        profile: runtime_profile_view(state, scope, record, None)?,
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::RuntimeProfileWriteResult {
+            written: true,
+            changed: result.changed,
+            path: result.path.display().to_string(),
+            target,
+            profile: runtime_profile_view(state, scope, record, None)?,
+        },
+    )?)
 }
 
 pub(super) fn set_runtime_profile_enabled(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::RuntimeProfileSetEnabledParams,
+    params: wire::agents_backend_rpc::RuntimeProfileSetEnabledParams,
 ) -> psychevo::Result<Value> {
     let profiles = runtime_profile_records(state, scope)?;
     let existing = profiles
         .get(&params.id)
         .ok_or_else(|| Error::Message(format!("unknown runtime profile: {}", params.id)))?;
-    let write = wire::RuntimeProfileWriteParams {
+    let write = wire::agents_backend_rpc::RuntimeProfileWriteParams {
         id: existing.config.id.clone(),
         target: params.target,
         runtime: existing.config.runtime.as_str().to_string(),
@@ -2458,7 +2558,7 @@ pub(super) fn set_runtime_profile_enabled(
 pub(super) fn delete_runtime_profile(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::RuntimeProfileDeleteParams,
+    params: wire::agents_backend_rpc::RuntimeProfileDeleteParams,
 ) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!(
@@ -2469,13 +2569,15 @@ pub(super) fn delete_runtime_profile(
     let target = params.target;
     let config_dir = runtime_profile_config_dir(state, scope, target);
     let result = remove_config_value(config_dir, &format!("runtime_profiles.{}", params.id))?;
-    Ok(serde_json::to_value(wire::RuntimeProfileDeleteResult {
-        deleted: result.changed,
-        changed: result.changed,
-        id: params.id,
-        path: result.path.display().to_string(),
-        target,
-    })?)
+    Ok(serde_json::to_value(
+        wire::agents_backend_rpc::RuntimeProfileDeleteResult {
+            deleted: result.changed,
+            changed: result.changed,
+            id: params.id,
+            path: result.path.display().to_string(),
+            target,
+        },
+    )?)
 }
 
 fn runtime_profile_records(
@@ -2615,7 +2717,7 @@ pub(super) fn validate_and_capture_team_runtime_members(
                 &member.id,
             )?;
             let fingerprint = runtime_profile_fingerprint(&profile.config);
-            let revision = crate::runtime_profile_config_revision(&fingerprint);
+            let revision = runtime_profile_config_revision(&fingerprint);
             if member
                 .runtime_profile_revision
                 .is_some_and(|captured| captured != revision)
@@ -2813,7 +2915,7 @@ fn runtime_profile_view(
     scope: &ResolvedScope,
     record: &RuntimeProfileRecord,
     checked_at_ms: Option<i64>,
-) -> psychevo::Result<wire::RuntimeProfileView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RuntimeProfileView> {
     let backends =
         load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     runtime_profile_view_with_backends(state, scope, record, checked_at_ms, &backends)
@@ -2825,10 +2927,10 @@ fn runtime_profile_view_with_backends(
     record: &RuntimeProfileRecord,
     checked_at_ms: Option<i64>,
     backends: &BTreeMap<String, AgentBackendConfig>,
-) -> psychevo::Result<wire::RuntimeProfileView> {
+) -> psychevo::Result<wire::agents_backend_rpc::RuntimeProfileView> {
     let config = &record.config;
     let fingerprint = runtime_profile_fingerprint(config);
-    let revision = crate::runtime_profile_config_revision(&fingerprint);
+    let revision = runtime_profile_config_revision(&fingerprint);
     let backend = config
         .backend_ref
         .as_deref()
@@ -2838,17 +2940,17 @@ fn runtime_profile_view_with_backends(
         RuntimeProfileKind::Native => {
             ["turn.start", "turn.interrupt", "turn.steer", "history.read"]
                 .into_iter()
-                .map(|id| wire::RuntimeCapabilityView {
+                .map(|id| wire::agents_backend_rpc::RuntimeCapabilityView {
                     id: id.to_string(),
                     enabled: true,
-                    stability: wire::RuntimeStabilityView::Stable,
+                    stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
                     unavailable_reason: None,
                 })
                 .collect()
         }
         RuntimeProfileKind::Acp => Vec::new(),
     };
-    Ok(wire::RuntimeProfileView {
+    Ok(wire::agents_backend_rpc::RuntimeProfileView {
         id: config.id.clone(),
         runtime: config.runtime.as_str().to_string(),
         enabled: config.enabled,
@@ -2863,7 +2965,7 @@ fn runtime_profile_view_with_backends(
         profile_revision: revision.to_string(),
         capability_revision: revision.to_string(),
         stability: (config.runtime == RuntimeProfileKind::Native)
-            .then_some(wire::RuntimeStabilityView::Stable),
+            .then_some(wire::agents_backend_rpc::RuntimeStabilityView::Stable),
         capabilities,
         default_model: config.default_model.clone(),
         default_mode: config.default_mode.clone(),
@@ -2879,44 +2981,28 @@ fn runtime_profile_view_with_backends(
 }
 
 fn runtime_profile_fingerprint(config: &RuntimeProfileConfig) -> String {
-    crate::runtime_profile_config_fingerprint(config)
+    runtime_profile_config_fingerprint(config)
 }
 
 fn bound_runtime_profile_record(
-    binding: &GatewayRuntimeBindingRecord,
+    binding: &AgentBindingSnapshot,
 ) -> psychevo::Result<RuntimeProfileRecord> {
-    let runtime_ref = binding.runtime_ref.as_deref().ok_or_else(|| {
-        runtime_rpc_error(
-            "bound_profile_snapshot_missing",
-            "binding",
-            wire::RuntimeRetryClassView::Never,
-            "Resolved runtime binding is missing its Runtime Profile identity.".to_string(),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
-        )
-    })?;
-    let encoded = binding.profile_config_json.as_deref().ok_or_else(|| {
-        runtime_rpc_error(
-            "bound_profile_snapshot_missing",
-            "binding",
-            wire::RuntimeRetryClassView::Never,
-            "Bound thread is missing its immutable effective Runtime Profile snapshot.".to_string(),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
-        )
-    })?;
-    let config: RuntimeProfileConfig = serde_json::from_str(encoded).map_err(|error| {
-        runtime_rpc_error(
-            "bound_profile_snapshot_invalid",
-            "binding",
-            wire::RuntimeRetryClassView::Never,
-            format!("Bound Runtime Profile snapshot could not be decoded: {error}"),
-            Some(format!("runtime-binding:{}", binding.thread_id)),
-        )
-    })?;
+    let runtime_ref = binding.runtime_ref.as_str();
+    let config: RuntimeProfileConfig =
+        serde_json::from_str(&binding.profile_config_json).map_err(|error| {
+            runtime_rpc_error(
+                "bound_profile_snapshot_invalid",
+                "binding",
+                wire::agents_backend_rpc::RuntimeRetryClassView::Never,
+                format!("Bound Runtime Profile snapshot could not be decoded: {error}"),
+                Some(format!("runtime-binding:{}", binding.thread_id)),
+            )
+        })?;
     if config.id != runtime_ref {
         return Err(runtime_rpc_error(
             "bound_profile_snapshot_mismatch",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             format!(
                 "Bound Runtime Profile snapshot identifies `{}`, but the binding identifies `{runtime_ref}`.",
                 config.id
@@ -2925,26 +3011,26 @@ fn bound_runtime_profile_record(
         ));
     }
     let fingerprint = runtime_profile_fingerprint(&config);
-    if binding.profile_fingerprint.as_deref() != Some(fingerprint.as_str()) {
+    if binding.profile_fingerprint != fingerprint {
         return Err(runtime_rpc_error(
             "bound_profile_snapshot_mismatch",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             "Bound Runtime Profile snapshot does not match its immutable fingerprint.".to_string(),
             Some(format!("runtime-binding:{}", binding.thread_id)),
         ));
     }
-    let revision = crate::runtime_profile_config_revision(&fingerprint);
+    let revision = runtime_profile_config_revision(&fingerprint);
     if binding
         .profile_revision
-        .as_deref()
-        .and_then(|value| value.parse::<u64>().ok())
+        .parse::<u64>()
+        .ok()
         .is_some_and(|captured| captured != revision)
     {
         return Err(runtime_rpc_error(
             "bound_profile_snapshot_mismatch",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             "Bound Runtime Profile snapshot does not match its captured revision.".to_string(),
             Some(format!("runtime-binding:{}", binding.thread_id)),
         ));
@@ -2955,40 +3041,24 @@ fn bound_runtime_profile_record(
     })
 }
 
-fn validate_bound_agent_snapshot(binding: &GatewayRuntimeBindingRecord) -> psychevo::Result<()> {
+fn validate_bound_agent_snapshot(binding: &AgentBindingSnapshot) -> psychevo::Result<()> {
     let diagnostic_ref = Some(format!("agent-binding:{}", binding.thread_id));
-    let fingerprint = binding.agent_fingerprint.as_deref().ok_or_else(|| {
-        runtime_rpc_error(
-            "bound_agent_snapshot_missing",
-            "binding",
-            wire::RuntimeRetryClassView::Never,
-            "Bound thread is missing its immutable Agent Definition fingerprint.".to_string(),
-            diagnostic_ref.clone(),
-        )
-    })?;
-    let encoded = binding.agent_definition_json.as_deref().ok_or_else(|| {
-        runtime_rpc_error(
-            "bound_agent_snapshot_missing",
-            "binding",
-            wire::RuntimeRetryClassView::Never,
-            "Bound thread is missing its immutable Agent Definition snapshot.".to_string(),
-            diagnostic_ref.clone(),
-        )
-    })?;
+    let fingerprint = binding.agent_fingerprint.as_str();
+    let encoded = binding.agent_definition_json.as_str();
     let snapshot: Value = serde_json::from_str(encoded).map_err(|error| {
         runtime_rpc_error(
             "bound_agent_snapshot_invalid",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             format!("Bound Agent Definition snapshot could not be decoded: {error}"),
             diagnostic_ref.clone(),
         )
     })?;
-    if crate::gateway_agent_definition_fingerprint(encoded) != fingerprint {
+    if gateway_agent_definition_fingerprint(encoded) != fingerprint {
         return Err(runtime_rpc_error(
             "bound_agent_snapshot_mismatch",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             "Bound Agent Definition snapshot does not match its immutable fingerprint.".to_string(),
             diagnostic_ref,
         ));
@@ -2999,7 +3069,7 @@ fn validate_bound_agent_snapshot(binding: &GatewayRuntimeBindingRecord) -> psych
         return Err(runtime_rpc_error(
             "bound_agent_snapshot_mismatch",
             "binding",
-            wire::RuntimeRetryClassView::Never,
+            wire::agents_backend_rpc::RuntimeRetryClassView::Never,
             format!(
                 "Bound Agent Definition snapshot does not identify captured Agent `{agent_ref}`."
             ),
@@ -3011,17 +3081,19 @@ fn validate_bound_agent_snapshot(binding: &GatewayRuntimeBindingRecord) -> psych
 
 fn runtime_readiness_stages(
     config: &RuntimeProfileConfig,
-    health: &wire::RuntimeHealthView,
-) -> Vec<wire::RuntimeReadinessStageView> {
+    health: &wire::agents_backend_rpc::RuntimeHealthView,
+) -> Vec<wire::agents_backend_rpc::RuntimeReadinessStageView> {
     let status = match health.status.as_str() {
-        "ready" => wire::RuntimeReadinessStatusView::Ready,
-        "missing" => wire::RuntimeReadinessStatusView::Missing,
-        "needs_auth" => wire::RuntimeReadinessStatusView::NeedsAuth,
-        "unsupported" | "disabled" => wire::RuntimeReadinessStatusView::Unsupported,
-        "error" => wire::RuntimeReadinessStatusView::Error,
-        _ => wire::RuntimeReadinessStatusView::Unchecked,
+        "ready" => wire::agents_backend_rpc::RuntimeReadinessStatusView::Ready,
+        "missing" => wire::agents_backend_rpc::RuntimeReadinessStatusView::Missing,
+        "needs_auth" => wire::agents_backend_rpc::RuntimeReadinessStatusView::NeedsAuth,
+        "unsupported" | "disabled" => {
+            wire::agents_backend_rpc::RuntimeReadinessStatusView::Unsupported
+        }
+        "error" => wire::agents_backend_rpc::RuntimeReadinessStatusView::Error,
+        _ => wire::agents_backend_rpc::RuntimeReadinessStatusView::Unchecked,
     };
-    vec![wire::RuntimeReadinessStageView {
+    vec![wire::agents_backend_rpc::RuntimeReadinessStageView {
         id: match config.runtime {
             RuntimeProfileKind::Native => "runtime",
             RuntimeProfileKind::Acp => "backend",
@@ -3037,9 +3109,9 @@ pub(super) fn runtime_profile_health(
     config: &RuntimeProfileConfig,
     backend: Option<&AgentBackendConfig>,
     checked_at_ms: Option<i64>,
-) -> wire::RuntimeHealthView {
+) -> wire::agents_backend_rpc::RuntimeHealthView {
     if !config.enabled {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "disabled".to_string(),
             summary: "Runtime Profile is disabled.".to_string(),
             command_path: None,
@@ -3047,7 +3119,7 @@ pub(super) fn runtime_profile_health(
         };
     }
     if config.runtime == RuntimeProfileKind::Native {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "ready".to_string(),
             summary: "Native Psychevo Agent runtime is available.".to_string(),
             command_path: None,
@@ -3055,7 +3127,7 @@ pub(super) fn runtime_profile_health(
         };
     }
     let Some(backend_ref) = config.backend_ref.as_deref() else {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "missing".to_string(),
             summary: "ACP Runtime Profile is missing backendRef.".to_string(),
             command_path: None,
@@ -3063,7 +3135,7 @@ pub(super) fn runtime_profile_health(
         };
     };
     let Some(backend) = backend else {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "missing".to_string(),
             summary: format!("ACP backend `{backend_ref}` is not configured."),
             command_path: None,
@@ -3071,7 +3143,7 @@ pub(super) fn runtime_profile_health(
         };
     };
     if !backend.enabled {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "disabled".to_string(),
             summary: format!("ACP backend `{backend_ref}` is disabled."),
             command_path: None,
@@ -3084,14 +3156,14 @@ pub(super) fn runtime_profile_health(
         .map(str::trim)
         .is_none_or(str::is_empty)
     {
-        return wire::RuntimeHealthView {
+        return wire::agents_backend_rpc::RuntimeHealthView {
             status: "missing".to_string(),
             summary: format!("ACP backend `{backend_ref}` has no launch command."),
             command_path: None,
             checked_at_ms,
         };
     }
-    wire::RuntimeHealthView {
+    wire::agents_backend_rpc::RuntimeHealthView {
         status: "unchecked".to_string(),
         summary: format!(
             "ACP backend `{backend_ref}` is configured; readiness is established by Agent session negotiation."
@@ -3106,7 +3178,7 @@ fn runtime_profile_health_for_state(
     config: &RuntimeProfileConfig,
     backend: Option<&AgentBackendConfig>,
     checked_at_ms: Option<i64>,
-) -> wire::RuntimeHealthView {
+) -> wire::agents_backend_rpc::RuntimeHealthView {
     let base = runtime_profile_health(config, backend, checked_at_ms);
     if config.backend_ref.as_deref() != Some(crate::managed_acp::CODEX_ACP_BACKEND_ID) {
         return base;
@@ -3117,7 +3189,7 @@ fn runtime_profile_health_for_state(
             if base.status != "unchecked" {
                 base
             } else {
-                wire::RuntimeHealthView {
+                wire::agents_backend_rpc::RuntimeHealthView {
                     status: "ready".to_string(),
                     summary: format!(
                         "Managed Codex ACP {} is installed and verified.",
@@ -3128,14 +3200,16 @@ fn runtime_profile_health_for_state(
                 }
             }
         }
-        crate::managed_acp::ManagedCodexAcpStatus::Missing { paths } => wire::RuntimeHealthView {
-            status: "missing".to_string(),
-            summary: "Managed Codex ACP is not installed; run backend/install.".to_string(),
-            command_path: Some(paths.root.display().to_string()),
-            checked_at_ms,
-        },
+        crate::managed_acp::ManagedCodexAcpStatus::Missing { paths } => {
+            wire::agents_backend_rpc::RuntimeHealthView {
+                status: "missing".to_string(),
+                summary: "Managed Codex ACP is not installed; run backend/install.".to_string(),
+                command_path: Some(paths.root.display().to_string()),
+                checked_at_ms,
+            }
+        }
         crate::managed_acp::ManagedCodexAcpStatus::Invalid { paths, reason } => {
-            wire::RuntimeHealthView {
+            wire::agents_backend_rpc::RuntimeHealthView {
                 status: "error".to_string(),
                 summary: format!("{reason}; run backend/repair."),
                 command_path: Some(paths.root.display().to_string()),
@@ -3181,22 +3255,22 @@ fn ensure_managed_codex_profile_ready(
 fn runtime_profile_diagnostics(
     config: &RuntimeProfileConfig,
     backend: Option<&AgentBackendConfig>,
-) -> Vec<wire::BackendDiagnosticView> {
+) -> Vec<wire::agents_backend_rpc::BackendDiagnosticView> {
     let mut diagnostics = Vec::new();
     if !config.enabled {
-        diagnostics.push(wire::BackendDiagnosticView {
+        diagnostics.push(wire::agents_backend_rpc::BackendDiagnosticView {
             kind: "disabled".to_string(),
             message: "Runtime Profile is disabled.".to_string(),
         });
     }
     if config.runtime == RuntimeProfileKind::Acp {
         match config.backend_ref.as_deref() {
-            None => diagnostics.push(wire::BackendDiagnosticView {
+            None => diagnostics.push(wire::agents_backend_rpc::BackendDiagnosticView {
                 kind: "missing_backend_ref".to_string(),
                 message: "ACP Runtime Profiles require a backendRef.".to_string(),
             }),
             Some(backend_ref) if backend.is_none() => {
-                diagnostics.push(wire::BackendDiagnosticView {
+                diagnostics.push(wire::agents_backend_rpc::BackendDiagnosticView {
                     kind: "missing_backend".to_string(),
                     message: format!("ACP backend `{backend_ref}` is not configured."),
                 });
@@ -3216,7 +3290,7 @@ fn runtime_profile_option_keys(options: &Value) -> Vec<String> {
 
 fn runtime_profile_config_options(
     config: &RuntimeProfileConfig,
-) -> Vec<wire::RuntimeConfigOptionView> {
+) -> Vec<wire::thread_command_turn::RuntimeConfigOptionView> {
     [
         ("model", "Model", config.default_model.as_deref()),
         ("mode", "Mode", config.default_mode.as_deref()),
@@ -3227,14 +3301,14 @@ fn runtime_profile_config_options(
         if current.is_empty() {
             return None;
         }
-        Some(wire::RuntimeConfigOptionView {
+        Some(wire::thread_command_turn::RuntimeConfigOptionView {
             id: id.to_string(),
             name: label.to_string(),
             description: Some("Captured Runtime Profile default.".to_string()),
             category: Some(id.to_string()),
             option_type: "select".to_string(),
             current_value: Some(current.to_string()),
-            values: vec![wire::RuntimeConfigOptionValueView {
+            values: vec![wire::thread_command_turn::RuntimeConfigOptionValueView {
                 value: current.to_string(),
                 name: current.to_string(),
                 description: None,
@@ -3246,11 +3320,11 @@ fn runtime_profile_config_options(
 }
 
 struct AgentSurfaceDescriptor {
-    controls: Vec<wire::ThreadControlDescriptorView>,
-    input_capabilities: Vec<wire::ThreadInputCapabilityView>,
-    capabilities: Vec<wire::RuntimeCapabilityView>,
-    actions: Vec<wire::ThreadActionKind>,
-    history: wire::ThreadHistoryView,
+    controls: Vec<wire::agents_backend_rpc::ThreadControlDescriptorView>,
+    input_capabilities: Vec<wire::agents_backend_rpc::ThreadInputCapabilityView>,
+    capabilities: Vec<wire::agents_backend_rpc::RuntimeCapabilityView>,
+    actions: Vec<wire::thread_command_turn::ThreadActionKind>,
+    history: wire::events_transcript::ThreadHistoryView,
 }
 
 impl Default for AgentSurfaceDescriptor {
@@ -3304,18 +3378,18 @@ fn native_agent_surface_descriptor(
         (
             "model",
             "Model",
-            wire::ThreadControlSurfaceRoleView::Model,
+            wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model,
             config.default_model.clone(),
             Vec::new(),
         ),
         (
             "reasoning",
             "Reasoning",
-            wire::ThreadControlSurfaceRoleView::Reasoning,
+            wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning,
             None,
             REASONING_EFFORT_VALUES
                 .iter()
-                .map(|value| wire::ThreadControlChoiceView {
+                .map(|value| wire::agents_backend_rpc::ThreadControlChoiceView {
                     value: Value::String((*value).to_string()),
                     label: (*value).to_string(),
                     description: None,
@@ -3325,14 +3399,14 @@ fn native_agent_surface_descriptor(
         (
             "mode",
             "Mode",
-            wire::ThreadControlSurfaceRoleView::Mode,
+            wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode,
             config
                 .default_mode
                 .clone()
                 .or_else(|| mode.current_value.clone()),
             mode.values
                 .into_iter()
-                .map(|choice| wire::ThreadControlChoiceView {
+                .map(|choice| wire::agents_backend_rpc::ThreadControlChoiceView {
                     value: Value::String(choice.value),
                     label: choice.name,
                     description: choice.description,
@@ -3342,11 +3416,11 @@ fn native_agent_surface_descriptor(
         (
             "permissionMode",
             "Permission mode",
-            wire::ThreadControlSurfaceRoleView::Advanced,
+            wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Advanced,
             Some("default".to_string()),
             ["default", "acceptEdits", "dontAsk", "bypassPermissions"]
                 .into_iter()
-                .map(|value| wire::ThreadControlChoiceView {
+                .map(|value| wire::agents_backend_rpc::ThreadControlChoiceView {
                     value: Value::String(value.to_string()),
                     label: value.to_string(),
                     description: None,
@@ -3362,29 +3436,29 @@ fn native_agent_surface_descriptor(
                 "mode" => config.default_mode.is_some(),
                 _ => false,
             };
-            wire::ThreadControlDescriptorView {
+            wire::agents_backend_rpc::ThreadControlDescriptorView {
                 id: id.to_string(),
                 label: label.to_string(),
                 surface_role,
-                mutability: wire::ThreadControlMutabilityView::Selectable,
+                mutability: wire::agents_backend_rpc::ThreadControlMutabilityView::Selectable,
                 enabled: ready,
                 required: id == "model",
                 unavailable_reason: (!ready).then(|| unavailable_reason.to_string()),
                 effective_value: effective.map(Value::String),
                 effective_source: if profile_default {
-                    wire::ThreadControlEffectiveSourceView::ProfileDefault
+                    wire::agents_backend_rpc::ThreadControlEffectiveSourceView::ProfileDefault
                 } else {
-                    wire::ThreadControlEffectiveSourceView::RuntimeDefault
+                    wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeDefault
                 },
                 is_default: true,
                 choices,
                 depends_on: None,
                 apply_scope: if bound {
-                    wire::ThreadControlApplyScopeView::Session
+                    wire::agents_backend_rpc::ThreadControlApplyScopeView::Session
                 } else {
-                    wire::ThreadControlApplyScopeView::TurnDraft
+                    wire::agents_backend_rpc::ThreadControlApplyScopeView::TurnDraft
                 },
-                stability: wire::RuntimeStabilityView::Stable,
+                stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
                 channel_safe: true,
                 capability_revision: capability_revision.clone(),
             }
@@ -3417,18 +3491,18 @@ fn native_agent_surface_descriptor(
         })
         .collect(),
         actions: vec![
-            wire::ThreadActionKind::Interrupt,
-            wire::ThreadActionKind::Steer,
-            wire::ThreadActionKind::Compact,
-            wire::ThreadActionKind::Fork,
-            wire::ThreadActionKind::ForkBefore,
-            wire::ThreadActionKind::RevertConversation,
-            wire::ThreadActionKind::UnrevertConversation,
+            wire::thread_command_turn::ThreadActionKind::Interrupt,
+            wire::thread_command_turn::ThreadActionKind::Steer,
+            wire::thread_command_turn::ThreadActionKind::Compact,
+            wire::thread_command_turn::ThreadActionKind::Fork,
+            wire::thread_command_turn::ThreadActionKind::ForkBefore,
+            wire::thread_command_turn::ThreadActionKind::RevertConversation,
+            wire::thread_command_turn::ThreadActionKind::UnrevertConversation,
         ],
         history: if bound {
-            wire::ThreadHistoryView {
-                owner: wire::ThreadHistoryOwnerView::Psychevo,
-                fidelity: wire::ThreadHistoryFidelityView::Full,
+            wire::events_transcript::ThreadHistoryView {
+                owner: wire::events_transcript::ThreadHistoryOwnerView::Psychevo,
+                fidelity: wire::events_transcript::ThreadHistoryFidelityView::Full,
                 cursor: None,
                 hint: None,
             }
@@ -3448,40 +3522,45 @@ fn acp_profile_surface_descriptor(
     let options = runtime_profile_config_options(config);
     let controls = options
         .into_iter()
-        .map(|option| wire::ThreadControlDescriptorView {
-            surface_role: match option.id.as_str() {
-                "model" => wire::ThreadControlSurfaceRoleView::Model,
-                "mode" | "agent" => wire::ThreadControlSurfaceRoleView::Mode,
-                _ => wire::ThreadControlSurfaceRoleView::Advanced,
+        .map(
+            |option| wire::agents_backend_rpc::ThreadControlDescriptorView {
+                surface_role: match option.id.as_str() {
+                    "model" => wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model,
+                    "mode" | "agent" => {
+                        wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode
+                    }
+                    _ => wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Advanced,
+                },
+                id: option.id,
+                label: option.name,
+                mutability: wire::agents_backend_rpc::ThreadControlMutabilityView::Selectable,
+                enabled: ready,
+                required: false,
+                unavailable_reason: (!ready).then(|| unavailable_reason.to_string()),
+                effective_value: option.current_value.map(Value::String),
+                effective_source:
+                    wire::agents_backend_rpc::ThreadControlEffectiveSourceView::ProfileDefault,
+                is_default: true,
+                choices: option
+                    .values
+                    .into_iter()
+                    .map(|choice| wire::agents_backend_rpc::ThreadControlChoiceView {
+                        value: Value::String(choice.value),
+                        label: choice.name,
+                        description: choice.description,
+                    })
+                    .collect(),
+                depends_on: None,
+                apply_scope: if bound {
+                    wire::agents_backend_rpc::ThreadControlApplyScopeView::Session
+                } else {
+                    wire::agents_backend_rpc::ThreadControlApplyScopeView::TurnDraft
+                },
+                stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
+                channel_safe: true,
+                capability_revision: capability_revision.clone(),
             },
-            id: option.id,
-            label: option.name,
-            mutability: wire::ThreadControlMutabilityView::Selectable,
-            enabled: ready,
-            required: false,
-            unavailable_reason: (!ready).then(|| unavailable_reason.to_string()),
-            effective_value: option.current_value.map(Value::String),
-            effective_source: wire::ThreadControlEffectiveSourceView::ProfileDefault,
-            is_default: true,
-            choices: option
-                .values
-                .into_iter()
-                .map(|choice| wire::ThreadControlChoiceView {
-                    value: Value::String(choice.value),
-                    label: choice.name,
-                    description: choice.description,
-                })
-                .collect(),
-            depends_on: None,
-            apply_scope: if bound {
-                wire::ThreadControlApplyScopeView::Session
-            } else {
-                wire::ThreadControlApplyScopeView::TurnDraft
-            },
-            stability: wire::RuntimeStabilityView::Stable,
-            channel_safe: true,
-            capability_revision: capability_revision.clone(),
-        })
+        )
         .collect();
     AgentSurfaceDescriptor {
         controls,
@@ -3500,11 +3579,11 @@ fn acp_profile_surface_descriptor(
             true,
             (!ready).then(|| unavailable_reason.to_string()),
         )],
-        actions: vec![wire::ThreadActionKind::Interrupt],
+        actions: vec![wire::thread_command_turn::ThreadActionKind::Interrupt],
         history: if bound {
-            wire::ThreadHistoryView {
-                owner: wire::ThreadHistoryOwnerView::Process,
-                fidelity: wire::ThreadHistoryFidelityView::Partial,
+            wire::events_transcript::ThreadHistoryView {
+                owner: wire::events_transcript::ThreadHistoryOwnerView::Process,
+                fidelity: wire::events_transcript::ThreadHistoryFidelityView::Partial,
                 cursor: None,
                 hint: Some(
                     "ACP history authority is finalized from the resident Agent session snapshot."
@@ -3517,10 +3596,10 @@ fn acp_profile_surface_descriptor(
     }
 }
 
-fn unavailable_history(hint: &str) -> wire::ThreadHistoryView {
-    wire::ThreadHistoryView {
-        owner: wire::ThreadHistoryOwnerView::Psychevo,
-        fidelity: wire::ThreadHistoryFidelityView::Unavailable,
+fn unavailable_history(hint: &str) -> wire::events_transcript::ThreadHistoryView {
+    wire::events_transcript::ThreadHistoryView {
+        owner: wire::events_transcript::ThreadHistoryOwnerView::Psychevo,
+        fidelity: wire::events_transcript::ThreadHistoryFidelityView::Unavailable,
         cursor: None,
         hint: Some(hint.to_string()),
     }
@@ -3540,13 +3619,13 @@ fn thread_input_capabilities(
     readiness_reason: &str,
     adapter_implements: impl Fn(&str) -> bool,
     adapter_reason: &str,
-) -> Vec<wire::ThreadInputCapabilityView> {
+) -> Vec<wire::agents_backend_rpc::ThreadInputCapabilityView> {
     THREAD_APPLICATION_INPUT_KINDS
         .into_iter()
         .map(|kind| {
             let implemented = adapter_implements(kind);
             let enabled = ready && implemented;
-            wire::ThreadInputCapabilityView {
+            wire::agents_backend_rpc::ThreadInputCapabilityView {
                 kind: kind.to_string(),
                 enabled,
                 unavailable_reason: (!enabled).then(|| {
@@ -3583,7 +3662,7 @@ fn effective_capability_view(
     adapter_implemented: bool,
     application_exposed: bool,
     negotiated_reason: Option<String>,
-) -> wire::RuntimeCapabilityView {
+) -> wire::agents_backend_rpc::RuntimeCapabilityView {
     let enabled = negotiated && adapter_implemented && application_exposed;
     let unavailable_reason = (!enabled).then(|| {
         if !negotiated {
@@ -3594,18 +3673,18 @@ fn effective_capability_view(
             format!("The Framework Adapter does not expose `{id}`.")
         }
     });
-    wire::RuntimeCapabilityView {
+    wire::agents_backend_rpc::RuntimeCapabilityView {
         id: id.to_string(),
         enabled,
-        stability: wire::RuntimeStabilityView::Stable,
+        stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
         unavailable_reason,
     }
 }
 
 fn acp_runtime_control_descriptors(
-    options: Vec<wire::RuntimeConfigOptionView>,
+    options: Vec<wire::thread_command_turn::RuntimeConfigOptionView>,
     capability_revision: String,
-) -> Vec<wire::ThreadControlDescriptorView> {
+) -> Vec<wire::agents_backend_rpc::ThreadControlDescriptorView> {
     options
         .into_iter()
         .map(|option| {
@@ -3613,12 +3692,16 @@ fn acp_runtime_control_descriptors(
                 option.id.as_str(),
                 option.category.as_deref().unwrap_or_default(),
             ) {
-                ("model", _) | (_, "model") => wire::ThreadControlSurfaceRoleView::Model,
-                ("effort" | "variant", _) | (_, "thought_level") => {
-                    wire::ThreadControlSurfaceRoleView::Reasoning
+                ("model", _) | (_, "model") => {
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model
                 }
-                ("mode" | "agent", _) | (_, "mode") => wire::ThreadControlSurfaceRoleView::Mode,
-                _ => wire::ThreadControlSurfaceRoleView::Advanced,
+                ("effort" | "variant", _) | (_, "thought_level") => {
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning
+                }
+                ("mode" | "agent", _) | (_, "mode") => {
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode
+                }
+                _ => wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Advanced,
             };
             let effective_value = option.current_value.as_ref().map(|value| {
                 if option.option_type == "boolean" {
@@ -3630,34 +3713,35 @@ fn acp_runtime_control_descriptors(
                     Value::String(value.clone())
                 }
             });
-            wire::ThreadControlDescriptorView {
+            wire::agents_backend_rpc::ThreadControlDescriptorView {
                 id: option.id,
                 label: option.name,
                 surface_role,
-                mutability: wire::ThreadControlMutabilityView::Selectable,
+                mutability: wire::agents_backend_rpc::ThreadControlMutabilityView::Selectable,
                 enabled: true,
                 required: false,
                 unavailable_reason: None,
                 effective_value,
-                effective_source: wire::ThreadControlEffectiveSourceView::RuntimeObserved,
+                effective_source:
+                    wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeObserved,
                 is_default: false,
                 choices: option
                     .values
                     .into_iter()
-                    .map(|choice| wire::ThreadControlChoiceView {
+                    .map(|choice| wire::agents_backend_rpc::ThreadControlChoiceView {
                         value: Value::String(choice.value),
                         label: choice.name,
                         description: choice.description,
                     })
                     .collect(),
                 depends_on: None,
-                apply_scope: wire::ThreadControlApplyScopeView::Session,
-                stability: wire::RuntimeStabilityView::Stable,
+                apply_scope: wire::agents_backend_rpc::ThreadControlApplyScopeView::Session,
+                stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
                 channel_safe: matches!(
                     surface_role,
-                    wire::ThreadControlSurfaceRoleView::Model
-                        | wire::ThreadControlSurfaceRoleView::Reasoning
-                        | wire::ThreadControlSurfaceRoleView::Mode
+                    wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model
+                        | wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Reasoning
+                        | wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode
                 ),
                 capability_revision: capability_revision.clone(),
             }
@@ -3666,42 +3750,43 @@ fn acp_runtime_control_descriptors(
 }
 
 pub(super) fn acp_session_mode_control_descriptor(
-    modes: &[crate::acp_peer::AcpSessionModeSnapshot],
+    modes: &[crate::acp_peer::session_projection::AcpSessionModeSnapshot],
     current_mode_id: Option<&str>,
     capability_revision: String,
-) -> Option<wire::ThreadControlDescriptorView> {
+) -> Option<wire::agents_backend_rpc::ThreadControlDescriptorView> {
     if modes.is_empty() {
         return None;
     }
-    Some(wire::ThreadControlDescriptorView {
+    Some(wire::agents_backend_rpc::ThreadControlDescriptorView {
         id: "mode".to_string(),
         label: "Mode".to_string(),
-        surface_role: wire::ThreadControlSurfaceRoleView::Mode,
-        mutability: wire::ThreadControlMutabilityView::Selectable,
+        surface_role: wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Mode,
+        mutability: wire::agents_backend_rpc::ThreadControlMutabilityView::Selectable,
         enabled: true,
         required: false,
         unavailable_reason: None,
         effective_value: current_mode_id.map(|mode| Value::String(mode.to_string())),
-        effective_source: wire::ThreadControlEffectiveSourceView::RuntimeObserved,
+        effective_source:
+            wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeObserved,
         is_default: false,
         choices: modes
             .iter()
-            .map(|mode| wire::ThreadControlChoiceView {
+            .map(|mode| wire::agents_backend_rpc::ThreadControlChoiceView {
                 value: Value::String(mode.id.clone()),
                 label: mode.name.clone(),
                 description: mode.description.clone(),
             })
             .collect(),
         depends_on: None,
-        apply_scope: wire::ThreadControlApplyScopeView::Session,
-        stability: wire::RuntimeStabilityView::Stable,
+        apply_scope: wire::agents_backend_rpc::ThreadControlApplyScopeView::Session,
+        stability: wire::agents_backend_rpc::RuntimeStabilityView::Stable,
         channel_safe: true,
         capability_revision,
     })
 }
 
 fn acp_session_agent_surface_descriptor(
-    snapshot: &crate::acp_peer::AcpSessionSnapshot,
+    snapshot: &crate::acp_peer::session_projection::AcpSessionSnapshot,
     capability_revision: String,
 ) -> AgentSurfaceDescriptor {
     let mut controls =
@@ -3728,7 +3813,7 @@ fn acp_session_agent_surface_descriptor(
                 "text" | "image" | "resource" | "resourceLink" | "embeddedContext"
             );
             let enabled = negotiated && adapter_implemented;
-            wire::ThreadInputCapabilityView {
+            wire::agents_backend_rpc::ThreadInputCapabilityView {
                 kind: kind.to_string(),
                 enabled,
                 unavailable_reason: (!enabled).then(|| {
@@ -3827,7 +3912,7 @@ fn acp_session_agent_surface_descriptor(
     capabilities.extend(snapshot.available_commands.iter().map(|command| {
         effective_capability_view(&format!("command:{}", command.name), true, true, true, None)
     }));
-    if let Some(pack) = crate::acp_peer::project_acp_capability_pack(snapshot) {
+    if let Some(pack) = crate::acp_peer::capability_packs::project_acp_capability_pack(snapshot) {
         capabilities.extend(pack.facts.into_iter().map(|fact| {
             let application_exposed = thread_application_exposes_capability(&fact.id);
             effective_capability_view(
@@ -3839,28 +3924,28 @@ fn acp_session_agent_surface_descriptor(
             )
         }));
     }
-    let mut actions = vec![wire::ThreadActionKind::Interrupt];
+    let mut actions = vec![wire::thread_command_turn::ThreadActionKind::Interrupt];
     if snapshot.capabilities.session.fork {
-        actions.push(wire::ThreadActionKind::Fork);
+        actions.push(wire::thread_command_turn::ThreadActionKind::Fork);
     }
     AgentSurfaceDescriptor {
         controls,
         input_capabilities,
         capabilities,
         actions,
-        history: wire::ThreadHistoryView {
+        history: wire::events_transcript::ThreadHistoryView {
             owner: match snapshot.history.owner {
-                crate::acp_peer::AcpHistoryOwnerSnapshot::Agent => {
-                    wire::ThreadHistoryOwnerView::Agent
+                crate::acp_peer::session_projection::AcpHistoryOwnerSnapshot::Agent => {
+                    wire::events_transcript::ThreadHistoryOwnerView::Agent
                 }
-                crate::acp_peer::AcpHistoryOwnerSnapshot::Process => {
-                    wire::ThreadHistoryOwnerView::Process
+                crate::acp_peer::session_projection::AcpHistoryOwnerSnapshot::Process => {
+                    wire::events_transcript::ThreadHistoryOwnerView::Process
                 }
             },
             fidelity: if snapshot.history.replay_complete {
-                wire::ThreadHistoryFidelityView::Full
+                wire::events_transcript::ThreadHistoryFidelityView::Full
             } else {
-                wire::ThreadHistoryFidelityView::Partial
+                wire::events_transcript::ThreadHistoryFidelityView::Partial
             },
             cursor: None,
             hint: if !snapshot.history.resumable {
@@ -3886,9 +3971,9 @@ fn acp_session_agent_surface_descriptor(
 }
 
 fn apply_control_state_precedence(
-    controls: &mut [wire::ThreadControlDescriptorView],
-    binding: Option<&GatewayRuntimeBindingRecord>,
-    source_lane: Option<&psychevo::__product::persistence::GatewaySourceLaneRecord>,
+    controls: &mut [wire::agents_backend_rpc::ThreadControlDescriptorView],
+    binding: Option<&ResolvedRuntimeBinding>,
+    source_lane: Option<&GatewaySourceLaneRecord>,
 ) {
     for control in controls {
         if let Some(value) = binding
@@ -3896,7 +3981,8 @@ fn apply_control_state_precedence(
             .cloned()
         {
             control.effective_value = Some(value);
-            control.effective_source = wire::ThreadControlEffectiveSourceView::ThreadPreference;
+            control.effective_source =
+                wire::agents_backend_rpc::ThreadControlEffectiveSourceView::ThreadPreference;
             control.is_default = false;
             continue;
         }
@@ -3906,7 +3992,8 @@ fn apply_control_state_precedence(
                 .cloned()
         {
             control.effective_value = Some(Value::String(value));
-            control.effective_source = wire::ThreadControlEffectiveSourceView::SourceDraft;
+            control.effective_source =
+                wire::agents_backend_rpc::ThreadControlEffectiveSourceView::SourceDraft;
             control.is_default = false;
             continue;
         }
@@ -3916,23 +4003,24 @@ fn apply_control_state_precedence(
                 .cloned()
         {
             control.effective_value = Some(value);
-            control.effective_source = wire::ThreadControlEffectiveSourceView::RuntimeObserved;
+            control.effective_source =
+                wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeObserved;
             control.is_default = false;
         }
     }
 }
 
 fn populate_native_control_catalog(
-    options: &RunOptions,
-    configured: &[psychevo::__product::runtime::ConfiguredModel],
-    controls: &mut [wire::ThreadControlDescriptorView],
+    selected_model: Option<&psychevo::config::ConfiguredModel>,
+    configured: &[psychevo::config::ConfiguredModel],
+    controls: &mut [wire::agents_backend_rpc::ThreadControlDescriptorView],
 ) {
     if let Some(model_control) = controls.iter_mut().find(|control| control.id == "model") {
         model_control.choices = configured
             .iter()
             .map(|model| {
                 let value = format!("{}/{}", model.provider, model.model);
-                wire::ThreadControlChoiceView {
+                wire::agents_backend_rpc::ThreadControlChoiceView {
                     value: Value::String(value.clone()),
                     label: model.model_name.clone().unwrap_or(value),
                     description: Some(model.provider_label.clone()),
@@ -3940,37 +4028,33 @@ fn populate_native_control_catalog(
             })
             .collect();
         if model_control.effective_value.is_none()
-            && let Ok(Some(model)) = selected_configured_model(options)
+            && let Some(model) = selected_model
         {
             model_control.effective_value =
                 Some(Value::String(format!("{}/{}", model.provider, model.model)));
-            model_control.effective_source = wire::ThreadControlEffectiveSourceView::RuntimeDefault;
+            model_control.effective_source =
+                wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeDefault;
         }
     }
     if let Some(reasoning_control) = controls
         .iter_mut()
         .find(|control| control.id == "reasoning")
         && reasoning_control.effective_value.is_none()
-        && let Some(reasoning) = options.reasoning_effort.clone().or_else(|| {
-            selected_configured_model(options)
-                .ok()
-                .flatten()
-                .and_then(|model| model.reasoning_effort)
-        })
+        && let Some(reasoning) = selected_model.and_then(|model| model.reasoning_effort.clone())
     {
         reasoning_control.effective_value = Some(Value::String(reasoning));
-        reasoning_control.effective_source = wire::ThreadControlEffectiveSourceView::RuntimeDefault;
+        reasoning_control.effective_source =
+            wire::agents_backend_rpc::ThreadControlEffectiveSourceView::RuntimeDefault;
     }
 }
 
 fn decorate_configured_model_control_labels(
-    configured: &[psychevo::__product::runtime::ConfiguredModel],
-    controls: &mut [wire::ThreadControlDescriptorView],
+    configured: &[psychevo::config::ConfiguredModel],
+    controls: &mut [wire::agents_backend_rpc::ThreadControlDescriptorView],
 ) {
-    let Some(model_control) = controls
-        .iter_mut()
-        .find(|control| control.surface_role == wire::ThreadControlSurfaceRoleView::Model)
-    else {
+    let Some(model_control) = controls.iter_mut().find(|control| {
+        control.surface_role == wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model
+    }) else {
         return;
     };
     for choice in &mut model_control.choices {
@@ -3988,7 +4072,7 @@ fn decorate_configured_model_control_labels(
 }
 
 fn source_draft_control_revision(
-    source_lane: Option<&psychevo::__product::persistence::GatewaySourceLaneRecord>,
+    source_lane: Option<&GatewaySourceLaneRecord>,
     capability_revision: &str,
 ) -> String {
     let Some(source_lane) = source_lane else {
@@ -4012,7 +4096,7 @@ pub(super) async fn apply_thread_control_precedence(
     options: &mut BTreeMap<String, String>,
 ) -> psychevo::Result<()> {
     if let Some(thread_id) = thread_id
-        && let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await?
+        && let Some(binding) = resolved_runtime_binding(state, thread_id).await?
     {
         for (control_id, value) in binding.thread_preferences {
             options.insert(control_id, thread_control_override_string_value(&value)?);
@@ -4021,7 +4105,7 @@ pub(super) async fn apply_thread_control_precedence(
     }
     if let Some(lane) = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&scope.source.source_key().0)
         .await?
     {
@@ -4047,7 +4131,7 @@ pub(super) fn thread_control_override_string_value(value: &Value) -> psychevo::R
 }
 
 fn runtime_profile_config_json(
-    params: &wire::RuntimeProfileWriteParams,
+    params: &wire::agents_backend_rpc::RuntimeProfileWriteParams,
 ) -> psychevo::Result<Value> {
     validate_runtime_profile_kind(&params.runtime)?;
     let backend_ref = params
@@ -4060,11 +4144,7 @@ fn runtime_profile_config_json(
         "acp" => RuntimeProfileKind::Acp,
         _ => unreachable!("runtime kind was validated"),
     };
-    psychevo::__product::configuration::validate_runtime_profile_backend_ref(
-        &params.id,
-        runtime_kind,
-        backend_ref,
-    )?;
+    psychevo::config::validate_runtime_profile_backend_ref(&params.id, runtime_kind, backend_ref)?;
     let mut object = serde_json::Map::new();
     object.insert("runtime".to_string(), json!(params.runtime.trim()));
     object.insert("enabled".to_string(), json!(params.enabled.unwrap_or(true)));
@@ -4125,20 +4205,22 @@ fn validate_runtime_profile_kind(value: &str) -> psychevo::Result<()> {
 fn runtime_profile_config_dir(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::BackendConfigTarget,
+    target: wire::agents_backend_rpc::BackendConfigTarget,
 ) -> PathBuf {
     match target {
-        wire::BackendConfigTarget::Project => scope.cwd.join(".psychevo"),
-        wire::BackendConfigTarget::Profile => active_profile_config_dir(state, scope),
+        wire::agents_backend_rpc::BackendConfigTarget::Project => scope.cwd.join(".psychevo"),
+        wire::agents_backend_rpc::BackendConfigTarget::Profile => {
+            active_profile_config_dir(state, scope)
+        }
     }
 }
 
 fn ensure_profile_config_for_runtime_profile_write(
     state: &WebState,
     scope: &ResolvedScope,
-    target: wire::BackendConfigTarget,
+    target: wire::agents_backend_rpc::BackendConfigTarget,
 ) -> psychevo::Result<()> {
-    if target != wire::BackendConfigTarget::Profile
+    if target != wire::agents_backend_rpc::BackendConfigTarget::Profile
         || !state
             .inner
             .inherited_env
@@ -4163,13 +4245,13 @@ fn runtime_profile_source_targets(
     state: &WebState,
     scope: &ResolvedScope,
     id: &str,
-) -> psychevo::Result<Vec<wire::BackendConfigTarget>> {
+) -> psychevo::Result<Vec<wire::agents_backend_rpc::BackendConfigTarget>> {
     let mut targets = Vec::new();
     if runtime_profile_exists_in_config_dir(&active_profile_config_dir(state, scope), id)? {
-        targets.push(wire::BackendConfigTarget::Profile);
+        targets.push(wire::agents_backend_rpc::BackendConfigTarget::Profile);
     }
     if runtime_profile_exists_in_config_dir(&scope.cwd.join(".psychevo"), id)? {
-        targets.push(wire::BackendConfigTarget::Project);
+        targets.push(wire::agents_backend_rpc::BackendConfigTarget::Project);
     }
     Ok(targets)
 }
@@ -4217,12 +4299,10 @@ mod runtime_session_ownership_tests {
                 home.to_string_lossy().to_string(),
             ),
         ]);
-        let runtime_state = StateRuntime::open(temp.path().join("state.db"))
+        let runtime = GatewayApplication::open(home, temp.path().join("state.db"), None, env)
             .await
-            .expect("state runtime");
-        let gateway = Gateway::new(runtime_state);
-        let config =
-            GatewayWebServerConfig::new(gateway, home, cwd, None, env, temp.path().join("static"));
+            .expect("Gateway Application");
+        let config = GatewayWebServerConfig::with_static(runtime, cwd, temp.path().join("static"));
         (temp, WebState::new(config))
     }
 
@@ -4289,9 +4369,9 @@ default_model = "test/default"
         let context = thread_context_read_result(
             &state,
             &scope,
-            wire::ThreadContextReadParams {
+            wire::agents_backend_rpc::ThreadContextReadParams {
                 thread_id: None,
-                target: Some(wire::RunnableTargetInput {
+                target: Some(wire::thread_command_turn::RunnableTargetInput {
                     agent_ref: Some("fixture".to_string()),
                     runtime_profile_ref: "fixture".to_string(),
                 }),
@@ -4303,7 +4383,10 @@ default_model = "test/default"
         let model = context
             .controls
             .iter()
-            .find(|control| control.surface_role == wire::ThreadControlSurfaceRoleView::Model)
+            .find(|control| {
+                control.surface_role
+                    == wire::agents_backend_rpc::ThreadControlSurfaceRoleView::Model
+            })
             .expect("model control");
         assert_eq!(model.effective_value, Some(json!("test/default")));
         assert_eq!(model.choices[0].label, "Configured default");
@@ -4335,16 +4418,13 @@ default_model = "test/default"
             ),
             ("PATH".to_string(), bin.to_string_lossy().to_string()),
         ]);
-        let runtime_state = StateRuntime::open(temp.path().join("state.db"))
-            .await
-            .expect("state runtime");
-        let gateway = Gateway::new(runtime_state);
-        let state = WebState::new(GatewayWebServerConfig::new(
-            gateway,
-            home.clone(),
+        let runtime =
+            GatewayApplication::open(home.clone(), temp.path().join("state.db"), None, env)
+                .await
+                .expect("Gateway Application");
+        let state = WebState::new(GatewayWebServerConfig::with_static(
+            runtime,
             cwd,
-            None,
-            env,
             temp.path().join("static"),
         ));
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
@@ -4352,7 +4432,7 @@ default_model = "test/default"
         thread_context_read_result(
             &state,
             &scope,
-            wire::ThreadContextReadParams {
+            wire::agents_backend_rpc::ThreadContextReadParams {
                 thread_id: None,
                 target: None,
                 scope: Some(scope.to_wire_scope()),
@@ -4369,28 +4449,11 @@ default_model = "test/default"
 
     #[tokio::test]
     async fn process_ephemeral_restart_keeps_cached_context_and_requires_a_new_thread() {
+        let host_cwd = std::env::current_dir().expect("host cwd");
+        let fixture = crate::test_support::acp_fixture(&host_cwd, "fake_acp_lifecycle");
         let (temp, state) = ephemeral_web_state().await;
         std::fs::create_dir_all(&state.inner.home).expect("home");
-        let script_path = temp.path().join("process_ephemeral_acp.py");
         let log_path = temp.path().join("process_ephemeral_methods.log");
-        std::fs::write(
-            &script_path,
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/process_ephemeral_acp.py"
-            )),
-        )
-        .expect("ACP fixture");
-        let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo::__product::platform::resolve_executable_path(
-            "python3",
-            &state.inner.cwd,
-            &psychevo::__product::platform::ExecutableResolveOptions {
-                platform: HostPlatform::current(),
-                env: &host_env,
-            },
-        )
-        .expect("python3");
         std::fs::write(
             state.inner.home.join("config.toml"),
             format!(
@@ -4398,7 +4461,8 @@ default_model = "test/default"
 kind = "acp"
 label = "Ephemeral"
 command = {}
-args = [{}, {}]
+args = [{}]
+env = {{ ACP_LIFECYCLE_LOG = {}, ACP_LIFECYCLE_MODE = "process-ephemeral" }}
 entrypoints = ["peer"]
 
 [runtime_profiles.ephemeral]
@@ -4407,138 +4471,120 @@ enabled = true
 label = "Ephemeral ACP"
 backend_ref = "ephemeral"
 "#,
-                serde_json::to_string(&python.to_string_lossy()).expect("python path"),
-                serde_json::to_string(&script_path.to_string_lossy()).expect("script path"),
-                serde_json::to_string(&log_path.to_string_lossy()).expect("log path"),
+                crate::test_support::toml_path(&fixture.program),
+                crate::test_support::toml_path(&fixture.script),
+                crate::test_support::toml_path(&log_path),
             ),
         )
         .expect("config");
-        let profile = RuntimeProfileConfig {
-            id: "ephemeral".to_string(),
-            runtime: RuntimeProfileKind::Acp,
-            enabled: true,
-            label: "Ephemeral ACP".to_string(),
-            backend_ref: Some("ephemeral".to_string()),
-            default_model: None,
-            default_mode: None,
-            default_agent: None,
-            sandbox: None,
-            workspace_roots: Vec::new(),
-            options: Value::Null,
-        };
-        let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-        let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-        let profile_revision =
-            crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-        let agent_json = r#"{"name":"ephemeral","instructions":"captured"}"#;
-        let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
-        let thread_id = state
-            .inner
-            .state
-            .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
-            .await
-            .expect("thread");
-        let cwd = state.inner.cwd.display().to_string();
-        state
-            .inner
-            .state
-            .create_gateway_runtime_binding(
-                psychevo::__product::persistence::GatewayRuntimeBindingInput {
-                    thread_id: &thread_id,
-                    agent_ref: Some("ephemeral"),
-                    agent_fingerprint: &agent_fingerprint,
-                    agent_definition_json: agent_json,
-                    runtime_ref: "ephemeral",
-                    backend_kind: "acp",
-                    native_kind: "acp",
-                    native_session_id: Some("ephemeral-native-1"),
-                    cwd: &cwd,
-                    profile_fingerprint: &profile_fingerprint,
-                    profile_revision: &profile_revision,
-                    profile_config_json: &profile_json,
-                    adapter_kind: "acp",
-                    adapter_revision: "test",
-                    ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-                    parent_thread_id: None,
-                },
-            )
-            .await
-            .expect("binding");
-        let persisted_projection = crate::acp_peer::AcpSessionSnapshot {
-            native_session_id: "ephemeral-native-1".to_string(),
-            agent: Some(crate::acp_peer::AcpAgentIdentitySnapshot {
-                name: "ephemeral-test".to_string(),
-                title: Some("Ephemeral".to_string()),
-                version: "1.0.0".to_string(),
-            }),
-            capabilities: crate::acp_peer::AcpNegotiatedCapabilitiesSnapshot {
-                prompt_input: crate::acp_peer::AcpPromptInputCapabilitiesSnapshot {
-                    text: true,
-                    image: false,
-                    audio: false,
-                    resource: false,
-                    resource_link: false,
-                    embedded_context: true,
-                },
-                session: crate::acp_peer::AcpSessionLifecycleCapabilitiesSnapshot {
-                    load: false,
-                    list: false,
-                    delete: false,
-                    fork: false,
-                    resume: false,
-                    close: false,
-                    additional_directories: false,
-                },
-                auth_logout: false,
-                auth_methods: Vec::new(),
-                providers: false,
-                mcp_http: false,
-                mcp_sse: false,
-                mcp_acp: false,
-            },
-            options: Vec::new(),
-            available_commands: Vec::new(),
-            available_modes: Vec::new(),
-            current_mode_id: None,
-            legacy_models: None,
-            history: crate::acp_peer::AcpHistorySnapshot {
-                owner: crate::acp_peer::AcpHistoryOwnerSnapshot::Process,
-                resumable: false,
-                load_supported: false,
-                resume_supported: false,
-                loaded_from_agent: false,
-                replay_complete: true,
-                replay_update_count: 0,
-                live_update_count: 0,
-            },
-            session_info: crate::acp_peer::AcpSessionInfoSnapshot::default(),
-            generation: 1,
-            session_epoch: 1,
-            control_revision: "ephemeral-controls".to_string(),
-            projection_revision: "ephemeral-projection".to_string(),
-        };
-        state
-            .inner
-            .state
-            .set_session_metadata_field(
-                &thread_id,
-                ACP_PEER_METADATA_KEY,
-                Some(json!({
-                    "agentName": "ephemeral",
-                    "backendId": "ephemeral",
-                    "backendKind": "acp",
-                    "nativeSessionId": "ephemeral-native-1",
-                    "sessionProjection": persisted_projection,
-                })),
-            )
-            .await
-            .expect("persist ACP product projection");
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+        let prospective = thread_context_read_result(
+            &state,
+            &scope,
+            wire::agents_backend_rpc::ThreadContextReadParams {
+                thread_id: None,
+                target: Some(wire::thread_command_turn::RunnableTargetInput {
+                    agent_ref: Some("ephemeral".to_string()),
+                    runtime_profile_ref: "ephemeral".to_string(),
+                }),
+                scope: Some(scope.to_wire_scope()),
+            },
+        )
+        .await
+        .expect("prospective context");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let accepted = crate::server::rpc_dispatch::handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx,
+            crate::server::rpc_json::RpcRequest {
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+                id: Some(json!("process-ephemeral-turn")),
+                method: "turn/start".to_string(),
+                params: Some(json!({
+                    "clientTurnId": "process-ephemeral-turn",
+                    "scope": scope.to_wire_scope(),
+                    "threadId": null,
+                    "target": {"agentRef": "ephemeral", "runtimeProfileRef": "ephemeral"},
+                    "input": [{"type": "text", "text": "establish process-owned history"}],
+                    "turnOverrides": {},
+                    "expectedContextRevision": prospective.context_revision,
+                    "expectedControlRevision": prospective.control_revision
+                })),
+            },
+        )
+        .await
+        .expect("real ACP turn");
+        let thread_id = accepted["threadId"]
+            .as_str()
+            .expect("thread id")
+            .to_string();
+        let terminal = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while let Some(message) = rx.recv().await {
+                if message.contains(r#""type":"turnCompleted""#) {
+                    return message;
+                }
+            }
+            String::new()
+        })
+        .await
+        .expect("turn terminal");
+        assert!(terminal.contains(r#""status":"completed""#), "{terminal}");
+
+        let thread = state
+            .inner
+            .framework
+            .resume_thread(&thread_id)
+            .await
+            .expect("bound thread");
+        let binding = thread
+            .agent_binding()
+            .await
+            .expect("binding")
+            .expect("bound Agent");
+        let ThreadAgentBinding::Resolved { binding, .. } = binding else {
+            panic!("bound Agent must resolve")
+        };
+        assert_eq!(binding.native_kind, "acp");
+        assert_eq!(binding.native_session_id.as_deref(), Some("draft-native"));
+        let persisted_projection: crate::acp_peer::session_projection::AcpSessionSnapshot =
+            serde_json::from_value(
+                thread
+                    .agent_session_projection()
+                    .await
+                    .expect("projection")
+                    .expect("persisted ACP projection"),
+            )
+            .expect("valid ACP projection");
+        assert_eq!(
+            persisted_projection.history.owner,
+            crate::acp_peer::session_projection::AcpHistoryOwnerSnapshot::Process
+        );
+        assert!(!persisted_projection.history.resumable);
+
+        let resident = thread_context_read_result_live(
+            &state,
+            &scope,
+            wire::agents_backend_rpc::ThreadContextReadParams {
+                thread_id: Some(thread_id.clone()),
+                target: None,
+                scope: Some(scope.to_wire_scope()),
+            },
+        )
+        .await
+        .expect("resident context");
+        assert!(resident.sendability.allowed);
+        state
+            .inner
+            .gateway
+            .shutdown_runtimes(false)
+            .await
+            .expect("restart Agent runtimes");
 
         let context = thread_context_read_result_live(
             &state,
             &scope,
-            wire::ThreadContextReadParams {
+            wire::agents_backend_rpc::ThreadContextReadParams {
                 thread_id: Some(thread_id),
                 target: None,
                 scope: Some(scope.to_wire_scope()),
@@ -4547,10 +4593,13 @@ backend_ref = "ephemeral"
         .await
         .expect("process-ephemeral cached Thread Context");
 
-        assert_eq!(context.history.owner, wire::ThreadHistoryOwnerView::Process);
+        assert_eq!(
+            context.history.owner,
+            wire::events_transcript::ThreadHistoryOwnerView::Process
+        );
         assert_eq!(
             context.history.fidelity,
-            wire::ThreadHistoryFidelityView::Partial
+            wire::events_transcript::ThreadHistoryFidelityView::Partial
         );
         assert!(
             context
@@ -4571,9 +4620,15 @@ backend_ref = "ephemeral"
                 .as_deref()
                 .is_some_and(|reason| reason.contains("process-ephemeral"))
         );
-        assert!(
-            !log_path.exists(),
-            "cache-only Thread Context must not initialize, load, or resume the ACP Agent"
+        let log = std::fs::read_to_string(&log_path).expect("ACP fixture log");
+        assert!(log.contains(r#""method":"session/new""#), "{log}");
+        assert!(log.contains(r#""method":"session/prompt""#), "{log}");
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains(r#""method":"initialize""#))
+                .count(),
+            1,
+            "cached context must not relaunch the process-ephemeral Agent: {log}"
         );
     }
 
@@ -4640,22 +4695,23 @@ backend_ref = "reviewer"
 
     #[tokio::test]
     async fn runtime_profile_write_keeps_launch_configuration_on_the_backend() {
-        let value = runtime_profile_config_json(&wire::RuntimeProfileWriteParams {
-            id: "reviewer".to_string(),
-            target: wire::BackendConfigTarget::Project,
-            runtime: "acp".to_string(),
-            enabled: Some(true),
-            label: Some("Reviewer".to_string()),
-            backend_ref: Some("reviewer-agent".to_string()),
-            default_model: Some("model-a".to_string()),
-            default_mode: None,
-            default_agent: None,
-            sandbox: None,
-            workspace_roots: Vec::new(),
-            options: None,
-            scope: None,
-        })
-        .expect("ACP profile config");
+        let value =
+            runtime_profile_config_json(&wire::agents_backend_rpc::RuntimeProfileWriteParams {
+                id: "reviewer".to_string(),
+                target: wire::agents_backend_rpc::BackendConfigTarget::Project,
+                runtime: "acp".to_string(),
+                enabled: Some(true),
+                label: Some("Reviewer".to_string()),
+                backend_ref: Some("reviewer-agent".to_string()),
+                default_model: Some("model-a".to_string()),
+                default_mode: None,
+                default_agent: None,
+                sandbox: None,
+                workspace_roots: Vec::new(),
+                options: None,
+                scope: None,
+            })
+            .expect("ACP profile config");
         let object = value.as_object().expect("profile object");
         assert_eq!(object.get("runtime"), Some(&json!("acp")));
         assert_eq!(object.get("backend_ref"), Some(&json!("reviewer-agent")));

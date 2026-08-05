@@ -3,19 +3,15 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    __product::configuration::configured_models,
-    __product::configuration::fetch_and_cache_model_catalog,
-    __product::configuration::model_catalog_providers,
-    __product::configuration::selected_configured_model,
-    __product::configuration::set_default_model, __product::runtime::ConfiguredModel,
-    __product::runtime::ModelCatalogEntry, __product::runtime::ModelCatalogProvider,
+    Configuration, config::ConfigScope, config::ConfiguredModel, config::ModelCatalogEntry,
+    config::ModelCatalogProvider,
 };
 use serde_json::{Value, json};
 
 use crate::args::{
     ModelArgs, ModelCommand, ModelFetchArgs, ModelJsonArgs, ModelListArgs, ModelSetArgs,
 };
-use crate::commands::common::{base_run_options, print_json_error};
+use crate::commands::common::{CommandConfiguration, print_json_error};
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
 pub(crate) async fn run_model_command(args: ModelArgs) -> Result<ExitCode> {
@@ -34,21 +30,19 @@ pub(crate) async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let options = base_run_options(&env_map, &home, &cwd).await?;
-    match &args.command {
-        ModelCommand::List(args) => list_models(args, &options)?,
-        ModelCommand::Current(args) => current_model(args, &options)?,
-        ModelCommand::Set(args) => set_model(args, &home, &cwd)?,
-        ModelCommand::Fetch(args) => fetch_models(args, &home, &options).await?,
-    }
+    let context = CommandConfiguration::open(&env_map, &home, &cwd).await?;
+    let result = match &args.command {
+        ModelCommand::List(args) => list_models(args, context.configuration()),
+        ModelCommand::Current(args) => current_model(args, context.configuration()),
+        ModelCommand::Set(args) => set_model(args, context.configuration()),
+        ModelCommand::Fetch(args) => fetch_models(args, context.configuration()).await,
+    };
+    context.finish(result).await?;
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn list_models(
-    args: &ModelListArgs,
-    options: &psychevo::__product::runtime::RunOptions,
-) -> Result<()> {
-    let mut models = configured_models(options)?;
+pub(crate) fn list_models(args: &ModelListArgs, configuration: &Configuration) -> Result<()> {
+    let mut models = configuration.configured_models()?;
     if let Some(provider) = &args.provider {
         let provider = provider.trim().to_lowercase();
         models.retain(|model| model.provider == provider);
@@ -80,11 +74,8 @@ pub(crate) fn list_models(
     Ok(())
 }
 
-pub(crate) fn current_model(
-    args: &ModelJsonArgs,
-    options: &psychevo::__product::runtime::RunOptions,
-) -> Result<()> {
-    let selected = selected_configured_model(options)?;
+pub(crate) fn current_model(args: &ModelJsonArgs, configuration: &Configuration) -> Result<()> {
+    let selected = configuration.selected_model()?;
     if args.json {
         println!(
             "{}",
@@ -107,12 +98,13 @@ pub(crate) fn current_model(
     Ok(())
 }
 
-pub(crate) fn set_model(
-    args: &ModelSetArgs,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<()> {
-    let value = set_default_model(home, cwd, args.global, &args.model)?;
+pub(crate) fn set_model(args: &ModelSetArgs, configuration: &Configuration) -> Result<()> {
+    let scope = if args.global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Local
+    };
+    let value = configuration.set_default_model(scope, &args.model, None)?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
@@ -125,10 +117,9 @@ pub(crate) fn set_model(
 
 pub(crate) async fn fetch_models(
     args: &ModelFetchArgs,
-    home: &std::path::Path,
-    options: &psychevo::__product::runtime::RunOptions,
+    configuration: &Configuration,
 ) -> Result<()> {
-    let mut providers = model_catalog_providers(options)?;
+    let mut providers = configuration.model_catalog_providers()?;
     if let Some(provider) = &args.provider {
         let provider = provider.trim().to_lowercase();
         providers.retain(|row| row.provider == provider);
@@ -144,7 +135,9 @@ pub(crate) async fn fetch_models(
 
     let mut rows = Vec::new();
     for provider in &providers {
-        let models = fetch_and_cache_model_catalog(home, provider).await?;
+        let models = configuration
+            .fetch_and_cache_model_catalog(provider)
+            .await?;
         rows.push(json!({
             "provider": provider_value(provider),
             "models": models.iter().map(catalog_model_value).collect::<Vec<_>>(),

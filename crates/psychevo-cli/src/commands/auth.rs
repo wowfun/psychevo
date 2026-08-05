@@ -2,18 +2,11 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::{
-    __product::configuration::auth_status_value,
-    __product::configuration::create_scoped_custom_provider,
-    __product::configuration::set_default_model, __product::configuration::set_provider_api_key,
-    __product::runtime::ScopedCustomProviderInput,
-};
+use psychevo::{Configuration, CreateCustomProviderRequest, config::ConfigScope};
 use serde_json::Value;
 
 use crate::args::{AuthArgs, AuthCommand, AuthSetArgs, AuthSetupArgs, AuthStatusArgs};
-use crate::commands::common::{
-    base_run_options, print_json_error, read_secret_from_stdin, scoped_config_dir,
-};
+use crate::commands::common::{CommandConfiguration, print_json_error, read_secret_from_stdin};
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
 pub(crate) async fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
@@ -32,19 +25,20 @@ pub(crate) async fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> 
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let options = base_run_options(&env_map, &home, &cwd).await?;
-    match &args.command {
-        AuthCommand::Status(args) => auth_status(args, &options),
-        AuthCommand::Setup(args) => auth_setup(args, &home, &cwd),
-        AuthCommand::Set(args) => auth_set(args, &options, &home, &cwd),
-    }
+    let context = CommandConfiguration::open(&env_map, &home, &cwd).await?;
+    let result = match &args.command {
+        AuthCommand::Status(args) => auth_status(args, context.configuration()),
+        AuthCommand::Setup(args) => auth_setup(args, context.configuration()),
+        AuthCommand::Set(args) => auth_set(args, context.configuration()),
+    };
+    context.finish(result).await
 }
 
 pub(crate) fn auth_status(
     args: &AuthStatusArgs,
-    options: &psychevo::__product::runtime::RunOptions,
+    configuration: &Configuration,
 ) -> Result<ExitCode> {
-    let value = auth_status_value(options, args.provider.as_deref())?;
+    let value = configuration.auth_status(args.provider.as_deref())?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
@@ -53,11 +47,7 @@ pub(crate) fn auth_status(
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn auth_setup(
-    args: &AuthSetupArgs,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<ExitCode> {
+pub(crate) fn auth_setup(args: &AuthSetupArgs, configuration: &Configuration) -> Result<ExitCode> {
     if args.api_kind != "openai-compatible" {
         return Err(anyhow!(
             "pevo auth setup only supports --api-kind openai-compatible"
@@ -75,18 +65,21 @@ pub(crate) fn auth_setup(
         .ok_or_else(|| anyhow!("pevo auth setup requires --base-url"))?;
     let label = args.label.clone().unwrap_or_else(|| args.provider.clone());
     let global = args.global || !args.local;
-    let result = create_scoped_custom_provider(ScopedCustomProviderInput {
-        config_dir: scoped_config_dir(home, cwd, global)?,
-        provider_id: args.provider.clone(),
-        label,
-        base_url: base_url.clone(),
-        api_key_env: args.api_key_env.clone(),
-        api_key,
-        require_api_key: !args.no_auth && args.api_key_env.is_none(),
-        no_auth: args.no_auth,
-    })?;
+    let scope = mutation_scope(global);
+    let result = configuration.create_custom_provider(
+        scope,
+        CreateCustomProviderRequest {
+            provider_id: args.provider.clone(),
+            label,
+            base_url: base_url.clone(),
+            api_key_env: args.api_key_env.clone(),
+            api_key,
+            require_api_key: !args.no_auth && args.api_key_env.is_none(),
+            no_auth: args.no_auth,
+        },
+    )?;
     let model_spec = format!("{}/{}", result.provider_id, args.model);
-    let model_value = set_default_model(home, cwd, global, &model_spec)?;
+    let model_value = configuration.set_default_model(scope, &model_spec, None)?;
     let warnings = if args.no_auth
         && !(base_url.starts_with("http://127.0.0.1")
             || base_url.starts_with("http://localhost")
@@ -122,19 +115,13 @@ pub(crate) fn auth_setup(
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn auth_set(
-    args: &AuthSetArgs,
-    options: &psychevo::__product::runtime::RunOptions,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<ExitCode> {
+pub(crate) fn auth_set(args: &AuthSetArgs, configuration: &Configuration) -> Result<ExitCode> {
     if !args.api_key_stdin {
         return Err(anyhow!("pevo auth set requires --api-key-stdin"));
     }
     let api_key = read_secret_from_stdin(true)?.expect("required stdin secret");
-    let value = set_provider_api_key(
-        options,
-        scoped_config_dir(home, cwd, args.global)?,
+    let value = configuration.set_provider_api_key(
+        mutation_scope(args.global),
         &args.provider,
         &api_key,
     )?;
@@ -153,6 +140,14 @@ pub(crate) fn auth_set(
         );
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn mutation_scope(global: bool) -> ConfigScope {
+    if global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Local
+    }
 }
 
 pub(crate) fn print_auth_status(value: &Value) {

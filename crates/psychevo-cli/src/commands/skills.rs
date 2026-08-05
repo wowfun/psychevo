@@ -5,16 +5,12 @@ use std::process::ExitCode;
 use anyhow::{Result, anyhow};
 use clap::CommandFactory;
 use psychevo::{
-    __product::capabilities::InstallOptions, __product::capabilities::ListSkillsOptions,
-    __product::capabilities::SaveSkillBundleOptions, __product::capabilities::SkillBundle,
-    __product::capabilities::SkillCatalog, __product::capabilities::SkillDiscoveryOptions,
-    __product::capabilities::SkillTarget, __product::capabilities::delete_skill_bundle,
-    __product::capabilities::discover_skills, __product::capabilities::install_skill,
-    __product::capabilities::list_skill_bundles,
-    __product::capabilities::list_skills_value_with_options,
-    __product::capabilities::remove_installed_skill, __product::capabilities::save_skill_bundle,
-    __product::capabilities::scan_skill_path, __product::capabilities::set_skill_config_value,
-    __product::capabilities::set_skill_enabled, __product::capabilities::view_skill_value,
+    skills::InstallOptions, skills::ListSkillsOptions, skills::SaveSkillBundleOptions,
+    skills::SkillBundle, skills::SkillCatalog, skills::SkillDiscoveryOptions, skills::SkillTarget,
+    skills::delete_skill_bundle, skills::discover_skills, skills::install_skill,
+    skills::list_skill_bundles, skills::list_skills_value_with_options,
+    skills::remove_installed_skill, skills::save_skill_bundle, skills::scan_skill_path,
+    skills::set_skill_config_value, skills::set_skill_enabled, skills::view_skill_value,
 };
 use serde_json::{Value, json};
 
@@ -244,7 +240,7 @@ pub(crate) fn publish_skill(
 ) -> Result<()> {
     let path = resolve_explicit_path(&args.path, env_map, cwd)?;
     let scan = scan_skill_path(&path)?;
-    if scan.verdict == psychevo::__product::capabilities::ScanVerdict::Dangerous {
+    if scan.verdict == psychevo::skills::ScanVerdict::Dangerous {
         return Err(anyhow!(
             "cannot publish a skill with dangerous scanner verdict"
         ));

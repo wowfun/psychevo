@@ -1,5 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::fs;
+use std::path::PathBuf;
+
+use anyhow::Result;
+use psychevo::agents::MAX_AGENT_SPAWN_DEPTH_CAP;
+use psychevo::application::StartAgentTaskRequest;
+
+use crate::tui::app_bottom_panel::{
+    agent_editor_markdown, parse_agent_editor_max_spawn_depth, valid_local_agent_name,
+};
+use crate::tui::app_state::TuiApp;
+use crate::tui::ui_types::{
+    AgentEditorField, AgentEditorMode, AgentEditorPanel, AgentTab, BottomPanel, FullscreenUi,
+};
 
 impl TuiApp {
     pub(crate) async fn start_available_agent_run(
@@ -8,35 +20,27 @@ impl TuiApp {
         agent_name: String,
         prompt: String,
     ) -> Result<()> {
-        let result = spawn_agent_background(AgentSpawnOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            parent_session: self.current_session.clone(),
-            prompt,
-            agent: agent_name.clone(),
-            config_path: self.config_path.clone(),
-            model: self.current_model.clone(),
-            reasoning_effort: self.current_variant.clone(),
-            mode: self.current_mode,
-            permission_mode: None,
-            approval_handler: None,
-            inherited_env: Some(self.env_map.clone()),
-            selected_parent_agent: self.current_agent.clone(),
-            no_skills: self.no_skills,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: self.skill_inputs.clone(),
-            mcp_servers: Vec::new(),
-            agent_control: Some(self.application.agent_control()),
-        })
-        .await?;
-        self.current_session = Some(result.parent_session_id);
+        let parent_thread_id = self.current_session.clone();
+        self.detach_foreground_for_session_switch(ui, None).await;
+        let mut request = StartAgentTaskRequest::new(&self.cwd, agent_name, prompt);
+        request.parent_thread_id = parent_thread_id;
+        request.model = self.current_model.clone();
+        request.reasoning_effort = self.current_variant.clone();
+        request.mode = self.current_mode;
+        request.inherited_env = Some(self.env_map.clone());
+        request.selected_parent_agent = self.current_agent.clone();
+        request.no_skills = self.no_skills;
+        request.skill_inputs = self.skill_inputs.clone();
+
+        let receipt = self.runtime.client().start_agent_task(request).await?;
+        self.current_session = Some(receipt.thread_id);
         self.reset_live_agent_reload_poll();
         self.refresh_current_session_title().await?;
         self.clear_new_session_draft();
-        ui.bottom_panel = None;
+        ui.clear_session_local_bottom_panel();
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
-        ui.push_status(format!("agent started: {}", result.agent.id));
+        ui.push_status(format!("agent started: {}", receipt.agent.id));
         ui.refresh_sidebar(self);
         Ok(())
     }
@@ -65,7 +69,7 @@ impl TuiApp {
             return Ok(format!("agent not found: {name}"));
         };
         Ok(serde_json::to_string_pretty(
-            &psychevo::__product::capabilities::view_agent_value(&agent),
+            &psychevo::agents::view_agent_value(&agent),
         )?)
     }
 
@@ -91,11 +95,9 @@ impl TuiApp {
             .tool_policy
             .permission_mode
             .map(|mode| match mode {
-                psychevo::__product::capabilities::AgentPermissionMode::Default => "default",
-                psychevo::__product::capabilities::AgentPermissionMode::AcceptEdits => {
-                    "acceptEdits"
-                }
-                psychevo::__product::capabilities::AgentPermissionMode::Plan => "plan",
+                psychevo::agents::AgentPermissionMode::Default => "default",
+                psychevo::agents::AgentPermissionMode::AcceptEdits => "acceptEdits",
+                psychevo::agents::AgentPermissionMode::Plan => "plan",
             })
             .unwrap_or_default()
             .to_string();

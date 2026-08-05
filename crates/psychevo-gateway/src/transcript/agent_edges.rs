@@ -1,8 +1,17 @@
-pub(crate) fn enrich_agent_blocks_from_edges(
+use psychevo::AgentRelationship;
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+};
+
+use super::{ensure_json_object_field, metadata_object};
+
+pub(crate) fn enrich_agent_blocks_from_relationships(
     entries: &mut [TranscriptEntry],
-    edges: &[AgentEdgeRecord],
+    relationships: &[AgentRelationship],
 ) {
-    let mut used_edges = BTreeMap::<usize, ()>::new();
+    let mut used_relationships = vec![false; relationships.len()];
     for entry in entries {
         for block in &mut entry.blocks {
             if block.kind != TranscriptBlockKind::Agent
@@ -15,14 +24,16 @@ pub(crate) fn enrich_agent_blocks_from_edges(
                 block.metadata = Some(Value::Object(metadata));
                 continue;
             }
-            let Some((edge_index, edge)) =
-                matching_agent_edge_for_block(&metadata, edges, &used_edges)
-            else {
+            let Some((relationship_index, relationship)) = matching_agent_relationship_for_block(
+                &metadata,
+                relationships,
+                &used_relationships,
+            ) else {
                 block.metadata = Some(Value::Object(metadata));
                 continue;
             };
-            used_edges.insert(edge_index, ());
-            enrich_agent_metadata_from_edge(&mut metadata, edge);
+            used_relationships[relationship_index] = true;
+            enrich_agent_metadata_from_relationship(&mut metadata, relationship);
             block.metadata = Some(Value::Object(metadata.clone()));
             if let Some(result) = &mut block.result {
                 result.metadata = Some(Value::Object(metadata));
@@ -31,7 +42,7 @@ pub(crate) fn enrich_agent_blocks_from_edges(
     }
 }
 
-pub(crate) fn agent_edge_lookup_candidates(entries: &[TranscriptEntry]) -> Vec<String> {
+pub(crate) fn agent_relationship_lookup_candidates(entries: &[TranscriptEntry]) -> Vec<String> {
     let mut candidates = std::collections::BTreeSet::new();
     for block in entries
         .iter()
@@ -41,7 +52,7 @@ pub(crate) fn agent_edge_lookup_candidates(entries: &[TranscriptEntry]) -> Vec<S
         let Some(metadata) = block.metadata.as_ref().and_then(Value::as_object) else {
             continue;
         };
-        push_candidate(&mut candidates, metadata.get("tool_call_id"));
+        insert_candidate(&mut candidates, metadata.get("tool_call_id"));
         for object in ["args", "result"]
             .into_iter()
             .filter_map(|key| metadata.get(key).and_then(Value::as_object))
@@ -55,14 +66,14 @@ pub(crate) fn agent_edge_lookup_candidates(entries: &[TranscriptEntry]) -> Vec<S
                 "task",
                 "message",
             ] {
-                push_candidate(&mut candidates, object.get(key));
+                insert_candidate(&mut candidates, object.get(key));
             }
         }
     }
     candidates.into_iter().collect()
 }
 
-fn push_candidate(candidates: &mut std::collections::BTreeSet<String>, value: Option<&Value>) {
+fn insert_candidate(candidates: &mut std::collections::BTreeSet<String>, value: Option<&Value>) {
     if let Some(value) = value
         .and_then(Value::as_str)
         .map(str::trim)
@@ -72,7 +83,7 @@ fn push_candidate(candidates: &mut std::collections::BTreeSet<String>, value: Op
     }
 }
 
-fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>) {
+pub(super) fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>) {
     let args = metadata.get("args").cloned().unwrap_or(Value::Null);
     let result = ensure_json_object_field(metadata, "result");
     for key in [
@@ -146,11 +157,11 @@ fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>
     }
 }
 
-fn matching_agent_edge_for_block<'a>(
+fn matching_agent_relationship_for_block<'a>(
     metadata: &serde_json::Map<String, Value>,
-    edges: &'a [AgentEdgeRecord],
-    used_edges: &BTreeMap<usize, ()>,
-) -> Option<(usize, &'a AgentEdgeRecord)> {
+    relationships: &'a [AgentRelationship],
+    used_relationships: &[bool],
+) -> Option<(usize, &'a AgentRelationship)> {
     let args = metadata.get("args").unwrap_or(&Value::Null);
     let result = metadata.get("result").unwrap_or(&Value::Null);
     let tool_call_id = metadata
@@ -158,11 +169,21 @@ fn matching_agent_edge_for_block<'a>(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    if let Some(match_by_tool_call) = edges.iter().enumerate().find(|(index, edge)| {
-        !used_edges.contains_key(index)
-            && tool_call_id
-                .is_some_and(|id| agent_edge_string(edge, "parent_tool_call_id") == Some(id))
-    }) {
+    if let Some(match_by_tool_call) =
+        relationships
+            .iter()
+            .enumerate()
+            .find(|(index, relationship)| {
+                !used_relationships[*index]
+                    && tool_call_id.is_some_and(|id| {
+                        relationship
+                            .agent
+                            .as_ref()
+                            .and_then(|agent| agent.parent_tool_call_id.as_deref())
+                            == Some(id)
+                    })
+            })
+    {
         return Some(match_by_tool_call);
     }
 
@@ -172,10 +193,21 @@ fn matching_agent_edge_for_block<'a>(
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    if let Some(match_by_agent_id) = edges.iter().enumerate().find(|(index, edge)| {
-        !used_edges.contains_key(index)
-            && result_agent_id.is_some_and(|id| agent_edge_string(edge, "id") == Some(id))
-    }) {
+    if let Some(match_by_agent_id) =
+        relationships
+            .iter()
+            .enumerate()
+            .find(|(index, relationship)| {
+                !used_relationships[*index]
+                    && result_agent_id.is_some_and(|id| {
+                        relationship
+                            .agent
+                            .as_ref()
+                            .and_then(|agent| agent.id.as_deref())
+                            == Some(id)
+                    })
+            })
+    {
         return Some(match_by_agent_id);
     }
 
@@ -201,61 +233,91 @@ fn matching_agent_edge_for_block<'a>(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    edges.iter().enumerate().find(|(index, edge)| {
-        !used_edges.contains_key(index)
-            && agent_name.is_some_and(|name| agent_edge_string(edge, "name") == Some(name))
-            && (task_label.is_some_and(|label| {
-                agent_edge_string(edge, "task_name") == Some(label)
-                    || agent_edge_string(edge, "task") == Some(label)
-            }) || task_prompt
-                .is_some_and(|prompt| agent_edge_string(edge, "task") == Some(prompt)))
-    })
+    relationships
+        .iter()
+        .enumerate()
+        .find(|(index, relationship)| {
+            let Some(agent) = relationship.agent.as_ref() else {
+                return false;
+            };
+            !used_relationships[*index]
+                && agent_name.is_some_and(|name| agent.name.as_deref() == Some(name))
+                && (task_label.is_some_and(|label| {
+                    agent.task_name.as_deref() == Some(label)
+                        || agent.task.as_deref() == Some(label)
+                }) || task_prompt.is_some_and(|prompt| agent.task.as_deref() == Some(prompt)))
+        })
 }
 
-fn enrich_agent_metadata_from_edge(
+fn enrich_agent_metadata_from_relationship(
     metadata: &mut serde_json::Map<String, Value>,
-    edge: &AgentEdgeRecord,
+    relationship: &AgentRelationship,
 ) {
     let result = ensure_json_object_field(metadata, "result");
     result.insert(
         "child_thread_id".to_string(),
-        Value::String(edge.child_session_id.clone()),
+        Value::String(relationship.child_thread_id.clone()),
     );
     result.insert(
         "child_session_id".to_string(),
-        Value::String(edge.child_session_id.clone()),
+        Value::String(relationship.child_thread_id.clone()),
     );
     result.insert(
         "session_id".to_string(),
-        Value::String(edge.child_session_id.clone()),
+        Value::String(relationship.child_thread_id.clone()),
     );
     result.insert(
         "parent_thread_id".to_string(),
-        Value::String(edge.parent_session_id.clone()),
+        Value::String(relationship.parent_thread_id.clone()),
     );
     result.insert(
         "parent_session_id".to_string(),
-        Value::String(edge.parent_session_id.clone()),
+        Value::String(relationship.parent_thread_id.clone()),
     );
-    if let Some(value) = agent_edge_string(edge, "id")
-        && result.get("agent_id").is_none()
-    {
-        result.insert("agent_id".to_string(), Value::String(value.to_string()));
-    }
-    for key in [
-        "name",
-        "agent_type",
-        "agent_path",
-        "task_name",
-        "message",
-        "task",
+    let Some(agent) = relationship.agent.as_ref() else {
+        return;
+    };
+    for (key, value) in [
+        ("agent_id", agent.id.as_deref()),
+        ("agent_name", agent.name.as_deref()),
+        ("task_name", agent.task_name.as_deref()),
+        ("task", agent.task.as_deref()),
+        ("agent_description", agent.description.as_deref()),
+        ("parent_tool_call_id", agent.parent_tool_call_id.as_deref()),
+        ("team_run_id", agent.team_run_id.as_deref()),
+        ("mission_run_id", agent.mission_run_id.as_deref()),
+        ("team_name", agent.team_name.as_deref()),
+        ("team_member_id", agent.team_member_id.as_deref()),
+        ("runtime_ref", agent.runtime_ref.as_deref()),
+        ("role", agent.role.as_deref()),
     ] {
-        if let Some(value) = agent_edge_string(edge, key) {
-            let result_key = if key == "name" { "agent_name" } else { key };
-            result
-                .entry(result_key.to_string())
-                .or_insert_with(|| Value::String(value.to_string()));
-        }
+        insert_agent_string_if_missing(result, key, value);
+    }
+    insert_agent_bool_if_missing(result, "background", agent.background);
+    insert_agent_bool_if_missing(result, "fork_context", agent.fork_context);
+}
+
+fn insert_agent_string_if_missing(
+    result: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if result.get(key).is_none()
+        && let Some(value) = value.map(str::trim).filter(|value| !value.is_empty())
+    {
+        result.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn insert_agent_bool_if_missing(
+    result: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<bool>,
+) {
+    if result.get(key).is_none()
+        && let Some(value) = value
+    {
+        result.insert(key.to_string(), Value::Bool(value));
     }
 }
 
@@ -269,16 +331,6 @@ fn agent_result_child_session_id(metadata: &serde_json::Map<String, Value>) -> O
                 .or_else(|| result.get("session_id"))
         })
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
-fn agent_edge_string<'a>(edge: &'a AgentEdgeRecord, key: &str) -> Option<&'a str> {
-    edge.metadata
-        .as_ref()?
-        .get("agent")?
-        .get(key)?
-        .as_str()
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }

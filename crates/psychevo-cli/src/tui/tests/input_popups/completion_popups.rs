@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::tests::test_app_with_models;
+use crate::tui::{
+    AgentSearchMatch, AgentSearchPopupState, BottomPanel, FileSearchMatch, FileSearchMatchKind,
+    FileSearchPopupState, FullscreenUi, GatewayEvent, ImageInput, KeyCode, KeyEvent, KeyModifiers,
+    ModelPanel, MouseButton, MouseEvent, MouseEventKind, Rect, RunningTask, SkillSearchMatch,
+    SkillSearchPopupState, TranscriptKind, TuiApp, textarea_text, textarea_with_text,
+    write_fullscreen_enter_commands, write_fullscreen_exit_commands,
+};
+use std::fs;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
@@ -16,7 +25,7 @@ pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
         .expect("submit");
 
     assert!(ui.pending_images.is_empty());
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -27,12 +36,7 @@ pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
             .iter()
             .all(|row| { !(row.kind == TranscriptKind::Meta && row.text.contains("attachments")) })
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -92,7 +96,7 @@ pub(crate) async fn unknown_dynamic_skill_submits_as_prompt() {
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some("/unknown"));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -103,12 +107,7 @@ pub(crate) async fn unknown_dynamic_skill_submits_as_prompt() {
             .iter()
             .all(|row| !row.text.contains("unknown skill or bundle"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 pub(crate) fn tiny_png_bytes() -> &'static [u8] {
@@ -590,18 +589,13 @@ pub(crate) async fn slash_skill_selection_submits_without_marker_rewrite() {
 
     assert_eq!(textarea_text(&ui.textarea), "");
     assert_eq!(ui.history.last().map(String::as_str), Some("/helper"));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
             .any(|row| row.kind == TranscriptKind::Prompt && row.text == "/helper")
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -757,10 +751,12 @@ pub(crate) async fn typed_turn_started_selected_skills_adds_transcript_status() 
         GatewayEvent::TurnStarted {
             thread_id: Some("session-1".to_string()),
             turn_id: "turn-1".to_string(),
-            selected_skills: vec![psychevo_gateway::GatewaySelectedSkill {
-                name: "reviewer".to_string(),
-                path: "/tmp/reviewer/SKILL.md".to_string(),
-            }],
+            selected_skills: vec![
+                psychevo_gateway_protocol::events_transcript::GatewaySelectedSkill {
+                    name: "reviewer".to_string(),
+                    path: "/tmp/reviewer/SKILL.md".to_string(),
+                },
+            ],
         },
     );
 

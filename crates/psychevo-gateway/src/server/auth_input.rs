@@ -1,4 +1,19 @@
-fn current_browser_session(
+use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use axum::http::HeaderMap;
+use axum::http::header::AUTHORIZATION;
+use psychevo::Error;
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+
+use crate::gateway::activity::ThreadTurnPolicy;
+use psychevo_gateway_protocol::source::{GatewayInputPart, GatewaySource};
+
+use super::binding::{AuthContext, BrowserSession, WebState};
+use super::stable_hash::stable_hash_hex;
+
+pub(super) fn current_browser_session(
     state: &WebState,
     auth: &AuthContext,
 ) -> psychevo::Result<BrowserSession> {
@@ -16,7 +31,7 @@ fn current_browser_session(
         .ok_or_else(|| Error::Message("browser session is no longer active".to_string()))
 }
 
-async fn authorize_thread(
+pub(super) async fn authorize_thread(
     state: &WebState,
     auth: &AuthContext,
     thread_id: &str,
@@ -24,23 +39,14 @@ async fn authorize_thread(
     if matches!(auth, AuthContext::Bearer) {
         return Ok(());
     }
-    if state
-        .inner
-        .state
-
-        .session_summary(thread_id)
-        .await?
-        .is_none()
-    {
-        return Err(Error::Message(format!("session not found: {thread_id}")));
-    }
+    state.inner.framework.resume_thread(thread_id).await?;
     Ok(())
 }
 
-fn source_from_input(
-    input: Option<wire::GatewaySourceInput>,
+pub(super) fn source_from_input(
+    input: Option<wire::source::GatewaySourceInput>,
     cwd: &Path,
-    default_lifetime: wire::GatewaySourceLifetime,
+    default_lifetime: wire::source::GatewaySourceLifetime,
 ) -> GatewaySource {
     let canonical = cwd.to_string_lossy().to_string();
     let hash = stable_hash_hex(&canonical);
@@ -49,7 +55,7 @@ fn source_from_input(
         .and_then(|name| name.to_str())
         .unwrap_or("cwd")
         .to_string();
-    let input = input.unwrap_or(wire::GatewaySourceInput {
+    let input = input.unwrap_or(wire::source::GatewaySourceInput {
         kind: "web".to_string(),
         raw_id: None,
         lifetime: Some(default_lifetime),
@@ -75,40 +81,28 @@ fn source_from_input(
     source
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+pub(super) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
     value.strip_prefix("Bearer ")
 }
 
-fn session_cookie_value(cookie_header: &str) -> Option<&str> {
+pub(super) fn session_cookie_value(cookie_header: &str) -> Option<&str> {
     cookie_header.split(';').find_map(|part| {
         let (name, value) = part.trim().split_once('=')?;
         (name == "psychevo_gateway_session").then_some(value)
     })
 }
 
-fn now_ms() -> i64 {
+pub(super) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
         .as_millis() as i64
 }
 
-#[cfg(test)]
-fn apply_mentions_to_run_options(
-    options: &mut RunOptions,
-    mentions: &[wire::GatewayMention],
-) -> psychevo::Result<()> {
-    apply_mentions_to_turn_intent(
-        options.runtime_ref.as_deref(),
-        &mut options.skill_inputs,
-        mentions,
-    )
-}
-
-fn apply_mentions_to_turn_policy(
-    policy: &mut crate::ThreadTurnPolicy,
-    mentions: &[wire::GatewayMention],
+pub(super) fn apply_mentions_to_turn_policy(
+    policy: &mut ThreadTurnPolicy,
+    mentions: &[wire::source::GatewayMention],
 ) -> psychevo::Result<()> {
     apply_mentions_to_turn_intent(
         policy.runtime_profile_ref.as_deref(),
@@ -120,14 +114,14 @@ fn apply_mentions_to_turn_policy(
 fn apply_mentions_to_turn_intent(
     runtime_profile_ref: Option<&str>,
     skill_inputs: &mut Vec<String>,
-    mentions: &[wire::GatewayMention],
+    mentions: &[wire::source::GatewayMention],
 ) -> psychevo::Result<()> {
     let peer_runtime = runtime_profile_ref
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "native");
     for mention in mentions {
         match &mention.target {
-            wire::GatewayMentionTarget::Skill { name, path } => {
+            wire::source::GatewayMentionTarget::Skill { name, path } => {
                 let input = path
                     .as_deref()
                     .filter(|path| !path.trim().is_empty())
@@ -137,7 +131,7 @@ fn apply_mentions_to_turn_intent(
                     skill_inputs.push(input);
                 }
             }
-            wire::GatewayMentionTarget::Agent {
+            wire::source::GatewayMentionTarget::Agent {
                 name, backend_ref, ..
             } => {
                 if let (Some(runtime), Some(backend_ref)) = (peer_runtime, backend_ref.as_deref())
@@ -155,11 +149,11 @@ fn apply_mentions_to_turn_intent(
     Ok(())
 }
 
-trait TurnStartInputExt {
+pub(super) trait TurnStartInputExt {
     fn input_parts(&self) -> psychevo::Result<Vec<GatewayInputPart>>;
 }
 
-impl TurnStartInputExt for wire::TurnStartParams {
+impl TurnStartInputExt for wire::thread_command_turn::TurnStartParams {
     fn input_parts(&self) -> psychevo::Result<Vec<GatewayInputPart>> {
         let input = self.input.clone();
         if input.is_empty() {

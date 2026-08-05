@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::time::{Duration, Instant};
+
+use psychevo::{accounting::effective_usage_total, application::ToolDisplaySpec};
+use serde_json::Value;
+
+use super::ledger::model_label;
+use crate::tui::support_history::{metadata_elapsed_duration, metadata_reasoning_effort};
 
 pub(crate) fn model_meta_label(provider: &str, model: &str, metadata: Option<&Value>) -> String {
     let label = model_label(provider, model);

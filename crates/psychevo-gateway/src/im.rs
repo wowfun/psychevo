@@ -6,7 +6,9 @@ use psychevo::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{GatewayImageInput, GatewayInputPart, GatewaySource, GatewaySourceLifetime};
+use psychevo_gateway_protocol::source::{
+    GatewayImageInput, GatewayInputPart, GatewaySource, GatewaySourceLifetime,
+};
 
 #[path = "im_adapters/mod.rs"]
 pub mod adapters;

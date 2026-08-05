@@ -48,10 +48,7 @@ pub(crate) fn count_openai_language_request(
     descriptor: &ModelDescriptor,
     request: &LanguageRequest,
 ) -> Result<OpenAiChatTokenCount, ProviderError> {
-    let encoding = resolve_count_encoding(
-        &descriptor.provider_family,
-        &descriptor.model_id,
-    );
+    let encoding = resolve_count_encoding(&descriptor.provider_family, &descriptor.model_id);
     let Some(enc) = tiktoken::get_encoding(&encoding.name) else {
         return Ok(OpenAiChatTokenCount {
             encoding: "o200k_base".to_string(),
@@ -87,8 +84,10 @@ pub(crate) fn count_openai_language_request(
         })
         .unwrap_or((0, 0));
     for tool in unsupported_tools {
-        system_tools_tokens =
-            system_tools_tokens.saturating_add(count_value(enc, &serde_json::to_value(tool).unwrap_or(Value::Null)));
+        system_tools_tokens = system_tools_tokens.saturating_add(count_value(
+            enc,
+            &serde_json::to_value(tool).unwrap_or(Value::Null),
+        ));
         tool_count = tool_count.saturating_add(1);
     }
 
@@ -126,12 +125,9 @@ pub(crate) fn count_openai_language_request(
                     .and_then(Value::as_str)
                     .unwrap_or("developer_prompt")
                 {
-                    "base_policy" => {
-                        base_policy_tokens = base_policy_tokens.saturating_add(tokens)
-                    }
+                    "base_policy" => base_policy_tokens = base_policy_tokens.saturating_add(tokens),
                     _ => {
-                        developer_prompt_tokens =
-                            developer_prompt_tokens.saturating_add(tokens);
+                        developer_prompt_tokens = developer_prompt_tokens.saturating_add(tokens);
                         if metadata
                             .and_then(|value| value.get("prompt_slot"))
                             .and_then(Value::as_str)
@@ -228,9 +224,7 @@ struct RequestContextCountingMetadata {
     skill_names: Vec<String>,
 }
 
-fn request_context_counting_metadata(
-    request: &LanguageRequest,
-) -> RequestContextCountingMetadata {
+fn request_context_counting_metadata(request: &LanguageRequest) -> RequestContextCountingMetadata {
     let Some(value) = request
         .extensions
         .get("psychevo")
@@ -370,25 +364,17 @@ fn skill_entry_name(entry: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use psychevo_ai::{
-        Capability, LanguageTool, TextContent, ToolDeclaration,
-    };
+    use psychevo_ai::{Capability, LanguageTool, TextContent, ToolDeclaration};
     use serde_json::json;
 
-    fn message_with_metadata(
-        text: &str,
-        metadata: Value,
-    ) -> psychevo_ai::Message {
+    fn message_with_metadata(text: &str, metadata: Value) -> psychevo_ai::Message {
         psychevo_ai::Message::System {
             content: vec![TextContent::new(text)],
             extensions: BTreeMap::from([("psychevo".to_string(), metadata)]),
         }
     }
 
-    fn user_with_category(
-        text: &str,
-        category: Option<&str>,
-    ) -> psychevo_ai::Message {
+    fn user_with_category(text: &str, category: Option<&str>) -> psychevo_ai::Message {
         psychevo_ai::Message::User {
             content: vec![psychevo_ai::UserContent::Text(TextContent::new(text))],
             extensions: category
@@ -451,8 +437,7 @@ mod tests {
             ..LanguageRequest::default()
         };
 
-        let count =
-            count_openai_language_request(&descriptor, &request).expect("count");
+        let count = count_openai_language_request(&descriptor, &request).expect("count");
         assert!(count.base_policy_tokens > 0);
         assert!(count.developer_prompt_tokens > 0);
         assert!(count.system_tools_tokens > 0);

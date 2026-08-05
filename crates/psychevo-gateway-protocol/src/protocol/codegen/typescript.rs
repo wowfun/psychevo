@@ -1,4 +1,13 @@
-fn write_checked(path: &Path, content: &str, check: bool) -> Result<()> {
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+use schemars::JsonSchema;
+use serde_json::Value;
+use ts_rs::TS;
+
+pub(super) fn write_checked(path: &Path, content: &str, check: bool) -> Result<()> {
     if check {
         let existing = fs::read_to_string(path).with_context(|| {
             format!(
@@ -18,7 +27,7 @@ fn write_checked(path: &Path, content: &str, check: bool) -> Result<()> {
     Ok(())
 }
 
-fn ts_decl<T>() -> Result<String>
+pub(super) fn ts_decl<T>() -> Result<String>
 where
     T: TS,
 {
@@ -26,7 +35,7 @@ where
     Ok(export_ts_decl(decl))
 }
 
-fn export_ts_decl(decl: String) -> String {
+pub(crate) fn export_ts_decl(decl: String) -> String {
     if decl.starts_with("type ") || decl.starts_with("interface ") {
         format!("export {decl}")
     } else {
@@ -34,7 +43,7 @@ fn export_ts_decl(decl: String) -> String {
     }
 }
 
-fn typescript_decl_with_schema_optionality(decl: &str, schema: &Value) -> String {
+pub(crate) fn typescript_decl_with_schema_optionality(decl: &str, schema: &Value) -> String {
     let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
         return decl.to_string();
     };
@@ -105,19 +114,9 @@ fn typescript_decl_with_schema_optionality(decl: &str, schema: &Value) -> String
     rendered
 }
 
-fn schema<T>() -> Result<Value>
+pub(crate) fn schema<T>() -> Result<Value>
 where
     T: JsonSchema,
 {
     serde_json::to_value(schemars::schema_for!(T)).map_err(Into::into)
-}
-
-macro_rules! exported_type {
-    ($ty:ty) => {
-        ExportedType {
-            name: stringify!($ty),
-            ts_decl: ts_decl::<$ty>,
-            schema: schema::<$ty>,
-        }
-    };
 }

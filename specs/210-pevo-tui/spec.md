@@ -143,19 +143,131 @@ without creating durable source bindings. Normal prompts, queued prompts,
 steer, interrupt, permission responses, clarify responses, source reset, and
 thread switching go through Client APIs.
 
-The TUI may install the Framework's private read-only Native event observer for
-terminal rendering that needs usage, allowlisted provider metadata, tool
-progress, or other execution details not carried by the stable public Turn
-event projection. It also supplies its profile-local workspace snapshot root so
-the existing `/undo` and `/redo` contract remains available. Neither private
-input grants queue or lifecycle authority: accepted, started, and terminal Turn
-state still comes only from Application.
+The foreground agent task retains its Application-issued `TurnHandle` as the
+single owner of steer, interrupt, clarify, and contextual shell-result
+injection. A foreground user-shell task retains only its own runtime control;
+the TUI does not pass that control through `TurnRequest`. Terminal rendering
+subscribes to the handle's bounded `TurnEvent` stream. The fullscreen running
+view, non-terminal `TurnPrinter`, and journey probe consume that same typed
+event directly; they must not convert it back through the internal
+`RunStreamEvent` model or a Gateway projection. Typed message, reasoning, Tool,
+interaction, scope, warning, and lifecycle variants retain their meaning
+through the terminal presentation seam. `TurnEvent::Runtime` retains only
+runtime detail that has no stronger typed variant, including usage or
+allowlisted provider metadata needed by the existing presentation. The TUI also
+supplies its profile-local workspace snapshot root so the existing `/undo` and
+`/redo` contract remains available. Queue and lifecycle authority, including
+accepted, started, and terminal Turn state, remains in Application.
+On `ResyncRequired`, both fullscreen and non-fullscreen presentation follow the
+projection-invalidation and authoritative reload contract in
+[035 Event Stream](../035-event-stream/spec.md); neither settles from its
+pre-gap Tool or message state.
+
+When session switching transfers an accepted Turn to auxiliary ownership, its
+TUI approval receiver moves with that same Turn. The event loop multiplexes
+foreground and auxiliary approval receivers into one visible decision queue;
+starting another foreground Turn cannot close or replace a background Turn's
+approval path. That queue preserves the monotonic request and cancellation
+order established across every foreground and auxiliary receiver; receiver
+scan order must not reprioritize a later decision. Permission cancellation
+removes the matching queued or visible decision, and a closed decision response
+is reaped even if its cancellation event races with auxiliary-task completion;
+neither path may leave a stale approval panel. A session or side-surface switch
+preserves an already visible permission decision panel until it is resolved or
+cancelled; it may clear other session-local panels but must never hide a live
+response sender.
+
+An explicit session switch validates the destination Thread, resumability, and
+canonical cwd before detaching a starting or running foreground Turn. If any
+destination validation fails, the current session, foreground owner, queued
+input, optimistic rows, and cwd remain unchanged; switching is not a partial
+mutation that requires best-effort rollback.
+
+When a local draft is submitted, TUI binds `current_session` to the selected or
+newly created Framework Thread before installing its foreground event stream.
+The first assistant event therefore belongs to the visible session immediately;
+it is never diverted into the background-session backlog while the same Turn is
+already displayed as the foreground running task.
+
+Thread discovery, resume or creation, and Turn admission run in one thin
+background `StartingTurn` task. Submission paints the optimistic user row and
+returns control to the terminal event loop immediately; redraw, typing, and
+paste handling remain responsive while admission is pending. TUI installs the
+Application-issued control and typed `TurnEvent` stream only after admission
+succeeds. If admission fails or its task panics, fullscreen stays open, the
+uncommitted optimistic row is removed, the submitted text and attachments are
+restored ahead of any newer composer draft, and the error is shown in the UI.
+Resolving a remembered Thread distinguishes an authoritative missing result
+from every other Client or State error; only a missing Thread may fall back to
+the latest eligible Thread or a new Thread. A new draft uses atomic
+`Client::start_thread_with_turn` admission, with a preallocated Thread identity
+when the approval handler needs it, so rejected or cancelled pre-acceptance
+work cannot leave an empty Thread. `/mission` prepares its registration before
+submission and includes the team and mission rows in the same durable Turn
+admission transaction, before the accepted actor can enter its execution lane.
+The registration binds only to that admission's authoritative Thread identity;
+it never creates or rebinds a parent Thread in a parallel preflight path. If a
+foreground Turn is starting or running, the mission stays only in the TUI input
+queue until its own next Turn admission; it is not pre-registered and is not
+converted into a steer. Inputs queued behind a starting Turn use that admission's
+private owner identity, never an unscoped `None` wildcard. Successful admission
+rebinds them to its authoritative Thread. Failure or foreground cancellation
+restores only inputs owned by that admission; another Thread's queued inputs or
+steers stay attached to that Thread. Cancelling or switching away removes that
+owner so a queued mission cannot be admitted on a different Thread. `/compact`
+submitted during a new Thread's `StartingTurn` is queued against that private
+owner and follows the same rebind or removal rule instead of being rejected for
+lack of an authoritative Thread identity.
+
+A contextual shell escape submitted after Turn acceptance but before its
+`Started` event is owned by that exact Turn. Session switching transfers the
+pending command with the auxiliary Turn owner; a different foreground Turn's
+`Started` event cannot launch it. Interrupt and teardown similarly clear or
+settle only the commands attached to the affected owner.
+
+`StartingTurn` is owned only by the foreground session. Esc or Ctrl+C removes
+it from the foreground immediately and restores its text and attachments;
+explicit session changes, including `/new`, Agent-panel Run, direct session
+selection, and entering or leaving `/btw`, remove it without restoring the old
+draft into the new composer. Both paths transfer the admission task to one
+retained asynchronous cleanup owner instead of aborting or dropping its caller
+future. That owner signals Application's phase-aware admission cancellation:
+pending Adapter preparation rejects promptly, while a raced accepted Turn is
+interrupted and awaited to terminal settlement. Finished cleanup owners are
+reaped without blocking input, and fullscreen teardown joins every retained
+owner so neither pending preparation nor an accepted Application actor is
+orphaned.
+
+Fullscreen teardown signals every foreground and auxiliary Agent or Shell
+control, releases visible and queued permission decisions, and joins every task
+owner before returning. A background Turn created by session switching cannot
+outlive or indefinitely block TUI exit.
+
+Returning from `/btw` restores the parent surface before deleting the temporary
+side Thread. The deletion remains owned by a retained asynchronous cleanup task,
+finished tasks are reaped without blocking input, and fullscreen teardown joins
+all retained side deletions.
+
+Fullscreen and scripted user-shell presentation consumes the Framework's typed
+Shell command, control, events, and result directly. The terminal presentation
+seam maps Shell start, completion, and warning events to the existing user-shell
+ledger or plain output without fabricating general Turn stream events. Session
+switching moves the same running Shell task, typed event receiver, and interrupt
+control to background ownership. When an auxiliary Shell command contributes
+context to the active local Turn, TUI supplies that `TurnHandle` once through
+the Shell request's injection intent and does not perform a second manual
+injection after completion.
 
 Clarify answers and cancellation for the TUI's own foreground Turn are submitted
 through that Application-issued running Turn control. Gateway clarify
 submission is only a fallback for a foreign Gateway activity projected into the
 current TUI session; the TUI must not try to rediscover its local Framework
 Turn through a Gateway source selector.
+
+Launching a background Agent from the Agent panel uses the Framework Client's
+standalone Agent-task use case. The TUI supplies intent and consumes the returned
+parent Thread and Agent identities; it does not construct runtime options or
+pass Framework state/supervision handles back into Framework.
 
 Editing an unsent steer updates the exact pending Control input. Only an
 `UnknownInput` result means the old steer has already left Control and may be
@@ -200,14 +312,14 @@ Workbench DOM commit; neither claims to observe physical pixels.
 An internal, opt-in TUI probe may write content-free JSONL observations for
 startup, input, foreground Framework execution-event receipt/application,
 authoritative Turn task completion, queue depth, frame paint, and settlement.
-The probe must observe the same `RunStreamEvent` path and completed
-`TurnHandle::wait` task that the TUI actually consumes; it must not require or
-fabricate a public Gateway Turn lifecycle for a Client-owned prompt. It must be
-inert unless an explicit test artifact path is supplied, must use a monotonic
-process clock, and must never write prompt text, response text, tokens, tool
-arguments, credentials, or provider request bodies. This probe is diagnostics
-only and does not extend the public Framework or Gateway protocol or the
-persisted transcript.
+The probe must observe the same typed `TurnEvent` path and completed
+`TurnHandle::wait` task that the running view and printer actually consume; it
+must not require or fabricate a public Gateway Turn lifecycle for a
+Client-owned prompt. It must be inert unless an explicit test artifact path is
+supplied, must use a monotonic process clock, and must never write prompt text,
+response text, tokens, tool arguments, credentials, or provider request bodies.
+This probe is diagnostics only and does not extend the public Framework or
+Gateway protocol or the persisted transcript.
 
 ## Session Observability
 

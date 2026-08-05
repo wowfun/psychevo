@@ -1,3 +1,11 @@
+use serde_json::Value;
+
+use super::super::validation::{non_empty_string, optional_string_field, parse_host_executables};
+use crate::config::{
+    Error, ExecPolicyConfig, ExecPolicyDecision, ExecPolicyExample, ExecPolicyHostExecutable,
+    ExecPolicyPatternToken, ExecPolicyRule, Result,
+};
+
 pub(crate) fn parse_exec_policy_config(value: &Value) -> Result<ExecPolicyConfig> {
     let object = value
         .as_object()

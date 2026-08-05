@@ -6,14 +6,13 @@ use std::time::{Duration, Instant};
 
 use sqlx::Connection;
 use sqlx::migrate::Migrator;
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteConnection, SqlitePoolOptions, SqliteSynchronous,
-};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::error::{Error, Result};
 
 use super::{
-    MIN_SUPPORTED_SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION, StateRuntime, StateRuntimeInner,
+    DEFAULT_STATE_CONNECTION_LIMIT, MIN_SUPPORTED_SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION,
+    StateRuntime, StateRuntimeInner,
 };
 
 static STATE_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -22,8 +21,9 @@ const WAL_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
 const WAL_BOOTSTRAP_INITIAL_BACKOFF: Duration = Duration::from_millis(10);
 const WAL_BOOTSTRAP_MAX_BACKOFF: Duration = Duration::from_millis(250);
 
-fn state_pool_options(in_memory: bool) -> SqlitePoolOptions {
-    let options = SqlitePoolOptions::new().max_connections(if in_memory { 1 } else { 5 });
+fn state_pool_options(in_memory: bool, connection_limit: u32) -> SqlitePoolOptions {
+    let options =
+        SqlitePoolOptions::new().max_connections(if in_memory { 1 } else { connection_limit });
     if in_memory {
         options.idle_timeout(None).max_lifetime(None)
     } else {
@@ -69,6 +69,18 @@ async fn bootstrap_persistent_wal(options: &SqliteConnectOptions) -> Result<()> 
 
 impl StateRuntime {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_connection_limit(path, DEFAULT_STATE_CONNECTION_LIMIT).await
+    }
+
+    pub(crate) async fn open_with_connection_limit(
+        path: impl AsRef<Path>,
+        connection_limit: u32,
+    ) -> Result<Self> {
+        if connection_limit == 0 {
+            return Err(Error::Message(
+                "state database connection limit must be greater than zero".to_string(),
+            ));
+        }
         let path = path.as_ref();
         let in_memory = path == Path::new(":memory:");
         if !in_memory
@@ -90,7 +102,7 @@ impl StateRuntime {
         .foreign_keys(true)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(SQLITE_BUSY_TIMEOUT);
-        let pool = state_pool_options(in_memory)
+        let pool = state_pool_options(in_memory, connection_limit)
             .connect_with(sqlite_options)
             .await?;
         let mut migration = pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -124,6 +136,7 @@ impl StateRuntime {
             inner: Arc::new(StateRuntimeInner {
                 db_path: path.to_path_buf(),
                 pool,
+                connection_limit: if in_memory { 1 } else { connection_limit },
                 in_flight_operations: AtomicU64::new(0),
                 completed_operations: AtomicU64::new(0),
                 failed_operations: AtomicU64::new(0),
@@ -136,7 +149,13 @@ impl StateRuntime {
                 #[cfg(test)]
                 fail_next_agent_terminal: AtomicU64::new(0),
                 #[cfg(test)]
+                fail_next_agent_thread_import_commit: AtomicU64::new(0),
+                #[cfg(test)]
                 gateway_turn_acceptance_barrier: Mutex::new(None),
+                #[cfg(test)]
+                native_history_fork_barrier: Mutex::new(None),
+                #[cfg(test)]
+                state_close_barrier: Mutex::new(None),
             }),
         })
     }
@@ -153,7 +172,7 @@ mod tests {
 
     #[test]
     fn in_memory_pool_keeps_its_only_connection_for_the_runtime_lifetime() {
-        let options = state_pool_options(true);
+        let options = state_pool_options(true, 9);
 
         assert_eq!(options.get_max_connections(), 1);
         assert_eq!(options.get_idle_timeout(), None);
@@ -161,7 +180,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_first_open_records_complete_v29_migration_history() {
+    async fn file_pool_uses_the_validated_owner_connection_limit() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = StateRuntime::open_with_connection_limit(temp.path().join("state.db"), 2)
+            .await
+            .expect("limited state runtime");
+        let diagnostics = runtime.diagnostics();
+        assert_eq!(diagnostics.connection_limit, 2);
+        assert!(diagnostics.pool_size <= diagnostics.connection_limit);
+        runtime.close().await;
+
+        let invalid =
+            StateRuntime::open_with_connection_limit(temp.path().join("invalid.db"), 0).await;
+        assert!(
+            matches!(invalid, Err(Error::Message(message)) if message.contains("greater than zero"))
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_first_open_records_complete_v32_migration_history() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = Arc::new(temp.path().join("state.db"));
         let barrier = Arc::new(Barrier::new(8));
@@ -193,7 +230,7 @@ mod tests {
             .fetch_one(&runtimes[0].inner.pool)
             .await
             .expect("journal mode");
-        assert_eq!(migration_count, 2);
+        assert_eq!(migration_count, 5);
         assert_eq!(user_version, SQLITE_SCHEMA_VERSION);
         assert_eq!(journal_mode, "wal");
         assert!(
@@ -208,7 +245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_v29_schema_registers_migrations_without_rewriting_data() {
+    async fn existing_v30_schema_migrates_without_rewriting_data() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("state.db");
         let runtime = StateRuntime::open(&db_path).await.expect("initial open");
@@ -218,6 +255,40 @@ mod tests {
             .create_session_with_metadata(&cwd, "test", "model", "provider", None)
             .await
             .expect("session");
+        sqlx::query("DROP INDEX idx_gateway_live_events_idempotency_key")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("remove v31 index");
+        sqlx::query("ALTER TABLE gateway_live_events DROP COLUMN idempotency_key")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("restore v30 live event table");
+        sqlx::query("DROP INDEX idx_gateway_turn_terminals_thread")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("remove v32 terminal index");
+        sqlx::query("DROP INDEX idx_gateway_turn_terminals_visible_history")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("remove v32 visible terminal index");
+        sqlx::query("DROP INDEX idx_messages_visible_history")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("remove v32 visible-history index");
+        sqlx::query("ALTER TABLE gateway_turn_terminals DROP COLUMN boundary_session_seq")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("restore v30 terminal table");
+        sqlx::query(
+            "CREATE INDEX idx_gateway_turn_terminals_thread ON gateway_turn_terminals(thread_id, completed_at_ms)",
+        )
+        .execute(&runtime.inner.pool)
+        .await
+        .expect("restore v30 terminal index");
+        sqlx::query("PRAGMA user_version = 30")
+            .execute(&runtime.inner.pool)
+            .await
+            .expect("restore v30 version");
         sqlx::query("DROP TABLE _sqlx_migrations")
             .execute(&runtime.inner.pool)
             .await
@@ -226,7 +297,7 @@ mod tests {
 
         let reopened = StateRuntime::open(&db_path)
             .await
-            .expect("register existing v29 schema");
+            .expect("migrate existing v30 schema");
         assert!(
             reopened
                 .session_summary(&session_id)
@@ -238,7 +309,7 @@ mod tests {
             .fetch_one(&reopened.inner.pool)
             .await
             .expect("migration history");
-        assert_eq!(migration_count, 2);
+        assert_eq!(migration_count, 5);
         reopened.close().await;
     }
 
@@ -251,11 +322,10 @@ mod tests {
         let cwd = temp.path().join("work");
         std::fs::create_dir_all(&cwd).expect("cwd");
 
-        let auto_checkpoint_pages =
-            sqlx::query_scalar::<_, i64>("PRAGMA wal_autocheckpoint")
-                .fetch_one(&runtime.inner.pool)
-                .await
-                .expect("WAL auto-checkpoint setting");
+        let auto_checkpoint_pages = sqlx::query_scalar::<_, i64>("PRAGMA wal_autocheckpoint")
+            .fetch_one(&runtime.inner.pool)
+            .await
+            .expect("WAL auto-checkpoint setting");
         assert_eq!(auto_checkpoint_pages, 1000);
 
         for _ in 0..50 {

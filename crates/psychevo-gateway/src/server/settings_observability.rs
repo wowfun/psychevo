@@ -1,7 +1,31 @@
-fn discover_gateway_agents(
+use psychevo::agents::{AgentCatalog, AgentDiscoveryOptions, discover_agents};
+use psychevo::command_registry::{DynamicSlashCommand, skill_prompt_marker};
+use psychevo::skills::{SkillCatalog, SkillDiscoveryOptions, discover_skills, list_skill_bundles};
+
+use super::agents::materialize_local_acp_backends;
+use super::binding::WebState;
+use super::scope_session::ResolvedScope;
+
+mod models;
+mod observability;
+mod workbench;
+
+pub(super) use models::{
+    model_assignment_set_value, model_provider_catalog_value, model_provider_save_value,
+    model_settings_value, model_state_read_value, model_state_set_value,
+};
+pub(super) use observability::{context_read_value, observability_read_value, usage_read_value};
+#[cfg(test)]
+pub(super) use workbench::display_relative_to_home;
+pub(super) use workbench::{
+    display_cwd, native_runtime_mode_option, session_control_agent, settings_read_value,
+    update_session_agent_setting, web_search_settings_update_value, web_search_settings_value,
+};
+
+pub(super) fn discover_gateway_agents(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo::Result<psychevo::__product::capabilities::AgentCatalog> {
+) -> psychevo::Result<AgentCatalog> {
     materialize_local_acp_backends(state, scope)?;
     discover_agents(&AgentDiscoveryOptions {
         home: state.inner.home.clone(),
@@ -12,10 +36,10 @@ fn discover_gateway_agents(
     })
 }
 
-fn discover_gateway_skills(
+pub(super) fn discover_gateway_skills(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo::Result<psychevo::__product::capabilities::SkillCatalog> {
+) -> psychevo::Result<SkillCatalog> {
     discover_skills(&SkillDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: scope.cwd.clone(),
@@ -27,7 +51,7 @@ fn discover_gateway_skills(
     })
 }
 
-fn dynamic_slash_commands(
+pub(super) fn dynamic_slash_commands(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo::Result<Vec<DynamicSlashCommand>> {
@@ -56,7 +80,3 @@ fn dynamic_slash_commands(
     }
     Ok(commands)
 }
-
-include!("settings_observability/observability.rs");
-include!("settings_observability/workbench.rs");
-include!("settings_observability/models.rs");

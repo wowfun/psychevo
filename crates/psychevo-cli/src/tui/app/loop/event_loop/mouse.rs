@@ -1,3 +1,12 @@
+use crate::tui::app_commands::normalize_submitted_slash_echo;
+use crate::tui::app_loop::scroll_bottom_panel;
+use crate::tui::support_input::selected_slash_menu_command_with_items;
+use crate::tui::{
+    BottomPanel, FullscreenUi, MouseButton, MouseEvent, MouseEventKind, MouseWheelTarget, TuiApp,
+    parse_slash_command_with_config, textarea_text,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) async fn handle_fullscreen_mouse(
         &mut self,

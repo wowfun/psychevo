@@ -1,3 +1,4 @@
-include!("policy_and_control/agent_parsing.rs");
-include!("policy_and_control/child_delegation.rs");
-include!("policy_and_control/policy_rules.rs");
+mod agent_parsing;
+mod child_delegation;
+mod policy_rules;
+mod support;

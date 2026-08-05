@@ -1,7 +1,19 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    attach_pending_framework_agent_running, buffer_text, draw_fullscreen_for_test, test_app,
+    test_context_snapshot,
+};
+use crate::tui::tests::{line_text, materialize_current_thread_fixture, runtime_turn_event};
+use crate::tui::{
+    BottomPanel, DiffOverlay, FullscreenUi, HelpTab, KeyCode, KeyEvent, KeyModifiers, Line,
+    QueuedInput, RunMode, SlashCommand, StartThreadRequest, StdCommand, TranscriptKind,
+    TranscriptRow, TuiApp, TuiState, bottom_status_context_for_width, parse_effective_slash_config,
+    textarea_text, textarea_with_text,
+};
+use std::fs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn mode_slash_command_requires_value() {
@@ -441,7 +453,7 @@ pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() 
 pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usage() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    StateRuntime::open(&app.db_path).await.expect("store");
+    materialize_current_thread_fixture(&mut app).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/help now");
 
@@ -476,7 +488,7 @@ pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usag
 pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    StateRuntime::open(&app.db_path).await.expect("store");
+    materialize_current_thread_fixture(&mut app).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Usage)
@@ -505,16 +517,17 @@ pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
 pub(crate) async fn usage_panel_groups_persisted_stats_rows() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+    let mut request = StartThreadRequest::new(&app.cwd);
+    request.source = "tui".to_string();
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(request)
         .await
-        .expect("session");
+        .expect("Thread");
+    let session_id = thread.id().to_string();
     app.current_session = Some(session_id.clone());
-    store
-        .set_session_title(&session_id, "Usage session")
-        .await
-        .expect("title");
+    thread.set_title("Usage session").await.expect("title");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
         r#"
@@ -692,14 +705,19 @@ pub(crate) async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() 
 pub(crate) async fn fullscreen_compact_queues_behind_running_turn() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session = store
-        .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+    let mut request = StartThreadRequest::new(&app.cwd);
+    request.source = "tui".to_string();
+    let session = app
+        .runtime
+        .client()
+        .start_thread(request)
         .await
-        .expect("session");
+        .expect("Thread")
+        .id()
+        .to_string();
     app.current_session = Some(session.clone());
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(
         &mut ui,
@@ -729,7 +747,7 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
     tokio::task::yield_now().await;
     ui.textarea = textarea_with_text("revise the current answer");
 
@@ -759,9 +777,8 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
     assert!(!text.contains("steer 1"));
     assert!(!ui.last_pending_input_action_areas.is_empty());
 
-    let pending_id = ui.pending_steers[0].id.as_u64();
-    ui.apply_stream_event_for_session(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event_for_session(
+        runtime_turn_event(serde_json::json!({
             "type": "message_end",
             "message": {
                 "role": "user",
@@ -770,7 +787,7 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
             },
             "metadata": {
                 "pending_input": {
-                    "id": pending_id,
+                    "id": 1,
                     "kind": "steer"
                 }
             }
@@ -796,7 +813,7 @@ pub(crate) async fn pending_preview_shows_steer_and_queue_above_composer_without
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
         .await

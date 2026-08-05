@@ -1,5 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Widget,
+};
+use unicode_width::UnicodeWidthStr;
+
+use crate::tui::{render_transcript::truncate_display_width, support_theme::tui_theme};
+
 pub(crate) trait TuiRenderable {
     fn desired_height(&self, width: u16) -> u16;
     fn render(&self, area: Rect, buf: &mut ratatui::buffer::Buffer);

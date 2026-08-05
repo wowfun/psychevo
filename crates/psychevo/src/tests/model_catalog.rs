@@ -1,5 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::config::{
+    fetch_and_cache_model_catalog, fetch_model_catalog_with_client, model_catalog_endpoint,
+    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
+    provider_models_cache_path_for_home, read_cached_model_catalog, write_cached_model_catalog,
+};
+use crate::tests::{CatalogServer, base_options, home_dir, write_config};
+use crate::types::{ModelCatalogEntry, ModelCatalogProvider, ModelMetadata};
+use serde_json::json;
+use std::{collections::BTreeMap, fs, time::Duration};
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn model_catalog_endpoint_follows_chat_base_url() {
     assert_eq!(

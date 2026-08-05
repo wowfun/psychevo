@@ -12,13 +12,13 @@ documentation = "https://docs.rs/psychevo-agent-core"
 keywords = ["ai", "agent", "llm"]
 categories = ["development-tools"]
 
+[package.metadata.psychevo]
+architecture-layer = 1
+
 [dependencies]
 futures.workspace = true
-psychevo-ai = { version = "0.1.0", path = "../psychevo-ai" }
+psychevo-ai = { version = "0.1.0", path = "../psychevo-ai", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-
-[dev-dependencies]
-pretty_assertions.workspace = true

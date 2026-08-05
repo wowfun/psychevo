@@ -1,8 +1,23 @@
-#[allow(unused_imports)]
-use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use crate::types::SessionEventPayload;
+use psychevo_agent_core::{
+    AgentLoopRequest, AssistantBlock, ControlHandle, Message, NoopEventSink, PromptInstruction,
+    run_agent_loop, user_text_message,
+};
+use psychevo_ai::LanguageModel;
+use serde_json::json;
+use tokio::time;
+
+use super::entrypoints::{SESSION_TITLE_MAX_CHARS, TITLE_GENERATION_TIMEOUT_SECS};
+use crate::config::ResolvedRunProvider;
+use crate::error::Result;
+use crate::messages::assistant_text;
+use crate::prompt_templates;
+use crate::skills::{SelectedSkill, SkillCatalog};
+use crate::store::StateRuntime;
+use crate::types::{RunStreamEvent, RunStreamSink, RunWarning, SessionEventPayload};
 
 pub(crate) fn called_agent_names(
     messages: &[Message],
@@ -367,10 +382,6 @@ pub(crate) fn fallback_session_title(prompt: &str, selected_skills: &[SelectedSk
         .or_else(|| selected_skills_fallback_title(selected_skills))
         .or_else(|| normalize_session_title(prompt))
         .unwrap_or_else(|| "New session".to_string())
-}
-
-pub fn fallback_visible_session_title(prompt: &str) -> String {
-    fallback_session_title(prompt, &[])
 }
 
 pub(crate) fn prompt_without_selected_skill_markers(

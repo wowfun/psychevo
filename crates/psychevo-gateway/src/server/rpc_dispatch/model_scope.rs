@@ -1,4 +1,10 @@
-async fn resolve_model_state_request_scope(
+use std::path::PathBuf;
+
+use super::super::auth_input::authorize_thread;
+use super::super::binding::{AuthContext, WebState};
+use super::super::scope_session::resolve_cwd_filter;
+
+pub(super) async fn resolve_model_state_request_scope(
     state: &WebState,
     auth: &AuthContext,
     cwd: Option<String>,
@@ -8,11 +14,10 @@ async fn resolve_model_state_request_scope(
         authorize_thread(state, auth, &thread_id).await?;
         let summary = state
             .inner
-            .state
-
-            .session_summary(&thread_id)
+            .framework
+            .thread_summary(&thread_id)
             .await?
-            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+            .ok_or_else(|| psychevo::Error::Message(format!("thread not found: {thread_id}")))?;
         return Ok((PathBuf::from(summary.cwd), Some(thread_id)));
     }
     Ok((resolve_cwd_filter(state, auth, cwd)?, None))

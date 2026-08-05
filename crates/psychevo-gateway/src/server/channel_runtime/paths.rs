@@ -1,4 +1,6 @@
-use super::*;
+use std::path::{Path, PathBuf};
+
+use psychevo::config::ChannelRuntimeConnection;
 
 pub(super) fn channel_cwd(default_cwd: &Path, connection: &ChannelRuntimeConnection) -> PathBuf {
     let raw = connection.cwd.as_deref().unwrap_or("");
@@ -11,7 +13,7 @@ pub(super) fn channel_cwd(default_cwd: &Path, connection: &ChannelRuntimeConnect
     } else {
         default_cwd.join(path)
     };
-    psychevo::__product::platform::canonicalize_cwd(&path).unwrap_or(path)
+    psychevo::paths::canonicalize_cwd(&path).unwrap_or(path)
 }
 
 #[cfg(feature = "native-channels")]

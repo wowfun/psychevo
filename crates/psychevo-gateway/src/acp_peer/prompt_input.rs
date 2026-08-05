@@ -1,4 +1,14 @@
-use super::*;
+use agent_client_protocol::schema::v1::{
+    AgentCapabilities, BlobResourceContents, ContentBlock, EmbeddedResource,
+    EmbeddedResourceResource, ImageContent, ResourceLink, TextContent, TextResourceContents,
+};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use psychevo::{Error, application::ImageInput, media::resolve_explicit_image_source};
+
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+use psychevo_gateway_protocol as wire;
+
+use super::stdio_turn::AcpPeerTurnContext;
 
 pub(super) async fn acp_prompt_blocks(
     peer: &ResolvedPeerTurn,
@@ -42,20 +52,22 @@ pub(super) async fn acp_prompt_blocks(
     } else {
         for part in &turn.input {
             match part {
-                wire::GatewayInputPart::Text { text } if !text.is_empty() => {
+                wire::source::GatewayInputPart::Text { text } if !text.is_empty() => {
                     prompt.push(ContentBlock::Text(TextContent::new(text.clone())));
                 }
-                wire::GatewayInputPart::Text { .. } => {}
-                wire::GatewayInputPart::Image { input } => {
+                wire::source::GatewayInputPart::Text { .. } => {}
+                wire::source::GatewayInputPart::Image { input } => {
                     let image = match input {
-                        wire::GatewayImageInput::LocalPath { path } => {
+                        wire::source::GatewayImageInput::LocalPath { path } => {
                             ImageInput::LocalPath(path.into())
                         }
-                        wire::GatewayImageInput::Url { url } => ImageInput::ImageUrl(url.clone()),
+                        wire::source::GatewayImageInput::Url { url } => {
+                            ImageInput::ImageUrl(url.clone())
+                        }
                     };
                     prompt.push(acp_image_block(&image, turn).await?);
                 }
-                wire::GatewayInputPart::Context {
+                wire::source::GatewayInputPart::Context {
                     label,
                     text,
                     visible_to_model: true,
@@ -75,8 +87,8 @@ pub(super) async fn acp_prompt_blocks(
                         EmbeddedResourceResource::TextResourceContents(resource),
                     )));
                 }
-                wire::GatewayInputPart::Context { .. } => {}
-                wire::GatewayInputPart::Resource {
+                wire::source::GatewayInputPart::Context { .. } => {}
+                wire::source::GatewayInputPart::Resource {
                     uri,
                     mime_type,
                     text,
@@ -110,7 +122,7 @@ pub(super) async fn acp_prompt_blocks(
                     };
                     prompt.push(ContentBlock::Resource(EmbeddedResource::new(resource)));
                 }
-                wire::GatewayInputPart::ResourceLink {
+                wire::source::GatewayInputPart::ResourceLink {
                     name,
                     uri,
                     description,

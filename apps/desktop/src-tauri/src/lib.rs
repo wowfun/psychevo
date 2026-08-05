@@ -1,9 +1,10 @@
-#![cfg_attr(not(feature = "native-runtime"), allow(dead_code))]
-
+#[cfg(feature = "native-runtime")]
 mod capture;
+#[cfg(feature = "native-runtime")]
 mod desktop_host;
+#[cfg(feature = "native-runtime")]
 mod gateway;
-#[cfg(feature = "wdio-test")]
+#[cfg(feature = "native-runtime")]
 mod startup_trace;
 
 #[cfg(feature = "native-runtime")]
@@ -14,19 +15,19 @@ use tauri::Manager;
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 pub fn run() {
-    #[cfg(feature = "wdio-test")]
     startup_trace::record_process_start();
     let builder = tauri::Builder::default();
     #[cfg(feature = "wdio-test")]
     let builder = builder
         .plugin(tauri_plugin_wdio_webdriver::init())
         .plugin(tauri_plugin_wdio::init());
-    #[cfg(feature = "wdio-test")]
     let builder = builder.setup(|app| {
-        if app.get_webview_window("workbench").is_none() {
-            return Err("Workbench window was not created during Desktop setup".into());
+        if startup_trace::enabled() {
+            if app.get_webview_window("workbench").is_none() {
+                return Err("Workbench window was not created during Desktop setup".into());
+            }
+            startup_trace::record_window_ready();
         }
-        startup_trace::record_window_ready();
         Ok(())
     });
 

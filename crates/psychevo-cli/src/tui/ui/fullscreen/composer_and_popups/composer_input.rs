@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, ImageInput, PendingImageAttachment, PendingInputAction, PendingInputEdit,
+    PendingInputEntry, PendingInputKind, PendingInputRef, QueuedInput, new_textarea,
+    next_image_placeholder, parse_shell_escape_input, queued_input_sequence,
+    queued_input_session_id, queued_input_text, rect_contains, textarea_text, textarea_with_text,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn enter_shell_mode(&mut self) {
@@ -180,6 +184,56 @@ impl<'a> FullscreenUi<'a> {
         if self.queued_inputs.is_empty() && self.pending_steers.is_empty() {
             return;
         }
+        let restored = self.take_restorable_pending_inputs();
+        self.restore_composer_parts(restored);
+    }
+
+    pub(crate) fn restore_failed_turn_start_to_composer(
+        &mut self,
+        queue_owner_id: &str,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+    ) {
+        let mut restored = self.take_restorable_pending_inputs_for_session(queue_owner_id);
+        restored.push((0, display_prompt, images));
+        self.restore_composer_parts(restored);
+    }
+
+    fn take_restorable_pending_inputs_for_session(
+        &mut self,
+        session_id: &str,
+    ) -> Vec<(u64, String, Vec<PendingImageAttachment>)> {
+        let mut restored = Vec::new();
+        let mut retained_steers = std::collections::VecDeque::new();
+        for steer in std::mem::take(&mut self.pending_steers) {
+            if steer.session_id.as_deref() == Some(session_id) {
+                restored.push((steer.sequence, steer.display_prompt, steer.images));
+            } else {
+                retained_steers.push_back(steer);
+            }
+        }
+        self.pending_steers = retained_steers;
+
+        let mut retained_inputs = std::collections::VecDeque::new();
+        for input in std::mem::take(&mut self.queued_inputs) {
+            if queued_input_session_id(&input) == Some(session_id) {
+                let sequence = queued_input_sequence(&input);
+                let images = match &input {
+                    QueuedInput::Prompt { images, .. } => images.clone(),
+                    QueuedInput::Shell { .. } | QueuedInput::Compact { .. } => Vec::new(),
+                };
+                restored.push((sequence, queued_input_text(input), images));
+            } else {
+                retained_inputs.push_back(input);
+            }
+        }
+        self.queued_inputs = retained_inputs;
+        restored
+    }
+
+    fn take_restorable_pending_inputs(
+        &mut self,
+    ) -> Vec<(u64, String, Vec<PendingImageAttachment>)> {
         let mut restored = Vec::new();
         let steers = self.pending_steers.drain(..).collect::<Vec<_>>();
         for steer in steers {
@@ -193,16 +247,38 @@ impl<'a> FullscreenUi<'a> {
             };
             restored.push((sequence, queued_input_text(input), images));
         }
+        restored
+    }
+
+    fn restore_composer_parts(
+        &mut self,
+        mut restored: Vec<(u64, String, Vec<PendingImageAttachment>)>,
+    ) {
         restored.sort_by_key(|(sequence, _, _)| *sequence);
+        let draft = self.composer_submission_text();
+        let draft_images = std::mem::take(&mut self.pending_images);
+        if !draft.is_empty() && draft != "!" {
+            let draft_sequence = restored
+                .last()
+                .map(|(sequence, _, _)| sequence.saturating_add(1))
+                .unwrap_or_default();
+            restored.push((draft_sequence, draft, draft_images));
+        }
         let mut parts = Vec::new();
-        for (_, text, images) in restored {
-            self.pending_images.extend(images);
+        let mut combined_images = Vec::new();
+        for (_, mut text, images) in restored {
+            let previous_text = parts.join("\n");
+            for mut attachment in images {
+                let placeholder = next_image_placeholder(&combined_images, &previous_text);
+                if attachment.placeholder != placeholder {
+                    text = text.replacen(&attachment.placeholder, &placeholder, 1);
+                    attachment.placeholder = placeholder;
+                }
+                combined_images.push(attachment);
+            }
             parts.push(text);
         }
-        let draft = self.composer_submission_text();
-        if !draft.is_empty() && draft != "!" {
-            parts.push(draft);
-        }
+        self.pending_images = combined_images;
         self.set_composer_text(&parts.join("\n"));
         self.reset_history_navigation();
         self.clear_slash_menu_dismissal();

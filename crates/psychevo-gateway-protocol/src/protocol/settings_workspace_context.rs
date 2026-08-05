@@ -1,3 +1,17 @@
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::channels::ChannelListResult;
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
+    option_json_safe_u64,
+};
+use crate::source::GatewayRequestScope;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -328,12 +342,18 @@ pub struct ModelOptionView {
 #[ts(rename_all = "camelCase")]
 pub struct ModelLimitView {
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub context: Option<u64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub output: Option<u64>,
@@ -462,7 +482,10 @@ pub struct WorkspaceFileEntry {
     pub path: String,
     pub name: String,
     pub kind: WorkspaceFileKind,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub depth: usize,
@@ -574,7 +597,10 @@ pub struct WorkspaceFileReadResult {
     #[serde(default)]
     pub editable_reason: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub size_bytes: usize,
@@ -608,7 +634,10 @@ pub struct WorkspaceFilePreviewOpenResult {
     #[serde(default)]
     pub editable_reason: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub size_bytes: usize,
@@ -621,7 +650,10 @@ pub struct WorkspaceFilePreviewOpenResult {
     pub media_type: String,
     pub resource_id: String,
     pub resource_path: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub expires_at_ms: i64,
@@ -660,7 +692,10 @@ pub struct WorkspaceFileWriteParams {
 pub struct WorkspaceFileWriteResult {
     pub path: String,
     pub revision: String,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub size_bytes: usize,
@@ -696,19 +731,31 @@ pub struct WorkspaceDiffFileView {
 #[ts(rename_all = "camelCase")]
 pub struct WorkspaceDiffTruncationView {
     pub truncated: bool,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub max_bytes: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub max_lines: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub omitted_bytes: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub omitted_lines: usize,
@@ -766,11 +813,17 @@ pub struct WorkspaceChangeGroupView {
     pub turn_id: String,
     #[serde(default)]
     pub thread_id: Option<String>,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub created_at_ms: i64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub completed_at_ms: i64,
@@ -833,7 +886,10 @@ pub struct ContextReadParams {
 pub struct ContextUsageCategoryView {
     pub id: String,
     pub label: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub tokens: u64,
@@ -855,16 +911,25 @@ pub struct ContextReadResult {
     pub status: String,
     pub basis: String,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub applies_to_session_seq: Option<i64>,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub used_tokens: u64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub context_limit: Option<u64>,
@@ -895,74 +960,125 @@ pub struct SessionUsageSummaryView {
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub message_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub assistant_message_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub context_input_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub billable_input_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub billable_output_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub reasoning_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_read_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_write_tokens: u64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub effective_total_tokens: Option<u64>,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub reported_total_tokens: u64,
     pub total_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub accounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unaccounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub estimated_cost_nanodollars: i64,
     pub cost_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub estimated_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub free_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub included_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unknown_pricing_count: u64,
@@ -993,81 +1109,138 @@ pub struct UsageWindowSummaryView {
     pub id: String,
     pub label: String,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub since_ms: Option<i64>,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub session_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub message_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub assistant_message_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub context_input_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub billable_input_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub billable_output_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub reasoning_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_read_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_write_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub effective_total_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub reported_total_tokens: u64,
     pub total_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub accounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unaccounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub estimated_cost_nanodollars: i64,
     pub cost_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub estimated_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub free_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub included_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unknown_pricing_count: u64,
@@ -1080,61 +1253,103 @@ pub struct UsageWindowSummaryView {
 #[ts(rename_all = "camelCase")]
 pub struct UsageActivityDayView {
     pub date: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub session_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub message_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub effective_total_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub reported_total_tokens: u64,
     pub total_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub accounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unaccounted_provider_call_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub context_input_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_read_tokens: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cache_write_tokens: u64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub estimated_cost_nanodollars: i64,
     pub cost_status: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub estimated_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub free_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub included_pricing_count: u64,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub unknown_pricing_count: u64,
@@ -1153,7 +1368,10 @@ pub struct UsageActivityView {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct UsageReadResult {
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub generated_at_ms: i64,

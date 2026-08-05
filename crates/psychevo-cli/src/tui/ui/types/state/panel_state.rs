@@ -1,3 +1,14 @@
+use super::fullscreen_state::{
+    AgentAction, AgentEditorField, AgentEditorMode, AgentEditorPanel, AgentPanel,
+    AgentRunPromptPanel, AgentTab, BottomSelectionPanel,
+};
+use super::transcript_state::HistoryMessageAction;
+use crate::tui::{
+    AgentEntrypoint, AgentSource, BTreeMap, BTreeSet, ClarifyAnswer, ClarifyRequestEvent,
+    ConfiguredModel, PathBuf, PermissionApprovalRequest, ProviderSetupPresetId,
+    ProviderWizardField, SlashHelpSections,
+};
+
 impl AgentPanel {
     pub(crate) fn new(running: BottomSelectionPanel, available: BottomSelectionPanel) -> Self {
         Self {

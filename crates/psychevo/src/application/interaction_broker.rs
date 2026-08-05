@@ -7,9 +7,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::state::FrameworkInteractionStatus;
 use crate::types::{
-    ApprovalHandler, ClarifyAnswer, ClarifyResponse, ClarifyResult, PermissionApprovalDecision,
-    PermissionApprovalOutcome, PermissionApprovalRequest,
+    ApprovalHandler, BlockingActionKind, ClarifyAnswer, ClarifyResponse, ClarifyResult,
+    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
 };
 
 use super::{
@@ -86,21 +87,24 @@ impl InteractionBroker {
                         else {
                             continue;
                         };
-                        let result = state
-                            .request_framework_interaction(
-                                interaction_id,
-                                &thread_id,
-                                &turn_id,
-                                kind,
-                                payload.clone(),
-                            )
-                            .await
-                            .map_err(|error| error.to_string())
-                            .and_then(|inserted| {
-                                inserted
-                                    .then_some(())
-                                    .ok_or_else(|| "interaction is no longer pending".to_string())
-                            });
+                        let result = match BlockingActionKind::parse_persisted(kind) {
+                            Some(kind) => state
+                                .request_framework_interaction(
+                                    interaction_id,
+                                    &thread_id,
+                                    &turn_id,
+                                    kind,
+                                    payload.clone(),
+                                )
+                                .await
+                                .map_err(|error| error.to_string())
+                                .and_then(|inserted| {
+                                    inserted.then_some(()).ok_or_else(|| {
+                                        "interaction is no longer pending".to_string()
+                                    })
+                                }),
+                            None => Err(format!("unsupported Framework interaction kind `{kind}`")),
+                        };
                         match &result {
                             Ok(()) => log.push(*event),
                             Err(_) => {
@@ -140,7 +144,7 @@ impl InteractionBroker {
                             &control,
                             &waiters,
                             &interaction_id,
-                            &kind,
+                            kind.as_str(),
                             &response,
                         ) else {
                             let _ = receipt.send(Ok(InteractionResponseReceipt {
@@ -157,16 +161,16 @@ impl InteractionBroker {
                             }
                         };
                         let status = if matches!(&response, InteractionResponse::Cancel) {
-                            "cancelled"
+                            FrameworkInteractionStatus::Cancelled
                         } else {
-                            "resolved"
+                            FrameworkInteractionStatus::Resolved
                         };
                         let result = state
                             .resolve_framework_interaction(
                                 &interaction_id,
                                 &thread_id,
                                 &turn_id,
-                                &kind,
+                                kind,
                                 status,
                                 resolution,
                             )
@@ -186,7 +190,7 @@ impl InteractionBroker {
                                 let delivered = waiter.deliver(response);
                                 log.push(TurnEvent::InteractionResolved {
                                     interaction_id: interaction_id.clone(),
-                                    kind,
+                                    kind: kind.as_str().to_string(),
                                     reason: reason.to_string(),
                                 });
                                 if delivered {
@@ -210,26 +214,29 @@ impl InteractionBroker {
                             reason.as_str(),
                             "cancelled" | "timed_out" | "turn_finished"
                         ) {
-                            "cancelled"
+                            FrameworkInteractionStatus::Cancelled
                         } else {
-                            "resolved"
+                            FrameworkInteractionStatus::Resolved
                         };
                         let resolution = serde_json::json!({
                             "kind": "observed",
                             "interactionKind": kind,
                             "reason": reason,
                         });
-                        let result = state
-                            .resolve_framework_interaction(
-                                &interaction_id,
-                                &thread_id,
-                                &turn_id,
-                                &kind,
-                                status,
-                                resolution,
-                            )
-                            .await
-                            .map_err(|error| error.to_string());
+                        let result = match BlockingActionKind::parse_persisted(&kind) {
+                            Some(durable_kind) => state
+                                .resolve_framework_interaction(
+                                    &interaction_id,
+                                    &thread_id,
+                                    &turn_id,
+                                    durable_kind,
+                                    status,
+                                    resolution,
+                                )
+                                .await
+                                .map_err(|error| error.to_string()),
+                            None => Err(format!("unsupported Framework interaction kind `{kind}`")),
+                        };
                         if matches!(result, Ok(true)) {
                             log.push(TurnEvent::InteractionResolved {
                                 interaction_id: interaction_id.clone(),
@@ -460,13 +467,14 @@ impl ApprovalHandler for FrameworkApprovalHandler {
 
     fn request_permission(
         &self,
-        request: PermissionApprovalRequest,
+        mut request: PermissionApprovalRequest,
     ) -> BoxFuture<'static, PermissionApprovalDecision> {
         let interaction_id = if request.tool_call_id.trim().is_empty() {
             Uuid::now_v7().to_string()
         } else {
             request.tool_call_id.clone()
         };
+        request.tool_call_id = interaction_id.clone();
         let receiver = self
             .interactions
             .register_permission(interaction_id.clone());
@@ -483,7 +491,6 @@ impl ApprovalHandler for FrameworkApprovalHandler {
                 interactions.remove_permission(&interaction_id);
                 return PermissionApprovalDecision::deny();
             }
-            let timeout_secs = request.timeout_secs.max(1);
             let mut receiver = receiver;
             let decision = match delegate {
                 Some(delegate) => {
@@ -502,33 +509,11 @@ impl ApprovalHandler for FrameworkApprovalHandler {
                             }
                         },
                         decision = &mut receiver => decision.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
-                            let decision = PermissionApprovalDecision::deny();
-                            let _ = broker
-                                .respond(
-                                    &interaction_id,
-                                    InteractionResponse::Permission(decision.clone()),
-                                )
-                                .await;
-                            decision
-                        },
                     }
                 }
-                None => {
-                    tokio::select! {
-                        decision = &mut receiver => decision.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
-                            let decision = PermissionApprovalDecision::deny();
-                            let _ = broker
-                                .respond(
-                                    &interaction_id,
-                                    InteractionResponse::Permission(decision.clone()),
-                                )
-                                .await;
-                            decision
-                        },
-                    }
-                }
+                None => receiver
+                    .await
+                    .unwrap_or_else(|_| PermissionApprovalDecision::deny()),
             };
             interactions.remove_permission(&interaction_id);
             decision
@@ -536,14 +521,30 @@ impl ApprovalHandler for FrameworkApprovalHandler {
     }
 
     fn cancel_permission(&self, tool_call_id: &str) -> BoxFuture<'static, ()> {
+        self.cancel_permission_with_reason(tool_call_id, "timed_out")
+    }
+
+    fn cancel_permission_with_reason(
+        &self,
+        tool_call_id: &str,
+        reason: &str,
+    ) -> BoxFuture<'static, ()> {
         let interaction_id = tool_call_id.to_string();
+        let reason = reason.to_string();
         let interactions = self.interactions.clone();
         let broker = self.broker.clone();
+        let delegate = self.delegate.clone();
         Box::pin(async move {
             interactions.remove_permission(&interaction_id);
-            let _ = broker
-                .cancel(&interaction_id, "permission", "timed_out")
-                .await;
+            if let Some(delegate) = delegate {
+                let (_, broker_result) = tokio::join!(
+                    delegate.cancel_permission_with_reason(&interaction_id, &reason),
+                    broker.cancel(&interaction_id, "permission", &reason),
+                );
+                let _ = broker_result;
+            } else {
+                let _ = broker.cancel(&interaction_id, "permission", &reason).await;
+            }
         })
     }
 }

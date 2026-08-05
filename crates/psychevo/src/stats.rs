@@ -1,5 +1,5 @@
 use psychevo_agent_core::now_ms;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::Row;
 
 use crate::error::Result;
@@ -136,9 +136,7 @@ pub async fn session_usage_summary(options: SessionUsageOptions) -> Result<Sessi
                 .bind(boundary)
                 .fetch_optional(&mut *conn)
                 .await?
-                .ok_or_else(|| {
-                    crate::Error::Message(format!("session not found: {session_id}"))
-                })
+                .ok_or_else(|| crate::Error::Message(format!("session not found: {session_id}")))
         })
         .await?;
     let accounted_provider_call_count = row_u64(&row, 12)?;
@@ -189,6 +187,95 @@ pub async fn session_usage_summary(options: SessionUsageOptions) -> Result<Sessi
         unknown_pricing_count,
         cache_read_percent: cache_read_percent(cache_read_tokens, context_input_tokens),
     })
+}
+
+pub(crate) async fn session_agent_token_totals(
+    store: &crate::store::StateRuntime,
+    session_id: &str,
+) -> Result<Option<Value>> {
+    let boundary = store
+        .session_revert_state(session_id)
+        .await?
+        .map(|revert| revert.start_seq)
+        .unwrap_or(i64::MAX);
+    let row = store
+        .observe_sqlx(async {
+            let mut conn = store.acquire_sqlx().await?;
+            Ok(sqlx::query(
+                r#"
+        WITH usage AS (
+            SELECT
+                COALESCE(
+                    context_input_tokens,
+                    json_extract(usage_json, '$.input_tokens'),
+                    json_extract(usage_json, '$.prompt_tokens'),
+                    json_extract(usage_json, '$.input')
+                ) AS input,
+                COALESCE(
+                    json_extract(usage_json, '$.output_tokens'),
+                    json_extract(usage_json, '$.completion_tokens'),
+                    json_extract(usage_json, '$.output')
+                ) AS output,
+                COALESCE(
+                    reasoning_tokens,
+                    json_extract(usage_json, '$.reasoning_tokens'),
+                    json_extract(usage_json, '$.reasoning')
+                ) AS reasoning,
+                COALESCE(
+                    reported_total_tokens,
+                    json_extract(usage_json, '$.total_tokens'),
+                    json_extract(usage_json, '$.total')
+                ) AS reported
+            FROM messages
+            WHERE session_id = ?1 AND session_seq < ?2 AND role = 'assistant'
+        ), normalized AS (
+            SELECT *, COALESCE(
+                reported,
+                COALESCE(input, 0) + COALESCE(output, 0) + COALESCE(reasoning, 0)
+            ) AS effective
+            FROM usage
+        )
+        SELECT
+            COALESCE(SUM(input), 0),
+            COALESCE(SUM(output), 0),
+            COALESCE(SUM(reasoning), 0),
+            COALESCE(SUM(effective), 0),
+            COALESCE(SUM(CASE WHEN input IS NOT NULL THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN output IS NOT NULL THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN reasoning IS NOT NULL THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN reported IS NOT NULL
+                                  OR input IS NOT NULL
+                                  OR output IS NOT NULL
+                                  OR reasoning IS NOT NULL
+                              THEN 1 ELSE 0 END), 0)
+        FROM normalized
+        "#,
+            )
+            .bind(session_id)
+            .bind(boundary)
+            .fetch_one(&mut *conn)
+            .await?)
+        })
+        .await?;
+    let present = [
+        row.try_get::<i64, _>(4)?,
+        row.try_get::<i64, _>(5)?,
+        row.try_get::<i64, _>(6)?,
+        row.try_get::<i64, _>(7)?,
+    ];
+    if present.iter().all(|count| *count == 0) {
+        return Ok(None);
+    }
+    let mut value = Map::new();
+    for (index, key) in ["input", "output", "reasoning", "total"]
+        .into_iter()
+        .enumerate()
+    {
+        if present[index] > 0 {
+            value.insert(key.to_string(), Value::from(row_u64(&row, index)?));
+        }
+    }
+    Ok(Some(Value::Object(value)))
 }
 
 pub async fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {

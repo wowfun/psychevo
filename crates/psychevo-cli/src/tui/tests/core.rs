@@ -1,5 +1,5 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::{reasoning_completed_turn_event, runtime_turn_event, summary};
+use crate::tui::{TuiRenderer, TurnEvent, TurnPrinter, resolve_session_ref_from_summaries};
 #[tokio::test]
 pub(crate) async fn resolves_unique_and_ambiguous_session_prefixes() {
     let sessions = vec![summary("abcdef"), summary("abc999"), summary("def000")];
@@ -20,14 +20,14 @@ pub(crate) async fn turn_printer_hides_reasoning_by_default() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::ReasoningDelta {
+            &TurnEvent::ReasoningDelta {
                 text: "private".to_string(),
             },
             &mut output,
         )
         .expect("delta");
     printer
-        .render_event(&RunStreamEvent::ReasoningEnd, &mut output)
+        .render_event(&reasoning_completed_turn_event(), &mut output)
         .expect("end");
 
     let output = String::from_utf8(output).expect("utf8");
@@ -41,14 +41,14 @@ pub(crate) async fn turn_printer_shows_reasoning_when_enabled() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::ReasoningDelta {
+            &TurnEvent::ReasoningDelta {
                 text: "visible thinking".to_string(),
             },
             &mut output,
         )
         .expect("delta");
     printer
-        .render_event(&RunStreamEvent::ReasoningEnd, &mut output)
+        .render_event(&reasoning_completed_turn_event(), &mut output)
         .expect("end");
 
     let output = String::from_utf8(output).expect("utf8");
@@ -63,7 +63,7 @@ pub(crate) async fn turn_printer_accumulates_assistant_deltas_without_duplicate_
     for text in ["hello", " world"] {
         printer
             .render_event(
-                &RunStreamEvent::AssistantTextDelta {
+                &TurnEvent::MessageDelta {
                     text: text.to_string(),
                 },
                 &mut output,
@@ -76,17 +76,58 @@ pub(crate) async fn turn_printer_accumulates_assistant_deltas_without_duplicate_
 }
 
 #[tokio::test]
+pub(crate) async fn turn_printer_discards_gapped_projection_and_uses_authoritative_answer() {
+    let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
+    let mut output = Vec::new();
+    printer
+        .render_event(
+            &runtime_turn_event(serde_json::json!({
+                "type": "tool_execution_start",
+                "tool_call_id": "call-gap",
+                "tool_name": "read",
+                "args": {"path": "old.txt"}
+            })),
+            &mut output,
+        )
+        .expect("tool start");
+    printer
+        .render_event(&TurnEvent::ResyncRequired { missed: 3 }, &mut output)
+        .expect("resync");
+    printer
+        .render_event(
+            &TurnEvent::MessageDelta {
+                text: "stale delta".to_string(),
+            },
+            &mut output,
+        )
+        .expect("stale delta ignored");
+    assert!(printer.needs_authoritative_reload());
+    assert!(printer.pending_tool_keys.is_empty());
+    assert!(printer.last_assistant_text.is_empty());
+
+    printer
+        .finish_after_authoritative_reload("authoritative answer", &mut output)
+        .expect("finish");
+
+    let output = String::from_utf8(output).expect("utf8");
+    assert!(output.contains("warning: missed 3 live turn events"));
+    assert!(output.contains("Answer:\nauthoritative answer"));
+    assert!(!output.contains("stale delta"));
+}
+
+#[tokio::test]
 pub(crate) async fn turn_printer_renders_project_instruction_warning() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
-                "type": "warning",
+            &TurnEvent::Warning {
+                data: serde_json::json!({
                 "kind": "project_instruction",
                 "message": "Detected CLAUDE.md",
                 "suggestion": "ln -s CLAUDE.md AGENTS.md"
-            })),
+                }),
+            },
             &mut output,
         )
         .expect("warning");
@@ -102,24 +143,28 @@ pub(crate) async fn turn_printer_preserves_bash_command_title_until_tool_end() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
-                "type": "tool_execution_start",
-                "tool_call_id": "call_bash",
-                "tool_name": "exec_command",
-                "args": {"cmd": "cargo test -p psychevo-cli\ncargo fmt"}
-            })),
+            &TurnEvent::Tool {
+                stage: psychevo::ItemStage::Started,
+                data: serde_json::json!({
+                    "tool_call_id": "call_bash",
+                    "tool_name": "exec_command",
+                    "args": {"cmd": "cargo test -p psychevo-cli\ncargo fmt"}
+                }),
+            },
             &mut output,
         )
         .expect("start");
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
-                "type": "tool_execution_end",
-                "tool_call_id": "call_bash",
-                "tool_name": "exec_command",
-                "result": {"output": "ok", "exit_code": 0},
-                "outcome": "normal"
-            })),
+            &TurnEvent::Tool {
+                stage: psychevo::ItemStage::Completed,
+                data: serde_json::json!({
+                    "tool_call_id": "call_bash",
+                    "tool_name": "exec_command",
+                    "result": {"output": "ok", "exit_code": 0},
+                    "outcome": "normal"
+                }),
+            },
             &mut output,
         )
         .expect("end");
@@ -136,7 +181,7 @@ pub(crate) async fn turn_printer_announces_streaming_tool_preparation_once() {
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",
@@ -157,7 +202,7 @@ pub(crate) async fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("pending");
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "message_update",
                 "message": {
                     "role": "assistant",
@@ -178,7 +223,7 @@ pub(crate) async fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("pending update");
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "tool_execution_start",
                 "tool_call_id": "call_write",
                 "tool_name": "write",
@@ -189,7 +234,7 @@ pub(crate) async fn turn_printer_announces_streaming_tool_preparation_once() {
         .expect("start");
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "tool_execution_end",
                 "tool_call_id": "call_write",
                 "tool_name": "write",
@@ -213,7 +258,7 @@ pub(crate) async fn turn_printer_scopes_reused_tool_positions_across_messages() 
     let mut output = Vec::new();
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",
@@ -234,7 +279,7 @@ pub(crate) async fn turn_printer_scopes_reused_tool_positions_across_messages() 
         .expect("first");
     printer
         .render_event(
-            &RunStreamEvent::value(serde_json::json!({
+            &runtime_turn_event(serde_json::json!({
                 "type": "message_end",
                 "message": {
                     "role": "assistant",

@@ -1,5 +1,4 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{FullscreenUi, TranscriptRow, active_tool_row};
 
 mod agent_rows;
 mod completion_elapsed;

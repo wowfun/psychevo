@@ -1,5 +1,3 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
 #[cfg(unix)]
 use crate::skills::write_skill_file_after_validation;
 use crate::skills::{
@@ -13,6 +11,9 @@ use crate::skills::{
     write_skill_file,
 };
 use crate::tools::skill_tools_for_mode;
+use crate::{tests::assert_first_party_tool_declaration_quality, types::RunMode};
+use std::{collections::BTreeMap, fs};
+use tempfile::tempdir;
 
 pub(crate) fn skill_options(
     temp: &tempfile::TempDir,

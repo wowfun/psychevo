@@ -1,4 +1,11 @@
-fn outcome_from_str(value: &str) -> Option<Outcome> {
+use super::types::GatewayTranscriptEntryMeta;
+use crate::tui::{
+    FullscreenUi, GatewayEvent, Outcome, TranscriptBlock, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptKind, TranscriptRow, TurnMetaProjection, Value, tool_id_key,
+    turn_meta_text, usage_context_tokens,
+};
+
+pub(super) fn outcome_from_str(value: &str) -> Option<Outcome> {
     match value {
         "normal" => Some(Outcome::Normal),
         "stopped" => Some(Outcome::Stopped),
@@ -8,7 +15,7 @@ fn outcome_from_str(value: &str) -> Option<Outcome> {
     }
 }
 
-fn transcript_block_text(block: &TranscriptBlock) -> String {
+pub(super) fn transcript_block_text(block: &TranscriptBlock) -> String {
     block
         .body
         .as_ref()
@@ -18,7 +25,7 @@ fn transcript_block_text(block: &TranscriptBlock) -> String {
         .unwrap_or_default()
 }
 
-fn gateway_block_row_index(ui: &mut FullscreenUi<'_>, block_id: &str) -> Option<usize> {
+pub(super) fn gateway_block_row_index(ui: &mut FullscreenUi<'_>, block_id: &str) -> Option<usize> {
     if block_id.is_empty() {
         return None;
     }
@@ -31,13 +38,13 @@ fn gateway_block_row_index(ui: &mut FullscreenUi<'_>, block_id: &str) -> Option<
     }
 }
 
-fn record_gateway_block_row(ui: &mut FullscreenUi<'_>, block_id: &str, index: usize) {
+pub(super) fn record_gateway_block_row(ui: &mut FullscreenUi<'_>, block_id: &str, index: usize) {
     if !block_id.is_empty() {
         ui.gateway_item_rows.insert(block_id.to_string(), index);
     }
 }
 
-fn tag_gateway_transcript_row(
+pub(super) fn tag_gateway_transcript_row(
     ui: &mut FullscreenUi<'_>,
     index: usize,
     entry: GatewayTranscriptEntryMeta<'_>,
@@ -57,7 +64,7 @@ fn tag_gateway_transcript_row(
     row.transcript_message_seq = entry.message_seq;
 }
 
-fn clear_gateway_row_slots_for_index(ui: &mut FullscreenUi<'_>, index: usize) {
+pub(super) fn clear_gateway_row_slots_for_index(ui: &mut FullscreenUi<'_>, index: usize) {
     if ui.assistant_row == Some(index) {
         ui.assistant_row = None;
     }
@@ -69,7 +76,7 @@ fn clear_gateway_row_slots_for_index(ui: &mut FullscreenUi<'_>, index: usize) {
     }
 }
 
-fn gateway_reasoning_title(block: &TranscriptBlock) -> String {
+pub(super) fn gateway_reasoning_title(block: &TranscriptBlock) -> String {
     if gateway_block_is_assistant_preamble(block) {
         return "Thinking".to_string();
     }
@@ -82,7 +89,7 @@ fn gateway_reasoning_title(block: &TranscriptBlock) -> String {
         .to_string()
 }
 
-fn gateway_block_is_assistant_preamble(block: &TranscriptBlock) -> bool {
+pub(super) fn gateway_block_is_assistant_preamble(block: &TranscriptBlock) -> bool {
     block
         .metadata
         .as_ref()
@@ -92,7 +99,7 @@ fn gateway_block_is_assistant_preamble(block: &TranscriptBlock) -> bool {
         || block.title.as_deref() == Some("Preamble")
 }
 
-fn transcript_block_title(block: &TranscriptBlock) -> String {
+pub(super) fn transcript_block_title(block: &TranscriptBlock) -> String {
     block.title.clone().unwrap_or_else(|| match block.kind {
         TranscriptBlockKind::Shell => "exec_command".to_string(),
         TranscriptBlockKind::File => "file".to_string(),
@@ -113,7 +120,7 @@ fn transcript_block_title(block: &TranscriptBlock) -> String {
     })
 }
 
-fn transcript_block_running_text(block: &TranscriptBlock) -> String {
+pub(super) fn transcript_block_running_text(block: &TranscriptBlock) -> String {
     let text = transcript_block_text(block);
     if !text.trim().is_empty() {
         return text;
@@ -128,7 +135,7 @@ fn transcript_block_running_text(block: &TranscriptBlock) -> String {
     }
 }
 
-fn transcript_kind_for_block(kind: TranscriptBlockKind) -> TranscriptKind {
+pub(super) fn transcript_kind_for_block(kind: TranscriptBlockKind) -> TranscriptKind {
     match kind {
         TranscriptBlockKind::File | TranscriptBlockKind::Diff | TranscriptBlockKind::Artifact => {
             TranscriptKind::Updated
@@ -139,7 +146,7 @@ fn transcript_kind_for_block(kind: TranscriptBlockKind) -> TranscriptKind {
     }
 }
 
-fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
+pub(super) fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
     match event {
         GatewayEvent::TurnStarted { thread_id, .. }
         | GatewayEvent::TurnQueued { thread_id, .. }
@@ -161,7 +168,7 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
     }
 }
 
-fn gateway_block_tool_call_id(block: &TranscriptBlock) -> Option<&str> {
+pub(super) fn gateway_block_tool_call_id(block: &TranscriptBlock) -> Option<&str> {
     block
         .metadata
         .as_ref()
@@ -171,17 +178,17 @@ fn gateway_block_tool_call_id(block: &TranscriptBlock) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn gateway_block_tool_value(block: &TranscriptBlock) -> Option<Value> {
+pub(super) fn gateway_block_tool_value(block: &TranscriptBlock) -> Option<Value> {
     let value = block.metadata.as_ref()?;
     (value.get("projection").and_then(Value::as_str) == Some("tool")).then(|| value.clone())
 }
 
-fn gateway_block_runtime_value(block: &TranscriptBlock) -> Option<Value> {
+pub(super) fn gateway_block_runtime_value(block: &TranscriptBlock) -> Option<Value> {
     let value = block.metadata.as_ref()?;
     (value.get("projection").and_then(Value::as_str) == Some("runtimeValue")).then(|| value.clone())
 }
 
-fn remove_visible_write_stdin_row(ui: &mut FullscreenUi<'_>, tool_call_id: &str) {
+pub(super) fn remove_visible_write_stdin_row(ui: &mut FullscreenUi<'_>, tool_call_id: &str) {
     if tool_call_id.is_empty() {
         return;
     }
@@ -197,7 +204,10 @@ fn remove_visible_write_stdin_row(ui: &mut FullscreenUi<'_>, tool_call_id: &str)
     }
 }
 
-fn apply_gateway_assistant_turn_metadata(ui: &mut FullscreenUi<'_>, block: &TranscriptBlock) {
+pub(super) fn apply_gateway_assistant_turn_metadata(
+    ui: &mut FullscreenUi<'_>,
+    block: &TranscriptBlock,
+) {
     let Some(metadata) = block.metadata.as_ref() else {
         return;
     };
@@ -225,7 +235,7 @@ fn apply_gateway_assistant_turn_metadata(ui: &mut FullscreenUi<'_>, block: &Tran
     }
 }
 
-fn push_gateway_completed_turn_meta(
+pub(super) fn push_gateway_completed_turn_meta(
     ui: &mut FullscreenUi<'_>,
     debug: bool,
     entry: GatewayTranscriptEntryMeta<'_>,
@@ -254,7 +264,7 @@ fn push_gateway_completed_turn_meta(
     ui.finish_turn();
 }
 
-fn gateway_assistant_block_receives_meta(block: &TranscriptBlock) -> bool {
+pub(super) fn gateway_assistant_block_receives_meta(block: &TranscriptBlock) -> bool {
     if block.kind != TranscriptBlockKind::Text || block.status != TranscriptBlockStatus::Completed {
         return false;
     }
@@ -272,7 +282,7 @@ fn gateway_assistant_block_receives_meta(block: &TranscriptBlock) -> bool {
         .is_none_or(|outcome| outcome == "normal")
 }
 
-fn gateway_assistant_turn_metadata(metadata: &Value) -> Option<Value> {
+pub(super) fn gateway_assistant_turn_metadata(metadata: &Value) -> Option<Value> {
     if let Some(value) = non_null_metadata_field(metadata, "metadata") {
         return Some(value);
     }
@@ -312,8 +322,3 @@ fn metadata_string_field(metadata: &Value, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
 }
-
-#[path = "helpers.rs"]
-pub(crate) mod helpers;
-#[allow(unused_imports)]
-pub use helpers::*;

@@ -1,0 +1,610 @@
+{
+  "schemaVersion": 1,
+  "decoders": {
+    "PendingInteraction": {
+      "schema": "AppPendingInteraction",
+      "valid": [
+        {
+          "name": "resolved_clarification",
+          "value": {
+            "interactionId": "interaction-1",
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "kind": "clarify",
+            "status": "resolved",
+            "payload": { "questions": [["Continue?"]] },
+            "resolution": { "answers": [["yes"]] },
+            "requestedAtMs": 41,
+            "resolvedAtMs": 42
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "missing_payload",
+          "value": {
+            "interactionId": "interaction-1",
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "kind": "clarify",
+            "status": "pending",
+            "requestedAtMs": 41
+          }
+        },
+        {
+          "name": "unsafe_requested_at",
+          "value": {
+            "interactionId": "interaction-1",
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "kind": "clarify",
+            "status": "pending",
+            "payload": {},
+            "requestedAtMs": 9007199254740992
+          }
+        }
+      ]
+    },
+    "CompactionResult": {
+      "schema": "AppThreadCompactResult",
+      "valid": [
+        {
+          "name": "compacted",
+          "value": {
+            "threadId": "thread-1",
+            "compacted": true,
+            "reason": "manual",
+            "message": "context compacted",
+            "checkpointId": 7,
+            "firstKeptSessionSeq": 12,
+            "tokensBefore": 4096,
+            "tokensAfter": 1024,
+            "summary": "Earlier work was summarized.",
+            "summaryProvider": "openai",
+            "summaryModel": "gpt-5"
+          }
+        },
+        {
+          "name": "not_compacted",
+          "value": {
+            "threadId": "thread-2",
+            "compacted": false,
+            "reason": "manual",
+            "message": "not enough messages to compact",
+            "checkpointId": null,
+            "firstKeptSessionSeq": null,
+            "tokensBefore": null,
+            "tokensAfter": null,
+            "summary": null,
+            "summaryProvider": null,
+            "summaryModel": null
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "framework_snake_case_shape",
+          "value": {
+            "session_id": "thread-1",
+            "compacted": true,
+            "reason": "manual",
+            "message": "context compacted",
+            "checkpoint_id": 7,
+            "first_kept_session_seq": 12,
+            "tokens_before": 4096,
+            "tokens_after": 1024,
+            "summary": "Earlier work was summarized.",
+            "summary_provider": "openai",
+            "summary_model": "gpt-5"
+          }
+        },
+        {
+          "name": "unsafe_token_count",
+          "value": {
+            "threadId": "thread-1",
+            "compacted": true,
+            "reason": "manual",
+            "message": "context compacted",
+            "checkpointId": 7,
+            "firstKeptSessionSeq": 12,
+            "tokensBefore": 9007199254740992,
+            "tokensAfter": 1024,
+            "summary": "Earlier work was summarized.",
+            "summaryProvider": "openai",
+            "summaryModel": "gpt-5"
+          }
+        },
+        {
+          "name": "missing_required_nullable_field",
+          "value": {
+            "threadId": "thread-1",
+            "compacted": true,
+            "reason": "manual",
+            "message": "context compacted",
+            "checkpointId": 7,
+            "firstKeptSessionSeq": 12,
+            "tokensBefore": 4096,
+            "tokensAfter": 1024,
+            "summary": "Earlier work was summarized.",
+            "summaryProvider": "openai"
+          }
+        }
+      ]
+    },
+    "ThreadItem": {
+      "schema": "AppThreadItem",
+      "valid": [
+        {
+          "name": "assistant_message",
+          "value": {
+            "sessionSeq": 7,
+            "message": { "role": "assistant", "content": [] },
+            "usage": { "inputTokens": 3 },
+            "metadata": { "provider": "fake" },
+            "accounting": { "reportedTotalTokens": 3 }
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "missing_message",
+          "value": { "sessionSeq": 7 }
+        },
+        {
+          "name": "unsafe_session_sequence",
+          "value": {
+            "sessionSeq": 9007199254740992,
+            "message": { "role": "assistant", "content": [] }
+          }
+        }
+      ]
+    },
+    "ThreadSummary": {
+      "schema": "AppThreadSummary",
+      "valid": [
+        {
+          "name": "active_thread",
+          "value": {
+            "id": "thread-1",
+            "source": "python",
+            "cwd": "/workspace",
+            "title": "Audit",
+            "startedAtMs": 10,
+            "updatedAtMs": 20,
+            "archived": false,
+            "messageCount": 3,
+            "toolCallCount": 1,
+            "activeTurnId": "turn-1"
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "boolean_message_count",
+          "value": {
+            "id": "thread-1",
+            "source": "python",
+            "cwd": "/workspace",
+            "title": null,
+            "startedAtMs": 10,
+            "updatedAtMs": 20,
+            "archived": false,
+            "messageCount": true,
+            "toolCallCount": 1,
+            "activeTurnId": null
+          }
+        },
+        {
+          "name": "unsafe_updated_at",
+          "value": {
+            "id": "thread-1",
+            "source": "python",
+            "cwd": "/workspace",
+            "title": null,
+            "startedAtMs": 10,
+            "updatedAtMs": 9007199254740992,
+            "archived": false,
+            "messageCount": 3,
+            "toolCallCount": 1,
+            "activeTurnId": null
+          }
+        }
+      ]
+    },
+    "ThreadSnapshot": {
+      "schema": "AppThreadSnapshot",
+      "valid": [
+        {
+          "name": "thread_with_nested_state",
+          "value": {
+            "id": "thread-1",
+            "source": "python",
+            "cwd": "/workspace",
+            "title": "Audit",
+            "startedAtMs": 10,
+            "updatedAtMs": 20,
+            "archived": false,
+            "messageCount": 1,
+            "toolCallCount": 0,
+            "activeTurnId": "turn-1",
+            "pendingInteractions": [
+              {
+                "interactionId": "interaction-1",
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "kind": "clarify",
+                "status": "pending",
+                "payload": { "questions": [["Continue?"]] },
+                "resolution": { "answers": [["yes"]] },
+                "requestedAtMs": 41,
+                "resolvedAtMs": 42
+              }
+            ],
+            "items": [
+              {
+                "sessionSeq": 1,
+                "message": { "role": "user", "content": [] },
+                "usage": { "inputTokens": 1 },
+                "metadata": { "source": "fixture" },
+                "accounting": { "reportedTotalTokens": 1 }
+              }
+            ]
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "pending_interactions_not_an_array",
+          "value": {
+            "id": "thread-1",
+            "source": "python",
+            "cwd": "/workspace",
+            "title": null,
+            "startedAtMs": 10,
+            "updatedAtMs": 20,
+            "archived": false,
+            "messageCount": 1,
+            "toolCallCount": 0,
+            "activeTurnId": null,
+            "pendingInteractions": {},
+            "items": []
+          }
+        }
+      ]
+    },
+    "TurnReceipt": {
+      "schema": "AppTurnReceipt",
+      "valid": [
+        {
+          "name": "accepted_with_client_identity",
+          "value": {
+            "accepted": true,
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "clientTurnId": " client-turn-1 "
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "accepted_is_not_boolean",
+          "value": {
+            "accepted": 1,
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "clientTurnId": null
+          }
+        }
+      ]
+    },
+    "TurnResult": {
+      "schema": "AppTurnResult",
+      "valid": [
+        {
+          "name": "completed_with_evidence",
+          "value": {
+            "threadId": "thread-1",
+            "outcome": "completed",
+            "finalAnswer": "done",
+            "provider": "fake",
+            "model": "fake",
+            "reasoningEffort": "medium",
+            "toolFailures": 0,
+            "contextLimit": 128000,
+            "contextSnapshot": { "used": 12 },
+            "warnings": [{ "kind": "fixture" }],
+            "terminalReason": { "kind": "completed" },
+            "terminalError": { "code": "none" },
+            "selectedAgent": { "id": "reviewer" },
+            "selectedSkills": [{ "id": "audit" }]
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "unknown_outcome",
+          "value": {
+            "threadId": "thread-1",
+            "outcome": "future",
+            "finalAnswer": "done",
+            "provider": "fake",
+            "model": "fake",
+            "reasoningEffort": null,
+            "toolFailures": 0,
+            "warnings": [],
+            "selectedSkills": []
+          }
+        },
+        {
+          "name": "negative_tool_failures",
+          "value": {
+            "threadId": "thread-1",
+            "outcome": "completed",
+            "finalAnswer": "done",
+            "provider": "fake",
+            "model": "fake",
+            "reasoningEffort": null,
+            "toolFailures": -1,
+            "warnings": [],
+            "selectedSkills": []
+          }
+        },
+        {
+          "name": "unsafe_context_limit",
+          "value": {
+            "threadId": "thread-1",
+            "outcome": "completed",
+            "finalAnswer": "done",
+            "provider": "fake",
+            "model": "fake",
+            "reasoningEffort": null,
+            "toolFailures": 0,
+            "contextLimit": 9007199254740992,
+            "warnings": [],
+            "selectedSkills": []
+          }
+        }
+      ]
+    },
+    "TurnEvent": {
+      "schema": "AppTurnEvent",
+      "valid": [
+        {
+          "name": "accepted",
+          "value": {
+            "type": "accepted",
+            "receipt": {
+              "accepted": true,
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "clientTurnId": null
+            },
+            "queuePosition": 2
+          }
+        },
+        {
+          "name": "started",
+          "value": {
+            "type": "started",
+            "threadId": "thread-1",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "name": "message",
+          "value": {
+            "type": "message",
+            "stage": "completed",
+            "message": { "role": "assistant", "content": [] }
+          }
+        },
+        {
+          "name": "message_delta",
+          "value": { "type": "message_delta", "text": "hello" }
+        },
+        {
+          "name": "reasoning_delta",
+          "value": { "type": "reasoning_delta", "text": "checking" }
+        },
+        {
+          "name": "reasoning_completed",
+          "value": { "type": "reasoning_completed", "text": null }
+        },
+        {
+          "name": "tool",
+          "value": {
+            "type": "tool",
+            "stage": "started",
+            "data": { "name": "read" }
+          }
+        },
+        {
+          "name": "interaction_requested",
+          "value": {
+            "type": "interaction_requested",
+            "interactionId": "interaction-1",
+            "kind": "clarify",
+            "payload": {}
+          }
+        },
+        {
+          "name": "interaction_resolved",
+          "value": {
+            "type": "interaction_resolved",
+            "interactionId": "interaction-1",
+            "reason": "answered"
+          }
+        },
+        {
+          "name": "warning",
+          "value": { "type": "warning", "data": { "kind": "test" } }
+        },
+        {
+          "name": "completed",
+          "value": {
+            "type": "completed",
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "outcome": "completed"
+          }
+        },
+        {
+          "name": "failed",
+          "value": {
+            "type": "failed",
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "message": "failed"
+          }
+        },
+        {
+          "name": "resync_required",
+          "value": { "type": "resync_required", "missed": 3 }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "unknown_variant",
+          "value": { "type": "future_event" }
+        },
+        {
+          "name": "host_activity_is_not_public_turn_event",
+          "value": {
+            "type": "activity_changed",
+            "threadId": "thread-1",
+            "activity": {
+              "revision": 1,
+              "running": true,
+              "activeTurnId": "turn-1",
+              "queuedTurns": 0
+            }
+          }
+        },
+        {
+          "name": "missing_variant_field",
+          "value": { "type": "message_delta" }
+        },
+        {
+          "name": "missing_nullable_variant_field",
+          "value": { "type": "reasoning_completed" }
+        },
+        {
+          "name": "unsafe_resync_count",
+          "value": { "type": "resync_required", "missed": 9007199254740992 }
+        },
+        {
+          "name": "negative_resync_count",
+          "value": { "type": "resync_required", "missed": -1 }
+        }
+      ]
+    },
+    "FilesystemApprovalTarget": {
+      "schema": "AppFilesystemApprovalTarget",
+      "valid": [
+        {
+          "name": "resolved_target",
+          "value": {
+            "requestedPath": "src/lib.rs",
+            "resolvedPath": "/workspace/src/lib.rs"
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "resolved_path_not_a_string",
+          "value": {
+            "requestedPath": "src/lib.rs",
+            "resolvedPath": 7
+          }
+        }
+      ]
+    },
+    "FilesystemApprovalRequest": {
+      "schema": "AppFilesystemApprovalRequest",
+      "valid": [
+        {
+          "name": "directory_scope",
+          "value": {
+            "targets": [
+              {
+                "requestedPath": "src/lib.rs",
+                "resolvedPath": "/workspace/src/lib.rs"
+              }
+            ],
+            "scopeCandidates": ["/workspace", "/workspace/src"]
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "scope_candidate_not_a_string",
+          "value": {
+            "targets": [
+              {
+                "requestedPath": "src/lib.rs",
+                "resolvedPath": "/workspace/src/lib.rs"
+              }
+            ],
+            "scopeCandidates": [7]
+          }
+        }
+      ]
+    },
+    "McpStartupApprovalRequest": {
+      "schema": "AppMcpStartupApprovalRequest",
+      "valid": [
+        {
+          "name": "stdio_target",
+          "value": {
+            "server": "filesystem",
+            "source": "workspace",
+            "target": {
+              "kind": "stdio",
+              "command": "mcp-filesystem",
+              "args": ["serve"],
+              "cwd": "/workspace",
+              "envNames": ["MCP_TOKEN"]
+            }
+          }
+        },
+        {
+          "name": "http_target",
+          "value": {
+            "server": "remote",
+            "source": "user",
+            "target": {
+              "kind": "http",
+              "url": "https://example.test/mcp",
+              "headerNames": ["X-Tenant"],
+              "credentialNames": ["MCP_TOKEN"]
+            }
+          }
+        }
+      ],
+      "invalid": [
+        {
+          "name": "unknown_target_kind",
+          "value": {
+            "server": "future",
+            "source": "workspace",
+            "target": { "kind": "socket", "path": "/tmp/mcp.sock" }
+          }
+        },
+        {
+          "name": "stdio_args_not_strings",
+          "value": {
+            "server": "filesystem",
+            "source": "workspace",
+            "target": {
+              "kind": "stdio",
+              "command": "mcp-filesystem",
+              "args": [1],
+              "cwd": "/workspace",
+              "envNames": []
+            }
+          }
+        }
+      ]
+    }
+  }
+}

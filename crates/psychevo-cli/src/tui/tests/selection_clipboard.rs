@@ -1,5 +1,21 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::{
+    ClipboardCommand, ClipboardEnvironment, FULLSCREEN_EVENT_POLL_INTERVAL,
+    FULLSCREEN_PASSIVE_REDRAW_INTERVAL, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, Line,
+    ManagedTerminalTitle, Modifier, MouseButton, MouseEvent, MouseEventKind, NO_ARGS, Paragraph,
+    Rect, RunMode, ScreenLine, SelectableRegion, SelectionState, TUI_MOUSE_CAPTURE_DISABLE_ANSI,
+    TUI_MOUSE_CAPTURE_ENABLE_ANSI, TUI_ROLE_SELECTION_BG, Terminal, TranscriptKind, TranscriptRow,
+    TuiApp, base64_encode, copy_text_to_clipboard_with, is_probably_wsl_from,
+    local_clipboard_commands_for, mouse_event_needs_redraw, osc52_sequence_with_passthrough,
+    passive_redraw_due, schedule_next_passive_redraw, screen_cells_from_text,
+    selected_text_from_lines, tmux_clipboard_copy_ready, write_fullscreen_enter_commands,
+    write_fullscreen_exit_commands,
+};
+use ratatui::backend::TestBackend;
+use std::io;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn tui_mouse_capture_avoids_any_motion_tracking() {
     assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1000h"));

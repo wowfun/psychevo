@@ -1,3 +1,14 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_usize, option_json_safe_i64,
+};
+use crate::source::{GatewayRequestScope, GatewaySource, GatewayThread, GatewayTurn};
+use crate::thread_command_turn::ThreadEditableDraft;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "type",
@@ -19,7 +30,10 @@ pub enum GatewayEvent {
         #[serde(rename = "turnId")]
         turn_id: String,
         #[serde(rename = "queuePosition")]
-        #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+        #[serde(
+            serialize_with = "json_safe_usize::serialize",
+            deserialize_with = "json_safe_usize::deserialize"
+        )]
         #[schemars(with = "JsonSafeU64")]
         #[ts(type = "number")]
         queue_position: usize,
@@ -54,7 +68,10 @@ pub enum GatewayEvent {
         block_id: String,
         text: String,
         #[serde(rename = "updatedAtMs")]
-        #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+        #[serde(
+            serialize_with = "json_safe_i64::serialize",
+            deserialize_with = "json_safe_i64::deserialize"
+        )]
         #[schemars(with = "JsonSafeI64")]
         #[ts(type = "number")]
         updated_at_ms: i64,
@@ -197,7 +214,10 @@ pub enum TranscriptBlockStatus {
 #[ts(rename_all = "camelCase")]
 pub struct TranscriptToolResult {
     #[serde(rename = "resultMessageSeq")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub result_message_seq: i64,
@@ -209,12 +229,18 @@ pub struct TranscriptToolResult {
     #[ts(type = "unknown | null")]
     pub metadata: Option<Value>,
     #[serde(rename = "createdAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
@@ -227,11 +253,18 @@ pub struct TranscriptBlock {
     pub id: String,
     pub kind: TranscriptBlockKind,
     pub status: TranscriptBlockStatus,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub order: i64,
-    #[serde(default, rename = "phaseOrdinal", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "phaseOrdinal",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[ts(optional)]
     pub phase_ordinal: Option<u32>,
     pub source: String,
@@ -246,12 +279,18 @@ pub struct TranscriptBlock {
     #[serde(default)]
     pub result: Option<TranscriptToolResult>,
     #[serde(rename = "createdAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
@@ -267,7 +306,10 @@ pub struct TranscriptEntry {
     #[serde(rename = "turnId")]
     pub turn_id: Option<String>,
     #[serde(rename = "messageSeq")]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub message_seq: Option<i64>,
@@ -282,12 +324,18 @@ pub struct TranscriptEntry {
     #[ts(type = "unknown | null")]
     pub accounting: Option<Value>,
     #[serde(rename = "createdAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub updated_at_ms: i64,
@@ -305,19 +353,28 @@ pub struct GatewayActivityView {
     pub running: bool,
     #[serde(default)]
     pub active_turn_id: Option<String>,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub queued_turns: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub started_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub updated_at_ms: Option<i64>,
@@ -329,7 +386,10 @@ pub struct GatewayActivityView {
     pub owner_surface: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub lease_expires_at_ms: Option<i64>,
@@ -356,7 +416,10 @@ pub enum ThreadActivityView {
         #[schemars(rename = "turnId")]
         turn_id: String,
         kind: FrameworkTurnKind,
-        #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+        #[serde(
+            serialize_with = "json_safe_usize::serialize",
+            deserialize_with = "json_safe_usize::deserialize"
+        )]
         #[schemars(with = "JsonSafeU64", rename = "queuedTurns")]
         #[ts(type = "number")]
         queued_turns: usize,
@@ -425,7 +488,10 @@ pub struct PendingActionView {
     pub owner_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub lease_expires_at_ms: Option<i64>,
@@ -481,7 +547,10 @@ pub struct ThreadHistoryEditingView {
     #[serde(default, rename = "boundaryMessageId")]
     pub boundary_message_id: Option<String>,
     #[serde(default, rename = "hiddenEntryCount")]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub hidden_entry_count: usize,
@@ -570,32 +639,50 @@ pub struct SessionSummaryView {
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub updated_at_ms: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     #[serde(default)]
     pub end_reason: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub archived_at_ms: Option<i64>,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub message_count: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub tool_call_count: usize,

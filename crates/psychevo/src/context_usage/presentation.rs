@@ -164,10 +164,10 @@ pub(crate) fn scope_label(scope: ContextScope) -> &'static str {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::{
-        BTreeMap, OpenAiChatRoleTokenCount, OpenAiChatSkillTokenCount,
-        OpenAiChatTokenCount, snapshot::*,
+    use super::super::counting::{
+        OpenAiChatRoleTokenCount, OpenAiChatSkillTokenCount, OpenAiChatTokenCount,
     };
+    use super::super::{BTreeMap, snapshot::*};
 
     fn count(system: u64, tools: u64, skills: u64, messages: u64) -> OpenAiChatTokenCount {
         let mut role_counts = BTreeMap::new();

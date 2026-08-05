@@ -1,5 +1,15 @@
+use std::sync::Arc;
+
+use futures::future::BoxFuture;
+use psychevo_agent_core::{ToolBinding, ToolDisplaySpec, ToolExecutionMode, ToolOutput};
+use psychevo_ai::AbortSignal;
+use serde_json::Value;
+
+use super::actions::PermissionAction;
+use super::state::{PermissionRuntime, PersistentPermissionGrant};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ActionPolicyEvaluation {
+pub(super) enum ActionPolicyEvaluation {
     Allow,
     Ask {
         reason: String,
@@ -13,9 +23,9 @@ pub(crate) enum ActionPolicyEvaluation {
     },
 }
 
-pub(crate) struct PermissionTool {
-    pub(crate) tool: Arc<dyn ToolBinding>,
-    pub(crate) runtime: PermissionRuntime,
+pub(super) struct PermissionTool {
+    pub(super) tool: Arc<dyn ToolBinding>,
+    pub(super) runtime: PermissionRuntime,
 }
 
 impl ToolBinding for PermissionTool {
@@ -56,18 +66,15 @@ impl ToolBinding for PermissionTool {
         let runtime = self.runtime.clone();
         let tool = Arc::clone(&self.tool);
         Box::pin(async move {
-            let approved_identity = match PermissionAction::from_tool_call(
-                &runtime.inner.cwd,
-                tool.name(),
-                &args,
-            ) {
-                Ok(action) => action.and_then(|action| action.filesystem_identity_snapshot()),
-                Err(err) => {
-                    return ToolOutput::error(format!(
-                        "filesystem identity resolution failed: {err}"
-                    ));
-                }
-            };
+            let approved_identity =
+                match PermissionAction::from_tool_call(&runtime.inner.cwd, tool.name(), &args) {
+                    Ok(action) => action.and_then(|action| action.filesystem_identity_snapshot()),
+                    Err(err) => {
+                        return ToolOutput::error(format!(
+                            "filesystem identity resolution failed: {err}"
+                        ));
+                    }
+                };
             if let Err(output) = runtime
                 .authorize_with_expected_identity(
                     &tool_call_id,

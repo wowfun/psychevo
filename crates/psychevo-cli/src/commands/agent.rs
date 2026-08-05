@@ -1,2 +1,4 @@
-include!("agent/agent_commands.rs");
-include!("agent/tests.rs");
+mod agent_commands;
+mod support;
+
+pub(crate) use agent_commands::run_agent_command;

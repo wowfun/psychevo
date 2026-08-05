@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, Result, SideCleanupTask, SideConversationState, SideConversationSurface,
+    SideDeleteTask, SlashCommand, StartSideConversationRequest, ThreadModelSelection, TuiApp,
+    short_session, tui_live_event_is_clarify_request,
+};
 pub(crate) const SIDE_CONVERSATION_NO_SESSION_MESSAGE: &str = "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again.";
 pub(crate) const SIDE_CONVERSATION_ALREADY_OPEN_MESSAGE: &str =
     "A /btw side chat is already open. Press Ctrl+C to return before starting another.";
@@ -27,35 +30,26 @@ impl TuiApp {
         };
 
         let (provider, model) = self.side_conversation_provider_model()?;
-        let store = &self.state_runtime;
-        let side_thread_id = store
-            .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
-                parent_session_id: &parent_session,
-                cwd: &self.cwd,
-                source: TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-                model: &model,
-                provider: &provider,
-                metadata: Some(serde_json::json!({
-                    SIDE_CONVERSATION_METADATA_KEY: {
-                        "ephemeral": true,
-                        "parent_session_id": parent_session.clone(),
-                    },
-                    "provider_label": provider,
-                    "reasoning_effort": self.current_variant.clone(),
-                    "mode": self.current_mode.as_str(),
-                    "permission_mode": self.current_permission_mode.as_str(),
-                    "selected_agent": self.current_agent.clone(),
-                })),
-                max_context_messages: self.run_options(String::new()).max_context_messages,
-                inherited_message_metadata: serde_json::json!({
-                    SIDE_INHERITED_METADATA_KEY: {
-                        "hidden": true,
-                        "parent_session_id": parent_session.clone(),
-                    }
-                }),
-                boundary_text: side_conversation_boundary_prompt(),
+        self.detach_foreground_for_session_switch(ui, None).await;
+        let side_thread = self
+            .runtime
+            .client()
+            .resume_thread(parent_session.clone())
+            .await?
+            .start_side_conversation(StartSideConversationRequest {
+                surface: SideConversationSurface::Tui,
+                model: ThreadModelSelection {
+                    provider,
+                    model,
+                    reasoning_effort: self.current_variant.clone(),
+                },
+                mode: self.current_mode,
+                permission_mode: self.current_permission_mode,
+                selected_agent: self.current_agent.clone(),
+                agent_binding: None,
             })
             .await?;
+        let side_thread_id = side_thread.id().to_string();
 
         let side_state = SideConversationState {
             parent_session: parent_session.clone(),
@@ -69,13 +63,12 @@ impl TuiApp {
             side_thread_id: side_thread_id.clone(),
         };
 
-        self.detach_running_for_session_switch(ui, None);
         self.side_conversation = Some(side_state);
         self.current_session = Some(side_thread_id.clone());
         self.reset_live_agent_reload_poll();
         self.current_session_title = Some(format!("Side {}", short_session(&side_thread_id)));
         self.clear_new_session_draft();
-        ui.bottom_panel = None;
+        ui.clear_session_local_bottom_panel();
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         ui.set_ephemeral_status("side chat; Ctrl+C returns");
@@ -94,6 +87,7 @@ impl TuiApp {
         let Some(side) = self.side_conversation.take() else {
             return Ok(());
         };
+        self.detach_foreground_for_session_switch(ui, None).await;
         let side_thread_id = side.side_thread_id.clone();
         self.current_session = Some(side.parent_session.clone());
         self.reset_live_agent_reload_poll();
@@ -108,7 +102,7 @@ impl TuiApp {
         self.refresh_selected_model();
         self.refresh_current_session_title().await?;
 
-        ui.bottom_panel = None;
+        ui.clear_session_local_bottom_panel();
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, &side.parent_session);
@@ -117,11 +111,47 @@ impl TuiApp {
         ui.set_ephemeral_status(SIDE_CONVERSATION_RETURNED_MESSAGE);
         ui.refresh_sidebar(self);
 
-        match self.state_runtime.delete_session(&side_thread_id).await {
-            Ok(()) => {}
-            Err(err) => ui.set_ephemeral_error(format!("failed to delete /btw side chat: {err}")),
-        }
+        self.start_side_delete_task(side_thread_id);
         Ok(())
+    }
+
+    fn start_side_delete_task(&mut self, thread_id: String) {
+        let framework = self.runtime.client().clone();
+        let delete_thread_id = thread_id.clone();
+        let task = tokio::spawn(async move {
+            let thread = framework
+                .resume_thread(delete_thread_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            thread.delete().await.map_err(|error| error.to_string())
+        });
+        self.side_delete_tasks
+            .push(SideDeleteTask { thread_id, task });
+    }
+
+    pub(crate) async fn drain_side_delete_tasks(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
+        let mut changed = false;
+        while let Some(index) = self
+            .side_delete_tasks
+            .iter()
+            .position(|cleanup| cleanup.task.is_finished())
+        {
+            let cleanup = self.side_delete_tasks.remove(index);
+            match cleanup.task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => ui.set_ephemeral_error(format!(
+                    "failed to delete /btw side chat {}: {error}",
+                    short_session(&cleanup.thread_id)
+                )),
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => ui.set_ephemeral_error(format!(
+                    "failed to delete /btw side chat {}: {error}",
+                    short_session(&cleanup.thread_id)
+                )),
+            }
+            changed = true;
+        }
+        changed
     }
 
     pub(crate) async fn handle_side_conversation_ctrl_c(
@@ -131,7 +161,7 @@ impl TuiApp {
         if !self.in_side_conversation() {
             return Ok(false);
         }
-        if self.request_current_session_interrupt(ui).await {
+        if ui.starting_turn.is_none() && self.request_current_session_interrupt(ui).await {
             return Ok(true);
         }
         self.close_side_conversation(ui).await?;
@@ -146,8 +176,10 @@ impl TuiApp {
     }
 
     pub(crate) fn side_conversation_provider_model(&self) -> Result<(String, String)> {
-        if let Some(model) = selected_configured_model(&self.run_options(String::new()))
+        if let Some(model) = self
+            .configuration()
             .ok()
+            .and_then(|configuration| configuration.selected_model().ok())
             .flatten()
         {
             return Ok((model.provider, model.model));
@@ -184,11 +216,11 @@ impl TuiApp {
         if self.side_cleanup_task.is_some() {
             return false;
         }
-        let state = self.state_runtime.clone();
+        let framework = self.runtime.client().clone();
         let cwd = self.cwd.clone();
         let task = tokio::spawn(async move {
-            state
-                .delete_sessions_for_cwd_with_source(&cwd, TUI_SIDE_CONVERSATION_SESSION_SOURCE)
+            framework
+                .cleanup_side_conversations(&cwd, SideConversationSurface::Tui)
                 .await
                 .map_err(|err| err.to_string())
         });

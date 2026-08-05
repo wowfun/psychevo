@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+use psychevo::{
+    PermissionMode, ProjectContextInstructionMode, RunMode, session_export::SessionArtifactKind,
+    session_export::SessionExportIncludeSet,
+};
 
 #[derive(Debug, Parser)]
 pub(crate) struct AgentStatusArgs {
@@ -211,15 +216,15 @@ pub(crate) enum ModelCommand {
     Fetch(ModelFetchArgs),
 }
 
-pub(crate) fn parse_export_include_arg(value: &str) -> std::result::Result<String, String> {
+fn parse_export_include_arg(value: &str) -> std::result::Result<String, String> {
     parse_include_arg(value, SessionArtifactKind::Export)
 }
 
-pub(crate) fn parse_share_include_arg(value: &str) -> std::result::Result<String, String> {
+fn parse_share_include_arg(value: &str) -> std::result::Result<String, String> {
     parse_include_arg(value, SessionArtifactKind::Share)
 }
 
-pub(crate) fn parse_include_arg(
+fn parse_include_arg(
     value: &str,
     artifact_kind: SessionArtifactKind,
 ) -> std::result::Result<String, String> {

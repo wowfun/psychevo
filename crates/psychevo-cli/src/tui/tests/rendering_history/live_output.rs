@@ -1,7 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::test_app;
+use crate::tui::tests::runtime_turn_event;
+use crate::tui::{FullscreenUi, TranscriptKind, TranscriptRow, active_tool_row};
+use std::time::{Duration, Instant};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn transcript_auto_follow_tracks_wrapped_streaming_content() {
@@ -20,8 +21,8 @@ pub(crate) async fn transcript_auto_follow_tracks_wrapped_streaming_content() {
     ui.scroll_to_bottom();
     let initial_bottom = ui.scroll;
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -42,8 +43,8 @@ pub(crate) async fn transcript_auto_follow_tracks_wrapped_streaming_content() {
     ui.scroll_transcript(-2);
     assert!(!ui.auto_follow_transcript);
     let manual_scroll = ui.scroll;
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -70,8 +71,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call_exec",
             "tool_name": "exec_command",
@@ -81,8 +82,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_yielded",
             "session_id": 42,
             "tool_call_id": "call_exec",
@@ -93,8 +94,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_exec",
             "tool_name": "exec_command",
@@ -121,8 +122,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
         "exec_command printf start; sleep 1; printf done"
     );
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_output_delta",
             "session_id": 42,
             "tool_call_id": "call_exec",
@@ -133,8 +134,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
         false,
     );
     let before_poll_rows = ui.transcript.len();
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call_poll",
             "tool_name": "write_stdin",
@@ -143,8 +144,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_poll",
             "tool_name": "write_stdin",
@@ -171,8 +172,8 @@ pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_outpu
             .all(|row| !row.title.contains("write_stdin"))
     );
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "exec_session_finished",
             "session_id": 42,
             "tool_call_id": "call_exec",
@@ -202,8 +203,8 @@ pub(crate) async fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
     ui.transcript.push(row);
     ui.exec_session_rows.insert(0, 0);
 
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "message_update",
             "message": {
                 "role": "assistant",
@@ -220,8 +221,8 @@ pub(crate) async fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": "call_poll",
             "tool_name": "write_stdin",
@@ -230,8 +231,8 @@ pub(crate) async fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
         true,
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::value(serde_json::json!({
+    ui.apply_turn_event(
+        runtime_turn_event(serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": "call_poll",
             "tool_name": "write_stdin",

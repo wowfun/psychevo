@@ -1,18 +1,16 @@
 use std::path::Path;
 
 use psychevo::{
-    __product::capabilities::AgentEntrypoint, __product::capabilities::ListSkillsOptions,
-    __product::capabilities::agent_source_display_label,
-    __product::capabilities::list_skills_value_with_options,
-    __product::capabilities::skill_source_display_label,
+    agents::AgentEntrypoint, agents::agent_source_display_label, skills::ListSkillsOptions,
+    skills::list_skills_value_with_options, skills::skill_source_display_label,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
-use super::{
-    ResolvedScope, WebState, command_item_completion_detail, command_item_matches,
-    command_list_result, discover_gateway_agents, discover_gateway_skills,
-};
+use super::binding::WebState;
+use super::commands::{command_item_completion_detail, command_item_matches, command_list_result};
+use super::scope_session::ResolvedScope;
+use super::settings_observability::{discover_gateway_agents, discover_gateway_skills};
 
 const MAX_COMPLETION_ITEMS: usize = 50;
 const MAX_FILE_COMPLETION_ITEMS: usize = 80;
@@ -37,13 +35,15 @@ pub(super) struct CompletionToken {
 pub(super) async fn completion_list_value(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::CompletionListParams,
+    params: wire::thread_command_turn::CompletionListParams,
 ) -> psychevo::Result<Value> {
     let Some(token) = active_completion_token(&params.text, params.cursor) else {
-        return Ok(serde_json::to_value(wire::CompletionListResult {
-            items: Vec::new(),
-            replacement: None,
-        })?);
+        return Ok(serde_json::to_value(
+            wire::thread_command_turn::CompletionListResult {
+                items: Vec::new(),
+                replacement: None,
+            },
+        )?);
     };
     let query = token.query.to_ascii_lowercase();
     let mut items = match token.sigil {
@@ -53,13 +53,15 @@ pub(super) async fn completion_list_value(
         _ => Vec::new(),
     };
     items.truncate(MAX_COMPLETION_ITEMS);
-    Ok(serde_json::to_value(wire::CompletionListResult {
-        items,
-        replacement: Some(wire::CompletionReplacement {
-            start: token.start,
-            end: token.end,
-        }),
-    })?)
+    Ok(serde_json::to_value(
+        wire::thread_command_turn::CompletionListResult {
+            items,
+            replacement: Some(wire::thread_command_turn::CompletionReplacement {
+                start: token.start,
+                end: token.end,
+            }),
+        },
+    )?)
 }
 
 pub(super) fn active_completion_token(text: &str, cursor: usize) -> Option<CompletionToken> {
@@ -97,7 +99,7 @@ async fn slash_completion_items(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
     query: &str,
-) -> psychevo::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::thread_command_turn::CompletionItem>> {
     let active_turn = match thread_id {
         Some(thread_id) => state.activity(&scope.source, Some(thread_id)).await.running,
         None => state.activity(&scope.source, None).await.running,
@@ -116,7 +118,7 @@ async fn slash_completion_items(
         .filter(|command| command_item_matches(command, query))
         .map(|command| {
             let (group, group_label) = command_item_completion_group(&command);
-            wire::CompletionItem {
+            wire::thread_command_turn::CompletionItem {
                 id: format!("command:{}", command.name),
                 sigil: "/".to_string(),
                 label: command.slash.clone(),
@@ -135,7 +137,10 @@ async fn slash_completion_items(
     Ok(items)
 }
 
-fn command_item_match_sort_key(command: &wire::CommandListItem, query: &str) -> (u8, String) {
+fn command_item_match_sort_key(
+    command: &wire::thread_command_turn::CommandListItem,
+    query: &str,
+) -> (u8, String) {
     if query.is_empty() {
         return (0, command.name.clone());
     }
@@ -179,7 +184,7 @@ fn dollar_completion_items(
     state: &WebState,
     scope: &ResolvedScope,
     query: &str,
-) -> psychevo::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::thread_command_turn::CompletionItem>> {
     let mut items = Vec::new();
     let skill_catalog = discover_gateway_skills(state, scope)?;
     let skills = list_skills_value_with_options(
@@ -206,7 +211,7 @@ fn dollar_completion_items(
                 .get("location")
                 .and_then(Value::as_str)
                 .map(ToString::to_string);
-            items.push(wire::CompletionItem {
+            items.push(wire::thread_command_turn::CompletionItem {
                 id: format!("skill:{name}"),
                 sigil: "$".to_string(),
                 label: format!("${name}"),
@@ -216,7 +221,7 @@ fn dollar_completion_items(
                     .get("description")
                     .and_then(Value::as_str)
                     .map(ToString::to_string),
-                target: Some(wire::GatewayMentionTarget::Skill {
+                target: Some(wire::source::GatewayMentionTarget::Skill {
                     name: name.to_string(),
                     path,
                 }),
@@ -243,7 +248,7 @@ fn dollar_completion_items(
     Ok(items)
 }
 
-fn sort_grouped_completion_items(items: &mut [wire::CompletionItem]) {
+fn sort_grouped_completion_items(items: &mut [wire::thread_command_turn::CompletionItem]) {
     items.sort_by(|left, right| {
         completion_group_rank(left)
             .cmp(&completion_group_rank(right))
@@ -256,7 +261,7 @@ fn at_completion_items(
     state: &WebState,
     scope: &ResolvedScope,
     query: &str,
-) -> psychevo::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::thread_command_turn::CompletionItem>> {
     let mut items =
         agent_completion_items(state, scope, query, '@', Some(AgentEntrypoint::Subagent))?;
     items.extend(file_completion_items(&scope.cwd, query)?);
@@ -270,7 +275,7 @@ fn agent_completion_items(
     query: &str,
     sigil: char,
     required_entrypoint: Option<AgentEntrypoint>,
-) -> psychevo::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::thread_command_turn::CompletionItem>> {
     let mut items = Vec::new();
     let agent_catalog = discover_gateway_agents(state, scope)?;
     for agent in agent_catalog.agents {
@@ -288,14 +293,14 @@ fn agent_completion_items(
             .iter()
             .map(|entrypoint| (*entrypoint).as_str().to_string())
             .collect::<Vec<_>>();
-        items.push(wire::CompletionItem {
+        items.push(wire::thread_command_turn::CompletionItem {
             id: format!("agent:{name}"),
             sigil: sigil.to_string(),
             label: format!("{sigil}{name}"),
             insert_text: format!("{sigil}{name}"),
             kind: "agent".to_string(),
             detail: Some(description),
-            target: Some(wire::GatewayMentionTarget::Agent {
+            target: Some(wire::source::GatewayMentionTarget::Agent {
                 name,
                 source: Some(agent.source.as_str().to_string()),
                 entrypoints,
@@ -341,7 +346,10 @@ fn completion_sort_text(query: &str, name: &str, description: Option<&str>, kind
     format!("{rank}:{kind}:{name_lower}")
 }
 
-fn file_completion_items(cwd: &Path, query: &str) -> psychevo::Result<Vec<wire::CompletionItem>> {
+fn file_completion_items(
+    cwd: &Path,
+    query: &str,
+) -> psychevo::Result<Vec<wire::thread_command_turn::CompletionItem>> {
     let mut items = Vec::new();
     collect_file_completion_items(cwd, cwd, query, 0, &mut items);
     sort_grouped_completion_items(&mut items);
@@ -354,7 +362,7 @@ fn collect_file_completion_items(
     dir: &Path,
     query: &str,
     depth: usize,
-    items: &mut Vec<wire::CompletionItem>,
+    items: &mut Vec<wire::thread_command_turn::CompletionItem>,
 ) {
     if depth > MAX_FILE_COMPLETION_DEPTH || items.len() >= MAX_FILE_COMPLETION_ITEMS {
         return;
@@ -388,14 +396,14 @@ fn collect_file_completion_items(
             } else {
                 GROUP_FILES
             };
-            items.push(wire::CompletionItem {
+            items.push(wire::thread_command_turn::CompletionItem {
                 id: format!("file:{relative}"),
                 sigil: "@".to_string(),
                 label: label.clone(),
                 insert_text: label,
                 kind: if is_dir { "directory" } else { "file" }.to_string(),
                 detail: Some(relative.clone()),
-                target: Some(wire::GatewayMentionTarget::File {
+                target: Some(wire::source::GatewayMentionTarget::File {
                     path: path.display().to_string(),
                     relative_path: relative.clone(),
                 }),
@@ -411,7 +419,9 @@ fn collect_file_completion_items(
     }
 }
 
-fn command_item_completion_group(command: &wire::CommandListItem) -> (&'static str, &'static str) {
+fn command_item_completion_group(
+    command: &wire::thread_command_turn::CommandListItem,
+) -> (&'static str, &'static str) {
     let source = command.source.to_ascii_lowercase();
     let presentation = command
         .presentation_kind
@@ -434,7 +444,9 @@ fn command_item_completion_group(command: &wire::CommandListItem) -> (&'static s
     (GROUP_COMMANDS, completion_group_label(GROUP_COMMANDS))
 }
 
-fn command_item_scope_label(command: &wire::CommandListItem) -> Option<String> {
+fn command_item_scope_label(
+    command: &wire::thread_command_turn::CommandListItem,
+) -> Option<String> {
     let (group, _) = command_item_completion_group(command);
     match group {
         GROUP_SKILLS => {
@@ -479,7 +491,7 @@ fn completion_group_label(group: &str) -> &'static str {
     }
 }
 
-fn completion_group_rank(item: &wire::CompletionItem) -> u8 {
+fn completion_group_rank(item: &wire::thread_command_turn::CompletionItem) -> u8 {
     match item.group.as_deref().unwrap_or(item.kind.as_str()) {
         GROUP_COMMANDS | "command" => 0,
         GROUP_SKILLS | "skill" => 1,

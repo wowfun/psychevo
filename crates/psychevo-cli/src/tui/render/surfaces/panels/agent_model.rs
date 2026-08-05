@@ -1,3 +1,12 @@
+use crate::tui::{
+    AgentEditorField, AgentEditorMode, AgentEditorPanel, AgentPanel, AgentRunPromptPanel, AgentTab,
+    Block, BottomSelectionPanel, BottomSelectionRow, BottomSelectionValue, ConfiguredModel, Frame,
+    Line, ModelPanel, ModelRowSource, ModelTab, Modifier, Paragraph, Rect, Span, Style, Wrap,
+    bottom_panel_row, format_count, format_model_spec, model_detail_capabilities,
+    model_detail_modalities, model_detail_pricing, model_detail_source, tui_theme,
+};
+use std::time::Duration;
+
 pub(crate) fn render_agent_panel(
     frame: &mut Frame<'_>,
     area: Rect,

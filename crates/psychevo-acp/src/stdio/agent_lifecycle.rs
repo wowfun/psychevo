@@ -1,3 +1,34 @@
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v2::{
+    AgentAuthCapabilities, AgentCapabilities, AvailableCommandsUpdate, CancelSessionNotification,
+    CloseSessionRequest, CloseSessionResponse, ConfigOptionUpdate, IdleStateUpdate, Implementation,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoginAuthRequest, LoginAuthResponse, McpCapabilities, McpHttpCapabilities, NewSessionRequest,
+    NewSessionResponse, PromptCapabilities, PromptEmbeddedContextCapabilities,
+    PromptImageCapabilities, PromptRequest, PromptResponse, ReplayFrom, ResumeSessionRequest,
+    ResumeSessionResponse, RunningStateUpdate, SessionCapabilities, SessionConfigOption, SessionId,
+    SessionInfo, SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    StateUpdate, StopReason,
+};
+use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Error};
+use psychevo::{Application, ImageInput, RunMode, StartThreadRequest, ThreadListQuery};
+
+use crate::commands::{
+    AcpApprovalHandler, AcpTurnProjection, SlashPromptAction, TERMINAL_SETUP_AUTH_METHOD_ID,
+    agent_message_update, reasoning_effort_value, send_session_setup_updates, send_session_update,
+    send_turn_event_update,
+};
+use crate::protocol::{
+    AcpUsageAccumulator, REASONING_EFFORT_VALUES, acp_internal_error, acp_mcp_servers,
+    prompt_parts, replay_thread_history, session_config_options, single_text_prompt, stop_reason,
+};
+use crate::stdio::{AcpOptions, AcpSession, PsychevoAcpAgent};
+
+use super::options_and_tests::AcpUsageUpdateContext;
+
 impl PsychevoAcpAgent {
     pub(crate) async fn new(options: AcpOptions) -> psychevo::Result<Self> {
         let mut builder = Application::builder()
@@ -8,12 +39,10 @@ impl PsychevoAcpAgent {
         }
         let application = builder.build().await?;
         let framework = application.client();
-        let state = application.__state_runtime();
         Ok(Self {
             options,
             application,
             framework,
-            state,
             sessions: Arc::default(),
             client_terminal_auth: Arc::new(Mutex::new(false)),
             client_terminal_output: Arc::new(Mutex::new(false)),
@@ -73,7 +102,7 @@ impl PsychevoAcpAgent {
                                 responder,
                                 cx: ConnectionTo<Client>| {
                         let session_id = request.session_id.clone();
-                        let result = agent.resume_session(request).await;
+                        let result = agent.resume_session(request, &cx).await;
                         let config_options = result
                             .as_ref()
                             .ok()
@@ -212,16 +241,9 @@ impl PsychevoAcpAgent {
         if self.ready_auth_provider().is_none() && !self.terminal_auth_available() {
             return Err(Error::auth_required().data("provider credentials are not configured"));
         }
-        let mut start = StartThreadRequest::new(&request.cwd);
-        start.source = "acp".to_string();
-        let thread = self
-            .framework
-            .start_thread(start)
-            .await
-            .map_err(acp_internal_error)?;
-        let session_id = SessionId::new(thread.id().to_string());
+        let session_id = SessionId::new(uuid::Uuid::now_v7().to_string());
         let mcp_servers = acp_mcp_servers(request.mcp_servers);
-        let session = AcpSession::new(request.cwd, thread, mcp_servers);
+        let session = AcpSession::new(request.cwd, mcp_servers);
         let config_options = self.session_config_options_for_session(&session);
         self.sessions
             .lock()
@@ -233,16 +255,28 @@ impl PsychevoAcpAgent {
     pub(crate) async fn resume_session(
         &self,
         request: ResumeSessionRequest,
+        cx: &ConnectionTo<Client>,
     ) -> Result<ResumeSessionResponse, Error> {
+        let replay_from_start = match request.replay_from.as_ref() {
+            None => false,
+            Some(ReplayFrom::Start(_)) => true,
+            Some(ReplayFrom::Other(cursor)) => {
+                return Err(Error::invalid_params()
+                    .data(format!("unsupported replay cursor: {}", cursor.type_)));
+            }
+            Some(_) => {
+                return Err(Error::invalid_params().data("unsupported replay cursor"));
+            }
+        };
         let runtime_session_id = request.session_id.to_string();
         let thread = self
             .framework
             .resume_thread(runtime_session_id.clone())
             .await
             .map_err(|_| Error::resource_not_found(Some(runtime_session_id.clone())))?;
-        let session = AcpSession::new(
+        let session = AcpSession::loaded(
             request.cwd,
-            thread,
+            thread.clone(),
             acp_mcp_servers(request.mcp_servers),
         );
         let config_options = self.session_config_options_for_session(&session);
@@ -250,7 +284,23 @@ impl PsychevoAcpAgent {
             .lock()
             .expect("acp session lock poisoned")
             .insert(request.session_id.to_string(), session);
-        Ok(ResumeSessionResponse::new().config_options(config_options))
+        let replay_meta = if replay_from_start {
+            match replay_thread_history(&thread, &request.session_id, cx).await {
+                Ok(meta) => meta,
+                Err(error) => {
+                    self.sessions
+                        .lock()
+                        .expect("acp session lock poisoned")
+                        .remove(&request.session_id.to_string());
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        Ok(ResumeSessionResponse::new()
+            .config_options(config_options)
+            .meta(replay_meta))
     }
 
     pub(crate) async fn list_sessions(
@@ -260,11 +310,17 @@ impl PsychevoAcpAgent {
         let cwd = request
             .cwd
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let store = self.state.clone();
-        let sessions = store
-            .list_sessions_for_cwd_with_sources(&cwd, &[])
+        let page = self
+            .framework
+            .list_threads(ThreadListQuery {
+                cwd: Some(cwd),
+                cursor: request.cursor,
+                ..Default::default()
+            })
             .await
-            .map_err(acp_internal_error)?
+            .map_err(acp_internal_error)?;
+        let sessions = page
+            .threads
             .into_iter()
             .map(|summary| {
                 SessionInfo::new(summary.id, PathBuf::from(summary.cwd))
@@ -272,7 +328,7 @@ impl PsychevoAcpAgent {
                     .updated_at(Some(summary.updated_at_ms.to_string()))
             })
             .collect();
-        Ok(ListSessionsResponse::new(sessions))
+        Ok(ListSessionsResponse::new(sessions).next_cursor(page.next_cursor))
     }
 
     pub(crate) async fn close_session(
@@ -297,11 +353,6 @@ impl PsychevoAcpAgent {
         cx: ConnectionTo<Client>,
     ) -> Result<PromptResponse, Error> {
         let session_id = request.session_id.clone();
-        send_session_update(
-            &cx,
-            session_id.clone(),
-            SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new())),
-        );
         let session_key = session_id.to_string();
         let prompt_blocks = request.prompt;
         let slash_prompt = single_text_prompt(&prompt_blocks).map(str::to_string);
@@ -312,7 +363,12 @@ impl PsychevoAcpAgent {
             };
             session.clone()
         };
-        let (prompt, image_inputs) = prompt_parts(prompt_blocks, &session.cwd);
+        let (prompt, image_inputs) = prompt_parts(prompt_blocks, &session.cwd)?;
+        send_session_update(
+            &cx,
+            session_id.clone(),
+            SessionUpdate::StateUpdate(StateUpdate::Running(RunningStateUpdate::new())),
+        );
 
         if let Some(slash_prompt) = slash_prompt {
             match self
@@ -404,9 +460,11 @@ impl PsychevoAcpAgent {
             let Some(session) = sessions.get_mut(&session_key) else {
                 return Err(Error::resource_not_found(Some(session_key)));
             };
-            if session.turn.is_some() {
+            if session.starting_turn || session.turn.is_some() {
                 return Err(Error::invalid_params().data("session already has an active prompt"));
             }
+            session.starting_turn = true;
+            session.cancel_starting_turn = false;
             session.clone()
         };
         send_session_update(
@@ -420,20 +478,72 @@ impl PsychevoAcpAgent {
             session_id: session_id.clone(),
             cx: cx.clone(),
         });
-        let request =
-            self.turn_request(&session, prompt, image_inputs, Some(approval_handler));
-        let handle = session
-            .thread
-            .start_turn(request)
-            .await
-            .map_err(acp_internal_error)?;
-        {
+        let request = self.turn_request(&session, prompt, image_inputs, Some(approval_handler));
+        let started = if let Some(thread) = session.thread.as_ref() {
+            thread
+                .start_turn(request)
+                .await
+                .map(|handle| (handle, None))
+        } else {
+            let mut start = StartThreadRequest::new(&session.cwd);
+            start.source = "acp".to_string();
+            match self.framework.start_thread_with_turn(start, request).await {
+                Ok(handle) => {
+                    let thread = self
+                        .framework
+                        .resume_thread(handle.receipt().thread_id.clone())
+                        .await;
+                    match thread {
+                        Ok(thread) => Ok((handle, Some(thread))),
+                        Err(error) => {
+                            handle.interrupt();
+                            Err(error)
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let (handle, new_thread) = match started {
+            Ok(started) => started,
+            Err(error) => {
+                if let Ok(mut sessions) = self.sessions.lock()
+                    && let Some(session) = sessions.get_mut(&session_key)
+                {
+                    session.starting_turn = false;
+                    session.cancel_starting_turn = false;
+                    session.clear_pending_admission_steers();
+                }
+                return Err(acp_internal_error(error));
+            }
+        };
+        let publication_error = {
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
             let Some(session) = sessions.get_mut(&session_key) else {
                 handle.interrupt();
                 return Err(Error::resource_not_found(Some(session_key)));
             };
-            session.turn = Some(handle.clone());
+            session.starting_turn = false;
+            if let Some(thread) = new_thread {
+                session.thread = Some(thread);
+            }
+            let canceled = std::mem::take(&mut session.cancel_starting_turn);
+            let publication_error = session
+                .take_pending_admission_steers()
+                .into_iter()
+                .find_map(|prompt| handle.queue_steer(prompt).err());
+            if canceled || publication_error.is_some() {
+                handle.interrupt();
+            }
+            if publication_error.is_none() {
+                session.turn = Some(handle.clone());
+            }
+            publication_error
+        };
+        if let Some(error) = publication_error {
+            return Err(acp_internal_error(format!(
+                "failed to publish retained ACP steer: {error}"
+            )));
         }
         let mut events = handle.events();
         let event_session_id = session_id.clone();
@@ -482,7 +592,6 @@ impl PsychevoAcpAgent {
                 if let Ok(mut sessions) = self.sessions.lock()
                     && let Some(session) = sessions.get_mut(&session_id.to_string())
                 {
-                    session.runtime_session_id = Some(result.thread_id);
                     session.turn = None;
                 }
                 send_session_update(
@@ -520,7 +629,10 @@ impl PsychevoAcpAgent {
             .get_mut(&notification.session_id.to_string())
             .and_then(|session| {
                 session.queued_prompts.clear();
-                session.pending_steers.clear();
+                session.clear_pending_admission_steers();
+                if session.starting_turn {
+                    session.cancel_starting_turn = true;
+                }
                 session.turn.clone()
             });
         if let Some(turn) = turn {
@@ -584,8 +696,10 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
     ) -> Vec<SessionConfigOption> {
-        let options = self.run_options(session, String::new(), Vec::new(), None);
-        let configured = configured_models(&options).unwrap_or_default();
+        let configured = self
+            .configuration_for_session(session)
+            .and_then(|configuration| configuration.configured_models())
+            .unwrap_or_default();
         session_config_options(
             session.mode,
             session.model.as_deref(),

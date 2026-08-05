@@ -12,6 +12,8 @@ use crate::thread_lineage::SIDE_CONVERSATION_SESSION_SOURCES;
 use crate::types::SessionSummary;
 
 use super::store_message_fields::parse_optional_json;
+use super::store_messages::insert_inherited_message_in_tx;
+use super::store_runtime_bindings::snapshot_resolved_writable_runtime_binding_in_tx;
 use super::{
     ChildSessionSnapshotInput, SessionBrowserRequest, SessionBrowserWorkspaceProjection,
     SessionListCursor, SessionListProjection, SessionListProjectionPage, SessionSummaryPage,
@@ -60,37 +62,124 @@ impl StateRuntime {
         &self,
         input: ChildSessionSnapshotInput<'_>,
     ) -> Result<String> {
-        let parent_messages = crate::context::prune_context(
-            self.load_messages(input.parent_session_id).await?,
-            input.max_context_messages,
-        );
-        let child_session = self
-            .create_child_session_with_metadata(
-                input.parent_session_id,
-                input.cwd,
-                input.source,
-                input.model,
-                input.provider,
-                input.metadata,
+        let child_session_id = Uuid::now_v7().to_string();
+        let now = now_ms();
+        let cwd = input.cwd.to_string_lossy().into_owned();
+        let metadata_json = input
+            .metadata
+            .map(|value| serde_json::to_string(&value))
+            .transpose()?;
+        let inherited_message_metadata_json =
+            serde_json::to_string(&input.inherited_message_metadata)?;
+
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let inserted = sqlx::query(
+                r#"
+                INSERT INTO sessions (
+                    id, source, parent_session_id, cwd, model, provider,
+                    started_at_ms, updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
+                    message_count, tool_call_count, title, metadata_json
+                )
+                SELECT ?1, ?2, ?3, ?4, ?5, ?6,
+                       ?7, ?7, NULL, NULL, NULL, 0, 0, NULL, ?8
+                FROM sessions
+                WHERE id = ?3 AND cwd = ?4
+                "#,
+            )
+            .bind(&child_session_id)
+            .bind(input.source)
+            .bind(input.parent_session_id)
+            .bind(&cwd)
+            .bind(input.model)
+            .bind(input.provider)
+            .bind(now)
+            .bind(&metadata_json)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if inserted != 1 {
+                return Err(Error::Message(format!(
+                    "parent Thread `{}` was not found in `{cwd}`",
+                    input.parent_session_id
+                )));
+            }
+
+            let inherited_count = sqlx::query(
+                r#"
+                INSERT INTO messages (
+                    session_id, session_seq, role, timestamp_ms, message_json,
+                    content_text, tool_call_id, tool_name, tool_calls_json,
+                    finish_reason, outcome, model, provider, usage_json, metadata_json
+                )
+                SELECT
+                    ?1,
+                    ROW_NUMBER() OVER (ORDER BY session_seq),
+                    role, timestamp_ms, message_json,
+                    content_text, tool_call_id, tool_name, tool_calls_json,
+                    finish_reason, outcome, model, provider, NULL, ?2
+                FROM messages
+                WHERE session_id = ?3
+                ORDER BY session_seq ASC
+                "#,
+            )
+            .bind(&child_session_id)
+            .bind(&inherited_message_metadata_json)
+            .bind(input.parent_session_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            let inherited_count = i64::try_from(inherited_count).map_err(|_| {
+                Error::Message("side conversation history is too large".to_string())
+            })?;
+            insert_inherited_message_in_tx(
+                &mut tx,
+                &child_session_id,
+                inherited_count.saturating_add(1),
+                &user_text_message(input.boundary_text),
+                &inherited_message_metadata_json,
             )
             .await?;
-        for message in parent_messages {
-            self.append_message_with_metrics(
-                &child_session,
-                &message,
-                None,
-                Some(input.inherited_message_metadata.clone()),
+            let message_count = inherited_count.saturating_add(1);
+            let tool_call_count = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COALESCE(SUM(json_array_length(tool_calls_json)), 0)
+                FROM messages
+                WHERE session_id = ?1 AND tool_calls_json IS NOT NULL
+                "#,
             )
+            .bind(&child_session_id)
+            .fetch_one(&mut *tx)
             .await?;
-        }
-        self.append_message_with_metrics(
-            &child_session,
-            &user_text_message(input.boundary_text),
-            None,
-            Some(input.inherited_message_metadata),
-        )
-        .await?;
-        Ok(child_session)
+            sqlx::query(
+                "UPDATE sessions SET message_count = ?1, tool_call_count = ?2 WHERE id = ?3",
+            )
+            .bind(message_count)
+            .bind(tool_call_count)
+            .bind(&child_session_id)
+            .execute(&mut *tx)
+            .await?;
+
+            if let Some(binding) = input.runtime_binding
+                && let Err(error) = snapshot_resolved_writable_runtime_binding_in_tx(
+                    &mut tx,
+                    input.parent_session_id,
+                    &child_session_id,
+                    binding.expected_binding_revision,
+                    binding.expected_control_revision,
+                    binding.effective_controls,
+                    now,
+                )
+                .await
+            {
+                tx.rollback().await?;
+                return Err(error);
+            }
+
+            tx.commit().await?;
+            Ok(child_session_id)
+        })
+        .await
     }
 
     pub(crate) async fn create_session_with_parent_and_metadata(
@@ -206,7 +295,8 @@ impl StateRuntime {
                 r#"
             SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
                    updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
-                   message_count, tool_call_count, title
+                   message_count, tool_call_count, title,
+                   json_extract(metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id
             FROM sessions
             WHERE (?1 IS NULL OR cwd = ?1)
               AND ((?2 = 0 AND archived_at_ms IS NULL) OR (?2 = 1 AND archived_at_ms IS NOT NULL))
@@ -253,7 +343,8 @@ impl StateRuntime {
                 r#"
                 SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
                        updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
-                       message_count, tool_call_count, title
+                       message_count, tool_call_count, title,
+                       json_extract(metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id
                 FROM sessions
                 WHERE (?1 IS NULL OR cwd = ?1)
                   AND ((?2 = 0 AND archived_at_ms IS NULL)
@@ -300,7 +391,7 @@ impl StateRuntime {
         result
     }
 
-    pub async fn browse_human_sessions(
+    pub(crate) async fn browse_human_sessions(
         &self,
         request: SessionBrowserRequest<'_>,
     ) -> Result<Vec<SessionBrowserWorkspaceProjection>> {
@@ -344,6 +435,7 @@ impl StateRuntime {
             SELECT r.id, r.source, r.parent_session_id, r.cwd, r.model, r.provider,
                    r.started_at_ms, r.updated_at_ms, r.ended_at_ms, r.end_reason,
                    r.archived_at_ms, r.message_count, r.tool_call_count, r.title,
+                   json_extract(r.metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id,
                    r.metadata_json,
                    (
                        SELECT m.content_text
@@ -422,7 +514,7 @@ impl StateRuntime {
         result
     }
 
-    pub async fn list_human_session_projections(
+    pub(crate) async fn list_human_session_projections(
         &self,
         cwd: Option<&str>,
         archived: bool,
@@ -442,6 +534,7 @@ impl StateRuntime {
             SELECT s.id, s.source, s.parent_session_id, s.cwd, s.model, s.provider,
                    s.started_at_ms, s.updated_at_ms, s.ended_at_ms, s.end_reason,
                    s.archived_at_ms, s.message_count, s.tool_call_count, s.title,
+                   json_extract(s.metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id,
                    s.metadata_json,
                    (
                        SELECT m.content_text
@@ -503,7 +596,7 @@ impl StateRuntime {
         result
     }
 
-    pub async fn session_list_projection(
+    pub(crate) async fn session_list_projection(
         &self,
         session_id: &str,
     ) -> Result<Option<SessionListProjection>> {
@@ -515,6 +608,7 @@ impl StateRuntime {
                 SELECT s.id, s.source, s.parent_session_id, s.cwd, s.model, s.provider,
                        s.started_at_ms, s.updated_at_ms, s.ended_at_ms, s.end_reason,
                        s.archived_at_ms, s.message_count, s.tool_call_count, s.title,
+                       json_extract(s.metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id,
                        s.metadata_json,
                        (
                            SELECT m.content_text
@@ -553,7 +647,8 @@ impl StateRuntime {
                 r#"
                 SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
                        updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
-                       message_count, tool_call_count, title
+                       message_count, tool_call_count, title,
+                       json_extract(metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id
                 FROM sessions
                 WHERE id = ?1
                 "#,
@@ -562,6 +657,76 @@ impl StateRuntime {
             .fetch_optional(&mut *conn)
             .await?
             .map(|row| session_summary_from_sqlx_row(&row))
+            .transpose()
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
+    pub(crate) async fn session_summaries_by_ids(
+        &self,
+        session_ids: &[String],
+    ) -> Result<Vec<SessionSummary>> {
+        if session_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if session_ids.len() > 200 {
+            return Err(Error::Message(
+                "session summary batch exceeds the 200-Thread limit".to_string(),
+            ));
+        }
+        let ids = serde_json::to_string(session_ids)?;
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
+                SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
+                       updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
+                       message_count, tool_call_count, title,
+                       json_extract(metadata_json, '$.forkedFromThreadId') AS forked_from_thread_id
+                FROM sessions
+                WHERE id IN (SELECT value FROM json_each(?1))
+                "#,
+            )
+            .bind(ids)
+            .fetch_all(&mut *conn)
+            .await?
+            .into_iter()
+            .map(|row| session_summary_from_sqlx_row(&row))
+            .collect()
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
+    pub(crate) async fn session_composer_model_selection(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(String, String, Option<String>)>> {
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
+                SELECT provider, model,
+                       json_extract(metadata_json, '$.composerModel.reasoningEffort')
+                FROM sessions
+                WHERE id = ?1
+                "#,
+            )
+            .bind(session_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| {
+                Ok((
+                    row.try_get(0)?,
+                    row.try_get(1)?,
+                    row.try_get::<Option<String>, _>(2)?,
+                ))
+            })
             .transpose()
         }
         .await;
@@ -585,6 +750,26 @@ impl StateRuntime {
         .await;
         operation.finish(&result);
         result
+    }
+
+    pub(crate) async fn acknowledged_agent_delete_thread_ids(&self) -> Result<Vec<String>> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            Ok(sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT id
+                FROM sessions
+                WHERE json_extract(
+                    metadata_json,
+                    '$.agentSessionDeleteIntent.state'
+                ) = 'remoteAcknowledged'
+                ORDER BY id ASC
+                "#,
+            )
+            .fetch_all(&mut *conn)
+            .await?)
+        })
+        .await
     }
 
     pub async fn set_session_metadata_field(
@@ -661,6 +846,58 @@ impl StateRuntime {
             session_id,
         )
         .await
+    }
+
+    pub(crate) async fn set_session_composer_model(
+        &self,
+        session_id: &str,
+        provider: &str,
+        model: &str,
+        reasoning_effort: Option<&str>,
+    ) -> Result<()> {
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let metadata_row = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT metadata_json FROM sessions WHERE id = ?1",
+            )
+            .bind(session_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(metadata_json) = metadata_row else {
+                return Err(Error::Message(format!("session not found: {session_id}")));
+            };
+            let mut metadata = metadata_object(metadata_json.as_deref())?;
+            let qualified_model = format!("{provider}/{model}");
+            let mut composer_model = Map::new();
+            composer_model.insert("model".to_string(), Value::String(qualified_model));
+            if let Some(reasoning_effort) = reasoning_effort {
+                composer_model.insert(
+                    "reasoningEffort".to_string(),
+                    Value::String(reasoning_effort.to_string()),
+                );
+            }
+            metadata.insert(
+                crate::model_state::SESSION_COMPOSER_MODEL_METADATA_KEY.to_string(),
+                Value::Object(composer_model),
+            );
+            let metadata_json = encode_metadata(metadata)?;
+            sqlx::query(
+                "UPDATE sessions SET provider = ?1, model = ?2, metadata_json = ?3, updated_at_ms = ?4 WHERE id = ?5",
+            )
+            .bind(provider)
+            .bind(model)
+            .bind(metadata_json)
+            .bind(now_ms())
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(())
+        }
+        .await;
+        operation.finish(&result);
+        result
     }
 
     pub async fn set_session_title(&self, session_id: &str, title: &str) -> Result<String> {
@@ -849,10 +1086,10 @@ type RawSessionProjection = (
 fn session_projection_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<RawSessionProjection> {
     Ok((
         session_summary_from_sqlx_row(row)?,
-        row.try_get(14)?,
         row.try_get(15)?,
         row.try_get(16)?,
         row.try_get(17)?,
+        row.try_get(18)?,
         false,
         0,
     ))
@@ -863,12 +1100,12 @@ fn session_browser_projection_from_row(
 ) -> Result<RawSessionProjection> {
     Ok((
         session_summary_from_sqlx_row(row)?,
-        row.try_get(14)?,
         row.try_get(15)?,
         row.try_get(16)?,
         row.try_get(17)?,
-        row.try_get::<i64, _>(18)? != 0,
-        row.try_get::<i64, _>(19)? as usize,
+        row.try_get(18)?,
+        row.try_get::<i64, _>(19)? != 0,
+        row.try_get::<i64, _>(20)? as usize,
     ))
 }
 
@@ -882,11 +1119,13 @@ fn projection_from_raw(raw: RawSessionProjection) -> Result<(SessionListProjecti
         exception,
         total,
     ) = raw;
+    let metadata = parse_optional_json(metadata_json)
+        .map_err(|_| corrupt_session_projection(&summary.id, "metadata"))?;
     Ok((
         SessionListProjection {
             summary,
             first_user_text,
-            metadata: parse_optional_json(metadata_json)?,
+            metadata,
             runtime_backend_kind,
             runtime_ref,
         },
@@ -896,8 +1135,12 @@ fn projection_from_raw(raw: RawSessionProjection) -> Result<(SessionListProjecti
 }
 
 fn session_summary_from_sqlx_row(row: &sqlx::sqlite::SqliteRow) -> Result<SessionSummary> {
+    let id: String = row.try_get(0)?;
+    let forked_from_thread_id: Option<String> = row
+        .try_get(14)
+        .map_err(|_| corrupt_session_projection(&id, "forkedFromThreadId"))?;
     Ok(SessionSummary {
-        id: row.try_get(0)?,
+        id,
         source: row.try_get(1)?,
         parent_session_id: row.try_get(2)?,
         cwd: row.try_get(3)?,
@@ -911,7 +1154,19 @@ fn session_summary_from_sqlx_row(row: &sqlx::sqlite::SqliteRow) -> Result<Sessio
         message_count: row.try_get(11)?,
         tool_call_count: row.try_get(12)?,
         title: row.try_get(13)?,
+        forked_from_thread_id,
     })
+}
+
+fn corrupt_session_projection(thread_id: &str, field: &'static str) -> Error {
+    Error::structured(
+        "Persisted Thread presentation data is invalid.",
+        serde_json::json!({
+            "kind": "corrupt_thread_presentation",
+            "threadId": thread_id,
+            "field": field,
+        }),
+    )
 }
 
 fn metadata_object(value: Option<&str>) -> Result<Map<String, Value>> {
@@ -929,5 +1184,248 @@ fn encode_metadata(metadata: Map<String, Value>) -> Result<Option<String>> {
         Ok(None)
     } else {
         Ok(Some(serde_json::to_string(&Value::Object(metadata))?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    use psychevo_agent_core::{Message, UserContentBlock, user_text_message};
+    use serde_json::json;
+
+    use super::*;
+    use crate::state::{
+        ChildSessionRuntimeBindingSnapshotInput, GatewayRuntimeBindingInput,
+        GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
+    };
+
+    const CWD: &str = "/workspace";
+
+    async fn parent_with_history(store: &StateRuntime) -> (String, Vec<Message>) {
+        let parent = store
+            .create_session_with_metadata(Path::new(CWD), "web", "model", "provider", None)
+            .await
+            .expect("parent");
+        let messages = vec![user_text_message("first"), user_text_message("second")];
+        for message in &messages {
+            store
+                .append_message(&parent, message)
+                .await
+                .expect("parent message");
+        }
+        (parent, messages)
+    }
+
+    async fn bind_parent(
+        store: &StateRuntime,
+        parent: &str,
+        ownership: GatewayRuntimeBindingOwnership,
+    ) -> GatewayRuntimeBindingRecord {
+        store
+            .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
+                thread_id: parent,
+                agent_ref: Some("reviewer"),
+                agent_fingerprint: "agent-fingerprint",
+                agent_definition_json: r#"{"name":"reviewer"}"#,
+                runtime_ref: "runtime:reviewer",
+                backend_kind: "acp",
+                native_kind: "acp",
+                native_session_id: Some("native-parent"),
+                cwd: CWD,
+                profile_fingerprint: "profile-fingerprint",
+                profile_revision: "profile-revision",
+                profile_config_json: "{}",
+                adapter_kind: "acp",
+                adapter_revision: "adapter-revision",
+                ownership,
+                parent_thread_id: None,
+            })
+            .await
+            .expect("parent binding")
+    }
+
+    async fn durable_counts(store: &StateRuntime) -> (i64, i64, i64) {
+        let sessions = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+            .fetch_one(&store.inner.pool)
+            .await
+            .expect("session count");
+        let messages = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+            .fetch_one(&store.inner.pool)
+            .await
+            .expect("message count");
+        let bindings = sqlx::query_scalar("SELECT COUNT(*) FROM gateway_runtime_bindings")
+            .fetch_one(&store.inner.pool)
+            .await
+            .expect("binding count");
+        (sessions, messages, bindings)
+    }
+
+    async fn create_side(
+        store: &StateRuntime,
+        parent: &str,
+        binding: Option<ChildSessionRuntimeBindingSnapshotInput<'_>>,
+    ) -> Result<String> {
+        store
+            .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
+                parent_session_id: parent,
+                cwd: Path::new(CWD),
+                source: crate::thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+                model: "model",
+                provider: "provider",
+                metadata: Some(json!({"side_conversation": true})),
+                inherited_message_metadata: json!({
+                    crate::thread_lineage::SIDE_INHERITED_METADATA_KEY: {
+                        "hidden": true,
+                        "parent_session_id": parent,
+                    }
+                }),
+                boundary_text: crate::prompt_templates::side_conversation_boundary_prompt(),
+                runtime_binding: binding,
+            })
+            .await
+    }
+
+    #[tokio::test]
+    async fn side_conversation_snapshot_commits_history_boundary_and_writable_binding_atomically() {
+        let store = StateRuntime::open(":memory:").await.expect("store");
+        let (parent, parent_messages) = parent_with_history(&store).await;
+        let parent_binding =
+            bind_parent(&store, &parent, GatewayRuntimeBindingOwnership::ReadWrite).await;
+        let effective_controls = BTreeMap::from([
+            ("mode".to_string(), json!("plan")),
+            ("model".to_string(), json!("live-model")),
+        ]);
+
+        let child = create_side(
+            &store,
+            &parent,
+            Some(ChildSessionRuntimeBindingSnapshotInput {
+                expected_binding_revision: parent_binding.binding_revision,
+                expected_control_revision: parent_binding.control_revision,
+                effective_controls: &effective_controls,
+            }),
+        )
+        .await
+        .expect("atomic side conversation");
+
+        let history = store.load_messages(&child).await.expect("child history");
+        assert_eq!(
+            &history[..parent_messages.len()],
+            parent_messages.as_slice()
+        );
+        assert_eq!(history.len(), parent_messages.len() + 1);
+        let Message::User { content, .. } = history.last().expect("boundary") else {
+            panic!("side conversation boundary must be a user message");
+        };
+        assert!(content.iter().any(|part| matches!(
+            part,
+            UserContentBlock::Text(block)
+                if block.text == crate::prompt_templates::side_conversation_boundary_prompt()
+        )));
+        let hidden_messages = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM messages
+            WHERE session_id = ?1
+              AND json_extract(metadata_json, '$.side_inherited.hidden') = 1
+            "#,
+        )
+        .bind(&child)
+        .fetch_one(&store.inner.pool)
+        .await
+        .expect("hidden message count");
+        assert_eq!(hidden_messages, history.len() as i64);
+
+        let child_binding = store
+            .gateway_runtime_binding(&child)
+            .await
+            .expect("binding read")
+            .expect("child binding");
+        assert_eq!(child_binding.agent_ref, parent_binding.agent_ref);
+        assert_eq!(child_binding.runtime_ref, parent_binding.runtime_ref);
+        assert_eq!(
+            child_binding.ownership,
+            GatewayRuntimeBindingOwnership::ReadWrite
+        );
+        assert_eq!(child_binding.native_session_id, None);
+        assert_eq!(child_binding.parent_thread_id, None);
+        assert_eq!(child_binding.binding_revision, 1);
+        assert_eq!(child_binding.thread_preferences, effective_controls);
+        assert!(child_binding.runtime_observed.is_empty());
+        assert_eq!(child_binding.control_revision, 1);
+    }
+
+    #[tokio::test]
+    async fn side_conversation_snapshot_rolls_back_when_parent_binding_is_missing() {
+        let store = StateRuntime::open(":memory:").await.expect("store");
+        let (parent, _) = parent_with_history(&store).await;
+        let controls = BTreeMap::new();
+        let before = durable_counts(&store).await;
+
+        let error = create_side(
+            &store,
+            &parent,
+            Some(ChildSessionRuntimeBindingSnapshotInput {
+                expected_binding_revision: 1,
+                expected_control_revision: 1,
+                effective_controls: &controls,
+            }),
+        )
+        .await
+        .expect_err("missing binding must reject the snapshot");
+
+        assert!(
+            error
+                .to_string()
+                .contains("resolved writable runtime binding")
+        );
+        assert_eq!(durable_counts(&store).await, before);
+    }
+
+    #[tokio::test]
+    async fn side_conversation_snapshot_rolls_back_for_read_only_parent_binding() {
+        let store = StateRuntime::open(":memory:").await.expect("store");
+        let (parent, _) = parent_with_history(&store).await;
+        let binding = bind_parent(&store, &parent, GatewayRuntimeBindingOwnership::ReadOnly).await;
+        let controls = BTreeMap::new();
+        let before = durable_counts(&store).await;
+
+        create_side(
+            &store,
+            &parent,
+            Some(ChildSessionRuntimeBindingSnapshotInput {
+                expected_binding_revision: binding.binding_revision,
+                expected_control_revision: binding.control_revision,
+                effective_controls: &controls,
+            }),
+        )
+        .await
+        .expect_err("read-only binding must reject the snapshot");
+
+        assert_eq!(durable_counts(&store).await, before);
+    }
+
+    #[tokio::test]
+    async fn side_conversation_snapshot_rolls_back_for_stale_binding_revision() {
+        let store = StateRuntime::open(":memory:").await.expect("store");
+        let (parent, _) = parent_with_history(&store).await;
+        let binding = bind_parent(&store, &parent, GatewayRuntimeBindingOwnership::ReadWrite).await;
+        let controls = BTreeMap::new();
+        let before = durable_counts(&store).await;
+
+        create_side(
+            &store,
+            &parent,
+            Some(ChildSessionRuntimeBindingSnapshotInput {
+                expected_binding_revision: binding.binding_revision + 1,
+                expected_control_revision: binding.control_revision,
+                effective_controls: &controls,
+            }),
+        )
+        .await
+        .expect_err("stale binding revision must reject the snapshot");
+
+        assert_eq!(durable_counts(&store).await, before);
     }
 }

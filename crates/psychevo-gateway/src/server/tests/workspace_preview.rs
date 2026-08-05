@@ -1,3 +1,21 @@
+use std::collections::BTreeMap;
+use std::time::{Duration, SystemTime};
+
+use axum::body::to_bytes;
+use axum::extract::{Path as AxumPath, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession, WebState};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{web_state, web_state_with_env};
+use crate::server::workspace;
+use crate::server::workspace_preview::workspace_preview_resource;
+
 #[tokio::test]
 async fn workspace_preview_open_returns_text_metadata_and_an_opaque_media_lease() {
     let (_temp, state) = web_state().await;
@@ -13,7 +31,7 @@ async fn workspace_preview_open_returns_text_metadata_and_an_opaque_media_lease(
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-open-1")),
             method: "workspace/file/preview/open".to_string(),
             params: Some(json!({ "scope": scope.clone(), "path": "report.pdf" })),
@@ -26,7 +44,7 @@ async fn workspace_preview_open_returns_text_metadata_and_an_opaque_media_lease(
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-open-2")),
             method: "workspace/file/preview/open".to_string(),
             params: Some(json!({ "scope": scope, "path": "report.pdf" })),
@@ -90,7 +108,8 @@ async fn workspace_preview_cors_allows_only_configured_workbench_origins() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PSYCHEVO_WORKBENCH_ORIGINS".to_string(),
         "https://app.example, https://preview.example".to_string(),
-    )])).await;
+    )]))
+    .await;
     std::fs::write(state.inner.cwd.join("table.csv"), b"name,value\nAda,1\n").expect("csv fixture");
     let resource_id = open_workspace_preview(&state, "table.csv").await;
 
@@ -310,7 +329,7 @@ async fn workspace_preview_release_and_file_changes_invalidate_the_capability() 
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-release")),
             method: "workspace/file/preview/release".to_string(),
             params: Some(json!({ "resourceId": released_resource_id.clone() })),
@@ -610,9 +629,9 @@ async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
     let current_scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let outside_scope = wire::GatewayRequestScope {
+    let outside_scope = wire::source::GatewayRequestScope {
         cwd: outside.to_string_lossy().to_string(),
-        source: wire::GatewaySourceInput {
+        source: wire::source::GatewaySourceInput {
             kind: "web".to_string(),
             raw_id: Some("outside-preview".to_string()),
             lifetime: None,
@@ -640,7 +659,7 @@ async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-traversal")),
             method: "workspace/file/preview/open".to_string(),
             params: Some(json!({
@@ -658,7 +677,7 @@ async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
         AuthContext::Browser { session_id },
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-scope-pivot")),
             method: "workspace/file/preview/open".to_string(),
             params: Some(json!({ "scope": outside_scope, "path": "secret.pdf" })),
@@ -724,7 +743,7 @@ async fn open_workspace_preview(state: &WebState, path: &str) -> String {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("preview-open")),
             method: "workspace/file/preview/open".to_string(),
             params: Some(json!({ "scope": scope, "path": path })),

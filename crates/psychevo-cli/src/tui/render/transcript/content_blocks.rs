@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    TranscriptKind, TranscriptRow, active_tool_elapsed, activity_spinner_frame, focus_marker_style,
+    format_duration_compact, interruption_style, ledger_title_line, render_inline_edit_diff,
+    render_markdown_lines, style_for_body, suffix_display_tokens, tool_elapsed_label,
+    tool_title_as_invocation, tui_theme, wrap_command_text,
+};
+use ratatui::{
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
+use std::path::Path;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(crate) fn prompt_lines(
     row: &TranscriptRow,

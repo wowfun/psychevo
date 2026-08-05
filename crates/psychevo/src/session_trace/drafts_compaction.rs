@@ -1,4 +1,102 @@
-fn run_start_trace_draft(payload: &Value) -> SessionTraceDraft {
+use std::collections::BTreeMap;
+
+use psychevo_agent_core::{AgentEvent, now_ms};
+use serde::Serialize;
+use serde_json::{Map, Value, json};
+
+use crate::types::MessageAccounting;
+
+use super::message_summaries::{
+    bounded_public_value, bounded_redacted_value, bounded_string, event_timestamp_ms,
+    insert_tool_correlation, is_sensitive_key, message_role_for_event, message_trace,
+};
+use super::sink::SessionTraceDraft;
+
+pub(super) const TRACE_TITLE_STRING_CHARS: usize = 160;
+const TRACE_SELECTED_SKILLS_MAX_ITEMS: usize = 500;
+const TRACE_SUMMARY_MAX_TURNS: usize = 500;
+
+#[derive(Debug, Default)]
+pub(super) struct SessionTraceStats {
+    coalesced_by_kind: BTreeMap<String, u64>,
+    dropped_by_reason: BTreeMap<String, u64>,
+    dropped_by_kind: BTreeMap<String, u64>,
+    turns: BTreeMap<usize, TurnTraceStats>,
+    coalesced_by_tool_name: BTreeMap<String, CoalescedToolNameStats>,
+}
+
+#[derive(Debug, Default)]
+struct TurnTraceStats {
+    coalesced_events: u64,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+struct CoalescedToolNameStats {
+    tool_call_pending: u64,
+    tool_execution_update: u64,
+}
+
+impl SessionTraceStats {
+    fn coalesce_kind(&mut self, kind: &str) {
+        increment_counter(&mut self.coalesced_by_kind, kind);
+    }
+
+    pub(super) fn drop_kind(&mut self, reason: &str, kind: &str) {
+        increment_counter(&mut self.dropped_by_reason, reason);
+        increment_counter(&mut self.dropped_by_kind, kind);
+    }
+
+    fn observe_coalesced_event(&mut self, event: &AgentEvent) {
+        match event {
+            AgentEvent::ToolCallPending { tool_name, .. } => {
+                let tool = self.coalesced_tool_name_mut(tool_name);
+                tool.tool_call_pending = tool.tool_call_pending.saturating_add(1);
+            }
+            AgentEvent::ToolExecutionUpdate { tool_name, .. } => {
+                let tool = self.coalesced_tool_name_mut(tool_name);
+                tool.tool_execution_update = tool.tool_execution_update.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    fn summary_payload(&self) -> Value {
+        let (turns, omitted_turns) = limited_summary_items(
+            self.turns.iter().map(|(turn_index, stats)| {
+                json!({
+                    "turn_index": turn_index,
+                    "coalesced_events": stats.coalesced_events,
+                })
+            }),
+            TRACE_SUMMARY_MAX_TURNS,
+        );
+        json!({
+            "summary_kind": "accounting_footer",
+            "coalesced_counts": self.coalesced_by_kind.clone(),
+            "dropped_counts": {
+                "by_reason": self.dropped_by_reason.clone(),
+                "by_kind": self.dropped_by_kind.clone(),
+            },
+            "turns": turns,
+            "coalesced_by_tool_name": self.coalesced_by_tool_name.clone(),
+            "omitted_counts": {
+                "turns": omitted_turns,
+            },
+        })
+    }
+
+    fn turn_mut(&mut self, turn_index: usize) -> &mut TurnTraceStats {
+        self.turns.entry(turn_index).or_default()
+    }
+
+    fn coalesced_tool_name_mut(&mut self, tool_name: &str) -> &mut CoalescedToolNameStats {
+        self.coalesced_by_tool_name
+            .entry(tool_name.to_string())
+            .or_default()
+    }
+}
+
+pub(super) fn run_start_trace_draft(payload: &Value) -> SessionTraceDraft {
     SessionTraceDraft {
         kind: "run_start".to_string(),
         timestamp_ms: now_ms(),
@@ -9,7 +107,7 @@ fn run_start_trace_draft(payload: &Value) -> SessionTraceDraft {
     }
 }
 
-fn trace_drafts_from_agent_event(
+pub(super) fn trace_drafts_from_agent_event(
     event: &AgentEvent,
     _accounting: Option<&MessageAccounting>,
     monotonic_offset_ms: u64,

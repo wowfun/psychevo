@@ -1,12 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::TranscriptEntryRole;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GatewayTranscriptEntryMeta<'a> {
-    role: TranscriptEntryRole,
-    thread_id: &'a str,
-    turn_id: Option<&'a str>,
-    entry_id: &'a str,
-    message_seq: Option<i64>,
-    source: &'a str,
+    pub(super) role: TranscriptEntryRole,
+    pub(super) thread_id: &'a str,
+    pub(super) turn_id: Option<&'a str>,
+    pub(super) entry_id: &'a str,
+    pub(super) message_seq: Option<i64>,
+    pub(super) source: &'a str,
 }

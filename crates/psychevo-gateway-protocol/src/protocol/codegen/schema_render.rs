@@ -1,4 +1,11 @@
-fn render_schema_export(name: &'static str, schema: &Value) -> Result<SchemaRender> {
+use std::collections::BTreeSet;
+
+use anyhow::{Context, Result, bail};
+use serde_json::Value;
+
+use super::SchemaRefEntry;
+
+pub(super) fn render_schema_export(name: &'static str, schema: &Value) -> Result<SchemaRender> {
     if !matches!(name, "ClientRequest" | "ServerNotification") {
         return Ok(SchemaRender {
             root_json: serde_json::to_string_pretty(schema)?,
@@ -23,11 +30,7 @@ fn render_schema_export(name: &'static str, schema: &Value) -> Result<SchemaRend
         root_refs.push(serde_json::json!({ "$ref": ref_id }));
         refs.push(SchemaRefEntry {
             export_name: schema_part_export_name(name, &slug),
-            import_path: format!(
-                "rpc/{}/{}",
-                schema_part_slug(&kebab_case(name)),
-                slug
-            ),
+            import_path: format!("rpc/{}/{}", schema_part_slug(&kebab_case(name)), slug),
             json: serde_json::to_string_pretty(&composite_part_schema(
                 name,
                 method,
@@ -50,9 +53,9 @@ fn render_schema_export(name: &'static str, schema: &Value) -> Result<SchemaRend
 }
 
 #[derive(Debug, Clone)]
-struct SchemaRender {
-    root_json: String,
-    refs: Vec<SchemaRefEntry>,
+pub(super) struct SchemaRender {
+    pub(super) root_json: String,
+    pub(super) refs: Vec<SchemaRefEntry>,
 }
 
 fn composite_part_schema(
@@ -81,7 +84,10 @@ fn composite_part_schema(
     }
     let required_definitions = required_definitions(variant, definitions);
     if !required_definitions.is_empty() {
-        object.insert("definitions".to_string(), Value::Object(required_definitions));
+        object.insert(
+            "definitions".to_string(),
+            Value::Object(required_definitions),
+        );
     }
     Ok(Value::Object(object))
 }
@@ -175,7 +181,11 @@ fn lower_camel(value: &str) -> String {
     let Some(first) = chars.next() else {
         return String::new();
     };
-    format!("{}{}", first.to_ascii_lowercase(), chars.collect::<String>())
+    format!(
+        "{}{}",
+        first.to_ascii_lowercase(),
+        chars.collect::<String>()
+    )
 }
 
 fn pascal_case(value: &str) -> String {
@@ -187,7 +197,11 @@ fn pascal_case(value: &str) -> String {
             let Some(first) = chars.next() else {
                 return String::new();
             };
-            format!("{}{}", first.to_ascii_uppercase(), chars.collect::<String>())
+            format!(
+                "{}{}",
+                first.to_ascii_uppercase(),
+                chars.collect::<String>()
+            )
         })
         .collect::<Vec<_>>()
         .join("")

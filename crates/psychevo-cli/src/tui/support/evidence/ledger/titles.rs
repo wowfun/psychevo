@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo::application::ToolDisplaySpec;
+use serde_json::Value;
+
+use super::{
+    agents::{active_agent_tool_title, agent_tool_title},
+    evidence_kind_for_value,
+    output::{clarify_tool_title, display_value_inline},
+};
+use crate::tui::ui_types::TranscriptKind;
 
 pub(crate) fn tool_title(tool: &str, value: &Value) -> String {
     if tool == "spawn_agent" {

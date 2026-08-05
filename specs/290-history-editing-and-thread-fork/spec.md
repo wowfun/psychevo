@@ -135,6 +135,50 @@ history. Deleting the source does not delete the scalar provenance value.
 
 ## Thread Interface
 
+The Framework Thread Application Interface is the single semantic owner of
+Native history-editing eligibility, durable state, and mutations. Gateway
+authorizes Workbench and TUI callers, guards Gateway-local Shell activity, and
+projects typed Framework results onto the shared wire contract. A surface must
+not read or mutate `StateRuntime` revert, message-count, binding, lineage, or
+activity records to reconstruct those decisions. `Thread::history_editing_state`
+and `editable_draft` return typed eligibility, staged state, draft parts,
+fidelity, and bounded unavailable reasons. `stage_conversation_edit` and
+`restore_conversation_edit` return typed idempotence, conflict, unavailable,
+staged, unchanged, and restored outcomes without exposing persistence records,
+metadata keys, wire strings, or a workspace snapshot hash.
+
+Conversation-edit and Native-fork mutations first record an idle-only
+reservation in the same `ApplicationRuntime` mutex that registers a Turn. A
+pending-admission, active, or queued Turn, or another idle-only history
+mutation, makes that reservation fail with structured `thread_busy` evidence
+before it queues or touches persistence; if the reservation wins first, later
+Turn registration fails before durable acceptance. The reservation remains
+held for the complete Store future. This two-way exclusion is not implemented
+as an activity snapshot followed by an ordinary FIFO mutation, and ordinary
+Thread mutations retain their existing FIFO semantics. Reservation rejection
+is returned as a structured Framework Error with `kind = thread_busy`; it is
+not a Store mutation outcome. An active idle-only reservation is likewise
+projected as busy by `Thread::history_editing_state`. Under the reservation,
+the durable eligibility and boundary lookup plus either the fork copy or the
+current staged-state check, draft revalidation, and revert write or restore
+occur in one SQL write transaction. The edit write compares the session
+metadata read by that transaction, so it cannot overwrite a concurrent
+workspace undo, conversation edit, or unrelated metadata update.
+
+Gateway conversation-edit and restore calls additionally reserve the Thread's
+primary Shell queue key in the same mutex used by Shell admission. A running or
+queued Shell rejects the history mutation before the Framework call; a history
+reservation that wins first makes `send_shell` reject before queueing or durable
+activity creation. The Gateway guard spans the complete Framework mutation
+future and removes its flag and otherwise-empty active state on drop. Neither
+direction is implemented as an activity snapshot followed by a mutation.
+When a source-keyed Shell first reveals its durable Thread id, Gateway publishes
+the `thread:*` alias in that same queue-state critical section before exposing
+the identifying event to local consumers. Alias resolution and history-mutation
+admission are one operation under that owner: a consumer cannot observe the id
+and reserve a second `thread:*` lane while the original `source:*` Shell is
+active.
+
 `thread/history/draft/read` accepts `scope`, `threadId`, and `messageId`. It
 returns the resolved `messageSeq`, ordered editable draft, fidelity, and an
 optional warning or unavailable reason.

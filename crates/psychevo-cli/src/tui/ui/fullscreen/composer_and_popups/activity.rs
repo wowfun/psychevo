@@ -1,27 +1,41 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AgentCatalog, AgentRelationship, ForeignGatewayActivity, FullscreenUi, GatewayActivity,
+    active_tool_row, agent_child_status_text, agent_relationship_title,
+    auxiliary_agent_live_for_session, current_session_matches, instant_from_wall_timestamp_ms,
+    matching_agent_relationship,
+};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
 impl<'a> FullscreenUi<'a> {
+    pub(crate) fn foreground_turn_active(&self) -> bool {
+        self.starting_turn.is_some() || self.running.is_some()
+    }
+
     pub(crate) fn reconcile_history_agent_rows(
         &mut self,
-        edges: &[AgentEdgeRecord],
+        relationships: &[AgentRelationship],
         catalog: Option<&AgentCatalog>,
     ) {
-        if edges.is_empty() {
+        if relationships.is_empty() {
             return;
         }
-        let mut used_edges = std::collections::BTreeSet::<usize>::new();
+        let mut used_relationships = std::collections::BTreeSet::<usize>::new();
         for row in &mut self.transcript {
             if row.tool_name.as_deref() != Some("spawn_agent") || row.agent_target.is_some() {
                 continue;
             }
             let row_was_active = active_tool_row(row);
-            let Some((edge_index, edge)) = matching_agent_edge(row, edges, &used_edges) else {
+            let Some((relationship_index, relationship)) =
+                matching_agent_relationship(row, relationships, &used_relationships)
+            else {
                 continue;
             };
-            used_edges.insert(edge_index);
-            row.agent_target = Some(edge.child_session_id.clone());
-            if let Some(title) = agent_edge_title(edge, catalog) {
+            used_relationships.insert(relationship_index);
+            row.agent_target = Some(relationship.child_thread_id.clone());
+            if let Some(title) = agent_relationship_title(relationship, catalog) {
                 row.title = title;
             }
             if row_was_active {
@@ -115,7 +129,9 @@ impl<'a> FullscreenUi<'a> {
     }
 
     pub(crate) fn local_status_has_running(&self, current_session: Option<&str>) -> bool {
-        self.running.as_ref().is_some_and(|running| {
+        self.starting_turn.as_ref().is_some_and(|starting| {
+            current_session_matches(starting.session_id.as_deref(), current_session)
+        }) || self.running.as_ref().is_some_and(|running| {
             current_session_matches(running.session_id.as_deref(), current_session)
         }) || self.auxiliary_agent_matches_current_session(current_session)
             || self.auxiliary_shell_matches_current_session(current_session)
@@ -214,37 +230,70 @@ impl<'a> FullscreenUi<'a> {
             .any(|shell| shell.session_id.as_deref() == Some(session_id))
     }
 
+    pub(crate) fn take_pending_auxiliary_shell_commands_for_owner(
+        &mut self,
+        session_id: Option<&str>,
+        turn_id: Option<&str>,
+    ) -> Vec<crate::tui::PendingAuxiliaryShellCommand> {
+        let mut owned = Vec::new();
+        let mut retained = std::collections::VecDeque::new();
+        for pending in std::mem::take(&mut self.pending_auxiliary_shell_commands) {
+            if pending.matches_owner(session_id, turn_id) {
+                owned.push(pending);
+            } else {
+                retained.push_back(pending);
+            }
+        }
+        self.pending_auxiliary_shell_commands = retained;
+        owned
+    }
+
     pub(crate) fn request_interrupt(&mut self, current_session: Option<&str>) -> bool {
         let mut interrupted = false;
-        if let Some(running) = &self.running
-            && current_session_matches(running.session_id.as_deref(), current_session)
-        {
-            running.control.abort();
+        let foreground_owner = self.running.as_ref().and_then(|running| {
+            current_session_matches(running.session_id.as_deref(), current_session).then(|| {
+                (
+                    running.control.clone(),
+                    running.session_id.clone(),
+                    running.turn_id.clone(),
+                )
+            })
+        });
+        if let Some((control, session_id, turn_id)) = foreground_owner {
+            control.abort();
+            self.take_pending_auxiliary_shell_commands_for_owner(
+                session_id.as_deref(),
+                turn_id.as_deref(),
+            );
             interrupted = true;
         }
-        for agent in &self.auxiliary_agent_tasks {
+        let mut interrupted_agent_owners = Vec::new();
+        for agent in &mut self.auxiliary_agent_tasks {
             if current_session
                 .is_some_and(|session_id| auxiliary_agent_live_for_session(agent, session_id))
             {
                 agent.control.abort();
+                interrupted_agent_owners.push((agent.session_id.clone(), agent.turn_id.clone()));
                 interrupted = true;
             }
+        }
+        for (session_id, turn_id) in interrupted_agent_owners {
+            self.take_pending_auxiliary_shell_commands_for_owner(
+                session_id.as_deref(),
+                turn_id.as_deref(),
+            );
         }
         for shell in &self.auxiliary_shell_tasks {
             if current_session
                 .is_some_and(|session_id| shell.session_id.as_deref() == Some(session_id))
             {
-                shell.control.abort();
+                shell.control.interrupt();
                 interrupted = true;
             }
         }
         if !interrupted {
             return false;
         }
-        for shell in &self.auxiliary_shell_tasks {
-            shell.control.abort();
-        }
-        self.pending_auxiliary_shell_commands.clear();
         self.interrupt_requested = true;
         true
     }

@@ -1,3 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 pub(crate) const MAX_AGENT_NAME_LEN: usize = 64;
 pub(crate) const SUBAGENT_TASK_LABEL_MAX_CHARS: usize = 80;
 pub(crate) const SUBAGENT_DEFAULT_MAX_TURNS: usize = 32;
@@ -300,4 +306,11 @@ pub enum AgentRunStatus {
     Interrupted,
     Shutdown,
     NotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMailboxWaitOutcome {
+    Ready,
+    TimedOut,
 }

@@ -5,12 +5,14 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use psychevo::ItemStage;
+use psychevo::TurnEvent;
 use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    GatewayEvent, RunStreamEvent, TranscriptBlock, TranscriptBlockKind, TranscriptEntry,
-    TranscriptEntryRole,
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptEntry, TranscriptEntryRole,
 };
 
 pub(crate) const TUI_PROFILE_PATH_ENV: &str = "PSYCHEVO_TUI_PROFILE_PATH";
@@ -131,16 +133,16 @@ impl TuiJourneyProfileProbe {
         self.observe_live_event(event_kind, true);
     }
 
-    pub(crate) fn observe_runtime_event_received(
+    pub(crate) fn observe_turn_event_received(
         &mut self,
-        event: &RunStreamEvent,
+        event: &TurnEvent,
     ) -> LiveEventProfileKind {
-        let kind = LiveEventProfileKind::from_runtime_event(event);
+        let kind = LiveEventProfileKind::from_turn_event(event);
         self.observe_live_event(kind, false);
         kind
     }
 
-    pub(crate) fn observe_runtime_event_applied(&mut self, event_kind: LiveEventProfileKind) {
+    pub(crate) fn observe_turn_event_applied(&mut self, event_kind: LiveEventProfileKind) {
         self.observe_live_event(event_kind, true);
     }
 
@@ -282,19 +284,36 @@ impl LiveEventProfileKind {
         }
     }
 
-    fn from_runtime_event(event: &RunStreamEvent) -> Self {
+    fn from_turn_event(event: &TurnEvent) -> Self {
+        if let TurnEvent::Scoped { event, .. } = event {
+            return Self::from_turn_event(event);
+        }
         let first_assistant = match event {
-            RunStreamEvent::Event(value) => runtime_value_has_nonempty_assistant_text(value),
-            RunStreamEvent::Scoped { event, .. } => Self::from_runtime_event(event).first_assistant,
-            RunStreamEvent::AssistantTextDelta { text } => !text.trim().is_empty(),
-            RunStreamEvent::ReasoningDelta { .. }
-            | RunStreamEvent::ReasoningEnd
-            | RunStreamEvent::ClarifyRequest(_)
-            | RunStreamEvent::ClarifyResolved(_) => false,
+            TurnEvent::Message { message, .. } => {
+                runtime_message_has_nonempty_assistant_text(message)
+            }
+            TurnEvent::Runtime { data } => runtime_value_has_nonempty_assistant_text(data),
+            TurnEvent::MessageDelta { text } => !text.trim().is_empty(),
+            TurnEvent::ActivityChanged { .. }
+            | TurnEvent::Accepted { .. }
+            | TurnEvent::Started { .. }
+            | TurnEvent::ReasoningDelta { .. }
+            | TurnEvent::ReasoningCompleted { .. }
+            | TurnEvent::Tool { .. }
+            | TurnEvent::InteractionRequested { .. }
+            | TurnEvent::InteractionResolved { .. }
+            | TurnEvent::Warning { .. }
+            | TurnEvent::Completed { .. }
+            | TurnEvent::Failed { .. }
+            | TurnEvent::ResyncRequired { .. }
+            | TurnEvent::Scoped { .. } => false,
         };
         Self {
             first_assistant,
-            turn_completed: false,
+            turn_completed: matches!(
+                event,
+                TurnEvent::Completed { .. } | TurnEvent::Failed { .. }
+            ),
         }
     }
 }
@@ -485,36 +504,45 @@ mod tests {
     }
 
     #[test]
-    fn runtime_classification_uses_visible_assistant_text_only() {
-        let visible = RunStreamEvent::value(serde_json::json!({
-            "type": "message_update",
-            "message": {
+    fn turn_classification_uses_visible_assistant_text_only() {
+        let visible = TurnEvent::Message {
+            stage: ItemStage::Updated,
+            message: serde_json::json!({
                 "role": "assistant",
                 "content": [{"type": "text", "text": "visible"}]
-            }
-        }));
-        assert!(LiveEventProfileKind::from_runtime_event(&visible).first_assistant);
+            }),
+            usage: None,
+            metadata: None,
+            accounting: None,
+        };
+        assert!(LiveEventProfileKind::from_turn_event(&visible).first_assistant);
 
         for event in [
-            RunStreamEvent::ReasoningDelta {
+            TurnEvent::ReasoningDelta {
                 text: "hidden reasoning".to_string(),
             },
-            RunStreamEvent::value(serde_json::json!({
-                "type": "message_update",
-                "message": {
+            TurnEvent::Message {
+                stage: ItemStage::Updated,
+                message: serde_json::json!({
                     "role": "assistant",
                     "content": [{"type": "text", "text": "  "}]
-                }
-            })),
-            RunStreamEvent::value(serde_json::json!({
-                "type": "message_update",
-                "message": {
+                }),
+                usage: None,
+                metadata: None,
+                accounting: None,
+            },
+            TurnEvent::Message {
+                stage: ItemStage::Updated,
+                message: serde_json::json!({
                     "role": "user",
                     "content": [{"type": "text", "text": "prompt"}]
-                }
-            })),
+                }),
+                usage: None,
+                metadata: None,
+                accounting: None,
+            },
         ] {
-            assert!(!LiveEventProfileKind::from_runtime_event(&event).first_assistant);
+            assert!(!LiveEventProfileKind::from_turn_event(&event).first_assistant);
         }
     }
 
@@ -661,12 +689,13 @@ mod tests {
             turn_id: Some("turn-1".to_string()),
             message_seq: Some(1),
             role,
-            status: psychevo_gateway::TranscriptBlockStatus::Running,
+            status: psychevo_gateway_protocol::events_transcript::TranscriptBlockStatus::Running,
             source: "runtime.stream".to_string(),
             blocks: vec![TranscriptBlock {
                 id: "block-1".to_string(),
                 kind,
-                status: psychevo_gateway::TranscriptBlockStatus::Running,
+                status:
+                    psychevo_gateway_protocol::events_transcript::TranscriptBlockStatus::Running,
                 order: 0,
                 phase_ordinal: None,
                 source: "runtime.stream".to_string(),

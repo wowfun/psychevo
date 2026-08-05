@@ -1,8 +1,40 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use futures::future::BoxFuture;
+use psychevo::application::{
+    GatewayChannelOutboxInput, GatewayChannelOutboxRecord, GatewayChannelOutboxStatus,
+};
+use psychevo::{Error, PermissionMode, config::ChannelRuntimeConnection};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+use crate::im::adapters::{
+    is_wechat_ilink_session_expired_error, wechat_ilink_error_code_from_message,
+};
+use crate::im::{
+    ChannelGateway, ImIdentity, ImInboundMessage, ImOutboundMessage, gateway_input_parts_for_im,
+    gateway_source_for_im,
+};
+use psychevo_gateway_protocol::source::GatewaySource;
+
+use super::super::binding::WebState;
+use super::super::runtime_profiles::{
+    apply_thread_control_precedence, runnable_target_for_source,
+    thread_context_read_result_for_target_id,
+};
+use super::super::thread_application::{
+    RoutedThreadTurn, enqueue_routed_compact_action as enqueue_routed_thread_compact_action,
+    run_routed_turn as run_routed_thread_turn, source_draft_control_values,
+};
+use super::super::voice::voice_policy_for_source;
 use super::commands::{ChannelCommandAction, route_channel_command};
 use super::events::{channel_event_sink, channel_reply_thread_id};
-use super::*;
-use futures::future::BoxFuture;
-use sha2::{Digest, Sha256};
+use super::paths::redact_channel_error;
+use super::{CHANNEL_IDLE_SLEEP_MS, CHANNEL_POLL_BACKOFF_MS, ChannelRuntimeState};
 
 pub(super) async fn run_channel_loop(
     state: WebState,
@@ -141,7 +173,7 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
 ) -> psychevo::Result<usize> {
     let records = state
         .inner
-        .state
+        .durability
         .retryable_gateway_channel_outbox(&connection.id)
         .await?;
     let mut delivered = 0;
@@ -153,7 +185,7 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
             Err(err) => {
                 let _ = state
                     .inner
-                    .state
+                    .durability
                     .fail_gateway_channel_outbox(&delivery_id)
                     .await;
                 first_error.get_or_insert(err);
@@ -171,7 +203,7 @@ async fn deliver_channel_outbox_record(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     channel_gateway: &ChannelGateway,
-    record: psychevo::__product::persistence::GatewayChannelOutboxRecord,
+    record: GatewayChannelOutboxRecord,
 ) -> psychevo::Result<()> {
     let payload = record.payload_text.ok_or_else(|| {
         psychevo::Error::Message(format!(
@@ -188,7 +220,7 @@ async fn deliver_channel_outbox_record(
     }
     let lane = state
         .inner
-        .state
+        .durability
         .gateway_source_lane(&record.source_key)
         .await?
         .ok_or_else(|| {
@@ -207,7 +239,7 @@ async fn deliver_channel_outbox_record(
         .await?;
     state
         .inner
-        .state
+        .durability
         .acknowledge_gateway_channel_outbox(&record.delivery_id)
         .await?;
     runtime.mark_outbound(&record.connection_id);
@@ -288,9 +320,10 @@ pub(super) async fn handle_channel_message(
                 let supervisor = state.inner.gateway.clone();
                 supervisor.spawn_background("channel-compaction-reply", async move {
                     let (thread_id, text) = match pending.await {
-                        Ok(wire::ThreadActionRunResult::Compact { thread_id, result }) => {
-                            (thread_id, channel_compaction_reply(&result))
-                        }
+                        Ok(wire::thread_command_turn::ThreadActionRunResult::Compact {
+                            thread_id,
+                            result,
+                        }) => (thread_id, channel_compaction_reply(&result)),
                         Ok(_) => (
                             fallback_thread_id,
                             "Context compaction returned an unexpected action result.".to_string(),
@@ -352,7 +385,9 @@ async fn enqueue_channel_compaction(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     instructions: Option<String>,
-) -> psychevo::Result<BoxFuture<'static, psychevo::Result<wire::ThreadActionRunResult>>> {
+) -> psychevo::Result<
+    BoxFuture<'static, psychevo::Result<wire::thread_command_turn::ThreadActionRunResult>>,
+> {
     let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
     let thread_id = if thread_id.is_some() {
         thread_id
@@ -372,7 +407,7 @@ async fn enqueue_channel_compaction(
         .await
 }
 
-fn channel_compaction_reply(result: &wire::ThreadCompactionResult) -> String {
+fn channel_compaction_reply(result: &wire::thread_command_turn::ThreadCompactionResult) -> String {
     if result.compacted {
         if let (Some(before), Some(after)) = (result.tokens_before, result.tokens_after) {
             return format!("Session compacted ({before} -> {after} tokens).");
@@ -476,7 +511,7 @@ async fn run_channel_inbound_turn(
         return Ok(());
     }
     let voice_policy = voice_policy_for_source(&state, &source);
-    if voice_policy != wire::VoicePolicyMode::Off {
+    if voice_policy != wire::voice::VoicePolicyMode::Off {
         eprintln!(
             "channel voice delivery fallback: id={} mode={:?} reason=native_voice_delivery_unavailable",
             connection.id, voice_policy
@@ -496,20 +531,18 @@ async fn run_channel_inbound_turn(
     let payload_hash = format!("{:x}", Sha256::digest(answer.as_bytes()));
     let record = state
         .inner
-        .state
-        .upsert_gateway_channel_outbox(
-            psychevo::__product::persistence::GatewayChannelOutboxInput {
-                delivery_id: &delivery_id,
-                thread_id: &result.thread.id,
-                turn_id: &result.turn.id,
-                connection_id: &connection.id,
-                source_key: &source.source_key().0,
-                payload_text: &answer,
-                payload_hash: &payload_hash,
-            },
-        )
+        .durability
+        .upsert_gateway_channel_outbox(GatewayChannelOutboxInput {
+            delivery_id: &delivery_id,
+            thread_id: &result.thread.id,
+            turn_id: &result.turn.id,
+            connection_id: &connection.id,
+            source_key: &source.source_key().0,
+            payload_text: &answer,
+            payload_hash: &payload_hash,
+        })
         .await?;
-    if record.status == "acknowledged" {
+    if record.status == GatewayChannelOutboxStatus::Acknowledged {
         return Ok(());
     }
     let send_result = channel_gateway
@@ -524,14 +557,14 @@ async fn run_channel_inbound_turn(
             runtime.mark_outbound(&connection.id);
             state
                 .inner
-                .state
+                .durability
                 .acknowledge_gateway_channel_outbox(&delivery_id)
                 .await?;
         }
         Err(err) => {
             let _ = state
                 .inner
-                .state
+                .durability
                 .fail_gateway_channel_outbox(&delivery_id)
                 .await;
             return Err(err);

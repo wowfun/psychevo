@@ -1,3 +1,35 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use psychevo_agent_core::{Message, contextual_user_message_to_ai, message_to_ai};
+use psychevo_ai::{
+    AnthropicMessagesAdapter, Capability, LanguageRequest, LanguageTool, ModelDescriptor,
+    OpenAiChatAdapter, OpenAiResponsesAdapter,
+};
+use serde::Serialize;
+use serde_json::Value;
+
+use super::inputs::{
+    ExportMessageRecord, SessionArtifactKind, SessionExportArtifact, SessionExportFormat,
+    SessionExportInclude, SessionExportOptions, SessionExportWriteResult,
+};
+use crate::error::{Error, Result};
+use crate::session_export::markdown_helpers::{sanitize_reasoning_for_export, short_session_id};
+use crate::session_export::reconstruction_markdown::{
+    base_reconstruction_warnings, contextual_user_messages_from_evidence,
+    effective_tool_names_from_prefix_metadata, export_document, filter_tool_declarations,
+    generation_metadata_from_session_metadata, prefix_contextual_user_messages,
+    prefix_prompt_instruction_messages, prompt_instruction_messages_from_evidence,
+    prompt_prefix_hash, prompt_prefix_version, push_mailbox_events_delivered_after_message,
+    push_mailbox_events_delivered_for_prompt, reconstructed_tool_declarations, render_markdown,
+    sanitize_message_without_reasoning, session_mode_from_metadata,
+    tool_declarations_hash_from_declarations, turn_contextual_user_messages_from_evidence,
+    turn_prompt_instruction_messages_from_evidence,
+};
+use crate::state::StateRuntime;
+use crate::store::{AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord};
+use crate::tools::mode_instruction;
+use crate::types::{RunMode, SessionSummary};
 
 #[derive(Serialize)]
 pub(crate) struct ExportDocument<'a> {
@@ -554,12 +586,7 @@ pub(crate) async fn reconstruct_last_provider_request(
         }
     };
     let preview = preview.map_err(|error| Error::Message(error.to_string()))?;
-    request_warnings.extend(
-        preview
-            .warnings
-            .into_iter()
-            .map(|warning| warning.message),
-    );
+    request_warnings.extend(preview.warnings.into_iter().map(|warning| warning.message));
     let body = preview.body;
 
     Ok(Some(ProviderRequestExport {
@@ -587,11 +614,7 @@ fn last_provider_request_boundary(
         .iter()
         .rev()
         .find(|record| matches!(record.message, Message::User { .. }))?;
-    Some((
-        assistant_index,
-        prompt.session_seq,
-        prompt.metadata.clone(),
-    ))
+    Some((assistant_index, prompt.session_seq, prompt.metadata.clone()))
 }
 
 pub(crate) struct ProviderMessageReconstruction<'a> {

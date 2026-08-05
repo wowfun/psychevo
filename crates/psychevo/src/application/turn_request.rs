@@ -1,46 +1,16 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-impl fmt::Debug for AdapterTurnOptions {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("AdapterTurnOptions")
-            .field("snapshot_root", &self.snapshot_root)
-            .field("max_context_messages", &self.max_context_messages)
-            .field(
-                "selected_capability_root_count",
-                &self.selected_capability_roots.len(),
-            )
-            .field(
-                "has_workspace_mutations",
-                &self.workspace_mutations.is_some(),
-            )
-            .field("input_part_count", &self.input_parts.len())
-            .field(
-                "has_run_stream_observer",
-                &self.run_stream_observer.is_some(),
-            )
-            .field(
-                "initial_thread_preference_count",
-                &self.initial_thread_preferences.len(),
-            )
-            .field(
-                "has_prepared_source_key",
-                &self.prepared_source_key.is_some(),
-            )
-            .field(
-                "has_turn_event_observer",
-                &self.turn_event_observer.is_some(),
-            )
-            .field("agent_entrypoint", &self.agent_entrypoint)
-            .finish()
-    }
-}
-
-impl fmt::Debug for PreparedTurnControl {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("PreparedTurnControl(..)")
-    }
-}
+use super::{
+    AgentEnvironmentOverlay, AgentExecutionPolicy, AgentInputPart, AgentMissionRegistration,
+    AgentModelSelection, AgentPreparationToken, AgentTargetSelection, AgentTurnInput,
+    ResolvedCapabilityPlan, ResolvedTurnPlan, TurnAdmissionCancellation, TurnRequest,
+};
+use crate::types::{
+    ApprovalHandler, ImageInput, McpServerInput, PermissionMode, ProjectContextInstructionMode,
+    RunMode, RunSandboxOverride, RuntimeTool,
+};
 
 impl TurnRequest {
     pub fn new(prompt: impl Into<String>) -> Self {
@@ -54,8 +24,6 @@ impl TurnRequest {
             config_path: None,
             model: None,
             reasoning_effort: None,
-            runtime_ref: None,
-            runtime_options: BTreeMap::new(),
             include_reasoning: false,
             mode: RunMode::default(),
             permission_mode: None,
@@ -64,15 +32,21 @@ impl TurnRequest {
             inherited_env: None,
             project_context: None,
             sandbox: None,
-            agent: None,
             no_agents: false,
             no_skills: false,
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
             tools: Vec::new(),
-            adapter_options: AdapterTurnOptions::default(),
+            input_parts: Vec::new(),
+            snapshot_root: None,
+            max_context_messages: None,
+            selected_capability_roots: Vec::new(),
+            workspace_mutations: None,
+            initial_thread_preferences: BTreeMap::new(),
+            admission_mission: None,
+            target: AgentTargetSelection::default(),
             requested_turn_id: None,
-            prepared_control: None,
+            admission_cancellation: None,
         }
     }
 
@@ -131,8 +105,8 @@ impl TurnRequest {
         runtime_ref: Option<String>,
         runtime_options: BTreeMap<String, String>,
     ) -> Self {
-        self.runtime_ref = runtime_ref;
-        self.runtime_options = runtime_options;
+        self.target.runtime_profile_ref = runtime_ref;
+        self.target.runtime_options = runtime_options;
         self
     }
 
@@ -176,7 +150,7 @@ impl TurnRequest {
     }
 
     pub fn with_agent(mut self, agent: Option<String>, no_agents: bool, no_skills: bool) -> Self {
-        self.agent = agent;
+        self.target.agent_ref = agent;
         self.no_agents = no_agents;
         self.no_skills = no_skills;
         self
@@ -192,114 +166,66 @@ impl TurnRequest {
         self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __set_runtime_tools(&mut self, tools: Vec<RuntimeTool>) {
+    pub fn with_input_parts(mut self, input_parts: Vec<AgentInputPart>) -> Self {
+        self.input_parts = input_parts;
+        self
+    }
+
+    pub fn with_runtime_tools(mut self, tools: Vec<RuntimeTool>) -> Self {
         self.tools = tools;
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __from_run_options(
-        options: RunOptions,
-        source: impl Into<String>,
-        run_stream_observer: Option<RunStreamSink>,
+    pub fn with_framework_context(
+        mut self,
+        snapshot_root: Option<PathBuf>,
+        max_context_messages: Option<usize>,
+        selected_capability_roots: Vec<crate::extensions::SelectedCapabilityRoot>,
+        workspace_mutations: Option<crate::types::WorkspaceMutationSink>,
     ) -> Self {
-        Self {
-            prompt: options.prompt,
-            image_inputs: options.image_inputs,
-            extract_prompt_image_sources: options.extract_prompt_image_sources,
-            prompt_display: options.prompt_display,
-            client_turn_id: None,
-            source: source.into(),
-            config_path: options.config_path,
-            model: options.model,
-            reasoning_effort: options.reasoning_effort,
-            runtime_ref: options.runtime_ref,
-            runtime_options: options.runtime_options,
-            include_reasoning: options.include_reasoning,
-            mode: options.mode,
-            permission_mode: options.permission_mode,
-            approval_handler: options.approval_handler,
-            clarify_enabled: options.clarify_enabled,
-            inherited_env: options.inherited_env,
-            project_context: options.project_context_override,
-            sandbox: options.sandbox_override,
-            agent: options.agent,
-            no_agents: options.no_agents,
-            no_skills: options.no_skills,
-            skill_inputs: options.skill_inputs,
-            mcp_servers: options.mcp_servers,
-            tools: options.runtime_tools,
-            adapter_options: AdapterTurnOptions {
-                snapshot_root: options.snapshot_root,
-                max_context_messages: options.max_context_messages,
-                selected_capability_roots: options.selected_capability_roots,
-                workspace_mutations: options.workspace_mutations,
-                run_stream_observer,
-                ..AdapterTurnOptions::default()
-            },
-            requested_turn_id: None,
-            prepared_control: None,
-        }
+        self.snapshot_root = snapshot_root;
+        self.max_context_messages = max_context_messages;
+        self.selected_capability_roots = selected_capability_roots;
+        self.workspace_mutations = workspace_mutations;
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __set_control(
-        &mut self,
-        handle: crate::types::RunControlHandle,
-        control: crate::types::RunControl,
-    ) {
-        self.prepared_control = Some(PreparedTurnControl { handle, control });
+    pub fn with_initial_thread_preferences(
+        mut self,
+        preferences: BTreeMap<String, String>,
+    ) -> Self {
+        self.initial_thread_preferences = preferences;
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __set_adapter_options(&mut self, options: AdapterTurnOptions) {
-        self.adapter_options = options;
+    pub fn with_admission_mission(mut self, mission: AgentMissionRegistration) -> Self {
+        self.admission_mission = Some(mission);
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __take_adapter_input_parts(&mut self) -> Vec<Value> {
-        std::mem::take(&mut self.adapter_options.input_parts)
+    pub fn with_agent_preparation(mut self, preparation: AgentPreparationToken) -> Self {
+        self.target.preparation = Some(preparation);
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __take_run_stream_observer(&mut self) -> Option<RunStreamSink> {
-        self.adapter_options.run_stream_observer.take()
+    pub fn with_agent_target_expectation(
+        mut self,
+        profile_revision: Option<u64>,
+        backend_ref: Option<String>,
+    ) -> Self {
+        self.target.expected_profile_revision = profile_revision;
+        self.target.expected_backend_ref = backend_ref;
+        self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __take_initial_thread_preferences(&mut self) -> BTreeMap<String, String> {
-        std::mem::take(&mut self.adapter_options.initial_thread_preferences)
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __take_prepared_source_key(&mut self) -> Option<String> {
-        self.adapter_options.prepared_source_key.take()
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __take_agent_entrypoint(&mut self) -> Option<crate::agents::AgentEntrypoint> {
-        self.adapter_options.agent_entrypoint.take()
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __set_agent_entrypoint(&mut self, entrypoint: crate::agents::AgentEntrypoint) {
-        self.adapter_options.agent_entrypoint = Some(entrypoint);
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __set_turn_id(&mut self, turn_id: String) {
+    pub fn with_requested_turn_id(mut self, turn_id: String) -> Self {
         self.requested_turn_id = Some(turn_id);
+        self
+    }
+
+    pub fn with_admission_cancellation(mut self, cancellation: TurnAdmissionCancellation) -> Self {
+        self.admission_cancellation = Some(cancellation);
+        self
     }
 
     pub fn tool(mut self, tool: Arc<dyn psychevo_agent_core::ToolBinding>) -> Self {
@@ -307,60 +233,69 @@ impl TurnRequest {
         self
     }
 
-    pub(super) fn into_run_options(
+    pub(super) fn resolve(
         self,
-        state: StateRuntime,
-        cwd: PathBuf,
-        thread_id: String,
+        inherited_env: BTreeMap<String, String>,
         application_config_path: Option<PathBuf>,
-    ) -> RunOptions {
-        RunOptions {
-            state,
-            cwd,
-            snapshot_root: self.adapter_options.snapshot_root,
-            session: Some(thread_id),
-            continue_latest: false,
-            prompt: self.prompt,
-            image_inputs: self.image_inputs,
-            extract_prompt_image_sources: self.extract_prompt_image_sources,
-            prompt_display: self.prompt_display,
-            max_context_messages: self.adapter_options.max_context_messages,
-            config_path: self.config_path.or(application_config_path),
-            project_context_override: self.project_context,
-            sandbox_override: self.sandbox,
-            model: self.model,
-            reasoning_effort: self.reasoning_effort,
-            runtime_ref: self.runtime_ref,
-            runtime_session_id: None,
-            runtime_options: self.runtime_options,
-            include_reasoning: self.include_reasoning,
-            mode: self.mode,
-            permission_mode: self.permission_mode,
-            approval_handler: self.approval_handler,
-            clarify_enabled: self.clarify_enabled,
-            inherited_env: self.inherited_env,
-            agent: self.agent,
-            external_agent_delegate: None,
-            no_agents: self.no_agents,
-            no_skills: self.no_skills,
-            selected_capability_roots: self.adapter_options.selected_capability_roots,
-            skill_inputs: self.skill_inputs,
-            mcp_servers: self.mcp_servers,
-            mcp_runtime: self.adapter_options.mcp_runtime,
-            workspace_mutations: self.adapter_options.workspace_mutations,
-            runtime_tools: self.tools,
+    ) -> ResolvedTurnPlan {
+        let parts = if self.input_parts.is_empty() {
+            let mut parts = Vec::with_capacity(1 + self.image_inputs.len());
+            if !self.prompt.is_empty() {
+                parts.push(AgentInputPart::Text {
+                    text: self.prompt.clone(),
+                });
+            }
+            parts.extend(
+                self.image_inputs
+                    .iter()
+                    .cloned()
+                    .map(|input| AgentInputPart::Image { input }),
+            );
+            parts
+        } else {
+            self.input_parts
+        };
+        ResolvedTurnPlan {
+            client_turn_id: self.client_turn_id,
+            requested_turn_id: self.requested_turn_id,
+            initial_thread_preferences: self.initial_thread_preferences,
+            admission_mission: self.admission_mission,
+            target: self.target,
+            input: AgentTurnInput {
+                prompt: self.prompt,
+                image_inputs: self.image_inputs,
+                parts,
+                extract_prompt_image_sources: self.extract_prompt_image_sources,
+                prompt_display: self.prompt_display,
+            },
+            model: AgentModelSelection {
+                model: self.model,
+                reasoning_effort: self.reasoning_effort,
+                include_reasoning: self.include_reasoning,
+            },
+            execution: AgentExecutionPolicy {
+                source: self.source,
+                config_path: self.config_path.or(application_config_path),
+                mode: self.mode,
+                permission_mode: self.permission_mode,
+                approval_handler: self.approval_handler,
+                clarify_enabled: self.clarify_enabled,
+                project_context: self.project_context,
+                sandbox: self.sandbox,
+                snapshot_root: self.snapshot_root,
+                max_context_messages: self.max_context_messages,
+                workspace_mutations: self.workspace_mutations,
+            },
+            capabilities: ResolvedCapabilityPlan {
+                no_agents: self.no_agents,
+                no_skills: self.no_skills,
+                selected_capability_roots: self.selected_capability_roots,
+                skill_inputs: self.skill_inputs,
+                mcp_servers: self.mcp_servers,
+                tools: self.tools,
+            },
+            environment: AgentEnvironmentOverlay { inherited_env },
+            admission_cancellation: self.admission_cancellation,
         }
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __into_run_options(
-        self,
-        state: StateRuntime,
-        cwd: PathBuf,
-        thread_id: String,
-        application_config_path: Option<PathBuf>,
-    ) -> RunOptions {
-        self.into_run_options(state, cwd, thread_id, application_config_path)
     }
 }

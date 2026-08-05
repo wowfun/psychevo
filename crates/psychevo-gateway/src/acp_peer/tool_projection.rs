@@ -1,4 +1,8 @@
-fn acp_update_kind(update: &Value) -> String {
+use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk};
+use psychevo::application::ToolCallBlock;
+use serde_json::{Map, Value, json};
+
+pub(super) fn acp_update_kind(update: &Value) -> String {
     update
         .get("sessionUpdate")
         .and_then(Value::as_str)
@@ -6,14 +10,14 @@ fn acp_update_kind(update: &Value) -> String {
         .to_string()
 }
 
-fn acp_content_chunk_text(chunk: ContentChunk) -> Option<String> {
+pub(super) fn acp_content_chunk_text(chunk: ContentChunk) -> Option<String> {
     match chunk.content {
         ContentBlock::Text(text) => Some(text.text),
         _ => None,
     }
 }
 
-fn acp_tool_call_id(value: &Value) -> String {
+pub(super) fn acp_tool_call_id(value: &Value) -> String {
     value
         .get("toolCallId")
         .or_else(|| value.get("tool_call_id"))
@@ -22,7 +26,7 @@ fn acp_tool_call_id(value: &Value) -> String {
         .to_string()
 }
 
-fn acp_merge_tool_update(existing: &Value, update: &Value) -> Value {
+pub(super) fn acp_merge_tool_update(existing: &Value, update: &Value) -> Value {
     let mut merged = existing.as_object().cloned().unwrap_or_default();
     if let Some(update) = update.as_object() {
         for (key, value) in update {
@@ -39,7 +43,11 @@ fn acp_merge_tool_update(existing: &Value, update: &Value) -> Value {
     Value::Object(merged)
 }
 
-fn acp_tool_runtime_event(local_session_id: &str, tool: &Value, was_started: bool) -> Value {
+pub(super) fn acp_tool_runtime_event(
+    local_session_id: &str,
+    tool: &Value,
+    was_started: bool,
+) -> Value {
     let status = tool
         .get("status")
         .and_then(Value::as_str)
@@ -93,7 +101,7 @@ fn acp_tool_runtime_event(local_session_id: &str, tool: &Value, was_started: boo
     Value::Object(event)
 }
 
-fn acp_tool_started_after_event(event: &Value) -> bool {
+pub(super) fn acp_tool_started_after_event(event: &Value) -> bool {
     matches!(
         event.get("type").and_then(Value::as_str),
         Some("tool_execution_start" | "tool_execution_update" | "tool_execution_end")
@@ -108,7 +116,7 @@ fn acp_tool_title(tool: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn acp_tool_runtime_name(tool: &Value) -> String {
+pub(super) fn acp_tool_runtime_name(tool: &Value) -> String {
     match tool.get("kind").and_then(Value::as_str).unwrap_or("other") {
         "read" => "read".to_string(),
         "edit" | "delete" | "move" => "edit".to_string(),
@@ -128,7 +136,11 @@ fn acp_tool_args(tool: &Value) -> Option<Value> {
         .cloned()
 }
 
-fn acp_tool_call_block(tool: &Value, content_index: usize, call_index: usize) -> ToolCallBlock {
+pub(super) fn acp_tool_call_block(
+    tool: &Value,
+    content_index: usize,
+    call_index: usize,
+) -> ToolCallBlock {
     let arguments = acp_tool_args(tool).unwrap_or_else(|| Value::Object(Map::new()));
     let arguments_json = serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string());
     ToolCallBlock {
@@ -142,7 +154,7 @@ fn acp_tool_call_block(tool: &Value, content_index: usize, call_index: usize) ->
     }
 }
 
-fn acp_tool_result(tool: &Value) -> Value {
+pub(super) fn acp_tool_result(tool: &Value) -> Value {
     let mut result = Map::new();
     if let Some(title) = acp_tool_title(tool) {
         result.insert("display".to_string(), json!(title));
@@ -167,7 +179,7 @@ fn acp_tool_result(tool: &Value) -> Value {
     Value::Object(result)
 }
 
-fn acp_tool_output(tool: &Value) -> Option<String> {
+pub(super) fn acp_tool_output(tool: &Value) -> Option<String> {
     if let Some(content) = tool.get("content").and_then(Value::as_array) {
         let text = content
             .iter()
@@ -228,7 +240,7 @@ fn acp_tool_content_text(content: &Value) -> Option<String> {
     }
 }
 
-fn acp_plan_body(plan: &Value) -> String {
+pub(super) fn acp_plan_body(plan: &Value) -> String {
     let entries = plan
         .get("entries")
         .and_then(Value::as_array)

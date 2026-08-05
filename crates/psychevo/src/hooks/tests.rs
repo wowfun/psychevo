@@ -699,9 +699,7 @@ async fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
     assert!(!prompt.is_blocked());
     assert_eq!(prompt.context[0]["text"], "prefer narrow validation");
 
-    let pre_compact = runtime
-        .run_pre_compact(&json!({"trigger": "manual"}))
-        .await;
+    let pre_compact = runtime.run_pre_compact(&json!({"trigger": "manual"})).await;
     assert_eq!(pre_compact.stop_reason.as_deref(), Some("compact later"));
     let post_compact = runtime
         .run_post_compact(&json!({"trigger": "manual"}))
@@ -938,7 +936,9 @@ async fn worker_handler_calls_hooks_call_adapter() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(&worker).expect("worker metadata").permissions();
+        let mut permissions = fs::metadata(&worker)
+            .expect("worker metadata")
+            .permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&worker, permissions).expect("worker executable");
     }
@@ -1004,11 +1004,12 @@ async fn worker_handler_calls_hooks_call_adapter() {
         },
     );
 
-    let result = runtime.run_event(
-        "PostToolUse",
-        &json!({"tool": "exec_command", "is_error": false}),
-    )
-    .await;
+    let result = runtime
+        .run_event(
+            "PostToolUse",
+            &json!({"tool": "exec_command", "is_error": false}),
+        )
+        .await;
 
     assert_eq!(result.feedback, vec!["worker saw hook"]);
     assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
@@ -1032,11 +1033,12 @@ async fn post_tool_use_model_content_is_parsed_as_current_result_transform() {
         },
     );
 
-    let result = runtime.run_event(
-        "PostToolUse",
-        &json!({"tool": "exec_command", "is_error": false}),
-    )
-    .await;
+    let result = runtime
+        .run_event(
+            "PostToolUse",
+            &json!({"tool": "exec_command", "is_error": false}),
+        )
+        .await;
 
     assert_eq!(result.model_content.as_deref(), Some("redacted result"));
 }

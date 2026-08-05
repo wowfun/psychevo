@@ -1,5 +1,5 @@
-#[allow(unused_imports)]
-use super::*;
+use psychevo_agent_core::{AssistantBlock, Message, UserContentBlock};
+use serde_json::Value;
 
 pub(crate) fn sanitize_reasoning_for_export(message: &Message) -> Message {
     match message {
@@ -86,7 +86,12 @@ pub(crate) mod tests {
     use psychevo_ai::Outcome;
     use tempfile::TempDir;
 
-    use crate::store::{AgentMailboxEventInput, PromptPrefixSlotRecord};
+    use crate::session_export::{
+        SessionArtifactKind, SessionExportFormat, SessionExportInclude, SessionExportIncludeSet,
+        SessionExportOptions, default_session_export_filename, render_session_export,
+    };
+    use crate::state::StateRuntime;
+    use crate::store::{AgentMailboxEventInput, PromptPrefixRecord, PromptPrefixSlotRecord};
 
     #[tokio::test]
     async fn default_export_filename_distinguishes_sibling_uuidv7_sessions() {
@@ -462,10 +467,7 @@ pub(crate) mod tests {
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         let request = &value["last_provider_request"];
         assert_eq!(request["protocol"], "anthropic_messages");
-        assert_eq!(
-            request["endpoint"],
-            "https://api.anthropic.com/v1/messages"
-        );
+        assert_eq!(request["endpoint"], "https://api.anthropic.com/v1/messages");
         assert_eq!(request["body"]["model"], "claude-sonnet-4-5");
         assert_eq!(request["body"]["messages"][0]["role"], "user");
         assert!(request["body"].get("input").is_none());

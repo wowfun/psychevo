@@ -7,18 +7,20 @@ use serde_json::Value;
 #[cfg(feature = "openai")]
 use serde_json::json;
 
+#[cfg(feature = "openai")]
+use crate::metadata::{allowlisted_provider_metadata, normalize_usage};
+#[cfg(feature = "xiaomi")]
+use crate::voice::{
+    VoiceAsrProvider, VoiceAsrRequest, VoiceAudioFormat, VoiceAudioInput, VoiceTtsProvider,
+    VoiceTtsRequest, XiaomiVoiceProvider,
+};
 use crate::{AdapterCall, AdapterFuture, ErrorPhase, Media, ProviderError};
 #[cfg(feature = "openai")]
-use crate::{
-    ErrorKind, GeneratedImage, ImageAdapter, ImageAdapterOutput, ImageRequest, Usage,
-    normalize_usage,
-};
+use crate::{ErrorKind, GeneratedImage, ImageAdapter, ImageAdapterOutput, ImageRequest, Usage};
 #[cfg(feature = "xiaomi")]
 use crate::{
     MediaInput, SpeechAdapter, SpeechAdapterOutput, SpeechRequest, TranscriptionAdapter,
-    TranscriptionAdapterOutput, TranscriptionRequest, VoiceAsrProvider, VoiceAsrRequest,
-    VoiceAudioFormat, VoiceAudioInput, VoiceTtsProvider, VoiceTtsRequest, Warning,
-    XiaomiVoiceProvider,
+    TranscriptionAdapterOutput, TranscriptionRequest, Warning,
 };
 
 #[cfg(feature = "openai")]
@@ -409,7 +411,7 @@ fn typed_usage(value: &Value) -> Option<Usage> {
 
 #[cfg(feature = "openai")]
 fn allowlisted_metadata(value: &Value) -> BTreeMap<String, Value> {
-    crate::allowlisted_provider_metadata(value)
+    allowlisted_provider_metadata(value)
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default()
         .into_iter()
@@ -428,7 +430,17 @@ fn value_object(value: Value) -> BTreeMap<String, Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[cfg(feature = "openai")]
+    use serde_json::json;
+
+    #[cfg(feature = "xiaomi")]
+    use super::{audio_format, speech_format};
+    #[cfg(feature = "openai")]
+    use super::{normalized_image_format, openai_image_generations_endpoint, parse_openai_images};
+    #[cfg(feature = "openai")]
+    use crate::ErrorKind;
+    #[cfg(feature = "xiaomi")]
+    use crate::voice::VoiceAudioFormat;
 
     #[cfg(feature = "openai")]
     #[test]

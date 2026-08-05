@@ -1,26 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use serde_json::json;
 
-#[path = "config/providers.rs"]
-mod providers;
-#[allow(unused_imports)]
-pub use providers::*;
-#[path = "config/resolution.rs"]
-mod resolution;
-#[allow(unused_imports)]
-pub use resolution::*;
 #[path = "config/channels.rs"]
 mod channels;
-#[allow(unused_imports)]
-pub use channels::*;
-#[path = "config/voice.rs"]
-mod voice;
-#[allow(unused_imports)]
-pub use voice::*;
 #[path = "config/image_generation.rs"]
 mod image_generation;
-#[allow(unused_imports)]
-pub use image_generation::*;
+#[path = "config/providers.rs"]
+mod providers;
+#[path = "config/resolution.rs"]
+mod resolution;
+#[path = "config/voice.rs"]
+mod voice;
 
 #[tokio::test]
 async fn profile_mcp_servers_parse_stdio_and_http_descriptors() {

@@ -1,21 +1,19 @@
-pub(crate) use std::collections::VecDeque;
-pub(crate) use std::io::{Read, Write};
-pub(crate) use std::net::TcpListener;
-pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::process::{Command, Stdio};
-pub(crate) use std::sync::{Arc, Mutex};
-pub(crate) use std::thread;
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-pub(crate) use rusqlite::Connection;
-pub(crate) use serde_json::{Value, json};
-pub(crate) use tempfile::tempdir;
+use serde_json::Value;
 
 pub(crate) fn pevo() -> &'static str {
     env!("CARGO_BIN_EXE_pevo")
 }
 
 pub(crate) fn pevo_cmd(home: &Path) -> Command {
-    let home = psychevo::__product::platform::normalized_native_path(home);
+    let home = psychevo::host_paths::normalized_native_path(home);
     let runtime_tmp = home.join("tmp");
     std::fs::create_dir_all(&runtime_tmp).expect("runtime temp");
     let mut command = Command::new(pevo());
@@ -342,44 +340,24 @@ pub(crate) fn assert_starter_config_template(config: &str) {
     );
 }
 
-// Scenario chunks share this integration-test harness.
-#[path = "smoke_cli/init.rs"]
-mod smoke_cli_init;
-#[allow(unused_imports)]
-use smoke_cli_init::*;
-#[path = "smoke_cli/run.rs"]
-mod smoke_cli_run;
-#[allow(unused_imports)]
-use smoke_cli_run::*;
-#[path = "smoke_cli/tui.rs"]
-mod smoke_cli_tui;
-#[allow(unused_imports)]
-use smoke_cli_tui::*;
-#[path = "smoke_cli/agent.rs"]
-mod smoke_cli_agent;
-#[allow(unused_imports)]
-use smoke_cli_agent::*;
-#[path = "smoke_cli/skills.rs"]
-mod smoke_cli_skills;
-#[allow(unused_imports)]
-use smoke_cli_skills::*;
-#[path = "smoke_cli/plugins.rs"]
-mod smoke_cli_plugins;
-#[allow(unused_imports)]
-use smoke_cli_plugins::*;
-#[path = "smoke_cli/hooks.rs"]
-mod smoke_cli_hooks;
-#[allow(unused_imports)]
-use smoke_cli_hooks::*;
-#[path = "smoke_cli/profile.rs"]
-mod smoke_cli_profile;
-#[allow(unused_imports)]
-use smoke_cli_profile::*;
-#[path = "smoke_cli/install.rs"]
-mod smoke_cli_install;
-#[allow(unused_imports)]
-use smoke_cli_install::*;
+// Scenario modules import only the harness seams they exercise.
 #[path = "smoke_cli/admin.rs"]
 mod smoke_cli_admin;
-#[allow(unused_imports)]
-use smoke_cli_admin::*;
+#[path = "smoke_cli/agent.rs"]
+mod smoke_cli_agent;
+#[path = "smoke_cli/hooks.rs"]
+mod smoke_cli_hooks;
+#[path = "smoke_cli/init.rs"]
+mod smoke_cli_init;
+#[path = "smoke_cli/install.rs"]
+mod smoke_cli_install;
+#[path = "smoke_cli/plugins.rs"]
+mod smoke_cli_plugins;
+#[path = "smoke_cli/profile.rs"]
+mod smoke_cli_profile;
+#[path = "smoke_cli/run.rs"]
+mod smoke_cli_run;
+#[path = "smoke_cli/skills.rs"]
+mod smoke_cli_skills;
+#[path = "smoke_cli/tui.rs"]
+mod smoke_cli_tui;

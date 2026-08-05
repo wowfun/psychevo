@@ -1,35 +1,17 @@
-use super::{
-    AbortSignal, AgentEdgeStatus, AgentLoopRequest, BTreeMap, ClarifyToolSurface,
-    CompactSessionOptions, CompactionReason, ContextRecorder, ControlHandle, Error, LanguageModel,
-    ExternalAgentDelegateRequest, FutureExt, Instant, Message, Mutex, PersistenceSink,
-    PromptPrefixRecordInput, Result, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
-    SelectedAgent, SmokeControl, ToolOutput, ToolSurfaceAssembly, Uuid, Value, compact_session,
-    json, load_projected_messages, user_text_message,
-};
-use super::{
-    Arc, Deserialize, PermissionRuntime, RuntimeTimeContext, assemble_child_prompt_prefix,
-    assemble_tool_surface_with_warnings, assistant_text,
-    catalog_surface::{
-        AgentContribution, AgentDefinition, AgentEntrypoint, AgentInvocationRole, AgentRunRecord,
-        AgentRunStatus, AgentToolContext, SUBAGENT_DEFAULT_MAX_TURNS, apply_agent_tool_policy,
-        apply_hook_runtime, build_hook_runtime, effective_run_mode, effective_tool_names,
-        narrow_permission_mode_for_agent,
-    },
-    context_evidence_for_request,
-    definition_policy::clamp_agent_spawn_depth,
-    lifecycle::{agent_child_session_summary_value, model_content_string, subagent_summary_value},
-    mailbox_tools::{
-        append_parent_agent_start_notification, fork_messages, now_ms,
-        update_run_child_session, update_run_completed, update_run_failed,
-    },
-    prompt_prefix_record,
-    teams::AgentTeamMember,
-    tool_declarations_hash_with_search, turn_runtime_time_instruction,
-};
+mod lifecycle;
+mod policy;
 
-include!("child_runs/lifecycle.rs");
-include!("child_runs/policy.rs");
-
+pub(crate) use lifecycle::{
+    ChildRun, SpawnAgentArgs, spawn_child_agent_background, spawn_subagent,
+};
+#[cfg(test)]
+pub(crate) use lifecycle::{
+    resolve_agent_tool_name, resolved_child_spawn_depth_remaining, validate_task_name,
+};
+pub(crate) use policy::{
+    AGENT_NOTIFICATION_METADATA_KEY, bind_child_model, default_task_name, run_child_agent,
+    sanitize_task_name,
+};
 struct ActiveAgentRunGuard {
     supervisor: super::supervisor::AgentSupervisor,
     id: String,

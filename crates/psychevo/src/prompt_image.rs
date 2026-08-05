@@ -79,7 +79,7 @@ pub(crate) fn prompt_message_from_text(
     prompt_message_from_inputs(prompt, &[], cwd, metadata).map(|build| build.message)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn prompt_message_from_inputs(
     prompt: &str,
     image_inputs: &[ImageInput],
@@ -467,9 +467,9 @@ pub(crate) fn index_is_inside_http_url_token(prompt: &str, index: usize) -> bool
 
 pub(crate) fn looks_like_prose_prefixed_path(source: &str) -> bool {
     source.find(":/").is_some_and(|index| index > 1)
-        || source.char_indices().any(|(index, _)| {
-            index > 0 && index_starts_windows_absolute_path(source, index)
-        })
+        || source
+            .char_indices()
+            .any(|(index, _)| index > 0 && index_starts_windows_absolute_path(source, index))
         || source.find("：/").is_some_and(|index| index > 0)
 }
 

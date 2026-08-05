@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.psychevo]
+architecture-layer = 0
+
 [dependencies]
 anyhow.workspace = true
 schemars.workspace = true

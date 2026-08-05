@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(test)]
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
+
+use crate::tui::ui_types::{ScreenCell, ScreenLine, SelectableRegion, SelectionState};
+
 impl ScreenLine {
     #[cfg(test)]
     pub(crate) fn first_x(&self) -> u16 {

@@ -1,5 +1,6 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, Instant, TranscriptKind, TranscriptRow, decrement_row_index, increment_row_index,
+};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn insert_transcript_row(&mut self, index: usize, row: TranscriptRow) -> usize {

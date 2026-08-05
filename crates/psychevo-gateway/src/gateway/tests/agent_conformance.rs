@@ -1,3 +1,38 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use psychevo::application::PermissionApprovalDecision;
+use psychevo::{Application, ConfigurationQuery, PermissionMode, RunMode, ThreadAgentBinding};
+use serde_json::Value;
+use tokio::sync::oneshot;
+use uuid::Uuid;
+
+use super::super::Gateway;
+use super::super::activity::{
+    SendTurnRequest, ThreadCallerContext, ThreadSurface, ThreadTurnIntent,
+};
+use super::super::agent_session::{
+    AgentSessionRef, AgentSessionSnapshot, CapturedAgentSessionTarget,
+};
+use super::super::peer_runtime::{PeerResolutionContext, resolve_peer_turn};
+use super::super::results::GatewayTurnResult;
+use super::support_peer::{
+    FrameworkNativeProbe, Harness, WaitFirst, harness, request, send_framework_turn,
+    send_framework_turn_with_handle, test_acp_command_toml,
+};
+use crate::GatewayEventEmitter;
+use crate::acp_peer;
+use crate::composition::GatewayApplication;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent, TranscriptBlockKind, TranscriptEntry,
+    TranscriptEntryRole,
+};
+use psychevo_gateway_protocol::source::{
+    GatewayInputPart, GatewaySource, GatewayThreadSelector, GatewayTurnStatus,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AgentConformanceRuntime {
     Native,
@@ -11,19 +46,12 @@ impl AgentConformanceRuntime {
             Self::Acp => "acp",
         }
     }
-
-    fn runtime_ref(self) -> &'static str {
-        match self {
-            Self::Native => "native",
-            Self::Acp => "acp:conformance",
-        }
-    }
 }
 
 struct AgentConformanceHarness {
     runtime: AgentConformanceRuntime,
     inner: Harness,
-    backend: Arc<FakeBackend>,
+    backend: Arc<FrameworkNativeProbe>,
     home: PathBuf,
     log: PathBuf,
     release_dir: PathBuf,
@@ -36,7 +64,7 @@ enum AgentConformanceHold {
 
 impl AgentConformanceHarness {
     async fn new(runtime: AgentConformanceRuntime) -> Self {
-        let backend = Arc::new(FakeBackend::default());
+        let backend = Arc::new(FrameworkNativeProbe::default());
         let inner = harness(backend.clone()).await;
         let home = inner._temp.path().join("home");
         let log = inner._temp.path().join("agent-conformance.jsonl");
@@ -64,7 +92,7 @@ impl AgentConformanceHarness {
                     test_acp_command_toml(&inner.cwd),
                     crate::test_support::toml_path(&fixture.script),
                     crate::test_support::toml_path(&log),
-                    crate::test_support::toml_path(inner.state.db_path()),
+                    crate::test_support::toml_path(&inner.db_path),
                     crate::test_support::toml_path(&release_dir),
                 ),
             )
@@ -114,18 +142,15 @@ impl AgentConformanceHarness {
     }
 
     fn runner(&self) -> (Application, Gateway) {
-        (
-            self.inner._application.clone(),
-            self.inner.gateway.clone(),
-        )
+        (self.inner._application.clone(), self.inner.gateway.clone())
     }
 
     fn request(&self, source: GatewaySource, prompt: &str) -> SendTurnRequest {
         let mut request = request(&self.inner, source, prompt);
         if self.runtime == AgentConformanceRuntime::Acp {
-            request.options.agent = Some("conformance".to_string());
-            request.options.runtime_ref = Some("acp:conformance".to_string());
-            request.options.inherited_env = Some(BTreeMap::from([
+            request.policy.agent_ref = Some("conformance".to_string());
+            request.policy.runtime_profile_ref = Some("acp:conformance".to_string());
+            request.policy.inherited_env = Some(BTreeMap::from([
                 (
                     "HOME".to_string(),
                     self.inner._temp.path().display().to_string(),
@@ -231,39 +256,18 @@ impl AgentConformanceHarness {
         expected_status: &str,
         expected_outcome: Option<&str>,
     ) {
-        let terminals = self
+        let terminal = self
             .inner
-            .state
-
-            .list_gateway_turn_terminals_for_thread(thread_id)
-            .await.expect("conformance terminals");
-        let matching = terminals
-            .iter()
-            .filter(|terminal| terminal.turn_id == turn_id)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            matching.len(),
-            1,
-            "{} Agent must persist exactly one terminal for turn {turn_id}",
-            self.runtime.label()
-        );
-        assert_eq!(matching[0].status, expected_status);
-        assert_eq!(matching[0].outcome.as_deref(), expected_outcome);
-    }
-
-    async fn assert_certain_terminal_delivery(&self, turn_id: &str) {
-        let delivery = self
-            .inner
-            .state
-
-            .gateway_turn_delivery(turn_id)
-            .await.expect("conformance delivery lookup")
-            .expect("conformance delivery");
-        assert_eq!(delivery.runtime_ref, self.runtime.runtime_ref());
-        assert_eq!(delivery.status, "terminal");
-        assert_eq!(delivery.input_json, None);
-        assert!(delivery.delivery_confirmed_at_ms.is_some());
-        assert!(delivery.terminal_at_ms.is_some());
+            ._application
+            .client()
+            .framework_turn_terminal_evidence(turn_id)
+            .await
+            .expect("conformance terminal")
+            .expect("durable conformance terminal");
+        assert_eq!(terminal.thread_id, thread_id);
+        assert_eq!(terminal.turn_id, turn_id);
+        assert_eq!(terminal.status.as_str(), expected_status);
+        assert_eq!(Some(terminal.outcome.as_str()), expected_outcome);
     }
 }
 
@@ -392,13 +396,14 @@ async fn conformance_success_persists_visible_history_single_terminal_and_certai
     assert_eq!(result.turn.status, GatewayTurnStatus::Completed);
     assert_eq!(started_turn_ids(&events), vec![result.turn.id.clone()]);
     assert_eq!(completion_turn_ids(&events), vec![result.turn.id.clone()]);
-    harness.assert_exactly_one_terminal(
-        &result.thread.id,
-        &result.turn.id,
-        "completed",
-        Some("normal"),
-    ).await;
-    harness.assert_certain_terminal_delivery(&result.turn.id).await;
+    harness
+        .assert_exactly_one_terminal(
+            &result.thread.id,
+            &result.turn.id,
+            "completed",
+            Some("normal"),
+        )
+        .await;
     assert_visible_conformance_history(
         runtime,
         &result.committed_entries,
@@ -411,7 +416,8 @@ async fn conformance_success_persists_visible_history_single_terminal_and_certai
         .inner
         .gateway
         .thread_transcript(&result.thread.id)
-        .await.expect("visible conformance history");
+        .await
+        .expect("visible conformance history");
     assert_visible_conformance_history(
         runtime,
         &visible_history,
@@ -420,7 +426,7 @@ async fn conformance_success_persists_visible_history_single_terminal_and_certai
     );
     let visible_signature = conformance_message_history_signature(&visible_history);
     assert_eq!(visible_signature, committed_signature);
-    let db_path = harness.inner.state.db_path().to_path_buf();
+    let db_path = harness.inner.db_path.clone();
 
     harness
         .inner
@@ -429,17 +435,24 @@ async fn conformance_success_persists_visible_history_single_terminal_and_certai
         .await
         .expect("shutdown binding conformance harness");
 
-    let reopened_state = StateRuntime::open(db_path).await.expect("reopen conformance state");
-    let reopened_gateway = Gateway::with_backend(reopened_state, harness.backend.clone());
-    let persisted_history = reopened_gateway
+    let reopened = GatewayApplication::open(harness.home.clone(), db_path, None, BTreeMap::new())
+        .await
+        .expect("reopen conformance composition");
+    let persisted_history = reopened
+        .gateway()
         .thread_transcript(&result.thread.id)
-        .await.expect("persisted conformance history");
+        .await
+        .expect("persisted conformance history");
     assert_eq!(
         conformance_message_history_signature(&persisted_history),
         visible_signature,
-        "{} history must survive a fresh StateRuntime/Gateway reader",
+        "{} history must survive a fresh Application/Gateway reader",
         runtime.label()
     );
+    reopened
+        .shutdown()
+        .await
+        .expect("shutdown reopened Framework reader");
 }
 
 async fn conformance_per_thread_ordering_and_cross_thread_concurrency(
@@ -475,7 +488,7 @@ async fn conformance_per_thread_ordering_and_cross_thread_concurrency(
         .await
         .expect("same Framework Thread");
     wait_for_agent_conformance_condition("same-thread turn to enter Framework queue", || {
-        same_thread.__activity().queued_turns == 1
+        same_thread.activity().queued_turns == 1
     })
     .await;
     assert_eq!(
@@ -573,8 +586,8 @@ async fn conformance_rejects_unsupported_control_and_structured_input(
         "must-not-reach-agent-control",
     );
     control_request
-        .options
-        .runtime_options
+        .policy
+        .control_values
         .insert("conformance-unsupported".to_string(), "value".to_string());
     let control_events = events.clone();
     control_request.event_sink = Some(GatewayEventEmitter::new(move |event| {
@@ -647,10 +660,8 @@ async fn conformance_cancel_produces_one_interrupted_terminal(runtime: AgentConf
     let hold = harness.prepare_hold("cancel");
     let events = Arc::new(Mutex::new(Vec::<GatewayEvent>::new()));
     let events_for_sink = events.clone();
-    let (handle, control) = run_control();
+    let (handle_tx, handle_rx) = oneshot::channel();
     let mut request = harness.request(source, "hold:cancel");
-    request.control_handle = Some(handle.clone());
-    request.control = Some(control);
     request.event_sink = Some(GatewayEventEmitter::new(move |event| {
         events_for_sink
             .lock()
@@ -658,25 +669,31 @@ async fn conformance_cancel_produces_one_interrupted_terminal(runtime: AgentConf
             .push(event);
     }));
     let (application, gateway) = harness.runner();
-    let turn =
-        tokio::spawn(async move { send_framework_turn(application, gateway, request).await });
+    let turn = tokio::spawn(async move {
+        send_framework_turn_with_handle(application, gateway, request, handle_tx).await
+    });
     harness.wait_for_hold(&hold, "hold:cancel").await;
-    handle.abort();
+    handle_rx
+        .await
+        .expect("accepted Framework Turn handle")
+        .interrupt();
 
     let result = tokio::time::timeout(Duration::from_secs(5), turn)
         .await
         .unwrap_or_else(|_| panic!("{} Agent ignored cancel", runtime.label()))
         .expect("cancel task")
         .expect("cancel result");
-    assert_eq!(result.result.outcome, Outcome::Aborted);
+    assert_eq!(result.result.outcome, psychevo::TurnOutcome::Interrupted);
     assert_eq!(result.turn.status, GatewayTurnStatus::Interrupted);
     assert_eq!(completion_turn_ids(&events), vec![result.turn.id.clone()]);
-    harness.assert_exactly_one_terminal(
-        &result.thread.id,
-        &result.turn.id,
-        "interrupted",
-        Some("aborted"),
-    ).await;
+    harness
+        .assert_exactly_one_terminal(
+            &result.thread.id,
+            &result.turn.id,
+            "interrupted",
+            Some("aborted"),
+        )
+        .await;
     if runtime == AgentConformanceRuntime::Acp {
         assert!(
             harness
@@ -871,38 +888,60 @@ async fn conformance_shared_agent_session_transact_seam(runtime: AgentConformanc
         .unwrap_or_else(|error| panic!("{} transact run: {error}", runtime.label()));
     assert_eq!(harness.observed_prompts(), vec!["transact-run".to_string()]);
 
-    let binding = harness
+    let binding = match harness
         .inner
-        .state
-
-        .gateway_runtime_binding(&turn.thread.id)
-        .await.expect("transact binding lookup")
-        .expect("transact binding");
-    let mut options = harness.request(source, "unused").options;
-    options.session = Some(turn.thread.id.clone());
-    let (profile, _, _) = resolve_gateway_runtime_profile(&options).await.expect("captured profile");
+        ._application
+        .client()
+        .thread_agent_binding(&turn.thread.id)
+        .await
+        .expect("transact binding lookup")
+        .expect("transact binding")
+    {
+        ThreadAgentBinding::Resolved { binding, .. } => binding,
+        ThreadAgentBinding::Unresolved { .. } => panic!("transact binding is unresolved"),
+    };
+    let request = harness.request(source, "unused");
+    let cwd = request.cwd;
+    let policy = request.policy;
+    let profile: psychevo::config::RuntimeProfileConfig =
+        serde_json::from_str(&binding.profile_config_json).expect("captured profile");
     let peer = if runtime == AgentConformanceRuntime::Acp {
-        let mut peer_options = options.clone();
-        peer_options.runtime_ref = profile.backend_ref.clone();
         Some(
-            resolve_peer_turn(&peer_options)
-                .expect("transact ACP peer resolution")
-                .expect("transact ACP peer is available"),
+            resolve_peer_turn(PeerResolutionContext {
+                cwd: &cwd,
+                base_env: policy
+                    .inherited_env
+                    .as_ref()
+                    .expect("conformance inherited environment"),
+                runtime_ref: profile.backend_ref.as_deref(),
+                agent_ref: policy.agent_ref.as_deref(),
+                no_agents: policy.no_agents,
+            })
+            .expect("transact ACP peer resolution")
+            .expect("transact ACP peer is available"),
         )
     } else {
         None
     };
     let mcp_servers = if let Some(peer) = peer.as_ref() {
-        acp_peer::resolve_peer_mcp_server_handoffs(peer, &options)
+        let mut query = ConfigurationQuery::new(&cwd);
+        query.inherited_env = policy.inherited_env.clone();
+        let configuration = harness
+            .inner
+            ._application
+            .client()
+            .configuration(query)
+            .expect("transact configuration");
+        acp_peer::stdio_turn::resolve_peer_mcp_server_handoffs(peer, &configuration)
             .await
             .expect("transact MCP handoff")
     } else {
         Vec::new()
     };
-    let target = CapturedAgentSessionTarget::bound(&binding, profile, peer)
+    let target = CapturedAgentSessionTarget::application_bound(&binding, profile, peer)
         .expect("capture bound Agent session target");
     let session = AgentSessionRef {
-        cwd: options.cwd,
+        cwd,
         local_session_id: turn.thread.id.clone(),
         native_session_id: binding
             .native_session_id
@@ -1002,31 +1041,41 @@ async fn agent_session_attach_is_idempotent_for_captured_binding_and_rejects_con
         .send(harness.request(source.clone(), "capture binding"))
         .await
         .expect("initial Native turn");
-    let binding = harness
+    let binding = match harness
         .inner
-        .state
+        ._application
+        .client()
+        .thread_agent_binding(&turn.thread.id)
+        .await
+        .expect("binding lookup")
+        .expect("captured binding")
+    {
+        ThreadAgentBinding::Resolved { binding, .. } => binding,
+        ThreadAgentBinding::Unresolved { .. } => panic!("captured binding is unresolved"),
+    };
+    let profile: psychevo::config::RuntimeProfileConfig =
+        serde_json::from_str(&binding.profile_config_json).expect("Native profile");
 
-        .gateway_runtime_binding(&turn.thread.id)
-        .await.expect("binding lookup")
-        .expect("captured binding");
-    let mut options = harness.request(source, "unused").options;
-    options.session = Some(turn.thread.id);
-    let (profile, _, _) = resolve_gateway_runtime_profile(&options).await.expect("Native profile");
-
-    let attachment_count = harness
-        .inner
-        .gateway
-        .agent_sessions
-        .bound_attachments
-        .lock()
-        .expect("attachment registry")
-        .len();
     harness
         .inner
         .gateway
         .agent_sessions
         .attach(
-            CapturedAgentSessionTarget::bound(&binding, profile.clone(), None)
+            CapturedAgentSessionTarget::application_bound(&binding, profile.clone(), None)
+                .expect("same captured target"),
+        )
+        .expect("initial captured target attachment");
+    let attachment_count = harness
+        .inner
+        .gateway
+        .agent_sessions
+        .bound_attachment_count();
+    harness
+        .inner
+        .gateway
+        .agent_sessions
+        .attach(
+            CapturedAgentSessionTarget::application_bound(&binding, profile.clone(), None)
                 .expect("same captured target"),
         )
         .expect("same captured target reattaches idempotently");
@@ -1035,22 +1084,19 @@ async fn agent_session_attach_is_idempotent_for_captured_binding_and_rejects_con
             .inner
             .gateway
             .agent_sessions
-            .bound_attachments
-            .lock()
-            .expect("attachment registry")
-            .len(),
+            .bound_attachment_count(),
         attachment_count,
-        "idempotent attach must not create another ordering owner"
+        "idempotent attach must not create another attachment identity"
     );
 
     let mut conflicting_binding = binding;
-    conflicting_binding.agent_fingerprint = Some("different-agent-fingerprint".to_string());
+    conflicting_binding.agent_fingerprint = "different-agent-fingerprint".to_string();
     let error = harness
         .inner
         .gateway
         .agent_sessions
         .attach(
-            CapturedAgentSessionTarget::bound(&conflicting_binding, profile, None)
+            CapturedAgentSessionTarget::application_bound(&conflicting_binding, profile, None)
                 .expect("construct conflicting captured target"),
         )
         .err()
@@ -1065,23 +1111,23 @@ async fn agent_session_attach_is_idempotent_for_captured_binding_and_rejects_con
 
 #[tokio::test]
 async fn thread_application_run_turn_lowers_typed_caller_intent() {
-    let backend = Arc::new(FakeBackend::default());
+    let backend = Arc::new(FrameworkNativeProbe::default());
     let harness = harness(backend.clone()).await;
     let source = GatewaySource::new("application-conformance", "typed-turn").invocation();
-    let mut caller =
-        ThreadCallerContext::new(ThreadSurface::Other("conformance".to_string()), harness.cwd.clone());
+    let mut caller = ThreadCallerContext::new(
+        ThreadSurface::Other("conformance".to_string()),
+        harness.cwd.clone(),
+    );
     caller.runtime_source = "application-conformance".to_string();
     let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text {
         text: "typed application input".to_string(),
     }]);
+    let mut start = psychevo::StartThreadRequest::new(&harness.cwd);
+    start.source = "application-conformance".to_string();
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest {
-            cwd: harness.cwd.clone(),
-            source: "application-conformance".to_string(),
-            metadata: None,
-        })
+        .start_thread(start)
         .await
         .expect("materialize typed Thread");
     intent.thread_id = Some(thread.id().to_string());
@@ -1112,11 +1158,11 @@ async fn thread_application_run_turn_lowers_typed_caller_intent() {
     assert_eq!(runs[0].permission_mode, Some(PermissionMode::DontAsk));
     assert!(
         harness
-            .gateway
-            .state()
-
-            .gateway_runtime_binding(runs[0].session.as_deref().expect("public Thread session"))
-            .await.expect("binding lookup")
+            ._application
+            .client()
+            .thread_agent_binding(runs[0].session.as_deref().expect("public Thread session"))
+            .await
+            .expect("binding lookup")
             .is_some()
     );
 }

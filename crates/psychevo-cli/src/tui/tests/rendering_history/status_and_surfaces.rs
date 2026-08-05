@@ -1,5 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    buffer_text, draw_fullscreen_for_test, test_app, test_context_snapshot,
+};
+use crate::tui::tests::{line_text, reasoning_completed_turn_event};
+use crate::tui::{
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, TUI_ROLE_SURFACE_BG, Terminal,
+    ThreadUsageSummary, TranscriptKind, TranscriptRow, TuiState, TurnEvent, UnicodeWidthStr,
+    active_tool_title, bottom_status_context_for_width, bottom_status_session_usage_segments,
+    format_directory_display_with_home, thinking_lines, tool_title,
+};
+use ratatui::backend::TestBackend;
+use std::path::Path;
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn history_tool_result_updates_rehydrated_pending_write_row() {
@@ -88,14 +100,14 @@ pub(crate) async fn live_reasoning_only_final_message_gets_turn_meta() {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "final folded report".to_string(),
         },
         true,
         false,
     );
-    ui.apply_stream_event(RunStreamEvent::ReasoningEnd, true, false);
+    ui.apply_turn_event(reasoning_completed_turn_event(), true, false);
     ui.apply_value_event(
         &serde_json::json!({
             "type": "message_end",
@@ -301,7 +313,7 @@ pub(crate) async fn bottom_status_session_observability_degrades_with_width() {
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_tokens = Some(900);
     ui.sidebar_context_limit = Some(1_000);
-    ui.session_usage_summary = Some(SessionUsageSummary {
+    ui.session_usage_summary = Some(ThreadUsageSummary {
         session_id: "session".to_string(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
@@ -383,8 +395,8 @@ pub(crate) async fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "I need to inspect a file.".to_string(),
         },
         true,
@@ -438,8 +450,8 @@ pub(crate) async fn reasoning_only_write_message_waits_for_typed_tool_call() {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me compose the full report now. I have all the data. Let me write it out."
                 .to_string(),
         },
@@ -522,8 +534,8 @@ pub(crate) async fn hidden_thinking_write_intent_does_not_create_provisional_upd
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me compose the full report now. Let me write it out.".to_string(),
         },
         false,
@@ -545,8 +557,8 @@ pub(crate) async fn visible_thinking_run_text_waits_for_typed_command_call() {
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me run a quick command to verify the file size.".to_string(),
         },
         true,

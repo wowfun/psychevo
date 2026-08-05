@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
 pub(crate) fn resolve_path(value: &str, env: &BTreeMap<String, String>, cwd: &Path) -> PathBuf {
     let path = if value == "~" {
         env.get("HOME")
@@ -28,7 +31,28 @@ impl<T> Pipe for T {}
 
 #[cfg(test)]
 pub(crate) mod tests {
-    pub(crate) use super::*;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use agent_client_protocol::ErrorCode;
+    use agent_client_protocol::schema::v2::{
+        AudioContent, ContentBlock, EmbeddedResource, EmbeddedResourceResource, EnvVariable,
+        McpServer, McpServerStdio, ResourceLink, SessionId, SessionUpdate, TextContent,
+        TextResourceContents,
+    };
+    use psychevo::mcp::McpTransportInput;
+    use psychevo::{ImageInput, StartThreadRequest};
+    use serde_json::json;
+
+    use crate::commands::{
+        ACP_COMMAND_ADVERTISEMENT_LIMIT, acp_command_capabilities, available_command_lines_from,
+        available_commands_from,
+    };
+    use crate::protocol::{
+        ACP_TEXT_RESOURCE_MAX_BYTES, AcpUsageAccumulator, acp_mcp_servers, prompt_parts,
+        runtime_event_session_update, tool_call_pending_raw_input,
+    };
+    use crate::stdio::{AcpOptions, AcpSession, PsychevoAcpAgent};
 
     #[tokio::test]
     async fn converts_acp_mcp_servers_to_runtime_inputs() {
@@ -61,7 +85,8 @@ pub(crate) mod tests {
                 ),
             ],
             &cwd,
-        );
+        )
+        .expect("prompt conversion");
         assert_eq!(text, "hello");
         assert_eq!(
             images,
@@ -71,10 +96,117 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn prompt_conversion_rejects_audio_remote_links_and_oversized_embedded_text() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let cases = [
+            (
+                ContentBlock::Audio(AudioContent::new("YXVkaW8=", "audio/mpeg")),
+                "audio content is not supported",
+            ),
+            (
+                ContentBlock::ResourceLink(ResourceLink::new(
+                    "remote",
+                    "https://example.com/context.txt",
+                )),
+                "remote ResourceLink is not supported",
+            ),
+            (
+                ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::TextResourceContents(TextResourceContents::new(
+                        "x".repeat(ACP_TEXT_RESOURCE_MAX_BYTES + 1),
+                        "memory://oversized",
+                    )),
+                )),
+                "text resource exceeds the 524288-byte limit",
+            ),
+        ];
+
+        for (block, expected) in cases {
+            let error = prompt_parts(vec![block], &cwd).expect_err("prompt must be rejected");
+            assert_eq!(error.code, ErrorCode::InvalidParams);
+            assert_eq!(
+                error.data.as_ref().and_then(serde_json::Value::as_str),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn local_resource_links_are_canonical_cwd_contained_and_byte_bounded() {
+        let root =
+            std::env::temp_dir().join(format!("psychevo-acp-resource-{}", uuid::Uuid::now_v7()));
+        let cwd = root.join("workspace");
+        std::fs::create_dir_all(&cwd).expect("workspace");
+        let inside = cwd.join("inside.txt");
+        let outside = root.join("outside.txt");
+        let oversized = cwd.join("oversized.txt");
+        std::fs::write(&inside, "inside").expect("inside resource");
+        std::fs::write(&outside, "outside").expect("outside resource");
+        std::fs::write(&oversized, vec![b'x'; ACP_TEXT_RESOURCE_MAX_BYTES + 1])
+            .expect("oversized resource");
+
+        for uri in ["inside.txt".to_string(), inside.display().to_string()] {
+            let (text, images) = prompt_parts(
+                vec![ContentBlock::ResourceLink(
+                    ResourceLink::new("inside", uri).mime_type("text/plain".to_string()),
+                )],
+                &cwd,
+            )
+            .expect("contained resource");
+            assert!(text.ends_with("inside"), "{text}");
+            assert!(images.is_empty());
+        }
+
+        for uri in [outside.display().to_string(), "../outside.txt".to_string()] {
+            let error = prompt_parts(
+                vec![ContentBlock::ResourceLink(
+                    ResourceLink::new("outside", uri).mime_type("text/plain".to_string()),
+                )],
+                &cwd,
+            )
+            .expect_err("cwd escape must be rejected");
+            assert_eq!(error.code, ErrorCode::InvalidParams);
+            assert_eq!(
+                error.data.as_ref().and_then(serde_json::Value::as_str),
+                Some("local ResourceLink must resolve to a file inside the session cwd")
+            );
+        }
+
+        #[cfg(unix)]
+        {
+            let escape = cwd.join("escape.txt");
+            std::os::unix::fs::symlink(&outside, &escape).expect("escape symlink");
+            let error = prompt_parts(
+                vec![ContentBlock::ResourceLink(
+                    ResourceLink::new("escape", "escape.txt").mime_type("text/plain".to_string()),
+                )],
+                &cwd,
+            )
+            .expect_err("symlink escape must be rejected");
+            assert_eq!(error.code, ErrorCode::InvalidParams);
+        }
+
+        let error = prompt_parts(
+            vec![ContentBlock::ResourceLink(
+                ResourceLink::new("oversized", "oversized.txt").mime_type("text/plain".to_string()),
+            )],
+            &cwd,
+        )
+        .expect_err("oversized linked text must be rejected");
+        assert_eq!(error.code, ErrorCode::InvalidParams);
+        assert_eq!(
+            error.data.as_ref().and_then(serde_json::Value::as_str),
+            Some("text resource exceeds the 524288-byte limit")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn synthesizes_usage_from_runtime_accounting() {
         let mut usage = AcpUsageAccumulator::default();
-        usage.record_stream_event(&RunStreamEvent::value(json!({
+        usage.record_runtime_value(&json!({
             "type": "message_end",
             "accounting": {
                 "billable_input_tokens": 8,
@@ -83,7 +215,7 @@ pub(crate) mod tests {
                 "reasoning_tokens": 1,
                 "reported_total_tokens": 16,
             },
-        })));
+        }));
 
         assert_eq!(usage.context_tokens_for_usage_update(), Some(16));
         let metrics = usage.to_usage().expect("usage");
@@ -163,7 +295,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn advertises_tools_slash_command() {
         let commands = available_command_lines_from(available_commands_from(
-            psychevo::__product::commands::available_slash_commands_for_surface(
+            psychevo::command_registry::available_slash_commands_for_surface(
                 acp_command_capabilities(),
                 false,
                 &[],
@@ -179,7 +311,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn parses_slash_prompt_command_and_args() {
-        use psychevo::__product::commands::{
+        use psychevo::command_registry::{
             SlashCommandAction, SlashCommandParse, parse_slash_command_line,
         };
 
@@ -209,7 +341,8 @@ pub(crate) mod tests {
             config_path: None,
             inherited_env: BTreeMap::new(),
         })
-        .await.expect("agent");
+        .await
+        .expect("agent");
         let session_id = SessionId::new("acp-test");
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let thread = agent
@@ -217,11 +350,7 @@ pub(crate) mod tests {
             .start_thread(StartThreadRequest::new(&cwd))
             .await
             .expect("thread");
-        let session = AcpSession::new(
-            cwd,
-            thread,
-            Vec::new(),
-        );
+        let session = AcpSession::loaded(cwd, thread, Vec::new());
         let text = agent.status_command_text(&session_id, &session).await;
         assert!(text.contains("ACP session: acp-test"), "{text}");
         assert!(text.contains("commands: "), "{text}");

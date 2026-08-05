@@ -49,24 +49,39 @@ pub struct ThreadDraftOpenParams {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct ThreadCompactionCheckpointView {
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub checkpoint_id: i64,
     pub reason: String,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub created_at_ms: i64,
-    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
     #[schemars(with = "JsonSafeI64")]
     #[ts(type = "number")]
     pub first_kept_session_seq: i64,
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub tokens_before: Option<u64>,
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub tokens_after: Option<u64>,
@@ -86,11 +101,17 @@ pub struct ThreadCompactionResult {
     pub message: String,
     #[serde(default)]
     pub checkpoint: Option<ThreadCompactionCheckpointView>,
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub tokens_before: Option<u64>,
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub tokens_after: Option<u64>,
@@ -101,6 +122,27 @@ pub struct ThreadCompactionResult {
     #[serde(default)]
     pub error: Option<String>,
 }
+
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::events_transcript::{
+    GatewayActionOutcome, PermissionDecision, SessionProjectView, SessionSummaryView,
+    ThreadHistoryView, ThreadSnapshot, TranscriptEntry,
+};
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
+    option_json_safe_u64, option_json_safe_usize,
+};
+use crate::settings_workspace_context::ModelSettingsScope;
+use crate::source::{
+    GatewayImageInput, GatewayInputPart, GatewayMention, GatewayMentionTarget, GatewayRequestScope,
+    GatewaySource, GatewayThread,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -128,7 +170,10 @@ pub struct ThreadListParams {
     #[serde(default)]
     pub archived: Option<bool>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
@@ -172,12 +217,18 @@ pub struct ThreadBrowserParams {
     #[serde(default)]
     pub include_session_ids: Vec<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub recent_days: Option<i64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
@@ -188,7 +239,10 @@ pub struct ThreadBrowserParams {
 #[ts(rename_all = "camelCase")]
 pub struct ThreadBrowserCursor {
     pub cwd: String,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub offset: usize,
@@ -209,7 +263,10 @@ pub struct ThreadBrowserWorkspace {
     pub project: SessionProjectView,
     pub sessions: Vec<SessionSummaryView>,
     #[serde(default)]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub hidden_count: usize,
@@ -238,12 +295,18 @@ pub struct ThreadDeleteResult {
 pub struct ThreadTraceParams {
     pub thread_id: String,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub after_seq: Option<u64>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
@@ -260,7 +323,10 @@ pub struct ThreadTraceResult {
     pub warnings: Vec<String>,
     pub truncated: bool,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub next_after_seq: Option<u64>,
@@ -274,7 +340,10 @@ pub struct CompletionListParams {
     #[serde(default)]
     pub thread_id: Option<String>,
     pub text: String,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub cursor: usize,
@@ -284,11 +353,17 @@ pub struct CompletionListParams {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct CompletionReplacement {
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub start: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub end: usize,
@@ -386,7 +461,10 @@ pub struct CommandListItem {
 pub struct CommandListResult {
     pub commands: Vec<CommandListItem>,
     #[serde(default)]
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub hidden_dynamic: usize,
@@ -433,7 +511,10 @@ pub struct SlashSettingsUpdateParams {
     #[serde(default)]
     pub leader_key: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_u64::serialize",
+        deserialize_with = "option_json_safe_u64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub leader_timeout_ms: Option<u64>,
@@ -470,7 +551,10 @@ pub struct SlashSettingsResult {
     pub scope: ModelSettingsScope,
     pub cwd: String,
     pub leader_key: String,
-    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_u64::serialize",
+        deserialize_with = "json_safe_u64::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub leader_timeout_ms: u64,
@@ -686,7 +770,10 @@ pub enum ThreadActionRunResult {
         #[serde(rename = "threadId")]
         thread_id: String,
         interrupted: bool,
-        #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+        #[serde(
+            serialize_with = "json_safe_usize::serialize",
+            deserialize_with = "json_safe_usize::deserialize"
+        )]
         #[schemars(with = "JsonSafeU64")]
         #[ts(type = "number")]
         cleared: usize,
@@ -740,7 +827,9 @@ pub enum ThreadInteractionResponse {
         #[ts(optional)]
         directory: Option<String>,
     },
-    Clarify { answers: Vec<Vec<String>> },
+    Clarify {
+        answers: Vec<Vec<String>>,
+    },
     CancelClarify,
 }
 
@@ -772,7 +861,10 @@ pub struct ThreadHistoryReadParams {
     #[serde(default)]
     pub cursor: Option<String>,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_usize::serialize",
+        deserialize_with = "option_json_safe_usize::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
@@ -805,7 +897,10 @@ pub struct ThreadHistoryDraftReadResult {
     pub thread_id: String,
     pub message_id: String,
     #[serde(default)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub message_seq: Option<i64>,
@@ -888,7 +983,10 @@ pub struct ShellResultPayload {
     pub thread: GatewayThread,
     pub command: String,
     pub outcome: String,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub tool_failures: usize,

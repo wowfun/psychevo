@@ -1,8 +1,59 @@
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::{Error as IoError, ErrorKind};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, UNIX_EPOCH};
+
+use axum::Router;
+use axum::http::HeaderMap;
+use axum::http::header::COOKIE;
+use axum::routing::{get, post};
+use psychevo::Client as FrameworkClient;
+use psychevo::PermissionMode;
+use psychevo::application::GatewayDurability;
+use psychevo::config::McpOAuthCredentialStore;
+#[cfg(not(test))]
+use psychevo::config::SystemMcpOAuthCredentialStore;
+use psychevo::host_paths::normalized_native_path;
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::net::TcpListener;
+use uuid::Uuid;
+
+use crate::composition::GatewayApplication;
+use crate::gateway::Gateway;
+use crate::gateway::activity::GatewayActivity;
+use crate::gateway::activity::{ThreadCallerContext, ThreadSurface, ThreadTurnIntent};
+use crate::gateway_now_ms;
+use psychevo_gateway_protocol::events_transcript::{GatewayEvent, PendingActionView};
+use psychevo_gateway_protocol::source::{GatewayInputPart, GatewaySource, GatewayThreadSelector};
+
+use super::auth_input::{bearer_token, now_ms, session_cookie_value};
+use super::browser_session_store::BrowserSessionStore;
+use super::download_static::{download_session, gateway_fallback, read_media_artifact};
+use super::event_delivery::{ConnectionSender, GatewayEventHub};
+use super::mcp_oauth_store::McpOAuthSessionStore;
+use super::rpc_dispatch::{
+    consume_launch, create_launch, managed_identity, managed_shutdown, readyz,
+    spawn_gateway_live_event_tailer, ws_handler,
+};
+use super::rpc_json::{cwd_source, rpc_notification};
+use super::session_import_application::reconcile_acknowledged_session_deletes;
+use super::terminal::TerminalManager;
+use super::voice::RealtimeSessionState;
+use super::workspace::WorkspaceReviewState;
+use super::workspace_external::WorkspaceExternalState;
+use super::workspace_preview::{
+    WorkspacePreviewLeaseStore, configured_workspace_preview_origins, workspace_preview_resource,
+};
+use super::{automations, channel_runtime, channels, codex_capability_broker, runtime_profiles};
+
 const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(6);
 const SERVER_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GatewayWebServerConfig {
-    pub gateway: Gateway,
+    runtime: GatewayApplication,
     pub home: PathBuf,
     pub cwd: PathBuf,
     pub config_path: Option<PathBuf>,
@@ -17,17 +68,13 @@ pub struct GatewayWebServerConfig {
 }
 
 impl GatewayWebServerConfig {
-    pub fn new(
-        gateway: Gateway,
-        home: PathBuf,
-        cwd: PathBuf,
-        config_path: Option<PathBuf>,
-        inherited_env: BTreeMap<String, String>,
-        static_dir: PathBuf,
-    ) -> Self {
+    pub fn with_static(runtime: GatewayApplication, cwd: PathBuf, static_dir: PathBuf) -> Self {
+        let home = runtime.home().clone();
+        let config_path = runtime.config_path().cloned();
+        let inherited_env = runtime.inherited_env().clone();
         let workspace_preview_origins = configured_workspace_preview_origins(&inherited_env);
         Self {
-            gateway,
+            runtime,
             home,
             cwd,
             config_path,
@@ -42,17 +89,13 @@ impl GatewayWebServerConfig {
         }
     }
 
-    pub fn headless(
-        gateway: Gateway,
-        home: PathBuf,
-        cwd: PathBuf,
-        config_path: Option<PathBuf>,
-        inherited_env: BTreeMap<String, String>,
-        token: String,
-    ) -> Self {
+    pub fn headless(runtime: GatewayApplication, cwd: PathBuf, token: String) -> Self {
+        let home = runtime.home().clone();
+        let config_path = runtime.config_path().cloned();
+        let inherited_env = runtime.inherited_env().clone();
         let workspace_preview_origins = configured_workspace_preview_origins(&inherited_env);
         Self {
-            gateway,
+            runtime,
             home,
             cwd,
             config_path,
@@ -71,7 +114,7 @@ impl GatewayWebServerConfig {
 pub struct BoundGatewayWebServer {
     listener: TcpListener,
     app: Router,
-    application: Application,
+    runtime: Arc<GatewayApplication>,
     local_addr: SocketAddr,
     token: String,
     managed_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
@@ -94,17 +137,14 @@ impl BoundGatewayWebServer {
         self.run_with_shutdown_signal(std::future::pending()).await
     }
 
-    pub async fn run_with_shutdown_signal<F>(
-        self,
-        shutdown_signal: F,
-    ) -> psychevo::Result<()>
+    pub async fn run_with_shutdown_signal<F>(self, shutdown_signal: F) -> psychevo::Result<()>
     where
         F: std::future::Future<Output = ()> + Send,
     {
         let Self {
             listener,
             app,
-            application,
+            runtime,
             managed_shutdown_rx,
             ..
         } = self;
@@ -139,19 +179,17 @@ impl BoundGatewayWebServer {
 
         tokio::select! {
             result = &mut server => {
-                let shutdown = shutdown_application_with_deadlines(
-                    &application,
-                    RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
-                ).await;
+                let shutdown = runtime
+                    .shutdown_with_deadline(RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT)
+                    .await;
                 result?;
                 shutdown
             }
             _ = &mut shutdown_signal => {
                 let _ = server_shutdown_tx.send(());
-                let shutdown = shutdown_application_with_deadlines(
-                    &application,
-                    RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
-                ).await;
+                let shutdown = runtime
+                    .shutdown_with_deadline(RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT)
+                    .await;
                 let drain = tokio::time::timeout(SERVER_CONNECTION_DRAIN_TIMEOUT, &mut server).await;
                 if let Ok(result) = drain {
                     result?;
@@ -159,35 +197,6 @@ impl BoundGatewayWebServer {
                 shutdown
             }
         }
-    }
-}
-
-async fn shutdown_application_with_deadlines(
-    application: &Application,
-    graceful_timeout: Duration,
-) -> psychevo::Result<()> {
-    let graceful =
-        tokio::time::timeout(graceful_timeout, application.shutdown()).await;
-    let graceful_failure = match graceful {
-        Ok(Ok(report)) => match report.require_clean() {
-            Ok(_) => return Ok(()),
-            Err(error) => format!("graceful runtime shutdown failed: {error}"),
-        },
-        Ok(Err(error)) => format!("graceful runtime shutdown failed: {error}"),
-        Err(_) => format!(
-            "graceful runtime shutdown exceeded {} ms",
-            graceful_timeout.as_millis()
-        ),
-    };
-    match application.shutdown_force().await {
-        Ok(report) => report.require_clean().map(|_| ()).map_err(|error| {
-            Error::Message(format!(
-                "{graceful_failure}; forced runtime shutdown failed: {error}"
-            ))
-        }),
-        Err(error) => Err(Error::Message(format!(
-            "{graceful_failure}; forced runtime shutdown failed: {error}"
-        ))),
     }
 }
 
@@ -202,11 +211,8 @@ pub async fn bind_gateway_web_server(
     }
     let managed = config.managed_instance_id.is_some();
     let (managed_shutdown_tx, managed_shutdown_rx) = tokio::sync::watch::channel(false);
-    let state = WebState::new_with_managed_shutdown(
-        config,
-        managed.then_some(managed_shutdown_tx),
-    );
-    let application = state.inner.application.clone();
+    let state = WebState::new_with_managed_shutdown(config, managed.then_some(managed_shutdown_tx));
+    let runtime = state.inner.runtime.clone();
     spawn_gateway_live_event_tailer(state.clone());
     let mut app = Router::new()
         .route("/readyz", get(readyz))
@@ -234,7 +240,7 @@ pub async fn bind_gateway_web_server(
     Ok(BoundGatewayWebServer {
         listener,
         app,
-        application,
+        runtime,
         local_addr,
         token,
         managed_shutdown_rx: managed.then_some(managed_shutdown_rx),
@@ -278,7 +284,7 @@ fn write_managed_state(
     config: &GatewayWebServerConfig,
 ) -> psychevo::Result<()> {
     let executable = executable_fingerprint(&std::env::current_exe()?)?;
-    let state = wire::ManagedServerState {
+    let state = wire::agents_backend_rpc::ManagedServerState {
         instance_id: config.managed_instance_id.clone(),
         pid: std::process::id(),
         base_url: format!("http://{local_addr}"),
@@ -298,7 +304,7 @@ fn write_managed_state(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    psychevo::__product::platform::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
+    psychevo::host_process::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
     Ok(())
 }
 
@@ -344,44 +350,45 @@ fn executable_inode(_metadata: &std::fs::Metadata) -> Option<u64> {
 }
 
 #[derive(Clone)]
-struct WebState {
-    inner: Arc<WebStateInner>,
+pub(super) struct WebState {
+    pub(super) inner: Arc<WebStateInner>,
 }
 
-struct WebStateInner {
-    gateway: Gateway,
-    application: Application,
-    framework: FrameworkClient,
-    state: StateRuntime,
-    event_hub: GatewayEventHub,
-    home: PathBuf,
-    cwd: PathBuf,
-    config_path: Option<PathBuf>,
-    inherited_env: BTreeMap<String, String>,
-    static_dir: Option<PathBuf>,
-    token: String,
-    managed_instance_id: Option<String>,
-    managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
-    source: GatewaySource,
-    launches: Mutex<HashMap<String, LaunchEntry>>,
-    browser_sessions: Mutex<BrowserSessionStore>,
-    terminals: TerminalManager,
-    review: WorkspaceReviewState,
-    workspace_external: WorkspaceExternalState,
-    workspace_preview: WorkspacePreviewLeaseStore,
-    workspace_preview_origins: BTreeSet<String>,
-    pending_actions: Mutex<HashMap<String, PendingActionView>>,
-    wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
-    mcp_oauth_sessions: Arc<Mutex<McpOAuthSessionStore>>,
-    voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
-    realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
-    runnable_target_catalog_generation: std::sync::atomic::AtomicU64,
-    runnable_target_catalogs:
+pub(super) struct WebStateInner {
+    pub(super) runtime: Arc<GatewayApplication>,
+    pub(super) gateway: Gateway,
+    pub(super) framework: FrameworkClient,
+    pub(super) durability: GatewayDurability,
+    pub(super) event_hub: GatewayEventHub,
+    pub(super) home: PathBuf,
+    pub(super) cwd: PathBuf,
+    pub(super) config_path: Option<PathBuf>,
+    pub(super) inherited_env: BTreeMap<String, String>,
+    pub(super) static_dir: Option<PathBuf>,
+    pub(super) token: String,
+    pub(super) managed_instance_id: Option<String>,
+    pub(super) managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub(super) source: GatewaySource,
+    pub(super) launches: Mutex<HashMap<String, LaunchEntry>>,
+    pub(super) browser_sessions: Mutex<BrowserSessionStore>,
+    pub(super) terminals: TerminalManager,
+    pub(super) review: WorkspaceReviewState,
+    pub(super) workspace_external: WorkspaceExternalState,
+    pub(super) workspace_preview: WorkspacePreviewLeaseStore,
+    pub(super) workspace_preview_origins: BTreeSet<String>,
+    pub(super) pending_actions: Mutex<HashMap<String, PendingActionView>>,
+    pub(super) wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
+    pub(super) mcp_oauth_sessions: Arc<Mutex<McpOAuthSessionStore>>,
+    pub(super) mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
+    pub(super) voice_policies: Mutex<HashMap<String, wire::voice::VoicePolicyMode>>,
+    pub(super) realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
+    pub(super) runnable_target_catalog_generation: std::sync::atomic::AtomicU64,
+    pub(super) runnable_target_catalogs:
         Mutex<BTreeMap<PathBuf, (u64, Arc<runtime_profiles::RunnableTargetCatalog>)>>,
-    agent_session_imports: Mutex<AgentSessionImportRegistry>,
-    channel_runtime: channel_runtime::ChannelRuntimeState,
-    codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
-    codex_elicitations:
+    pub(super) agent_session_imports: Mutex<AgentSessionImportRegistry>,
+    pub(super) channel_runtime: channel_runtime::ChannelRuntimeState,
+    pub(super) codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
+    pub(super) codex_elicitations:
         Mutex<HashMap<String, codex_capability_broker::PendingCodexElicitation>>,
 }
 
@@ -389,32 +396,33 @@ const AGENT_SESSION_IMPORT_TTL_MS: i64 = 10 * 60 * 1_000;
 const MAX_AGENT_SESSION_IMPORT_HANDLES: usize = 2_048;
 
 #[derive(Debug, Clone)]
-struct AgentSessionImportCandidate {
-    native_session_id: String,
-    runtime_profile_ref: String,
-    cwd: PathBuf,
-    title: Option<String>,
-    expires_at_ms: i64,
+pub(super) struct AgentSessionImportCandidate {
+    pub(super) native_session_id: String,
+    pub(super) runtime_profile_ref: String,
+    pub(super) cwd: PathBuf,
+    pub(super) title: Option<String>,
+    pub(super) expires_at_ms: i64,
 }
 
 #[derive(Debug, Clone)]
-struct AgentSessionImportCursor {
-    cursor: String,
-    runtime_profile_ref: String,
-    expires_at_ms: i64,
+pub(super) struct AgentSessionImportCursor {
+    pub(super) cursor: String,
+    pub(super) runtime_profile_ref: String,
+    pub(super) expires_at_ms: i64,
 }
 
 #[derive(Debug, Default)]
-struct AgentSessionImportRegistry {
-    candidates: HashMap<String, AgentSessionImportCandidate>,
-    cursors: HashMap<String, AgentSessionImportCursor>,
+pub(super) struct AgentSessionImportRegistry {
+    pub(super) candidates: HashMap<String, AgentSessionImportCandidate>,
+    pub(super) cursors: HashMap<String, AgentSessionImportCursor>,
 }
 
 impl AgentSessionImportRegistry {
-    fn retain_live(&mut self, now_ms: i64) {
+    pub(super) fn retain_live(&mut self, now_ms: i64) {
         self.candidates
             .retain(|_, candidate| candidate.expires_at_ms > now_ms);
-        self.cursors.retain(|_, cursor| cursor.expires_at_ms > now_ms);
+        self.cursors
+            .retain(|_, cursor| cursor.expires_at_ms > now_ms);
         while self.candidates.len() + self.cursors.len() >= MAX_AGENT_SESSION_IMPORT_HANDLES {
             if let Some(key) = self.candidates.keys().next().cloned() {
                 self.candidates.remove(&key);
@@ -426,7 +434,7 @@ impl AgentSessionImportRegistry {
         }
     }
 
-    fn insert_candidate(
+    pub(super) fn insert_candidate(
         &mut self,
         runtime_profile_ref: String,
         cwd: PathBuf,
@@ -449,7 +457,7 @@ impl AgentSessionImportRegistry {
         id
     }
 
-    fn insert_cursor(&mut self, runtime_profile_ref: String, cursor: String) -> String {
+    pub(super) fn insert_cursor(&mut self, runtime_profile_ref: String, cursor: String) -> String {
         let now_ms = gateway_now_ms();
         self.retain_live(now_ms);
         let id = format!("cursor:{}", Uuid::now_v7());
@@ -466,14 +474,14 @@ impl AgentSessionImportRegistry {
 }
 
 #[derive(Debug, Clone)]
-struct BrowserSession {
-    cwd: PathBuf,
-    source: GatewaySource,
-    external_action_grants: BTreeSet<PathBuf>,
+pub(super) struct BrowserSession {
+    pub(super) cwd: PathBuf,
+    pub(super) source: GatewaySource,
+    pub(super) external_action_grants: BTreeSet<PathBuf>,
 }
 
 impl BrowserSession {
-    fn with_external_action_grant(cwd: PathBuf, source: GatewaySource) -> Self {
+    pub(super) fn with_external_action_grant(cwd: PathBuf, source: GatewaySource) -> Self {
         Self {
             external_action_grants: BTreeSet::from([normalized_native_path(&cwd)]),
             cwd,
@@ -483,31 +491,31 @@ impl BrowserSession {
 }
 
 #[derive(Debug, Clone)]
-struct LaunchEntry {
-    open_token: String,
-    expires_at_ms: i64,
-    cwd: PathBuf,
-    source: GatewaySource,
+pub(super) struct LaunchEntry {
+    pub(super) open_token: String,
+    pub(super) expires_at_ms: i64,
+    pub(super) cwd: PathBuf,
+    pub(super) source: GatewaySource,
 }
 
 #[derive(Debug, Clone)]
-enum AuthContext {
+pub(super) enum AuthContext {
     Bearer,
     Browser { session_id: String },
 }
 
 impl AuthContext {
-    fn is_bearer(&self) -> bool {
+    pub(super) fn is_bearer(&self) -> bool {
         matches!(self, Self::Bearer)
     }
 }
 
-fn merge_framework_activity(
+pub(super) fn merge_framework_activity(
     activity: &mut GatewayActivity,
     running: bool,
     active_turn_id: Option<String>,
     queued_turns: usize,
-    kind: wire::FrameworkTurnKind,
+    kind: wire::events_transcript::FrameworkTurnKind,
 ) {
     activity.running |= running;
     if let Some(turn_id) = active_turn_id {
@@ -515,7 +523,7 @@ fn merge_framework_activity(
         if !activity.activities.iter().any(|candidate| {
             matches!(
                 candidate,
-                wire::ThreadActivityView::FrameworkTurn {
+                wire::events_transcript::ThreadActivityView::FrameworkTurn {
                     turn_id: candidate_turn_id,
                     ..
                 } if candidate_turn_id == &turn_id
@@ -523,7 +531,7 @@ fn merge_framework_activity(
         }) {
             activity.activities.insert(
                 0,
-                wire::ThreadActivityView::FrameworkTurn {
+                wire::events_transcript::ThreadActivityView::FrameworkTurn {
                     activity_id: turn_id.clone(),
                     turn_id,
                     kind,
@@ -537,26 +545,18 @@ fn merge_framework_activity(
 
 impl WebState {
     #[cfg(test)]
-    fn new(config: GatewayWebServerConfig) -> Self {
+    pub(super) fn new(config: GatewayWebServerConfig) -> Self {
         Self::new_with_managed_shutdown(config, None)
     }
 
-    fn new_with_managed_shutdown(
+    pub(super) fn new_with_managed_shutdown(
         config: GatewayWebServerConfig,
         managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Self {
-        let state = config.gateway.state().clone();
-        let application = Application::__from_open_state(
-            config.home.clone(),
-            config.config_path.clone(),
-            state.clone(),
-            Arc::new(GatewayAgentSessionAdapter::new(config.gateway.clone())),
-        );
-        config
-            .gateway
-            .attach_framework_application(application.clone())
-            .expect("Gateway Framework Application must be attached once");
-        let framework = application.client();
+        let runtime = Arc::new(config.runtime);
+        let durability = runtime.application().gateway_durability();
+        let framework = runtime.client().clone();
+        let gateway = runtime.gateway().clone();
         let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
         let codex_capability_broker =
@@ -565,10 +565,10 @@ impl WebState {
             WorkspaceExternalState::production(&config.inherited_env, &config.cwd);
         let web_state = Self {
             inner: Arc::new(WebStateInner {
-                gateway: config.gateway,
-                application,
+                runtime,
+                gateway,
                 framework,
-                state,
+                durability,
                 event_hub: GatewayEventHub::default(),
                 home: config.home,
                 cwd: config.cwd,
@@ -589,6 +589,7 @@ impl WebState {
                 pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 mcp_oauth_sessions: Arc::new(Mutex::new(McpOAuthSessionStore::default())),
+                mcp_oauth_credentials: mcp_oauth_credential_store(),
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
                 runnable_target_catalog_generation: std::sync::atomic::AtomicU64::new(1),
@@ -609,7 +610,7 @@ impl WebState {
         web_state
     }
 
-    fn auth_from_headers(&self, headers: &HeaderMap) -> Option<AuthContext> {
+    pub(super) fn auth_from_headers(&self, headers: &HeaderMap) -> Option<AuthContext> {
         if bearer_token(headers).is_some_and(|token| token == self.inner.token) {
             return Some(AuthContext::Bearer);
         }
@@ -627,22 +628,28 @@ impl WebState {
             })
     }
 
-    fn selector(&self, source: &GatewaySource) -> GatewayThreadSelector {
+    pub(super) fn selector(&self, source: &GatewaySource) -> GatewayThreadSelector {
         GatewayThreadSelector::source(source.source_key())
     }
 
-    async fn activity(&self, source: &GatewaySource, thread_id: Option<&str>) -> GatewayActivity {
+    pub(super) async fn activity(
+        &self,
+        source: &GatewaySource,
+        thread_id: Option<&str>,
+    ) -> GatewayActivity {
         let mut activity = match thread_id {
-            Some(thread_id) => self
-                .inner
-                .gateway
-                .activity_for_selector(GatewayThreadSelector::thread_id(thread_id))
-                .await,
-            None => self
-                .inner
-                .gateway
-                .activity_for_selector(self.selector(source))
-                .await,
+            Some(thread_id) => {
+                self.inner
+                    .gateway
+                    .activity_for_selector(GatewayThreadSelector::thread_id(thread_id))
+                    .await
+            }
+            None => {
+                self.inner
+                    .gateway
+                    .activity_for_selector(self.selector(source))
+                    .await
+            }
         };
         let framework_thread_id = match thread_id {
             Some(thread_id) => Some(thread_id.to_string()),
@@ -657,20 +664,16 @@ impl WebState {
         if let Some(thread_id) = framework_thread_id
             && let Ok(thread) = self.inner.framework.resume_thread(&thread_id).await
         {
-            let framework_activity = thread.__activity();
+            let framework_activity = thread.activity();
             activity.framework_revision = Some(framework_activity.revision.to_string());
-            let kind = self
-                .inner
-                .state
-                .session_summary(&thread_id)
+            let kind = thread
+                .summary()
                 .await
                 .ok()
-                .flatten()
-                .filter(|summary| summary.parent_session_id.is_some())
-                .map_or(
-                    wire::FrameworkTurnKind::Root,
-                    |_| wire::FrameworkTurnKind::DelegatedChild,
-                );
+                .filter(|summary| summary.parent_thread_id.is_some())
+                .map_or(wire::events_transcript::FrameworkTurnKind::Root, |_| {
+                    wire::events_transcript::FrameworkTurnKind::DelegatedChild
+                });
             merge_framework_activity(
                 &mut activity,
                 framework_activity.running,
@@ -682,7 +685,7 @@ impl WebState {
             activity.framework_revision = Some(
                 self.inner
                     .framework
-                    .__activity_snapshot()
+                    .activity_snapshot()
                     .revision
                     .to_string(),
             );
@@ -690,26 +693,32 @@ impl WebState {
         activity
     }
 
-    async fn session_activity_snapshot(
+    pub(super) async fn session_activity_snapshot(
         &self,
     ) -> psychevo::Result<(String, BTreeMap<String, GatewayActivity>)> {
         let mut snapshot = self.inner.gateway.session_activity_snapshot().await?;
-        let framework_snapshot = self.inner.framework.__activity_snapshot();
+        let framework_snapshot = self.inner.framework.activity_snapshot();
         let revision = framework_snapshot.revision.to_string();
+        let framework_thread_ids = framework_snapshot
+            .threads
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let summaries = self
+            .inner
+            .framework
+            .thread_summaries(&framework_thread_ids)
+            .await?;
         for activity in snapshot.values_mut() {
             activity.framework_revision = Some(revision.clone());
         }
         for (thread_id, framework_activity) in framework_snapshot.threads {
-            let kind = self
-                .inner
-                .state
-                .session_summary(&thread_id)
-                .await?
-                .filter(|summary| summary.parent_session_id.is_some())
-                .map_or(
-                    wire::FrameworkTurnKind::Root,
-                    |_| wire::FrameworkTurnKind::DelegatedChild,
-                );
+            let kind = summaries
+                .get(&thread_id)
+                .filter(|summary| summary.parent_thread_id.is_some())
+                .map_or(wire::events_transcript::FrameworkTurnKind::Root, |_| {
+                    wire::events_transcript::FrameworkTurnKind::DelegatedChild
+                });
             let activity = snapshot.entry(thread_id).or_default();
             activity.framework_revision = Some(revision.clone());
             merge_framework_activity(
@@ -723,70 +732,23 @@ impl WebState {
         Ok((revision, snapshot))
     }
 
-    fn run_options(&self, cwd: PathBuf, thread_id: Option<String>) -> RunOptions {
-        let mut inherited_env = self.inner.inherited_env.clone();
-        inherited_env
-            .entry("PSYCHEVO_HOME".to_string())
-            .or_insert_with(|| self.inner.home.to_string_lossy().into_owned());
-        RunOptions {
-            state: self.inner.state.clone(),
-            cwd: cwd.clone(),
-            snapshot_root: Some(self.inner.home.join("snapshots")),
-            session: thread_id.clone(),
-            continue_latest: false,
-            prompt: String::new(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: true,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: self.inner.config_path.clone(),
-            project_context_override: None,
-            sandbox_override: None,
-            model: None,
-            reasoning_effort: None,
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: BTreeMap::new(),
-            include_reasoning: false,
-            mode: RunMode::Default,
-            permission_mode: Some(PermissionMode::Default),
-            approval_handler: None,
-            clarify_enabled: true,
-            inherited_env: Some(inherited_env),
-            agent: None,
-            external_agent_delegate: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: automations::automation_runtime_tools(
-                self.clone(),
-                cwd.clone(),
-                thread_id.clone(),
-            ),
-        }
-    }
-
-    fn thread_turn_request(
+    pub(super) fn thread_turn_request(
         &self,
         cwd: PathBuf,
         thread_id: Option<String>,
         input: Vec<GatewayInputPart>,
-    ) -> (crate::ThreadCallerContext, crate::ThreadTurnIntent) {
+    ) -> (ThreadCallerContext, ThreadTurnIntent) {
         let mut inherited_env = self.inner.inherited_env.clone();
         inherited_env
             .entry("PSYCHEVO_HOME".to_string())
             .or_insert_with(|| self.inner.home.to_string_lossy().into_owned());
-        let mut caller = crate::ThreadCallerContext::new(crate::ThreadSurface::Web, cwd.clone());
+        let mut caller = ThreadCallerContext::new(ThreadSurface::Web, cwd.clone());
         caller.set_runtime_tools(automations::automation_runtime_tools(
             self.clone(),
             cwd,
             thread_id.clone(),
         ));
-        let mut intent = crate::ThreadTurnIntent::new(input);
+        let mut intent = ThreadTurnIntent::new(input);
         intent.thread_id = thread_id;
         intent.policy.snapshot_root = Some(self.inner.home.join("snapshots"));
         intent.policy.extract_prompt_image_sources = true;
@@ -798,11 +760,15 @@ impl WebState {
     }
 
     #[cfg(test)]
-    fn record_event(&self, event: &GatewayEvent) {
+    pub(super) fn record_event(&self, event: &GatewayEvent) {
         self.record_event_with_context(event, PendingInteractionContext::default());
     }
 
-    fn record_event_with_context(&self, event: &GatewayEvent, context: PendingInteractionContext) {
+    pub(super) fn record_event_with_context(
+        &self,
+        event: &GatewayEvent,
+        context: PendingInteractionContext,
+    ) {
         match event {
             GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
                 self.inner
@@ -831,7 +797,7 @@ impl WebState {
         }
     }
 
-    fn publish_gateway_event_with_context(
+    pub(super) fn publish_gateway_event_with_context(
         &self,
         event: GatewayEvent,
         context: PendingInteractionContext,
@@ -840,7 +806,7 @@ impl WebState {
         self.publish_gateway_event_for_connection(event, context, review_cwd, None);
     }
 
-    fn publish_gateway_event_for_connection(
+    pub(super) fn publish_gateway_event_for_connection(
         &self,
         event: GatewayEvent,
         context: PendingInteractionContext,
@@ -858,39 +824,7 @@ impl WebState {
         self.inner.event_hub.publish(&display_event);
     }
 
-    async fn pending_context_for_live_event(
-        &self,
-        record: &psychevo::__product::persistence::GatewayLiveEventRecord,
-    ) -> PendingInteractionContext {
-        let mut context = PendingInteractionContext {
-            thread_id: record.thread_id.clone(),
-            turn_id: record.turn_id.clone(),
-            activity_id: record.activity_id.clone(),
-            source_key: None,
-            owner_id: record.owner_id.clone(),
-            lease_expires_at_ms: None,
-        };
-        if let Some(activity_id) = &record.activity_id
-            && let Ok(Some(activity)) = self.inner.state.gateway_activity(activity_id).await
-        {
-            if context.thread_id.is_none() {
-                context.thread_id = activity.thread_id;
-            }
-            if context.turn_id.is_none() {
-                context.turn_id = activity.turn_id;
-            }
-            if context.owner_id.is_none() {
-                context.owner_id = Some(activity.owner_id);
-            }
-            if context.source_key.is_none() {
-                context.source_key = activity.source_key;
-            }
-            context.lease_expires_at_ms = Some(activity.lease_expires_at_ms);
-        }
-        context
-    }
-
-    fn pending_context_for_selector(
+    pub(super) fn pending_context_for_selector(
         &self,
         selector: &GatewayThreadSelector,
         thread_id: Option<&str>,
@@ -912,7 +846,7 @@ impl WebState {
         }
     }
 
-    fn event_with_pending_context(
+    pub(super) fn event_with_pending_context(
         &self,
         event: GatewayEvent,
         context: &PendingInteractionContext,
@@ -928,7 +862,7 @@ impl WebState {
         }
     }
 
-    fn remove_pending_permission(&self, request_id: &str) {
+    pub(super) fn remove_pending_permission(&self, request_id: &str) {
         self.inner
             .pending_actions
             .lock()
@@ -936,7 +870,11 @@ impl WebState {
             .remove(request_id);
     }
 
-    fn remove_pending_actions_for_completed_turn(&self, thread_id: Option<&str>, turn_id: &str) {
+    pub(super) fn remove_pending_actions_for_completed_turn(
+        &self,
+        thread_id: Option<&str>,
+        turn_id: &str,
+    ) {
         self.inner
             .pending_actions
             .lock()
@@ -954,19 +892,79 @@ impl WebState {
             });
     }
 
-    fn record_review_event(&self, event: &GatewayEvent, cwd: &Path) {
+    pub(super) fn record_review_event(&self, event: &GatewayEvent, cwd: &Path) {
         self.inner.review.observe_event(event, cwd);
     }
 }
 
+#[cfg(not(test))]
+fn mcp_oauth_credential_store() -> Arc<dyn McpOAuthCredentialStore> {
+    Arc::new(SystemMcpOAuthCredentialStore)
+}
+
+#[cfg(test)]
+fn mcp_oauth_credential_store() -> Arc<dyn McpOAuthCredentialStore> {
+    Arc::new(TestMcpOAuthCredentialStore::default())
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestMcpOAuthCredentialStore {
+    tokens: Mutex<HashMap<String, String>>,
+}
+
+#[cfg(test)]
+impl McpOAuthCredentialStore for TestMcpOAuthCredentialStore {
+    fn load_access_token(&self, account: &str) -> psychevo::Result<Option<String>> {
+        Ok(self
+            .tokens
+            .lock()
+            .expect("test MCP OAuth credentials poisoned")
+            .get(account)
+            .cloned())
+    }
+
+    fn save_access_token(&self, account: &str, access_token: &str) -> psychevo::Result<()> {
+        self.tokens
+            .lock()
+            .expect("test MCP OAuth credentials poisoned")
+            .insert(account.to_string(), access_token.to_string());
+        Ok(())
+    }
+
+    fn clear_access_token(&self, account: &str) -> psychevo::Result<bool> {
+        Ok(self
+            .tokens
+            .lock()
+            .expect("test MCP OAuth credentials poisoned")
+            .remove(account)
+            .is_some())
+    }
+}
+
 #[derive(Debug, Clone, Default)]
-struct PendingInteractionContext {
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-    activity_id: Option<String>,
-    source_key: Option<String>,
-    owner_id: Option<String>,
-    lease_expires_at_ms: Option<i64>,
+pub(super) struct PendingInteractionContext {
+    pub(super) thread_id: Option<String>,
+    pub(super) turn_id: Option<String>,
+    pub(super) activity_id: Option<String>,
+    pub(super) source_key: Option<String>,
+    pub(super) owner_id: Option<String>,
+    pub(super) lease_expires_at_ms: Option<i64>,
+}
+
+impl From<crate::gateway::live_projection::GatewayLiveProjectionContext>
+    for PendingInteractionContext
+{
+    fn from(context: crate::gateway::live_projection::GatewayLiveProjectionContext) -> Self {
+        Self {
+            thread_id: context.thread_id,
+            turn_id: context.turn_id,
+            activity_id: context.activity_id,
+            source_key: context.source_key,
+            owner_id: context.owner_id,
+            lease_expires_at_ms: context.lease_expires_at_ms,
+        }
+    }
 }
 
 fn pending_action_with_context(

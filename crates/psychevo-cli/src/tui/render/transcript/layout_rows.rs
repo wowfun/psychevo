@@ -1,7 +1,23 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    FullscreenUi, ScreenLine, SelectableRegion, SelectionState, ToolRowPhase, TranscriptHitTarget,
+    TranscriptKind, TranscriptLayoutBlock, TranscriptLayoutBlockKey, TranscriptLayoutCache,
+    TranscriptLayoutRowKey, TranscriptRenderBlock, TranscriptRow, active_tool_elapsed,
+    activity_spinner_frame, answer_lines, append_expandable_evidence_body, cell_overlaps_range,
+    default_title, focus_marker_style, is_agent_tool_row, label_style, ledger_title_line,
+    ledger_title_right_text, ordered_selection, prompt_lines, row_expand_hint, row_visible,
+    style_for_body, text_selection_style, thinking_lines, tool_display_title, tool_elapsed_label,
+    tool_lines, tool_title_detail, truncate_display_width, tui_theme, user_shell_lines,
+    wrapped_line_count,
+};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, Paragraph, Wrap},
+};
+use std::path::Path;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(crate) fn transcript_selectable_area(area: Rect) -> Rect {
     Rect {

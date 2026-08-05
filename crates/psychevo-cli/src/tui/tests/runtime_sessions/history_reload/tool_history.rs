@@ -1,11 +1,27 @@
+use std::time::Duration;
+
+use psychevo::application::{
+    GatewayActivityClaimInput, GatewayActivityKind, GatewayControlCommandKind,
+    GatewayLiveSnapshotInput,
+};
+use psychevo_gateway_protocol::source::{GatewayTurn, GatewayTurnStatus};
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+use crate::tui::tests::fixtures::{test_app, test_context_snapshot, test_shell_running_control};
+use crate::tui::tests::{insert_tui_message, start_thread_fixture};
+use crate::tui::{
+    FullscreenUi, GatewayEvent, RunningTask, RunningTurn, RunningTurnEvents, SlashCommand,
+    ThreadUsageSummary, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    TranscriptEntry, TranscriptEntryRole, TranscriptKind, TuiApp, TurnResult,
+    bottom_status_context_for_width, tool_id_key, wall_now_ms,
+};
+
 #[tokio::test]
 pub(crate) async fn load_history_omits_bottom_context_usage_without_context_limit() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -33,7 +49,9 @@ pub(crate) async fn load_history_omits_bottom_context_usage_without_context_limi
     .expect("insert assistant");
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     assert_eq!(ui.sidebar_tokens, Some(9));
     assert_eq!(ui.sidebar_context_limit, None);
@@ -49,7 +67,7 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
     ui.sidebar_tokens = Some(9);
     ui.sidebar_context_limit = Some(64_000);
     ui.last_context_snapshot = Some(test_context_snapshot());
-    ui.session_usage_summary = Some(SessionUsageSummary {
+    ui.session_usage_summary = Some(ThreadUsageSummary {
         session_id: "session".to_string(),
         provider: "mock".to_string(),
         model: "mock-model".to_string(),
@@ -91,16 +109,15 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
 pub(crate) async fn load_history_marks_orphan_tool_call_interrupted_but_merges_result() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
 
@@ -140,7 +157,9 @@ pub(crate) async fn load_history_marks_orphan_tool_call_interrupted_but_merges_r
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     let row = ui
         .transcript
         .iter()
@@ -174,7 +193,9 @@ pub(crate) async fn load_history_marks_orphan_tool_call_interrupted_but_merges_r
         }),
     );
     ui.clear_transcript();
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     let rows = ui
         .transcript
         .iter()
@@ -192,16 +213,15 @@ pub(crate) async fn load_history_marks_orphan_tool_call_interrupted_but_merges_r
 pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_owner() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -235,20 +255,20 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
 
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    let (control, _) = run_control();
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: Some(session_id.clone()),
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     let row = ui
         .transcript
         .iter()
@@ -271,23 +291,24 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
 pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_foreign_gateway_activity() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "web",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "web",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
+    claim_foreign_gateway_activity(&app, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let row = ui
         .transcript
@@ -310,23 +331,24 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_foreign_
 pub(crate) async fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "web",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "web",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() - 1, 91_000).await;
+    claim_foreign_gateway_activity(&app, &conn, &session_id, wall_now_ms() - 1, 91_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let row = ui
         .transcript
@@ -345,33 +367,38 @@ pub(crate) async fn load_history_keeps_stale_foreign_gateway_activity_interrupte
 pub(crate) async fn current_foreign_gateway_activity_interrupt_routes_control_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "web",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "web",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 1_000).await;
+    claim_foreign_gateway_activity(&app, &conn, &session_id, wall_now_ms() + 60_000, 1_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     assert!(app.request_current_session_interrupt(&mut ui).await);
     assert!(ui.interrupt_requested);
-    let commands = store
-        .pending_gateway_control_commands("gateway:web:test", 10)
-        .await.expect("pending commands");
+    let commands = app
+        .runtime
+        .application()
+        .gateway_durability()
+        .claim_pending_gateway_control_commands("gateway:web:test", 10)
+        .await
+        .expect("pending commands");
     assert!(
         commands
             .iter()
-            .any(|command| command.command_kind == "interrupt"),
+            .any(|command| command.command_kind == GatewayControlCommandKind::Interrupt),
         "{commands:?}"
     );
 }
@@ -380,25 +407,23 @@ pub(crate) async fn current_foreign_gateway_activity_interrupt_routes_control_co
 pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active_tool_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "web",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
-    let unrelated_session = store
-        .create_session_with_metadata(&app.cwd, "web", "mock-model", "mock", None)
-        .await.expect("unrelated session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "web",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
+    let unrelated_session =
+        start_thread_fixture(&app, &app.cwd, "web", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
+    claim_foreign_gateway_activity(&app, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
     append_foreign_gateway_event(
-        &store,
+        &app,
         &session_id,
         GatewayEvent::EntryUpdated {
             turn_id: "turn-web".to_string(),
@@ -410,9 +435,10 @@ pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active
                 "writing report",
             ),
         },
-    ).await;
+    )
+    .await;
     append_foreign_gateway_event(
-        &store,
+        &app,
         &unrelated_session,
         GatewayEvent::EntryUpdated {
             turn_id: "turn-other".to_string(),
@@ -424,10 +450,13 @@ pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active
                 "unrelated update",
             ),
         },
-    ).await;
+    )
+    .await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let rows = ui
         .transcript
@@ -446,7 +475,7 @@ pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active
     );
 
     append_foreign_gateway_event(
-        &store,
+        &app,
         &session_id,
         GatewayEvent::TurnCompleted {
             thread_id: Some(session_id.clone()),
@@ -462,10 +491,12 @@ pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active
             },
             committed_entries: vec![gateway_answer_entry(&session_id, "turn-web", 2, "done")],
         },
-    ).await;
+    )
+    .await;
     assert!(
         app.drain_foreign_gateway_live_events(&mut ui)
-            .await.expect("drain foreign events")
+            .await
+            .expect("drain foreign events")
     );
     assert!(!ui.status_has_running(Some(&session_id)));
     assert!(
@@ -490,16 +521,15 @@ pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active
 pub(crate) async fn load_history_drops_stale_foreign_gateway_pending_for_completed_tool() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "web",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "web",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
@@ -518,9 +548,9 @@ pub(crate) async fn load_history_drops_stale_foreign_gateway_pending_for_complet
             "timestamp_ms": 2
         }),
     );
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
+    claim_foreign_gateway_activity(&app, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
     append_foreign_gateway_event(
-        &store,
+        &app,
         &session_id,
         GatewayEvent::EntryUpdated {
             turn_id: "turn-web".to_string(),
@@ -532,10 +562,13 @@ pub(crate) async fn load_history_drops_stale_foreign_gateway_pending_for_complet
                 "",
             ),
         },
-    ).await;
+    )
+    .await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let rows = ui
         .transcript
@@ -551,16 +584,15 @@ pub(crate) async fn load_history_drops_stale_foreign_gateway_pending_for_complet
 pub(crate) async fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mimo-v2.5-pro",
-            "xiaomi-token-plan",
-            None,
-        )
-        .await.expect("session");
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mimo-v2.5-pro",
+        "xiaomi-token-plan",
+        None,
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
 
@@ -597,7 +629,9 @@ pub(crate) async fn load_history_does_not_rehydrate_aborted_tool_calls_as_runnin
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     let row = ui
         .transcript
         .iter()
@@ -619,10 +653,7 @@ pub(crate) async fn load_history_does_not_rehydrate_aborted_tool_calls_as_runnin
 pub(crate) async fn message_history_orders_reasoning_before_assistant_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -645,7 +676,9 @@ pub(crate) async fn message_history_orders_reasoning_before_assistant_text() {
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let thinking = ui
         .transcript
@@ -664,10 +697,7 @@ pub(crate) async fn message_history_orders_reasoning_before_assistant_text() {
 pub(crate) async fn message_history_orders_assistant_preamble_before_tool_after_reload() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await.expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -730,7 +760,9 @@ pub(crate) async fn message_history_orders_assistant_preamble_before_tool_after_
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).await.expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let preamble = ui
         .transcript
@@ -798,19 +830,21 @@ fn insert_unfinished_write_call(conn: &rusqlite::Connection, session_id: &str) {
 }
 
 async fn claim_foreign_gateway_activity(
-    store: &StateRuntime,
+    app: &TuiApp,
     conn: &rusqlite::Connection,
     session_id: &str,
     lease_expires_at_ms: i64,
     started_elapsed_ms: i64,
 ) {
-    store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    app.runtime
+        .application()
+        .gateway_durability()
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "activity-web",
             thread_id: Some(session_id),
             source_key: Some("source:web:test"),
             turn_id: Some("turn-web"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "gateway:web:test",
             owner_surface: Some("web"),
             lease_expires_at_ms,
@@ -818,7 +852,8 @@ async fn claim_foreign_gateway_activity(
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("claim foreign activity");
+        .await
+        .expect("claim foreign activity");
     conn.execute(
         "UPDATE gateway_activities SET started_at_ms = ?2 WHERE activity_id = ?1",
         rusqlite::params![
@@ -829,44 +864,46 @@ async fn claim_foreign_gateway_activity(
     .expect("set activity start");
 }
 
-async fn append_foreign_gateway_event(
-    store: &StateRuntime,
-    session_id: &str,
-    event: GatewayEvent,
-) {
+async fn append_foreign_gateway_event(app: &TuiApp, session_id: &str, event: GatewayEvent) {
+    let durability = app.runtime.application().gateway_durability();
     match &event {
         GatewayEvent::EntryStarted { turn_id, entry }
         | GatewayEvent::EntryUpdated { turn_id, entry }
         | GatewayEvent::EntryCompleted { turn_id, entry } => {
-            let event_kind = match event {
+            let event_kind = match &event {
                 GatewayEvent::EntryStarted { .. } => "entryStarted",
                 GatewayEvent::EntryUpdated { .. } => "entryUpdated",
                 GatewayEvent::EntryCompleted { .. } => "entryCompleted",
                 _ => unreachable!(),
             };
-            store
-                .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
-                    snapshot_key: &format!("activity-web:{turn_id}:{}", entry.id),
-                    activity_id: Some("activity-web"),
-                    owner_id: Some("gateway:web:test"),
-                    thread_id: Some(session_id),
-                    turn_id: Some(turn_id),
-                    event_kind,
-                    event: serde_json::to_value(&event).expect("gateway event value"),
-                })
-                .await.expect("upsert gateway live snapshot");
+            let snapshot_key = format!("activity-web:{turn_id}:{}", entry.id);
+            let snapshot = GatewayLiveSnapshotInput {
+                snapshot_key: &snapshot_key,
+                activity_id: Some("activity-web"),
+                owner_id: Some("gateway:web:test"),
+                thread_id: Some(session_id),
+                turn_id: Some(turn_id),
+                event_kind,
+                event: serde_json::to_value(&event).expect("gateway event value"),
+            };
+            durability
+                .upsert_gateway_live_snapshots(&[snapshot])
+                .await
+                .expect("upsert gateway live snapshot");
         }
         _ => {
             let event = serde_json::to_value(event).expect("gateway event value");
-            store
+            durability
                 .append_gateway_live_event(
                     Some("activity-web"),
                     Some("gateway:web:test"),
                     Some(session_id),
                     Some("turn-web"),
+                    None,
                     &event,
                 )
-                .await.expect("append gateway live event");
+                .await
+                .expect("append gateway live event");
         }
     }
 }

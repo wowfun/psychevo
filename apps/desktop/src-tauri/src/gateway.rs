@@ -161,7 +161,6 @@ pub(crate) async fn gateway_connect(
     if let Some(replaced) = replaced {
         let _ = replaced.cancel.send(true);
     }
-    #[cfg(feature = "wdio-test")]
     crate::startup_trace::record_bridge_connected(&connection_id);
 
     let writer_app = app.clone();
@@ -439,14 +438,12 @@ async fn resolve_managed_gateway(
     let mut managed_guard = resolver.managed.lock().await;
     if let Some(managed) = managed_guard.as_ref() {
         if ensure_managed_gateway_healthy(managed).await.is_ok() {
-            #[cfg(feature = "wdio-test")]
             crate::startup_trace::record_managed_gateway_ready();
             return Ok(managed.clone());
         }
         *managed_guard = None;
     }
     let managed = resolve_managed_gateway_uncached().await?;
-    #[cfg(feature = "wdio-test")]
     crate::startup_trace::record_managed_gateway_ready();
     *managed_guard = Some(managed.clone());
     Ok(managed)

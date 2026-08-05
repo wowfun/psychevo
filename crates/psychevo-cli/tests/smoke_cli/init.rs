@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::{assert_starter_config_template, pevo_cmd};
+use rusqlite::Connection;
+use serde_json::{Value, json};
+use std::path::Path;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::thread;
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn cli_help_lists_aligned_command_descriptions() {
     let temp = tempdir().expect("temp");
@@ -740,6 +746,61 @@ pub(crate) fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct AppliedSchema {
+    user_version: i64,
+    migrations: Vec<(i64, Vec<u8>)>,
+}
+
+fn applied_schema(database_path: &Path) -> AppliedSchema {
+    let conn = Connection::open(database_path).expect("db");
+    let user_version = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("user_version");
+    let mut statement = conn
+        .prepare("SELECT version, success, checksum FROM _sqlx_migrations ORDER BY version ASC")
+        .expect("migration query");
+    let migrations = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, Vec<u8>>(2)?,
+            ))
+        })
+        .expect("migration rows")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("migration records");
+
+    assert!(user_version > 0, "initialized schema must be versioned");
+    assert!(
+        !migrations.is_empty(),
+        "initialized schema must be migrated"
+    );
+    assert!(
+        migrations.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "migration versions must be unique and strictly ordered"
+    );
+    assert!(
+        migrations.iter().all(|(_, success, _)| *success),
+        "every recorded migration must have committed successfully"
+    );
+    assert!(
+        migrations
+            .iter()
+            .all(|(_, _, checksum)| !checksum.is_empty()),
+        "every recorded migration must retain its checksum"
+    );
+
+    AppliedSchema {
+        user_version,
+        migrations: migrations
+            .into_iter()
+            .map(|(version, _, checksum)| (version, checksum))
+            .collect(),
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn cli_init_creates_home_tree_and_is_idempotent() {
     let temp = tempdir().expect("temp");
@@ -769,11 +830,7 @@ pub(crate) async fn cli_init_creates_home_tree_and_is_idempotent() {
     assert!(env_template.contains("DEEPSEEK_API_KEY=sk-..."));
     assert!(!stdout.contains("sk-"));
 
-    let conn = Connection::open(home.join("state.db")).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("user_version");
-    assert_eq!(user_version, 29);
+    let initialized_schema = applied_schema(&home.join("state.db"));
 
     std::fs::write(home.join("config.toml"), "custom config").expect("custom config");
     std::fs::write(home.join(".env"), "CUSTOM=1\n").expect("custom env");
@@ -791,6 +848,11 @@ pub(crate) async fn cli_init_creates_home_tree_and_is_idempotent() {
         std::fs::read_to_string(home.join(".env")).expect("env"),
         "CUSTOM=1\n"
     );
+    assert_eq!(
+        applied_schema(&home.join("state.db")),
+        initialized_schema,
+        "idempotent init must not replay or replace applied migrations"
+    );
 }
 
 #[tokio::test]
@@ -803,6 +865,8 @@ pub(crate) async fn cli_init_reset_state_backs_up_existing_sqlite_files() {
         .output()
         .expect("pevo init");
     assert!(init.status.success());
+    let initialized_schema = applied_schema(&home.join("state.db"));
+    let initialized_database = std::fs::read(home.join("state.db")).expect("initialized db");
     std::fs::write(home.join("state.db-wal"), "wal").expect("wal");
     std::fs::write(home.join("state.db-shm"), "shm").expect("shm");
 
@@ -831,6 +895,11 @@ pub(crate) async fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let backup = backups[0].path();
     assert!(backup.join("state.db").exists());
     assert_eq!(
+        std::fs::read(backup.join("state.db")).expect("backup db"),
+        initialized_database,
+        "reset must preserve the exact prior database"
+    );
+    assert_eq!(
         std::fs::read_to_string(backup.join("state.db-wal")).expect("wal"),
         "wal"
     );
@@ -839,9 +908,9 @@ pub(crate) async fn cli_init_reset_state_backs_up_existing_sqlite_files() {
         "shm"
     );
 
-    let conn = Connection::open(home.join("state.db")).expect("db");
-    let user_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("user_version");
-    assert_eq!(user_version, 29);
+    assert_eq!(
+        applied_schema(&home.join("state.db")),
+        initialized_schema,
+        "reset must rebuild the same complete migration set"
+    );
 }

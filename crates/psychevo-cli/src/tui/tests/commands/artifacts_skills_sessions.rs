@@ -1,12 +1,25 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    attach_pending_framework_agent_running, buffer_text, draw_fullscreen_for_test, test_app,
+};
+use crate::tui::tests::{
+    insert_tui_message, insert_tui_message_with_metadata, start_thread_fixture,
+    test_app_with_models, test_track_snapshot,
+};
+use crate::tui::{
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    PendingInputAction, PendingInputRef, PermissionMode, QueuedInput, RunMode, SessionArtifactKind,
+    SessionExportFormat, SlashCommand, TranscriptKind, textarea_text, textarea_with_text,
+};
+use serde_json::Value;
+use std::fs;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn pending_preview_queue_edit_confirm_and_escape() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Queue("next turn".to_string()))
         .await
@@ -78,7 +91,7 @@ pub(crate) async fn pending_preview_steer_edit_updates_before_drain() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
         .await
@@ -107,7 +120,7 @@ pub(crate) async fn pending_preview_capacity_error_preserves_the_edit_and_origin
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("keep me".to_string()))
         .await
@@ -117,7 +130,7 @@ pub(crate) async fn pending_preview_capacity_error_preserves_the_edit_and_origin
         .as_ref()
         .expect("running")
         .control
-        .steer_user_message(psychevo::__agent_core::user_text_message(
+        .steer_user_message(psychevo::application::user_text_message(
             "x".repeat(900_000),
         ))
         .expect("large peer steer below the individual limit");
@@ -148,7 +161,7 @@ pub(crate) async fn pending_preview_late_confirm_resubmits_as_new_input() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
         .await
@@ -177,6 +190,7 @@ pub(crate) async fn pending_preview_late_confirm_resubmits_as_new_input() {
         prompt: "queued prompt".to_string(),
         display_prompt: "queued prompt".to_string(),
         images: Vec::new(),
+        mission: None,
         sequence,
     });
     assert!(ui.start_pending_input_edit(PendingInputRef::Queue(sequence)));
@@ -197,7 +211,7 @@ pub(crate) async fn pending_preview_undo_removes_steer_and_queue() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
         .await
@@ -232,7 +246,7 @@ pub(crate) async fn pending_cancel_clears_unsent_steer_and_queue() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_pending_framework_agent_running(&app, &mut ui).await;
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("nudge now".to_string()))
         .await
@@ -290,25 +304,23 @@ pub(crate) async fn explicit_steer_errors_when_idle() {
 pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(
-            &app.cwd,
-            "tui",
-            "mock-model",
-            "mock",
-            Some(serde_json::json!({
-                "base_url": "https://example.test/v1",
-                "mode": "default",
-                "model_metadata": {
-                    "capabilities": {
-                        "tool_call": true
-                    }
+    let session_id = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "tui",
+        "mock-model",
+        "mock",
+        Some(serde_json::json!({
+            "base_url": "https://example.test/v1",
+            "mode": "default",
+            "model_metadata": {
+                "capabilities": {
+                    "tool_call": true
                 }
-            })),
-        )
-        .await
-        .expect("session");
+            }
+        })),
+    )
+    .await;
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -355,7 +367,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.md".to_string()),
             format: SessionExportFormat::Markdown,
-            include: psychevo::__product::sessions::SessionExportIncludeSet::default_for(
+            include: psychevo::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Export,
             ),
         }),
@@ -379,7 +391,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo::__product::sessions::SessionExportIncludeSet::parse(
+            include: psychevo::session_export::SessionExportIncludeSet::parse(
                 "last-provider-request",
                 SessionArtifactKind::Export,
             )
@@ -409,7 +421,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/response.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo::__product::sessions::SessionExportIncludeSet::parse(
+            include: psychevo::session_export::SessionExportIncludeSet::parse(
                 "last-provider-response",
                 SessionArtifactKind::Export,
             )
@@ -444,7 +456,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         &mut ui,
         SlashCommand::Share(crate::tui::slash::TuiShareOptions {
             path: Some("share.md".to_string()),
-            include: psychevo::__product::sessions::SessionExportIncludeSet::default_for(
+            include: psychevo::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Share,
             ),
         }),
@@ -499,10 +511,10 @@ pub(crate) async fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
         "---\nname: same\ndescription: Project same\n---\n\nbody\n",
     )
     .expect("project same");
-    psychevo::__product::capabilities::set_skill_enabled(
+    psychevo::skills::set_skill_enabled(
         &app.home,
         &app.cwd,
-        psychevo::__product::capabilities::SkillTarget::Global,
+        psychevo::skills::SkillTarget::Global,
         "disabled",
         false,
     )
@@ -668,17 +680,12 @@ pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_
     )
     .await
     .expect("skill invoke");
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert_eq!(textarea_text(&ui.textarea), "");
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Prompt && row.text == "/helper apply it to src/lib.rs"
     }));
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -706,7 +713,7 @@ pub(crate) async fn enter_on_dynamic_slash_menu_item_submits_without_skill_marke
         "",
         "dynamic slash selection must not leave a $skill marker in the composer"
     );
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -717,77 +724,7 @@ pub(crate) async fn enter_on_dynamic_slash_menu_item_submits_without_skill_marke
             .iter()
             .all(|row| !(row.kind == TranscriptKind::Prompt && row.text.starts_with("$helper")))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
-}
-
-pub(crate) fn test_context_snapshot() -> ContextSnapshot {
-    let mut categories = BTreeMap::new();
-    categories.insert(
-        "base_policy".to_string(),
-        ContextCategory {
-            label: "Base policy".to_string(),
-            tokens: 10,
-            estimated: true,
-            status: "estimated".to_string(),
-            percent: Some(10.0),
-            details: Value::Null,
-        },
-    );
-    categories.insert(
-        "history".to_string(),
-        ContextCategory {
-            label: "History".to_string(),
-            tokens: 40,
-            estimated: true,
-            status: "estimated".to_string(),
-            percent: Some(40.0),
-            details: serde_json::json!({
-                "roles": {"user": {"count": 1, "tokens": 40}},
-            }),
-        },
-    );
-    categories.insert(
-        "free_space".to_string(),
-        ContextCategory {
-            label: "Free space".to_string(),
-            tokens: 50,
-            estimated: true,
-            status: "derived".to_string(),
-            percent: Some(50.0),
-            details: Value::Null,
-        },
-    );
-    ContextSnapshot {
-        event_type: "context_snapshot".to_string(),
-        scope: ContextScope::LastProviderRequest,
-        status: "estimated".to_string(),
-        basis: "latest_provider_request".to_string(),
-        applies_to_session_seq: None,
-        session_id: Some("session".to_string()),
-        provider: "mock".to_string(),
-        model: "model".to_string(),
-        mode: Some("default".to_string()),
-        context_limit: Some(100),
-        tokenizer: ContextTokenizer {
-            encoding: "o200k_base".to_string(),
-            source: "fallback".to_string(),
-            fallback: true,
-        },
-        total: ContextTotal {
-            tokens: 50,
-            estimated_tokens: 50,
-            estimated: true,
-            source: "estimate".to_string(),
-            percent: Some(50.0),
-        },
-        categories,
-        advice: Vec::new(),
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -806,11 +743,7 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
     );
     let file = app.cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("session");
+    let session_id = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session_id.clone());
 
     let before_first = test_track_snapshot(&app, &session_id);

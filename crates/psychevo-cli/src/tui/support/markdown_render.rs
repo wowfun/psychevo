@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{collapsed_more_line_count, ledger_body_collapse_policy, tui_theme};
+use ratatui::{
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
+use std::path::Path;
 
 pub(crate) fn render_markdown_lines(
     input: &str,
@@ -430,15 +434,15 @@ impl<'a> MarkdownWriter<'a> {
 
 #[path = "markdown_render/tables.rs"]
 pub(crate) mod tables;
-#[allow(unused_imports)]
-pub use tables::*;
+pub(crate) use tables::{
+    clean_table_cell, code_block_language, heading_prefix, heading_style, is_blank_line,
+    render_table,
+};
 
 #[path = "markdown_render/code_highlight.rs"]
 pub(crate) mod code_highlight;
-#[allow(unused_imports)]
-pub use code_highlight::*;
+pub(crate) use code_highlight::highlight_code_line;
 
 #[path = "markdown_render/fences.rs"]
 pub(crate) mod fences;
-#[allow(unused_imports)]
-pub use fences::*;
+pub(crate) use fences::{local_link_display, unwrap_markdown_table_fences};

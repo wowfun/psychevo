@@ -1,3 +1,25 @@
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+
+use agent_client_protocol::schema::v1::{
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalExitStatus, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+};
+use psychevo::{
+    Error,
+    application::{PermissionApprovalOutcome, PermissionApprovalRequest},
+    host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path},
+};
+use tokio::io::AsyncReadExt as _;
+use tokio::sync::watch;
+
+use super::metadata_permissions::acp_internal_error;
+use super::turn::AcpClientContext;
+
 const ACP_TERMINAL_DEFAULT_OUTPUT_LIMIT: usize = 1024 * 1024;
 const ACP_TERMINAL_MAX_OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
 const ACP_TERMINAL_MAX_ARGS: usize = 1024;
@@ -5,7 +27,7 @@ const ACP_TERMINAL_MAX_ENV: usize = 128;
 const ACP_TERMINAL_MAX_FIELD_CHARS: usize = 65_536;
 
 #[derive(Clone, Default)]
-struct AcpTerminalRegistry {
+pub(super) struct AcpTerminalRegistry {
     records: Arc<Mutex<HashMap<String, AcpTerminalRecord>>>,
 }
 
@@ -28,11 +50,12 @@ impl AcpTerminalRegistry {
     /// Removes every terminal owned by one ACP session and cooperatively kills
     /// any child that is still running. Lifecycle cleanup must call this after
     /// close/delete acknowledgement and during generation teardown.
-    fn terminate_session(&self, session_id: &str) -> psychevo::Result<()> {
+    pub(super) fn terminate_session(&self, session_id: &str) -> psychevo::Result<()> {
         let removed = {
-            let mut records = self.records.lock().map_err(|_| {
-                Error::Message("ACP terminal registry lock poisoned".to_string())
-            })?;
+            let mut records = self
+                .records
+                .lock()
+                .map_err(|_| Error::Message("ACP terminal registry lock poisoned".to_string()))?;
             let terminal_ids = records
                 .iter()
                 .filter(|(_, record)| record.session_id == session_id)
@@ -49,12 +72,15 @@ impl AcpTerminalRegistry {
         Ok(())
     }
 
-    fn terminate_all(&self) -> psychevo::Result<()> {
+    pub(super) fn terminate_all(&self) -> psychevo::Result<()> {
         let removed = {
-            let mut records = self.records.lock().map_err(|_| {
-                Error::Message("ACP terminal registry lock poisoned".to_string())
-            })?;
-            std::mem::take(&mut *records).into_values().collect::<Vec<_>>()
+            let mut records = self
+                .records
+                .lock()
+                .map_err(|_| Error::Message("ACP terminal registry lock poisoned".to_string()))?;
+            std::mem::take(&mut *records)
+                .into_values()
+                .collect::<Vec<_>>()
         };
         for record in removed {
             let _ = record.kill.send(true);
@@ -91,7 +117,7 @@ impl AcpTerminalState {
     }
 }
 
-async fn create_terminal(
+pub(super) async fn create_terminal(
     registry: AcpTerminalRegistry,
     context: Arc<AcpClientContext>,
     request: CreateTerminalRequest,
@@ -129,7 +155,7 @@ async fn create_terminal(
         ))
     })?;
     let args = request.args.iter().map(OsString::from).collect::<Vec<_>>();
-    let mut command = psychevo::__product::platform::tokio_host_process_command(
+    let mut command = psychevo::process_env::tokio_host_process_command(
         &program,
         &args,
         HostPlatform::current(),
@@ -142,10 +168,10 @@ async fn create_terminal(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    psychevo::__product::platform::apply_tokio_process_env(
+    psychevo::process_env::apply_tokio_process_env(
         &mut command,
         &env,
-        psychevo::__product::platform::ProcessEnvOptions::new(&[]),
+        psychevo::process_env::ProcessEnvOptions::new(&[]),
     )
     .map_err(acp_internal_error)?;
     let mut child = command.spawn().map_err(acp_internal_error)?;
@@ -189,7 +215,7 @@ async fn create_terminal(
                 Err(error) => TerminalExitStatus::new().signal(error.to_string()),
             },
             _ = kill_rx.changed() => {
-                psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
+                psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
                 TerminalExitStatus::new().signal("killed".to_string())
             }
         };
@@ -230,7 +256,7 @@ async fn read_acp_terminal_output(
     }
 }
 
-async fn terminal_output(
+pub(super) async fn terminal_output(
     registry: AcpTerminalRegistry,
     request: TerminalOutputRequest,
 ) -> Result<TerminalOutputResponse, agent_client_protocol::Error> {
@@ -242,14 +268,13 @@ async fn terminal_output(
     let state = record.state.lock().map_err(|_| {
         agent_client_protocol::Error::internal_error().data("ACP terminal state lock poisoned")
     })?;
-    Ok(TerminalOutputResponse::new(
-        state.output.clone(),
-        state.truncated,
+    Ok(
+        TerminalOutputResponse::new(state.output.clone(), state.truncated)
+            .exit_status(state.exit_status.clone()),
     )
-    .exit_status(state.exit_status.clone()))
 }
 
-async fn wait_for_terminal_exit(
+pub(super) async fn wait_for_terminal_exit(
     registry: AcpTerminalRegistry,
     request: WaitForTerminalExitRequest,
 ) -> Result<WaitForTerminalExitResponse, agent_client_protocol::Error> {
@@ -276,7 +301,7 @@ async fn wait_for_terminal_exit(
     }
 }
 
-async fn kill_terminal(
+pub(super) async fn kill_terminal(
     registry: AcpTerminalRegistry,
     request: KillTerminalRequest,
 ) -> Result<KillTerminalResponse, agent_client_protocol::Error> {
@@ -299,7 +324,7 @@ async fn kill_terminal(
     Ok(KillTerminalResponse::new())
 }
 
-async fn release_terminal(
+pub(super) async fn release_terminal(
     registry: AcpTerminalRegistry,
     request: ReleaseTerminalRequest,
 ) -> Result<ReleaseTerminalResponse, agent_client_protocol::Error> {
@@ -361,7 +386,12 @@ fn validate_acp_terminal_request(
     }
     if std::iter::once(request.command.as_str())
         .chain(request.args.iter().map(String::as_str))
-        .chain(request.env.iter().flat_map(|entry| [entry.name.as_str(), entry.value.as_str()]))
+        .chain(
+            request
+                .env
+                .iter()
+                .flat_map(|entry| [entry.name.as_str(), entry.value.as_str()]),
+        )
         .any(|value| value.contains('\0') || value.chars().count() > ACP_TERMINAL_MAX_FIELD_CHARS)
     {
         return Err(agent_client_protocol::Error::invalid_params()
@@ -380,9 +410,9 @@ fn guarded_terminal_cwd(
         return Err(agent_client_protocol::Error::invalid_params()
             .data("ACP terminal cwd must be absolute"));
     }
-    let requested = requested.canonicalize().map_err(|error| {
-        agent_client_protocol::Error::invalid_request().data(error.to_string())
-    })?;
+    let requested = requested
+        .canonicalize()
+        .map_err(|error| agent_client_protocol::Error::invalid_request().data(error.to_string()))?;
     if !requested.starts_with(&root) {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("ACP terminal cwd is outside the captured workspace"));
@@ -421,5 +451,51 @@ async fn approve_acp_terminal_create(
         Err(agent_client_protocol::Error::invalid_request().data("permission denied"))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use tokio::sync::watch;
+
+    use super::{AcpTerminalRecord, AcpTerminalRegistry, AcpTerminalState};
+
+    #[test]
+    fn terminal_cleanup_is_session_scoped() {
+        let registry = AcpTerminalRegistry::default();
+        let state = Arc::new(Mutex::new(AcpTerminalState::new(128)));
+        let completed = Arc::new(tokio::sync::Notify::new());
+        let (first_kill, first_kill_rx) = watch::channel(false);
+        let (second_kill, second_kill_rx) = watch::channel(false);
+        registry.records.lock().expect("terminal records").extend([
+            (
+                "first".to_string(),
+                AcpTerminalRecord {
+                    session_id: "native-first".to_string(),
+                    state: Arc::clone(&state),
+                    kill: first_kill,
+                    completed: Arc::clone(&completed),
+                },
+            ),
+            (
+                "second".to_string(),
+                AcpTerminalRecord {
+                    session_id: "native-second".to_string(),
+                    state,
+                    kill: second_kill,
+                    completed,
+                },
+            ),
+        ]);
+
+        registry
+            .terminate_session("native-first")
+            .expect("terminate first session");
+
+        assert!(*first_kill_rx.borrow());
+        assert!(!*second_kill_rx.borrow());
+        assert_eq!(registry.records.lock().expect("terminal records").len(), 1);
     }
 }

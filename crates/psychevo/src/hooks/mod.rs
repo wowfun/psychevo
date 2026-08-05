@@ -14,22 +14,27 @@ use serde_json::{Value, json};
 
 use crate::config::deep_merge;
 
+#[cfg(test)]
+pub(crate) use config::config_hook_sources_for_path;
 pub use config::{
     hook_metadata_value, hook_runtime_config_from_options,
     hook_runtime_config_with_plugin_sources_from_options, set_hook_enabled_in_profile,
     trust_hook_in_profile,
 };
-#[cfg(test)]
-pub(crate) use config::config_hook_sources_for_path;
 pub use runtime::HookRuntime;
-pub use types::*;
+pub use types::{
+    HookEventName, HookHandler, HookHandlerType, HookLifecycleOutcome, HookMatcherGroup,
+    HookMetadata, HookPermissionDecision, HookPermissionRequestOutcome, HookPostToolUseOutcome,
+    HookPreToolUseOutcome, HookReadOnlyOutcome, HookResponse, HookRunEntry, HookRunStatus,
+    HookRunSummary, HookRuntimeConfig, HookSourceDescriptor, HookSourceKind, HookStateRecord,
+    HookStateStore, HookStopOutcome, HookTrustStatus, HookUserPromptSubmitOutcome,
+    HookWorkerAdapter,
+};
 
 pub(crate) const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 600;
 pub(crate) const OUTPUT_LIMIT: usize = 4096;
 
-pub fn agent_hook_source(
-    agent: &crate::agents::AgentDefinition,
-) -> Option<HookSourceDescriptor> {
+pub fn agent_hook_source(agent: &crate::agents::AgentDefinition) -> Option<HookSourceDescriptor> {
     agent.hooks.as_ref().map(|hooks| {
         let source_kind = match agent.source {
             crate::agents::AgentSource::Project

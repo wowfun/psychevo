@@ -1,16 +1,36 @@
+use std::path::PathBuf;
+
+use agent_client_protocol::schema::v2::{
+    AvailableCommand, ConfigOptionUpdate, SessionId, SessionUpdate,
+};
+use agent_client_protocol::{Client, ConnectionTo, Error};
+use psychevo::application::RefreshThreadContextRequest;
+use psychevo::command_registry::{
+    AvailableSlashCommands, DynamicSlashCommand, available_slash_commands_for_surface,
+    skill_prompt_marker,
+};
+use psychevo::compaction::CompactionReason;
+use psychevo::config::ConfigScope;
+use psychevo::paths::canonicalize_cwd;
+use psychevo::skills::{SkillDiscoveryOptions, discover_skills, list_skill_bundles};
+use psychevo::{CompactThreadRequest, PermissionMode, RunMode, ThreadSummary};
+use serde_json::Value;
+
+use crate::commands::{
+    ACP_COMMAND_ADVERTISEMENT_LIMIT, SlashPromptAction, acp_command_capabilities,
+    ambiguous_session_matches, available_commands_from, reasoning_effort_value,
+    resolve_session_reference, send_session_update, send_slash_text,
+};
+use crate::protocol::acp_internal_error;
+use crate::stdio::{AcpSession, PsychevoAcpAgent};
+
 impl PsychevoAcpAgent {
-    pub(crate) async fn refresh_command_text(
-        &self,
-        session: &AcpSession,
-    ) -> Result<String, Error> {
-        let Some(runtime_session_id) = session.runtime_session_id.clone() else {
+    pub(crate) async fn refresh_command_text(&self, session: &AcpSession) -> Result<String, Error> {
+        let Some(thread) = session.thread.as_ref() else {
             return Ok("no runtime session yet".to_string());
         };
-        let result =
-            psychevo::__product::runtime::reload_session_context(psychevo::__product::runtime::ReloadContextOptions {
-                state: self.state.clone(),
-                session: runtime_session_id,
-                config_path: self.options.config_path.clone(),
+        let result = thread
+            .refresh_context(RefreshThreadContextRequest {
                 mode: Some(session.mode),
                 inherited_env: Some(self.options.inherited_env.clone()),
                 agent: None,
@@ -94,10 +114,9 @@ impl PsychevoAcpAgent {
         let Some(current) = sessions.get_mut(&session_id.to_string()) else {
             return Err(Error::resource_not_found(Some(session_id.to_string())));
         };
-        current.runtime_session_id = Some(target.id.clone());
-        current.thread = thread;
+        current.thread = Some(thread);
+        current.clear_pending_admission_steers();
         current.queued_prompts.clear();
-        current.pending_steers.clear();
         Ok(format!(
             "resumed session: {} {}",
             target.id,
@@ -108,17 +127,23 @@ impl PsychevoAcpAgent {
     pub(crate) async fn session_summaries_for(
         &self,
         session: &AcpSession,
-    ) -> Result<Vec<SessionSummary>, Error> {
-        let store = self.state.clone();
-        store
-            .list_sessions_for_cwd_with_sources(&session.cwd, &[])
+    ) -> Result<Vec<ThreadSummary>, Error> {
+        let page = self
+            .framework
+            .list_threads(psychevo::ThreadListQuery {
+                cwd: Some(session.cwd.clone()),
+                ..Default::default()
+            })
             .await
-            .map_err(acp_internal_error)
+            .map_err(acp_internal_error)?;
+        Ok(page.threads)
     }
 
     pub(crate) fn model_command_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let options = self.run_options(session, String::new(), Vec::new(), None);
-        let configured = configured_models(&options).map_err(acp_internal_error)?;
+        let configured = self
+            .configuration_for_session(session)
+            .and_then(|configuration| configuration.configured_models())
+            .map_err(acp_internal_error)?;
         let mut lines = vec![
             format!(
                 "model: {}",
@@ -210,9 +235,10 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) fn permissions_status_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let options = self.run_options(session, String::new(), Vec::new(), None);
-        let value =
-            permission_rules_value(&options, ConfigScope::Local).map_err(acp_internal_error)?;
+        let value = self
+            .configuration_for_session(session)
+            .and_then(|configuration| configuration.permission_rules(ConfigScope::Local))
+            .map_err(acp_internal_error)?;
         let permissions = &value["permissions"];
         let mut lines = vec![
             format!("mode: {}", session.mode.as_str()),
@@ -290,39 +316,25 @@ impl PsychevoAcpAgent {
         session: &AcpSession,
         instructions: Option<String>,
     ) -> Result<String, Error> {
-        let Some(runtime_session_id) = session.runtime_session_id.clone() else {
+        let Some(thread) = session.thread.as_ref() else {
             return Ok("no runtime session yet".to_string());
         };
-        let result = compact_session(CompactSessionOptions {
-            state: self.state.clone(),
-            cwd: session.cwd.clone(),
-            session: runtime_session_id,
-            config_path: self.options.config_path.clone(),
-            model: session.model.clone(),
-            reasoning_effort: session.reasoning_effort.clone(),
-            inherited_env: Some(self.options.inherited_env.clone()),
-            reason: CompactionReason::Manual,
-            instructions,
-            force: true,
-        })
-        .await
-        .map_err(acp_internal_error)?;
+        let result = thread
+            .compact(CompactThreadRequest {
+                config_path: self.options.config_path.clone(),
+                model: session.model.clone(),
+                reasoning_effort: session.reasoning_effort.clone(),
+                inherited_env: Some(self.options.inherited_env.clone()),
+                reason: CompactionReason::Manual,
+                instructions,
+                force: true,
+            })
+            .await
+            .map_err(acp_internal_error)?;
         Ok(format!(
             "{}\ncompacted: {}",
             result.message, result.compacted
         ))
-    }
-
-    pub(crate) fn undo_options(&self, session: &AcpSession) -> Result<SessionUndoOptions, Error> {
-        let Some(runtime_session_id) = session.runtime_session_id.clone() else {
-            return Err(Error::invalid_params().data("no runtime session yet"));
-        };
-        Ok(SessionUndoOptions {
-            state: self.state.clone(),
-            cwd: session.cwd.clone(),
-            snapshot_root: self.options.home.join("snapshots"),
-            session_id: runtime_session_id,
-        })
     }
 
     pub(crate) fn local_config_dir(&self, session: &AcpSession) -> Result<PathBuf, Error> {
@@ -346,14 +358,12 @@ impl PsychevoAcpAgent {
             .get(&session_id.to_string())
             .cloned();
         let Some(session) = session else {
-            return available_commands_from(
-                psychevo::__product::commands::AvailableSlashCommands {
-                    commands: Vec::new(),
-                    hidden_dynamic: 0,
-                },
-            );
+            return available_commands_from(AvailableSlashCommands {
+                commands: Vec::new(),
+                hidden_dynamic: 0,
+            });
         };
-        let active_turn = session.turn.is_some();
+        let active_turn = session.active_turn();
         available_commands_from(self.available_commands_for_session_state(&session, active_turn))
     }
 
@@ -361,8 +371,8 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
         active_turn: bool,
-    ) -> psychevo::__product::commands::AvailableSlashCommands {
-        psychevo::__product::commands::available_slash_commands_for_surface(
+    ) -> AvailableSlashCommands {
+        available_slash_commands_for_surface(
             acp_command_capabilities(),
             active_turn,
             &self.dynamic_slash_commands(session),
@@ -370,20 +380,14 @@ impl PsychevoAcpAgent {
         )
     }
 
-    pub(crate) fn dynamic_slash_commands(
-        &self,
-        session: &AcpSession,
-    ) -> Vec<psychevo::__product::commands::DynamicSlashCommand> {
+    pub(crate) fn dynamic_slash_commands(&self, session: &AcpSession) -> Vec<DynamicSlashCommand> {
         let mut commands = Vec::new();
         if let Ok(bundles) = list_skill_bundles(&self.options.home, &session.cwd) {
             for bundle in bundles {
-                commands.push(psychevo::__product::commands::DynamicSlashCommand {
+                commands.push(DynamicSlashCommand {
                     name: bundle.slug.clone(),
                     summary: bundle.description,
-                    prompt: psychevo::__product::commands::skill_prompt_marker(
-                        &bundle.slug,
-                        "",
-                    ),
+                    prompt: skill_prompt_marker(&bundle.slug, ""),
                 });
             }
         }
@@ -397,13 +401,10 @@ impl PsychevoAcpAgent {
             no_skills: false,
         }) {
             for skill in catalog.skills {
-                commands.push(psychevo::__product::commands::DynamicSlashCommand {
+                commands.push(DynamicSlashCommand {
                     name: skill.name.clone(),
                     summary: skill.description,
-                    prompt: psychevo::__product::commands::skill_prompt_marker(
-                        &skill.name,
-                        "",
-                    ),
+                    prompt: skill_prompt_marker(&skill.name, ""),
                 });
             }
         }
@@ -433,19 +434,15 @@ impl PsychevoAcpAgent {
         let Some(session) = sessions.get_mut(&session_id.to_string()) else {
             return 0;
         };
-        let turn = session.turn.clone();
-        let mut canceled = 0usize;
-        for id in session.pending_steers.drain(..) {
-            if turn
-                .as_ref()
-                .is_some_and(|turn| turn.__cancel_steer(id))
-            {
-                canceled += 1;
-            }
-        }
+        let canceled = session
+            .turn
+            .as_ref()
+            .map(|turn| turn.cancel_all_queued_steers())
+            .unwrap_or(0);
+        let retained = session.clear_pending_admission_steers();
         let queued = session.queued_prompts.len();
         session.queued_prompts.clear();
-        canceled + queued
+        canceled + retained + queued
     }
 
     pub(crate) fn apply_steer_effect(
@@ -459,18 +456,23 @@ impl PsychevoAcpAgent {
         let Some(session) = sessions.get_mut(&session_id.to_string()) else {
             return Err(Error::resource_not_found(Some(session_id.to_string())));
         };
+        if session.starting_turn {
+            session.retain_admission_steer(prompt.clone())?;
+            return Ok(send_slash_text(
+                cx,
+                session_id,
+                format!("steer retained: {prompt}"),
+            ));
+        }
         let Some(turn) = session.turn.clone() else {
             return Ok(SlashPromptAction::RunPrompt(prompt));
         };
-        match turn.__steer(&prompt) {
-            Ok(id) => {
-                session.pending_steers.push(id);
-                Ok(send_slash_text(
-                    cx,
-                    session_id,
-                    format!("steer queued: {prompt}"),
-                ))
-            }
+        match turn.queue_steer(&prompt) {
+            Ok(_) => Ok(send_slash_text(
+                cx,
+                session_id,
+                format!("steer queued: {prompt}"),
+            )),
             Err(psychevo::ControlInputError::Closed) => {
                 session.queued_prompts.push_back(prompt.clone());
                 Ok(send_slash_text(
@@ -479,7 +481,7 @@ impl PsychevoAcpAgent {
                     format!("queued prompt: {prompt}"),
                 ))
             }
-            Err(error) => Err(acp_internal_error(error)),
+            Err(error) => Err(Error::invalid_params().data(error.to_string())),
         }
     }
 }

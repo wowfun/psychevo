@@ -1,4 +1,25 @@
-fn live_tool_entry(
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    GatewaySelectedSkill, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    TranscriptEntry, TranscriptEntryRole,
+};
+
+use super::live_helpers::temporary_tool_call_id_for_value;
+use super::live_projector_agents::agent_metadata_string;
+
+pub(super) struct LiveEntryBuild<'a> {
+    pub(super) turn_id: &'a str,
+    pub(super) id_suffix: &'a str,
+    pub(super) role: TranscriptEntryRole,
+    pub(super) kind: TranscriptBlockKind,
+    pub(super) status: TranscriptBlockStatus,
+    pub(super) title: Option<String>,
+    pub(super) body: Option<String>,
+    pub(super) metadata: Option<Value>,
+}
+
+pub(super) fn live_tool_entry(
     turn_id: &str,
     value: &Value,
     status: TranscriptBlockStatus,
@@ -20,19 +41,19 @@ fn live_tool_entry(
     let mut metadata = tool_value_metadata(value);
     set_metadata_field(&mut metadata, "tool_call_id", json!(tool_call_id.clone()));
     let title = live_tool_title(tool_name, &metadata);
-    live_entry(
+    live_entry(LiveEntryBuild {
         turn_id,
-        &format!("tool:{}", tool_call_id),
-        TranscriptEntryRole::Assistant,
-        tool_kind(tool_name),
+        id_suffix: &format!("tool:{}", tool_call_id),
+        role: TranscriptEntryRole::Assistant,
+        kind: tool_kind(tool_name),
         status,
-        Some(title),
+        title: Some(title),
         body,
-        Some(metadata),
-    )
+        metadata: Some(metadata),
+    })
 }
 
-fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
+pub(super) fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
     if let Some(display) = metadata
         .get("display")
         .and_then(Value::as_str)
@@ -119,17 +140,17 @@ fn first_shell_command_line(text: &str) -> Option<&str> {
     first_non_empty
 }
 
-#[allow(clippy::too_many_arguments)]
-fn live_entry(
-    turn_id: &str,
-    id_suffix: &str,
-    role: TranscriptEntryRole,
-    kind: TranscriptBlockKind,
-    status: TranscriptBlockStatus,
-    title: Option<String>,
-    body: Option<String>,
-    metadata: Option<Value>,
-) -> TranscriptEntry {
+pub(super) fn live_entry(build: LiveEntryBuild<'_>) -> TranscriptEntry {
+    let LiveEntryBuild {
+        turn_id,
+        id_suffix,
+        role,
+        kind,
+        status,
+        title,
+        body,
+        metadata,
+    } = build;
     let now = crate::gateway_now_ms();
     let id = format!("live:{turn_id}:{id_suffix}");
     TranscriptEntry {
@@ -165,7 +186,7 @@ fn live_entry(
     }
 }
 
-fn assistant_message_metadata(value: &Value) -> Value {
+pub(super) fn assistant_message_metadata(value: &Value) -> Value {
     let mut metadata = serde_json::json!({
         "usage": value.get("usage").cloned().unwrap_or(Value::Null),
         "metadata": value.get("metadata").cloned().unwrap_or(Value::Null),
@@ -183,7 +204,7 @@ fn assistant_message_metadata(value: &Value) -> Value {
     metadata
 }
 
-fn assistant_phase_metadata(value: &Value) -> Value {
+pub(super) fn assistant_phase_metadata(value: &Value) -> Value {
     let mut metadata = assistant_message_metadata(value);
     if let Some(object) = metadata.as_object_mut() {
         object.insert(
@@ -194,7 +215,7 @@ fn assistant_phase_metadata(value: &Value) -> Value {
     metadata
 }
 
-fn assistant_message_is_tool_call_turn(message: Option<&Value>) -> bool {
+pub(super) fn assistant_message_is_tool_call_turn(message: Option<&Value>) -> bool {
     let Some(message) = message else {
         return false;
     };
@@ -224,7 +245,7 @@ fn assistant_message_is_tool_call_turn(message: Option<&Value>) -> bool {
         })
 }
 
-fn tool_value_metadata(value: &Value) -> Value {
+pub(super) fn tool_value_metadata(value: &Value) -> Value {
     let mut object = serde_json::Map::new();
     object.insert("projection".to_string(), Value::String("tool".to_string()));
     for key in [
@@ -260,14 +281,14 @@ fn tool_value_metadata(value: &Value) -> Value {
     Value::Object(object)
 }
 
-fn tool_name_from_value(value: &Value) -> &str {
+pub(super) fn tool_name_from_value(value: &Value) -> &str {
     value
         .get("tool_name")
         .and_then(Value::as_str)
         .unwrap_or("tool")
 }
 
-fn explicit_tool_call_id_from_value(value: &Value) -> Option<&str> {
+pub(super) fn explicit_tool_call_id_from_value(value: &Value) -> Option<&str> {
     value
         .get("tool_call_id")
         .and_then(Value::as_str)
@@ -275,7 +296,7 @@ fn explicit_tool_call_id_from_value(value: &Value) -> Option<&str> {
         .filter(|tool_call_id| !tool_call_id.is_empty())
 }
 
-fn tool_args_from_value(value: &Value) -> Option<Value> {
+pub(super) fn tool_args_from_value(value: &Value) -> Option<Value> {
     value
         .get("args")
         .or_else(|| value.get("arguments"))
@@ -288,18 +309,18 @@ fn tool_args_from_value(value: &Value) -> Option<Value> {
         })
 }
 
-fn exec_session_id_from_args_value(value: &Value) -> Option<u64> {
+pub(super) fn exec_session_id_from_args_value(value: &Value) -> Option<u64> {
     value.get("session_id").and_then(Value::as_u64)
 }
 
-fn exec_session_id_from_result_value(value: &Value) -> Option<u64> {
+pub(super) fn exec_session_id_from_result_value(value: &Value) -> Option<u64> {
     value
         .get("result")
         .and_then(|result| result.get("session_id"))
         .and_then(Value::as_u64)
 }
 
-fn exec_result_running_value(value: &Value) -> bool {
+pub(super) fn exec_result_running_value(value: &Value) -> bool {
     exec_session_id_from_result_value(value).is_some()
         && value
             .get("result")
@@ -307,21 +328,21 @@ fn exec_result_running_value(value: &Value) -> bool {
             .is_none_or(Value::is_null)
 }
 
-fn exec_result_completed_value(value: &Value) -> bool {
+pub(super) fn exec_result_completed_value(value: &Value) -> bool {
     value
         .get("result")
         .and_then(|result| result.get("exit_code"))
         .is_some_and(|exit_code| !exit_code.is_null())
 }
 
-fn tool_event_failed(value: &Value) -> bool {
+pub(super) fn tool_event_failed(value: &Value) -> bool {
     value
         .get("outcome")
         .and_then(Value::as_str)
         .is_some_and(|outcome| outcome != "normal")
 }
 
-fn background_running_agent_result_value(tool_name: &str, value: &Value) -> bool {
+pub(super) fn background_running_agent_result_value(tool_name: &str, value: &Value) -> bool {
     tool_name == "spawn_agent"
         && value.get("type").and_then(Value::as_str) != Some("agent_session_start")
         && value
@@ -331,7 +352,7 @@ fn background_running_agent_result_value(tool_name: &str, value: &Value) -> bool
             == Some("running")
 }
 
-fn tool_result_output_runtime(value: &Value) -> String {
+pub(super) fn tool_result_output_runtime(value: &Value) -> String {
     value
         .get("result")
         .and_then(|result| result.get("output"))
@@ -340,7 +361,7 @@ fn tool_result_output_runtime(value: &Value) -> String {
         .to_string()
 }
 
-fn tool_result_output_value(value: &Value) -> String {
+pub(super) fn tool_result_output_value(value: &Value) -> String {
     value
         .get("result")
         .and_then(|result| result.get("output"))
@@ -349,7 +370,7 @@ fn tool_result_output_value(value: &Value) -> String {
         .to_string()
 }
 
-fn merge_output(existing: &mut String, next: &str) {
+pub(super) fn merge_output(existing: &mut String, next: &str) {
     if next.is_empty() || existing.ends_with(next) {
         return;
     }
@@ -360,13 +381,13 @@ fn merge_output(existing: &mut String, next: &str) {
     }
 }
 
-fn set_metadata_field(metadata: &mut Value, key: &str, value: Value) {
+pub(super) fn set_metadata_field(metadata: &mut Value, key: &str, value: Value) {
     if let Some(object) = metadata.as_object_mut() {
         object.insert(key.to_string(), value);
     }
 }
 
-fn set_metadata_result_field(metadata: &mut Value, key: &str, value: Value) {
+pub(super) fn set_metadata_result_field(metadata: &mut Value, key: &str, value: Value) {
     let Some(object) = metadata.as_object_mut() else {
         return;
     };
@@ -381,7 +402,7 @@ fn set_metadata_result_field(metadata: &mut Value, key: &str, value: Value) {
     }
 }
 
-fn result_body_from_metadata(metadata: &Value) -> Option<String> {
+pub(super) fn result_body_from_metadata(metadata: &Value) -> Option<String> {
     metadata
         .get("result")
         .and_then(|result| result.get("output"))
@@ -394,7 +415,7 @@ fn result_body_from_metadata(metadata: &Value) -> Option<String> {
         })
 }
 
-fn runtime_value_metadata(value: &Value) -> Value {
+pub(super) fn runtime_value_metadata(value: &Value) -> Value {
     let mut object = value.as_object().cloned().unwrap_or_default();
     object.insert(
         "projection".to_string(),
@@ -403,7 +424,7 @@ fn runtime_value_metadata(value: &Value) -> Value {
     Value::Object(object)
 }
 
-fn selected_skills_from_value(value: &Value) -> Vec<GatewaySelectedSkill> {
+pub(super) fn selected_skills_from_value(value: &Value) -> Vec<GatewaySelectedSkill> {
     value
         .get("selected_skills")
         .and_then(Value::as_array)
@@ -422,7 +443,7 @@ fn selected_skills_from_value(value: &Value) -> Vec<GatewaySelectedSkill> {
         .collect()
 }
 
-fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
+pub(super) fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
     match tool_name {
         "exec_command" | "write_stdin" => TranscriptBlockKind::Shell,
         "read" | "write" | "edit" | "apply_patch" => TranscriptBlockKind::File,
@@ -437,7 +458,7 @@ fn tool_kind(tool_name: &str) -> TranscriptBlockKind {
     }
 }
 
-fn generated_image_artifact_id(metadata: &Value) -> Option<String> {
+pub(super) fn generated_image_artifact_id(metadata: &Value) -> Option<String> {
     let result = metadata.get("result").unwrap_or(metadata);
     let media_kind = result
         .get("mediaKind")
@@ -455,7 +476,7 @@ fn generated_image_artifact_id(metadata: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn generated_image_body_from_metadata(metadata: &Value) -> Option<String> {
+pub(super) fn generated_image_body_from_metadata(metadata: &Value) -> Option<String> {
     let result = metadata.get("result").unwrap_or(metadata);
     generated_image_artifact_id(metadata)?;
     let mut lines = vec!["Generated image".to_string()];
@@ -479,11 +500,11 @@ fn generated_image_body_from_metadata(metadata: &Value) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-fn json_preview(value: &Value) -> Option<String> {
+pub(super) fn json_preview(value: &Value) -> Option<String> {
     serde_json::to_string(value).ok()
 }
 
-fn message_text(message: Option<&Value>) -> Option<String> {
+pub(super) fn message_text(message: Option<&Value>) -> Option<String> {
     let text = message?
         .get("content")?
         .as_array()?
@@ -498,7 +519,7 @@ fn message_text(message: Option<&Value>) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn compact_text(text: &str, max_chars: usize) -> String {
+pub(super) fn compact_text(text: &str, max_chars: usize) -> String {
     let mut output = String::new();
     for (index, ch) in text.chars().enumerate() {
         if index >= max_chars {

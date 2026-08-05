@@ -1,3 +1,14 @@
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::{RpcRequest, cwd_source};
+use crate::server::scope_session::ResolvedScope;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn automation_rpc_create_list_and_delete_round_trips() {
     let (_temp, state) = web_state().await;
@@ -8,7 +19,7 @@ async fn automation_rpc_create_list_and_delete_round_trips() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -38,7 +49,7 @@ async fn automation_rpc_create_list_and_delete_round_trips() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "automation/list".to_string(),
             params: None,
@@ -55,7 +66,7 @@ async fn automation_rpc_create_list_and_delete_round_trips() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(3)),
             method: "automation/delete".to_string(),
             params: Some(json!({ "automationId": automation_id })),
@@ -70,7 +81,7 @@ async fn automation_rpc_create_list_and_delete_round_trips() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(4)),
             method: "automation/list".to_string(),
             params: None,
@@ -120,7 +131,7 @@ async fn browser_session_can_manage_automation_for_other_cwd() {
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -144,7 +155,7 @@ async fn browser_session_can_manage_automation_for_other_cwd() {
         auth,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "automation/list".to_string(),
             params: Some(json!({ "cwd": other_cwd })),
@@ -167,7 +178,7 @@ async fn automation_rpc_accepts_one_shot_delay_schedule() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -198,7 +209,7 @@ async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -221,7 +232,7 @@ async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "automation/pause".to_string(),
             params: Some(json!({ "automationId": automation_id.clone() })),
@@ -237,7 +248,7 @@ async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(3)),
             method: "automation/write".to_string(),
             params: Some(json!({
@@ -260,7 +271,7 @@ async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(4)),
             method: "automation/resume".to_string(),
             params: Some(json!({ "automationId": automation_id.clone() })),
@@ -276,7 +287,7 @@ async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(5)),
             method: "automation/pause".to_string(),
             params: Some(json!({ "automationId": "missing" })),

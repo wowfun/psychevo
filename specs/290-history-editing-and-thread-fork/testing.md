@@ -16,7 +16,9 @@ Gateway tests must cover Native eligibility, stable message-boundary resolution,
 full fork, point fork, empty-prefix fork, durable evidence remapping, source
 immutability, title and scalar lineage projection, root-history visibility, and
 bounded rejection for running, staged, child, side, channel, automation, and ACP
-point-fork requests.
+point-fork requests. They must also cover the shared typed availability and
+staged-state projection used by both interactive surfaces, including mutation
+revalidation after a stale UI read.
 Compound Gateway contract tests inherit the repository-owned host-neutral Rust
 test stack defined by [410 CI/CD Workflows](../410-ci-cd-workflows/spec.md).
 

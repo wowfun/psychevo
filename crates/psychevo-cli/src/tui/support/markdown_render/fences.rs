@@ -1,6 +1,4 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-use std::borrow::Cow;
+use std::{borrow::Cow, path::Path};
 
 pub(crate) fn unwrap_markdown_table_fences(input: &str) -> Cow<'_, str> {
     let lines = input.lines().collect::<Vec<_>>();

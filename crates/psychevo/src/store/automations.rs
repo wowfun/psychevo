@@ -6,7 +6,8 @@ use crate::error::{Error, Result};
 
 use super::{
     AutomationRunFinishInput, AutomationRunRecord, AutomationRunRecoveryCandidate,
-    AutomationTaskInput, AutomationTaskRecord, StateRuntime,
+    AutomationRunStatus, AutomationTaskInput, AutomationTaskKind, AutomationTaskRecord,
+    StateRuntime, invalid_persisted_domain_value,
 };
 
 impl StateRuntime {
@@ -44,7 +45,7 @@ impl StateRuntime {
             )
             .bind(&id)
             .bind(input.cwd)
-            .bind(input.kind)
+            .bind(input.kind.as_str())
             .bind(input.target_thread_id)
             .bind(input.title)
             .bind(input.prompt)
@@ -322,7 +323,7 @@ impl StateRuntime {
                 "#,
             )
             .bind(input.run_id)
-            .bind(input.status)
+            .bind(input.status.as_str())
             .bind(now)
             .bind(input.thread_id)
             .bind(input.source_key)
@@ -346,7 +347,7 @@ impl StateRuntime {
                 "#,
             )
             .bind(automation_id)
-            .bind(input.status)
+            .bind(input.status.as_str())
             .bind(error.as_deref())
             .bind(input.next_run_at_ms)
             .bind(input.source_key)
@@ -402,10 +403,13 @@ fn automation_task_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AutomationT
     let schedule_json: String = row.try_get(6)?;
     let execution_json: String = row.try_get(8)?;
     let enabled: i64 = row.try_get(7)?;
+    let kind: String = row.try_get(2)?;
+    let last_status: Option<String> = row.try_get(16)?;
     Ok(AutomationTaskRecord {
         id: row.try_get(0)?,
         cwd: row.try_get(1)?,
-        kind: row.try_get(2)?,
+        kind: AutomationTaskKind::parse(&kind)
+            .ok_or_else(|| invalid_persisted_domain_value("automations", "kind", &kind))?,
         target_thread_id: row.try_get(3)?,
         title: row.try_get(4)?,
         prompt: row.try_get(5)?,
@@ -419,7 +423,14 @@ fn automation_task_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AutomationT
         updated_at_ms: row.try_get(13)?,
         last_run_at_ms: row.try_get(14)?,
         next_run_at_ms: row.try_get(15)?,
-        last_status: row.try_get(16)?,
+        last_status: last_status
+            .as_deref()
+            .map(|value| {
+                AutomationRunStatus::parse(value).ok_or_else(|| {
+                    invalid_persisted_domain_value("automations", "last_status", value)
+                })
+            })
+            .transpose()?,
         last_error: row.try_get(17)?,
     })
 }
@@ -433,6 +444,7 @@ fn automation_run_from_row_at(
     offset: usize,
 ) -> Result<AutomationRunRecord> {
     let metadata_json: Option<String> = row.try_get(offset + 9)?;
+    let status: String = row.try_get(offset + 3)?;
     let metadata = metadata_json
         .as_deref()
         .map(serde_json::from_str)
@@ -441,7 +453,8 @@ fn automation_run_from_row_at(
         id: row.try_get(offset)?,
         automation_id: row.try_get(offset + 1)?,
         trigger: row.try_get(offset + 2)?,
-        status: row.try_get(offset + 3)?,
+        status: AutomationRunStatus::parse(&status)
+            .ok_or_else(|| invalid_persisted_domain_value("automation_runs", "status", &status))?,
         started_at_ms: row.try_get(offset + 4)?,
         completed_at_ms: row.try_get(offset + 5)?,
         thread_id: row.try_get(offset + 6)?,

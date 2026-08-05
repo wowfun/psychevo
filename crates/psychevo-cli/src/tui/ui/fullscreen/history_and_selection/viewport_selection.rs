@@ -1,5 +1,25 @@
+#[cfg(test)]
+use crate::tui::support_selection::screen_cells_from_text;
+#[cfg(test)]
+use crate::tui::ui_types::ScreenLine;
+use crate::tui::{
+    AgentSearchState, BTreeMap, BTreeSet, BottomPanel, CursorMove, FileSearchState, FocusMode,
+    FullscreenUi, PermissionApprovalDecision, PermissionApprovalPanel, Rect, SelectableRegion,
+    SelectionState, SidebarSnapshot, SkillSearchState, TranscriptKind, TranscriptLayoutCache,
+    TuiApp, TuiApprovalEvent, Value, VecDeque, composer_cursor_from_point, git_snapshot,
+    new_textarea, rect_contains, row_visible, screen_line_from_buffer, selected_text_from_lines,
+    short_session, transcript_layout_matches_current, transcript_total_height_for_ui,
+};
+use std::time::Instant;
 
 impl<'a> FullscreenUi<'a> {
+    pub(crate) fn clear_session_local_bottom_panel(&mut self) {
+        match self.bottom_panel.as_mut() {
+            Some(BottomPanel::PermissionApproval(panel)) => panel.previous_panel = None,
+            _ => self.bottom_panel = None,
+        }
+    }
+
     pub(crate) fn new(app: &TuiApp) -> Self {
         let mut ui = Self {
             textarea: new_textarea(),
@@ -38,10 +58,13 @@ impl<'a> FullscreenUi<'a> {
             turn_terminal_message: None,
             turn_had_reasoning: false,
             turn_terminal_visible_answer: false,
+            turn_projection_invalid: false,
             history_prompt_started_ms: None,
             loaded_session_message_count: 0,
             thinking_visible: app.thinking_visible,
             raw_visible: app.raw_visible,
+            starting_turn: None,
+            starting_turn_cleanups: Vec::new(),
             running: None,
             foreign_gateway_activities: BTreeMap::new(),
             applied_gateway_live_event_seqs: BTreeSet::new(),
@@ -127,14 +150,86 @@ impl<'a> FullscreenUi<'a> {
     }
 
     pub(crate) fn drain_permission_approval_requests(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = self.reap_closed_permission_approvals();
+        let mut events = Vec::new();
+        for agent in &mut self.auxiliary_agent_tasks {
+            let Some(rx) = &mut agent.approval_rx else {
+                continue;
+            };
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
         if let Some(rx) = &mut self.approval_rx {
-            while let Ok(request) = rx.try_recv() {
-                self.pending_permission_approvals.push_back(request);
-                changed = true;
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+        events.sort_by_key(TuiApprovalEvent::sequence);
+        for event in events {
+            match event {
+                TuiApprovalEvent::Request { request, .. } => {
+                    self.pending_permission_approvals.push_back(*request);
+                    changed = true;
+                }
+                TuiApprovalEvent::Cancel {
+                    session_id,
+                    tool_call_id,
+                    reason,
+                    ..
+                } => {
+                    let _ = reason;
+                    changed |=
+                        self.cancel_permission_approval(session_id.as_deref(), &tool_call_id);
+                }
             }
         }
         changed | self.open_next_permission_approval()
+    }
+
+    fn reap_closed_permission_approvals(&mut self) -> bool {
+        let pending_len = self.pending_permission_approvals.len();
+        self.pending_permission_approvals
+            .retain(|request| !request.response.is_closed());
+        let mut changed = self.pending_permission_approvals.len() != pending_len;
+
+        if self
+            .active_permission_approval
+            .as_ref()
+            .is_some_and(|response| response.is_closed())
+        {
+            self.active_permission_approval.take();
+            if let Some(BottomPanel::PermissionApproval(panel)) = self.bottom_panel.take() {
+                self.bottom_panel = panel.restore_panel();
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    fn cancel_permission_approval(&mut self, session_id: Option<&str>, tool_call_id: &str) -> bool {
+        let matches = |request_session: Option<&str>, request_tool_call_id: &str| {
+            request_tool_call_id == tool_call_id
+                && session_id.is_none_or(|session| request_session == Some(session))
+        };
+        let old_len = self.pending_permission_approvals.len();
+        self.pending_permission_approvals.retain(|request| {
+            !matches(request.session_id.as_deref(), &request.request.tool_call_id)
+        });
+        let mut changed = self.pending_permission_approvals.len() != old_len;
+        let cancel_active = matches!(
+            self.bottom_panel.as_ref(),
+            Some(BottomPanel::PermissionApproval(panel))
+                if matches(panel.session_id.as_deref(), &panel.request.tool_call_id)
+        );
+        if cancel_active
+            && let Some(BottomPanel::PermissionApproval(panel)) = self.bottom_panel.take()
+        {
+            self.active_permission_approval.take();
+            self.bottom_panel = panel.restore_panel();
+            changed = true;
+        }
+        changed
     }
 
     pub(crate) fn open_next_permission_approval(&mut self) -> bool {
@@ -489,5 +584,4 @@ impl<'a> FullscreenUi<'a> {
                 (!text.trim().is_empty()).then(|| text.to_string())
             })
     }
-
 }

@@ -1,12 +1,221 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    FixtureKind, assert_tui_snapshot, buffer_text, draw_fullscreen_for_test, finished_turn_result,
+    fixture_ui, test_app,
+};
+use crate::tui::{
+    BottomPanel, BottomSelectionPanel, ClarifyInputMode, ClarifyQuestion, ClarifyRequestEvent,
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    PermissionApprovalOutcome, PermissionApprovalPanel, PermissionApprovalRequest, RunningTask,
+    RunningTurn, RunningTurnControl, RunningTurnEvents, StartThreadRequest, TranscriptKind, TuiApp,
+    TuiApprovalHandler, TurnEvent, TurnRequest, TurnResult,
+};
+use psychevo::{Application, ApprovalHandler};
+use std::sync::Arc;
+use std::time::Duration;
+use tempfile::tempdir;
+use tokio::sync::{mpsc, oneshot};
+
+#[tokio::test]
+pub(crate) async fn tui_approval_cancel_removes_matching_active_panel() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let (sender, receiver) = mpsc::unbounded_channel();
+    ui.approval_rx = Some(receiver);
+    let handler = TuiApprovalHandler {
+        session_id: app.current_session.clone(),
+        sender,
+    };
+    let tool_call_id = "cancelled-tui-approval".to_string();
+    let pending = tokio::spawn(handler.request_permission(PermissionApprovalRequest {
+        tool_call_id: tool_call_id.clone(),
+        tool_name: "write".to_string(),
+        summary: "write a file".to_string(),
+        reason: "test".to_string(),
+        matched_rule: None,
+        suggested_rule: None,
+        allow_always: false,
+        filesystem: None,
+        mcp_startup: None,
+        timeout_secs: 300,
+    }));
+    tokio::task::yield_now().await;
+    assert!(ui.drain_permission_approval_requests());
+    assert!(matches!(
+        ui.bottom_panel,
+        Some(BottomPanel::PermissionApproval(_))
+    ));
+
+    handler
+        .cancel_permission_with_reason(&tool_call_id, "aborted")
+        .await;
+    assert!(ui.drain_permission_approval_requests());
+    assert!(!matches!(
+        ui.bottom_panel,
+        Some(BottomPanel::PermissionApproval(_))
+    ));
+    assert!(ui.active_permission_approval.is_none());
+    assert_eq!(
+        pending.await.expect("approval task"),
+        psychevo::application::PermissionApprovalDecision::deny()
+    );
+    tokio::task::yield_now().await;
+    ui.drain_permission_approval_requests();
+    assert!(ui.pending_permission_approvals.is_empty());
+}
+
+#[tokio::test]
+pub(crate) async fn closed_tui_approval_response_cannot_leave_a_stale_panel() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let (sender, receiver) = mpsc::unbounded_channel();
+    ui.approval_rx = Some(receiver);
+    let handler = TuiApprovalHandler {
+        session_id: app.current_session.clone(),
+        sender,
+    };
+    let pending = tokio::spawn(handler.request_permission(PermissionApprovalRequest {
+        tool_call_id: "abandoned-tui-approval".to_string(),
+        tool_name: "write".to_string(),
+        summary: "write a file".to_string(),
+        reason: "test".to_string(),
+        matched_rule: None,
+        suggested_rule: None,
+        allow_always: false,
+        filesystem: None,
+        mcp_startup: None,
+        timeout_secs: 300,
+    }));
+    tokio::task::yield_now().await;
+    assert!(ui.drain_permission_approval_requests());
+    assert!(matches!(
+        ui.bottom_panel,
+        Some(BottomPanel::PermissionApproval(_))
+    ));
+
+    pending.abort();
+    let _ = pending.await;
+    assert!(ui.drain_permission_approval_requests());
+    assert!(ui.active_permission_approval.is_none());
+    assert!(!matches!(
+        ui.bottom_panel,
+        Some(BottomPanel::PermissionApproval(_))
+    ));
+    assert!(ui.pending_permission_approvals.is_empty());
+}
+
+#[derive(Debug)]
+struct ClarifyFixtureAdapter {
+    request: ClarifyRequestEvent,
+    outcome:
+        std::sync::Mutex<Option<oneshot::Sender<psychevo::application::ClarifyInteractionOutcome>>>,
+}
+
+#[derive(Debug)]
+struct PreparedClarifyFixture {
+    request: ClarifyRequestEvent,
+    outcome: Option<oneshot::Sender<psychevo::application::ClarifyInteractionOutcome>>,
+}
+
+impl psychevo::AgentSessionAdapter for ClarifyFixtureAdapter {
+    fn prepare_turn(
+        self: Arc<Self>,
+        _request: psychevo::AgentTurnPreparation,
+    ) -> futures::future::BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>>
+    {
+        let prepared = PreparedClarifyFixture {
+            request: self.request.clone(),
+            outcome: self.outcome.lock().expect("clarify outcome lock").take(),
+        };
+        Box::pin(async move { Ok(Box::new(prepared) as Box<dyn psychevo::PreparedAgentTurn>) })
+    }
+}
+
+impl psychevo::PreparedAgentTurn for PreparedClarifyFixture {
+    fn invoke(
+        mut self: Box<Self>,
+        invocation: psychevo::AgentTurnInvocation,
+    ) -> futures::future::BoxFuture<'static, psychevo::Result<TurnResult>> {
+        Box::pin(async move {
+            let thread_id = invocation.receipt.thread_id.clone();
+            let outcome = invocation.control.request_clarification(self.request).await;
+            if let Some(sender) = self.outcome.take() {
+                let _ = sender.send(outcome);
+            }
+            drop(invocation);
+            Ok(finished_turn_result(thread_id))
+        })
+    }
+}
+
+async fn attach_framework_clarify(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    request: ClarifyRequestEvent,
+) -> oneshot::Receiver<psychevo::application::ClarifyInteractionOutcome> {
+    let call_id = request.call_id.clone();
+    let (outcome_tx, outcome_rx) = oneshot::channel();
+    let application = Application::builder()
+        .home(&app.home)
+        .database_path(":memory:")
+        .agent_session_adapter(Arc::new(ClarifyFixtureAdapter {
+            request,
+            outcome: std::sync::Mutex::new(Some(outcome_tx)),
+        }))
+        .build()
+        .await
+        .expect("clarify fixture Application");
+    let thread = application
+        .client()
+        .start_thread(StartThreadRequest::new(&app.cwd))
+        .await
+        .expect("clarify fixture Thread");
+    let handle = thread
+        .start_turn(TurnRequest::new("clarify fixture"))
+        .await
+        .expect("clarify fixture Turn");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if thread
+                .pending_interactions()
+                .await
+                .expect("clarify pending interactions")
+                .iter()
+                .any(|interaction| interaction.interaction_id == call_id)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("clarify interaction registered");
+    let control = handle.clone();
+    let events = handle.events();
+    let task = tokio::spawn(async move {
+        let result = handle.wait().await;
+        application.shutdown().await?.require_clean()?;
+        result
+    });
+    ui.running = Some(RunningTurn {
+        session_id: Some(control.receipt().thread_id.clone()),
+        control: RunningTurnControl::Agent(control),
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Turn(events),
+        task: RunningTask::Agent(task),
+    });
+    outcome_rx
+}
+
 #[tokio::test]
 pub(crate) async fn clarify_request_opens_bottom_panel_and_renders_options() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
 
     assert!(matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))));
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
@@ -36,37 +245,17 @@ pub(crate) async fn foreground_framework_clarify_answer_uses_running_turn_contro
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    let (control, _) = run_control();
-    let (_live_tx, live_rx) = mpsc::unbounded_channel();
-    let running_task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    ui.running = Some(RunningTurn {
-        session_id: None,
-        control: control.clone(),
-        selector: None,
-        turn_id: None,
-        events: RunningTurnEvents::Runtime(live_rx),
-        task: RunningTask::Agent(running_task),
-    });
-    let (stream_tx, mut stream_rx) = mpsc::unbounded_channel();
-    let stream: RunStreamSink = Arc::new(move |event| {
-        let _ = stream_tx.send(event);
-    });
-    let RunStreamEvent::ClarifyRequest(mut request) = clarify_request_event() else {
-        panic!("clarify request");
-    };
+    let mut request = clarify_request();
     request.questions.truncate(1);
-    let interaction =
-        tokio::spawn(async move { control.request_clarification(request, stream, None).await });
-    let requested = stream_rx.recv().await.expect("clarify requested event");
-    ui.apply_stream_event(requested, true, false);
+    let requested = clarify_request_turn_event(request.clone());
+    let interaction = attach_framework_clarify(&app, &mut ui, request).await;
+    ui.apply_turn_event(requested, true, false);
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .await
         .expect("answer clarify");
 
-    let psychevo::__product::runtime::ClarifyInteractionOutcome::Answered(response) =
+    let psychevo::application::ClarifyInteractionOutcome::Answered(response) =
         interaction.await.expect("clarify interaction")
     else {
         panic!("clarify should be answered");
@@ -81,30 +270,10 @@ pub(crate) async fn foreground_framework_clarify_cancel_uses_running_turn_contro
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    let (control, _) = run_control();
-    let (_live_tx, live_rx) = mpsc::unbounded_channel();
-    let running_task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
-    });
-    ui.running = Some(RunningTurn {
-        session_id: None,
-        control: control.clone(),
-        selector: None,
-        turn_id: None,
-        events: RunningTurnEvents::Runtime(live_rx),
-        task: RunningTask::Agent(running_task),
-    });
-    let (stream_tx, mut stream_rx) = mpsc::unbounded_channel();
-    let stream: RunStreamSink = Arc::new(move |event| {
-        let _ = stream_tx.send(event);
-    });
-    let RunStreamEvent::ClarifyRequest(request) = clarify_request_event() else {
-        panic!("clarify request");
-    };
-    let interaction =
-        tokio::spawn(async move { control.request_clarification(request, stream, None).await });
-    let requested = stream_rx.recv().await.expect("clarify requested event");
-    ui.apply_stream_event(requested, true, false);
+    let request = clarify_request();
+    let requested = clarify_request_turn_event(request.clone());
+    let interaction = attach_framework_clarify(&app, &mut ui, request).await;
+    ui.apply_turn_event(requested, true, false);
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .await
@@ -112,7 +281,7 @@ pub(crate) async fn foreground_framework_clarify_cancel_uses_running_turn_contro
 
     assert_eq!(
         interaction.await.expect("clarify interaction"),
-        psychevo::__product::runtime::ClarifyInteractionOutcome::Cancelled
+        psychevo::application::ClarifyInteractionOutcome::Cancelled
     );
     assert!(ui.bottom_panel.is_none());
 }
@@ -123,7 +292,7 @@ pub(crate) async fn clarify_panel_supports_other_text_and_optional_note_modes() 
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await
         .expect("down");
@@ -281,7 +450,7 @@ pub(crate) async fn clarify_panel_mouse_click_selects_options_and_opens_other_in
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
     let careful_area = ui
         .last_bottom_panel_areas
@@ -356,13 +525,14 @@ pub(crate) async fn clarify_resolved_restores_previous_bottom_panel() {
         Vec::new(),
     )));
 
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     assert!(matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))));
-    ui.apply_stream_event(
-        RunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
-            call_id: "call_clarify".to_string(),
-            reason: psychevo::__product::runtime::ClarifyResolvedReason::TimedOut,
-        }),
+    ui.apply_turn_event(
+        TurnEvent::InteractionResolved {
+            interaction_id: "call_clarify".to_string(),
+            kind: "clarify".to_string(),
+            reason: "timed_out".to_string(),
+        },
         true,
         false,
     );
@@ -379,7 +549,7 @@ pub(crate) async fn clarify_request_from_background_session_is_buffered_without_
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
-    app.apply_owned_fullscreen_stream_event(
+    app.apply_owned_fullscreen_turn_event(
         &mut ui,
         Some("fedcba9876543210"),
         clarify_request_event(),
@@ -456,7 +626,7 @@ pub(crate) async fn clarify_cancel_result_cell_is_unanswered_without_status_nois
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
 
     ui.apply_value_event(
         &serde_json::json!({
@@ -495,7 +665,9 @@ pub(crate) async fn clarify_history_tool_result_reuses_tool_call_questions() {
             "type": "tool_call",
             "id": "call_clarify",
             "name": "clarify",
-            "arguments": args,
+            "arguments": args.clone(),
+            "arguments_json": serde_json::to_string(&args).expect("clarify args json"),
+            "arguments_error": null,
             "content_index": 0,
             "call_index": 0
         }],
@@ -544,7 +716,7 @@ pub(crate) async fn tui_snapshot_clarify_question_panel() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     assert_tui_snapshot("clarify_question_panel", 120, 24, &app, ui);
 }
 
@@ -553,7 +725,7 @@ pub(crate) async fn tui_snapshot_clarify_other_inline() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
         .await
         .expect("down");
@@ -579,7 +751,7 @@ pub(crate) async fn tui_snapshot_clarify_note_inline() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
-    ui.apply_stream_event(clarify_request_event(), true, false);
+    ui.apply_turn_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
         .expect("note");
@@ -680,8 +852,8 @@ pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_sco
                 matched_rule: None,
                 suggested_rule: Some("filesystem:linked/result.txt".to_string()),
                 allow_always: false,
-                filesystem: Some(psychevo::__product::runtime::FilesystemApprovalRequest {
-                    targets: vec![psychevo::__product::runtime::FilesystemApprovalTarget {
+                filesystem: Some(psychevo::application::FilesystemApprovalRequest {
+                    targets: vec![psychevo::application::FilesystemApprovalTarget {
                         requested_path: "linked/result.txt".to_string(),
                         resolved_path: "/tmp/shared/result.txt".to_string(),
                     }],
@@ -765,8 +937,8 @@ pub(crate) async fn filesystem_scope_keyboard_navigation_keeps_selection_visible
             matched_rule: None,
             suggested_rule: None,
             allow_always: false,
-            filesystem: Some(psychevo::__product::runtime::FilesystemApprovalRequest {
-                targets: vec![psychevo::__product::runtime::FilesystemApprovalTarget {
+            filesystem: Some(psychevo::application::FilesystemApprovalRequest {
+                targets: vec![psychevo::application::FilesystemApprovalTarget {
                     requested_path: "linked/result.txt".to_string(),
                     resolved_path: "/tmp/a/b/c/d/e/f/result.txt".to_string(),
                 }],
@@ -890,11 +1062,23 @@ async fn assert_permission_click_outcome(index: usize, expected: PermissionAppro
     assert!(ui.bottom_panel.is_none());
 }
 
-pub(crate) fn clarify_request_event() -> RunStreamEvent {
-    RunStreamEvent::ClarifyRequest(ClarifyRequestEvent {
+pub(crate) fn clarify_request() -> ClarifyRequestEvent {
+    ClarifyRequestEvent {
         call_id: "call_clarify".to_string(),
         questions: clarify_questions(),
-    })
+    }
+}
+
+pub(crate) fn clarify_request_turn_event(request: ClarifyRequestEvent) -> TurnEvent {
+    TurnEvent::InteractionRequested {
+        interaction_id: request.call_id.clone(),
+        kind: "clarify".to_string(),
+        payload: serde_json::to_value(request).expect("serialize clarify request"),
+    }
+}
+
+pub(crate) fn clarify_request_event() -> TurnEvent {
+    clarify_request_turn_event(clarify_request())
 }
 
 pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
@@ -903,11 +1087,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which mode should we use?".to_string(),
             options: vec![
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "Fast (Recommended)".to_string(),
                     description: "Prioritize speed".to_string(),
                 },
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "Careful".to_string(),
                     description: "Prioritize review".to_string(),
                 },
@@ -920,11 +1104,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "How much detail should the answer include?".to_string(),
             options: vec![
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "Brief".to_string(),
                     description: "Keep it concise".to_string(),
                 },
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "Deep".to_string(),
                     description: "Cover tradeoffs".to_string(),
                 },
@@ -937,11 +1121,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which output format should be used?".to_string(),
             options: vec![
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "Markdown".to_string(),
                     description: "Use prose and bullets".to_string(),
                 },
-                psychevo::__product::runtime::ClarifyQuestionOption {
+                psychevo::application::ClarifyQuestionOption {
                     label: "JSON".to_string(),
                     description: "Use structured data".to_string(),
                 },

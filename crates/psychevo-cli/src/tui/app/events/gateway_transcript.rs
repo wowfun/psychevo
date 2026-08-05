@@ -1,3 +1,25 @@
+use super::gateway_helpers::{
+    apply_gateway_assistant_turn_metadata, clear_gateway_row_slots_for_index,
+    gateway_assistant_block_receives_meta, gateway_block_row_index, gateway_block_runtime_value,
+    gateway_block_tool_call_id, gateway_block_tool_value, gateway_event_session_id,
+    gateway_reasoning_title, outcome_from_str, push_gateway_completed_turn_meta,
+    record_gateway_block_row, tag_gateway_transcript_row, transcript_block_running_text,
+    transcript_block_text, transcript_block_title, transcript_kind_for_block,
+};
+use super::helpers::buffer_session_live_event;
+use super::types::GatewayTranscriptEntryMeta;
+use crate::tui::ui_fullscreen::turn_start_local_row;
+use crate::tui::{
+    ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason, FullscreenUi,
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent, GatewayThreadSelector,
+    GatewayTurnStatus, Outcome, PermissionApprovalDecision, PermissionApprovalRequest,
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole, TranscriptKind, TranscriptRow, TuiApp, TuiApprovalRequest, Value,
+    WriteArgumentPreview, short_session, tool_id_key,
+};
+use std::time::Instant;
+use tokio::sync::oneshot;
+
 struct GatewayTranscriptTextDelta<'a> {
     thread_id: Option<&'a str>,
     turn_id: &'a str,
@@ -186,7 +208,7 @@ impl TuiApp {
                         request,
                         response,
                     });
-                let gateway = self.gateway.clone();
+                let gateway = self.runtime.gateway().clone();
                 tokio::spawn(async move {
                     let decision = rx
                         .await
@@ -675,7 +697,7 @@ impl TuiApp {
     }
 }
 
-fn gateway_block_tool_name(block: &TranscriptBlock) -> Option<&str> {
+pub(super) fn gateway_block_tool_name(block: &TranscriptBlock) -> Option<&str> {
     block
         .metadata
         .as_ref()
@@ -683,7 +705,7 @@ fn gateway_block_tool_name(block: &TranscriptBlock) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-fn gateway_write_argument_preview(
+pub(super) fn gateway_write_argument_preview(
     block: &TranscriptBlock,
 ) -> Option<(WriteArgumentPreview, String)> {
     if gateway_block_tool_name(block) != Some("write") {

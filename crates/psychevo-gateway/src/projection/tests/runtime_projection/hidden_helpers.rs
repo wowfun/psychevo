@@ -1,3 +1,11 @@
+use psychevo::application::RunStreamEvent;
+use serde_json::{Value, json};
+
+use crate::projection::GatewayLiveProjector;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+};
+
 #[test]
 fn live_projector_hidden_assistant_message_end_closes_segment() {
     let mut projector = GatewayLiveProjector::default();
@@ -49,7 +57,7 @@ fn live_projector_hidden_assistant_message_end_closes_segment() {
     }
 }
 
-fn gateway_entry(event: &GatewayEvent) -> &TranscriptEntry {
+pub(super) fn gateway_entry(event: &GatewayEvent) -> &TranscriptEntry {
     match event {
         GatewayEvent::EntryStarted { entry, .. }
         | GatewayEvent::EntryUpdated { entry, .. }
@@ -58,7 +66,10 @@ fn gateway_entry(event: &GatewayEvent) -> &TranscriptEntry {
     }
 }
 
-fn agent_block<'a>(entry: &'a TranscriptEntry, tool_call_id: &str) -> Option<&'a TranscriptBlock> {
+pub(super) fn agent_block<'a>(
+    entry: &'a TranscriptEntry,
+    tool_call_id: &str,
+) -> Option<&'a TranscriptBlock> {
     entry.blocks.iter().find(|block| {
         block.kind == TranscriptBlockKind::Agent
             && block
@@ -70,7 +81,11 @@ fn agent_block<'a>(entry: &'a TranscriptEntry, tool_call_id: &str) -> Option<&'a
     })
 }
 
-fn assert_agent_block_task(entry: &TranscriptEntry, tool_call_id: &str, expected_task_name: &str) {
+pub(super) fn assert_agent_block_task(
+    entry: &TranscriptEntry,
+    tool_call_id: &str,
+    expected_task_name: &str,
+) {
     let block = agent_block(entry, tool_call_id).expect("agent block");
     let metadata = block.metadata.as_ref().expect("metadata");
     assert_eq!(metadata["args"]["task_name"], expected_task_name);
@@ -83,7 +98,11 @@ fn assert_agent_block_task(entry: &TranscriptEntry, tool_call_id: &str, expected
     }
 }
 
-fn assert_agent_block_child(entry: &TranscriptEntry, tool_call_id: &str, expected_child_id: &str) {
+pub(super) fn assert_agent_block_child(
+    entry: &TranscriptEntry,
+    tool_call_id: &str,
+    expected_child_id: &str,
+) {
     let block = agent_block(entry, tool_call_id).expect("agent block");
     let metadata = block.metadata.as_ref().expect("metadata");
     assert_eq!(
@@ -101,12 +120,14 @@ fn assert_agent_block_child(entry: &TranscriptEntry, tool_call_id: &str, expecte
                     .get("result")
                     .and_then(|result| result.get("child_session_id"))
             })
-            .or_else(|| metadata.get("result").and_then(|result| result.get("session_id"))),
+            .or_else(|| metadata
+                .get("result")
+                .and_then(|result| result.get("session_id"))),
         Some(&json!(expected_child_id))
     );
 }
 
-fn assert_agent_block_has_no_child(entry: &TranscriptEntry, tool_call_id: &str) {
+pub(super) fn assert_agent_block_has_no_child(entry: &TranscriptEntry, tool_call_id: &str) {
     let block = agent_block(entry, tool_call_id).expect("agent block");
     let metadata = block.metadata.as_ref().expect("metadata");
     assert!(
@@ -129,7 +150,7 @@ fn assert_agent_block_has_no_child(entry: &TranscriptEntry, tool_call_id: &str) 
     );
 }
 
-fn assert_exec_event(
+pub(super) fn assert_exec_event(
     event: &GatewayEvent,
     expected_tool_call_id: &str,
     expected_status: TranscriptBlockStatus,

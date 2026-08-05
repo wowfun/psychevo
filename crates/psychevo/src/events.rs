@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
-use psychevo_agent_core::{AgentEvent, ControlHandle, EventSink, Message, Result as CoreResult};
+use psychevo_agent_core::{AgentEvent, EventSink, Message, Result as CoreResult};
 use serde_json::{Value, json};
 
 use crate::accounting::account_usage;
@@ -15,7 +15,7 @@ use crate::session_trace::SessionTraceSink;
 use crate::store::{ContextEvidenceInput, StateRuntime};
 use crate::types::{
     EDITABLE_INPUT_METADATA_KEY, MessageAccounting, ModelMetadata, PromptDisplayMetadata,
-    RunStreamEvent, RunStreamSink, SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
+    RunStreamEvent, RunStreamSink, SelectedAgent, TUI_DISPLAY_METADATA_KEY,
 };
 
 pub(crate) struct PersistenceSink {
@@ -27,8 +27,6 @@ pub(crate) struct PersistenceSink {
     pub(crate) started: Instant,
     pub(crate) tool_elapsed_ms: Arc<Mutex<BTreeMap<String, u64>>>,
     pub(crate) current_turn_index: Arc<Mutex<Option<usize>>>,
-    pub(crate) control: SmokeControl,
-    pub(crate) control_handle: Option<ControlHandle>,
     pub(crate) events: Option<Arc<Mutex<Vec<Value>>>>,
     pub(crate) stream_events: Option<RunStreamSink>,
     pub(crate) trace: Option<SessionTraceSink>,
@@ -49,8 +47,6 @@ impl EventSink for PersistenceSink {
         let prompt_snapshot = self.prompt_snapshot.clone();
         let prompt_snapshot_written = Arc::clone(&self.prompt_snapshot_written);
         let prompt_context_evidence = Arc::clone(&self.prompt_context_evidence);
-        let control = self.control;
-        let control_handle = self.control_handle.clone();
         let events = self.events.clone();
         let stream_events = self.stream_events.clone();
         let include_reasoning = self.include_reasoning;
@@ -135,19 +131,6 @@ impl EventSink for PersistenceSink {
                 stream_events(value);
             }
             match event {
-                AgentEvent::AgentStart => match control {
-                    SmokeControl::None => {}
-                    SmokeControl::StopAfterTurn => {
-                        if let Some(handle) = control_handle {
-                            handle.stop();
-                        }
-                    }
-                    SmokeControl::AbortOnAgentStart => {
-                        if let Some(handle) = control_handle {
-                            handle.abort();
-                        }
-                    }
-                },
                 AgentEvent::MessageEnd {
                     message,
                     usage,

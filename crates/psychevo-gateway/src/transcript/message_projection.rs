@@ -1,4 +1,21 @@
-fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option<TranscriptEntry> {
+use psychevo::ThreadItem;
+use psychevo::application::{
+    AssistantBlock, AssistantSource, Message, TUI_DISPLAY_METADATA_KEY, USER_SHELL_METADATA_KEY,
+    UserContentBlock,
+};
+use serde_json::{Value, json};
+
+use psychevo_gateway_protocol::events_transcript::{
+    TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole,
+};
+
+use super::{compact_text, metadata_object};
+
+pub(super) fn project_message_entry(
+    thread_id: &str,
+    summary: &ThreadItem,
+) -> Option<TranscriptEntry> {
     match &summary.message {
         Message::User {
             content,
@@ -178,7 +195,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                             *timestamp_ms,
                         ))
                     }
-                    AssistantBlock::Source(psychevo::__ai::AssistantSource::UrlCitation(source)) => Some(block(
+                    AssistantBlock::Source { source: AssistantSource::UrlCitation(source) } => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,
@@ -190,7 +207,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                         Some(json!({"projection":"url_citation", "url":source.url, "title":source.title, "start_index":source.start_index, "end_index":source.end_index})),
                         *timestamp_ms,
                     )),
-                    AssistantBlock::Source(psychevo::__ai::AssistantSource::Image(source)) => Some(block(
+                    AssistantBlock::Source { source: AssistantSource::Image(source) } => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,
@@ -202,7 +219,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                         Some(json!({"projection":"web_image_source", "image_url":source.image_url, "thumbnail_url":source.thumbnail_url, "source_website_url":source.source_website_url, "caption":source.caption})),
                         *timestamp_ms,
                     )),
-                    AssistantBlock::Source(psychevo::__ai::AssistantSource::Provider { kind, data }) => Some(block(
+                    AssistantBlock::Source { source: AssistantSource::Provider { kind, data } } => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,
@@ -232,7 +249,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
 }
 
 fn acp_plan_block(
-    summary: &TuiMessageSummary,
+    summary: &ThreadItem,
     status: TranscriptBlockStatus,
     timestamp_ms: i64,
     existing_blocks: &[TranscriptBlock],
@@ -277,7 +294,10 @@ fn acp_plan_block(
 
 fn tool_call_title(tool_name: &str, arguments: &Value) -> String {
     if tool_name == "web_search" {
-        let query = arguments.get("query").and_then(Value::as_str).unwrap_or_default();
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let title = if query.is_empty() {
             "Searching the web".to_string()
         } else {
@@ -315,7 +335,7 @@ fn first_effective_command(command: &str) -> String {
         .to_string()
 }
 
-fn user_shell_block(summary: &TuiMessageSummary, timestamp_ms: i64) -> Option<TranscriptBlock> {
+fn user_shell_block(summary: &ThreadItem, timestamp_ms: i64) -> Option<TranscriptBlock> {
     let metadata = summary
         .metadata
         .as_ref()?
@@ -372,7 +392,7 @@ fn user_shell_block(summary: &TuiMessageSummary, timestamp_ms: i64) -> Option<Tr
 
 fn entry(
     thread_id: &str,
-    summary: &TuiMessageSummary,
+    summary: &ThreadItem,
     role: TranscriptEntryRole,
     status: TranscriptBlockStatus,
     blocks: Vec<TranscriptBlock>,
@@ -396,7 +416,7 @@ fn entry(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn block(
+pub(super) fn block(
     id: String,
     kind: TranscriptBlockKind,
     status: TranscriptBlockStatus,

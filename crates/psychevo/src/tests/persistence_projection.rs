@@ -1,5 +1,21 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::events::{PersistenceSink, project_agent_event, project_run_stream_event};
+use crate::paths::canonical_cwd;
+use crate::state::StateRuntime;
+use crate::store::ContextEvidenceInput;
+use crate::tests::sessions_titles::user_message;
+use crate::types::{
+    EDITABLE_INPUT_METADATA_KEY, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
+    SelectedAgent, StoredEditableInputEnvelope, StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY,
+};
+use psychevo_agent_core::{AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec};
+use psychevo_ai::Outcome;
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tempfile::tempdir;
 
 #[tokio::test]
 async fn editable_input_envelope_is_versioned_and_separate_from_display_metadata() {
@@ -74,8 +90,6 @@ pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_mess
         started,
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: Some(stream),
         trace: None,
@@ -152,8 +166,6 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: None,
         trace: None,
@@ -230,8 +242,6 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: Some(stream),
         trace: None,
@@ -313,8 +323,6 @@ pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadat
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: Some(stream),
         trace: None,
@@ -389,8 +397,6 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: Some(stream),
         trace: None,
@@ -694,8 +700,6 @@ pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: None,
         trace: None,
@@ -900,8 +904,6 @@ fn test_persistence_sink(store: StateRuntime, session_id: String) -> Persistence
         started: Instant::now(),
         tool_elapsed_ms: Arc::new(Mutex::new(BTreeMap::new())),
         current_turn_index: Arc::new(Mutex::new(None)),
-        control: SmokeControl::None,
-        control_handle: None,
         events: None,
         stream_events: None,
         trace: None,

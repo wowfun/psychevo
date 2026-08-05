@@ -10,7 +10,7 @@ use windows_sys::Win32::Foundation::{
     HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::{
-    ACL, ACL_REVISION, ACCESS_ALLOWED_ACE, AddAccessAllowedAce, AllocateAndInitializeSid, CopySid,
+    ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAce, AllocateAndInitializeSid, CopySid,
     CreateRestrictedToken, CreateWellKnownSid, FreeSid, GetLengthSid, GetTokenInformation,
     InitializeAcl, PSID, SECURITY_ATTRIBUTES, SECURITY_NT_AUTHORITY, SID_AND_ATTRIBUTES,
     TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS,
@@ -206,12 +206,7 @@ impl ProcThreadAttributeList {
     fn new(attribute_count: u32) -> io::Result<Self> {
         let mut size = 0_usize;
         unsafe {
-            InitializeProcThreadAttributeList(
-                ptr::null_mut(),
-                attribute_count,
-                0,
-                &mut size,
-            );
+            InitializeProcThreadAttributeList(ptr::null_mut(), attribute_count, 0, &mut size);
         }
         if size == 0 {
             return Err(io::Error::last_os_error());
@@ -366,11 +361,7 @@ fn restricted_read_only_token() -> io::Result<OwnedHandle> {
     let restricted = unsafe { OwnedHandle::from_raw_handle(restricted as _) };
     set_compatibility_default_dacl(
         raw_handle(&restricted),
-        &[
-            sid_ptr(&user_sid),
-            sid_ptr(&logon_sid),
-            sid_ptr(&world_sid),
-        ],
+        &[sid_ptr(&user_sid), sid_ptr(&logon_sid), sid_ptr(&world_sid)],
     )?;
     Ok(restricted)
 }
@@ -448,12 +439,7 @@ fn token_logon_sid(token: HANDLE) -> io::Result<Vec<u8>> {
 fn world_sid() -> io::Result<Vec<u8>> {
     let mut required = 0_u32;
     unsafe {
-        let _ = CreateWellKnownSid(
-            WinWorldSid,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            &mut required,
-        );
+        let _ = CreateWellKnownSid(WinWorldSid, ptr::null_mut(), ptr::null_mut(), &mut required);
     }
     if required == 0 {
         return Err(with_io_context(
@@ -665,12 +651,13 @@ fn quote_windows_argument(argument: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io::Read;
     use std::time::{Duration, Instant};
 
     use crate::types::RunMode;
 
-    use super::*;
+    use super::{ExecInvocation, WindowsRestrictedSpawn, argv_to_command_line, spawn_read_only};
 
     #[test]
     fn quotes_windows_arguments_without_reinterpreting_backslashes() {
@@ -748,9 +735,7 @@ printf "\nmarkers:%s:%s:%s:%s\n" \
         );
         assert!(output.contains("read-sentinel"), "{output:?}");
         assert!(
-            output.contains(
-                "markers:1:read-only:windows-restricted-token-advisory:not-confined"
-            ),
+            output.contains("markers:1:read-only:windows-restricted-token-advisory:not-confined"),
             "{output:?}"
         );
         assert!(output.contains("child-ok"), "{output:?}");

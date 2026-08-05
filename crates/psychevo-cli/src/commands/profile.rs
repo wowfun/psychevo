@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow, bail};
-use psychevo::__product::persistence::StateRuntime;
+use psychevo::Application;
 use serde_json::{Value, json};
 
 use crate::args::{
@@ -251,8 +251,12 @@ async fn create_profile_home(home: &Path, description: Option<&str>) -> Result<(
     write_if_absent(&home.join("config.toml"), STARTER_CONFIG)?;
     write_if_absent(&home.join(".env"), STARTER_ENV)?;
     crate::profiles::protect_env_file(&home.join(".env"))?;
-    let state_runtime = StateRuntime::open(home.join("state.db")).await?;
-    state_runtime.close().await;
+    let application = Application::builder()
+        .home(home)
+        .database_path(home.join("state.db"))
+        .build()
+        .await?;
+    application.shutdown().await?.require_clean()?;
     write_metadata(
         home,
         &ProfileMetadata {

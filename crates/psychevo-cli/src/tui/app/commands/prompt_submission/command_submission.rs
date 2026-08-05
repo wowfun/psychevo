@@ -1,3 +1,17 @@
+use super::SubmittedSlashInput;
+use crate::tui::app_commands::{
+    fork_prompt_marker, fullscreen_context_bar_width, mission_command_args,
+    normalize_submitted_slash_echo, slash_command_echo,
+};
+use crate::tui::support_input::should_parse_slash_command_input;
+use crate::tui::{
+    BottomPanel, ContextFormatOptions, DiffOverlay, FullscreenUi, ModelPanel,
+    RELOAD_CONTEXT_DEPRECATED_MESSAGE, SessionListView, SlashCommand, TuiApp, TuiSlashParse,
+    format_context_snapshot_text_with_options, mission_prompt_marker, parse_tui_slash_with_config,
+    resolve_image_source,
+};
+use anyhow::{Result, anyhow};
+
 impl TuiApp {
     pub(crate) fn classify_submitted_slash_input(&self, text: &str) -> Result<SubmittedSlashInput> {
         if !should_parse_slash_command_input(text) {
@@ -54,7 +68,7 @@ impl TuiApp {
                 ui.push_command_result(command_echo, None, self.status_text(), false);
             }
             SlashCommand::New => {
-                self.detach_running_for_session_switch(ui, None);
+                self.detach_foreground_for_session_switch(ui, None).await;
                 self.begin_new_session_draft();
                 self.current_agent = self.startup_agent.clone();
                 self.current_agent_explicit_default = false;
@@ -64,7 +78,8 @@ impl TuiApp {
             }
             SlashCommand::Sessions => {
                 ui.bottom_panel = Some(BottomPanel::Sessions(
-                    self.session_selection_panel(SessionListView::Active).await?,
+                    self.session_selection_panel(SessionListView::Active)
+                        .await?,
                 ));
             }
             SlashCommand::Usage => {
@@ -139,7 +154,7 @@ impl TuiApp {
                     .await?;
             }
             SlashCommand::Queue(message) => {
-                self.submit_fullscreen_queue(ui, message)?;
+                self.submit_fullscreen_queue(ui, message).await?;
             }
             SlashCommand::PendingCancel => {
                 self.cancel_pending_fullscreen_inputs(ui);
@@ -152,18 +167,18 @@ impl TuiApp {
             }
             SlashCommand::VariantSet(variant) => {
                 match self.set_variant_no_print(variant.clone()).await {
-                Ok(()) => {
-                    ui.push_command_result(
-                        command_echo,
-                        None,
-                        format!("variant: {variant}"),
-                        false,
-                    );
-                    ui.refresh_sidebar(self);
-                }
-                Err(err) => {
-                    ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
-                }
+                    Ok(()) => {
+                        ui.push_command_result(
+                            command_echo,
+                            None,
+                            format!("variant: {variant}"),
+                            false,
+                        );
+                        ui.refresh_sidebar(self);
+                    }
+                    Err(err) => {
+                        ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
+                    }
                 }
             }
             SlashCommand::ModeSet(mode) => {
@@ -333,11 +348,10 @@ impl TuiApp {
                 self.submit_fullscreen_prompt(ui, text, Vec::new()).await?;
             }
             SlashCommand::Mission { team, goal } => {
-                self.record_mission_metadata(team.as_deref(), &goal).await?;
+                let mission = self.mission_registration(team.as_deref(), &goal)?;
                 let args = mission_command_args(team.as_deref(), &goal);
                 let text = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
-                self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())
-                    .await?;
+                self.submit_fullscreen_mission(ui, text, command_echo, mission)?;
             }
             SlashCommand::Compact(instructions) => {
                 self.submit_fullscreen_compaction(ui, instructions, command_echo)?;

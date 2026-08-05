@@ -1,6 +1,11 @@
+use std::collections::BTreeMap;
+
+use psychevo::ConfigurationQuery;
+
+use super::super::binding::WebState;
 use super::adapters::build_channel_gateway;
+use super::paths::redact_channel_error;
 use super::runner::run_channel_loop;
-use super::*;
 
 pub(in crate::server) fn reconcile(state: WebState) {
     if tokio::runtime::Handle::try_current().is_err() {
@@ -25,8 +30,13 @@ async fn reconcile_inner(state: WebState) -> psychevo::Result<()> {
             .reconcile_active(&std::collections::BTreeSet::new());
         return Ok(());
     }
-    let options = state.run_options(state.inner.cwd.clone(), None);
-    let connections = channel_runtime_connections(&options, &state.inner.cwd)?;
+    let mut query = ConfigurationQuery::new(&state.inner.cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let connections = state
+        .inner
+        .framework
+        .configuration(query)?
+        .channel_runtime_connections()?;
     let mut desired = std::collections::BTreeSet::new();
     for connection in &connections {
         if connection.enabled && connection.config_status == "ready" {

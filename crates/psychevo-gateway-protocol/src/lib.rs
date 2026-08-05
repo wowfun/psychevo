@@ -1,30 +1,52 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::Path;
-
-use anyhow::{Context, Result, bail};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use ts_rs::TS;
-
-include!("protocol/safe_integer.rs");
-include!("protocol/app_server.rs");
-include!("protocol/source.rs");
-include!("protocol/events_transcript.rs");
-include!("protocol/thread_command_turn.rs");
-include!("protocol/automations.rs");
-include!("protocol/channels.rs");
-include!("protocol/voice.rs");
-include!("protocol/settings_workspace_context.rs");
-include!("protocol/agents_backend_rpc.rs");
-include!("protocol/capability_results.rs");
-include!("protocol/request_registry.rs");
-include!("protocol/codegen.rs");
+#[path = "protocol/agents_backend_rpc.rs"]
+pub mod agents_backend_rpc;
+#[path = "protocol/app_server.rs"]
+pub mod app_server;
+#[path = "protocol/automations.rs"]
+pub mod automations;
+#[path = "protocol/capability_results.rs"]
+pub mod capability_results;
+#[path = "protocol/channels.rs"]
+pub mod channels;
+#[path = "protocol/codegen.rs"]
+pub mod codegen;
+#[path = "protocol/events_transcript.rs"]
+pub mod events_transcript;
+#[path = "protocol/request_registry.rs"]
+pub mod request_registry;
+#[path = "protocol/safe_integer.rs"]
+pub mod safe_integer;
+#[path = "protocol/settings_workspace_context.rs"]
+pub mod settings_workspace_context;
+#[path = "protocol/source.rs"]
+pub mod source;
+#[path = "protocol/thread_command_turn.rs"]
+pub mod thread_command_turn;
+#[path = "protocol/voice.rs"]
+pub mod voice;
 
 #[cfg(test)]
 mod thread_application_contract_tests {
-    use super::*;
+    use crate::agents_backend_rpc::{
+        RuntimeErrorView, RuntimeProfileView, RuntimeProfileWriteParams, RuntimeRetryClassView,
+        ServerNotification, ThreadContextReadParams, ThreadContextReadResult,
+        ThreadControlSetParams, ThreadImportListParams, ThreadImportParams,
+    };
+    use crate::app_server::AppMcpStartupApprovalTarget;
+    use crate::codegen::{export_ts_decl, schema, typescript_decl_with_schema_optionality};
+    use crate::events_transcript::{
+        FrameworkTurnKind, PermissionDecision, ThreadActivityView, ThreadSnapshot,
+    };
+    use crate::request_registry::ClientRequest;
+    use crate::settings_workspace_context::WorkspaceCreateParams;
+    use crate::source::BackendKind;
+    use crate::thread_command_turn::{
+        RunnableTargetInput, ThreadActionInput, ThreadActionKind, ThreadActionRunParams,
+        ThreadDraftOpenParams, ThreadDraftTargetIntent, ThreadHistoryDraftReadParams,
+        ThreadHistoryReadParams, ThreadInteractionRespondParams, ThreadInteractionResponse,
+        ThreadListParams, ThreadReadParams, TurnStartParams,
+    };
+    use ts_rs::TS;
 
     #[test]
     fn generated_schema_follows_tagged_enum_variant_field_renames() {

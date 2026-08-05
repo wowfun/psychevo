@@ -4,13 +4,7 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    __product::configuration::config_provider_list_value,
-    __product::configuration::config_show_value,
-    __product::configuration::create_scoped_custom_provider,
-    __product::configuration::permission_rules_value,
-    __product::configuration::remove_local_permission_rule,
-    __product::configuration::set_config_value, __product::configuration::set_provider_api_key,
-    __product::runtime::ConfigScope, __product::runtime::ScopedCustomProviderInput,
+    Configuration, CreateCustomProviderRequest, config::ConfigScope, paths::canonicalize_cwd,
 };
 use serde_json::{Value, json};
 
@@ -19,10 +13,7 @@ use crate::args::{
     ConfigPermissionsArgs, ConfigPermissionsCommand, ConfigProviderAddArgs, ConfigProviderArgs,
     ConfigProviderCommand, ConfigSetArgs, ConfigShowArgs,
 };
-use crate::commands::common::{
-    base_run_options, config_scope_dir, print_json_error, read_secret_from_stdin, scope_label,
-    scoped_config_dir, scoped_label,
-};
+use crate::commands::common::{CommandConfiguration, print_json_error, read_secret_from_stdin};
 use crate::env::{env_path, inherited_env, resolve_psychevo_home, resolve_state_db};
 
 pub(crate) async fn run_config_command(args: ConfigArgs) -> Result<ExitCode> {
@@ -42,22 +33,31 @@ pub(crate) async fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCo
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     match &args.command {
         ConfigCommand::Path(args) => print_paths(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Show(args) => {
-            let options = base_run_options(&env_map, &home, &cwd).await?;
-            let value = config_show_value(&options, config_scope(args))?;
-            print_config_document(&value, args.json)?;
-        }
         ConfigCommand::Edit(args) => edit_config(args, &home, &cwd)?,
-        ConfigCommand::Set(args) => set_config(args, &env_map, &home, &cwd).await?,
-        ConfigCommand::Validate(args) => validate_config(args, &env_map, &home, &cwd).await?,
-        ConfigCommand::Doctor(args) => doctor_config(args, &env_map, &home, &cwd).await?,
-        ConfigCommand::Status(args) => doctor_config(args, &env_map, &home, &cwd).await?,
-        ConfigCommand::Provider(args) => run_provider_command(args, &env_map, &home, &cwd).await?,
-        ConfigCommand::Permissions(args) => {
-            run_permissions_command(args, &env_map, &home, &cwd).await?
+        command => {
+            let context = CommandConfiguration::open(&env_map, &home, &cwd).await?;
+            let result = run_configuration_command(command, context.configuration());
+            context.finish(result).await?;
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn run_configuration_command(command: &ConfigCommand, configuration: &Configuration) -> Result<()> {
+    match command {
+        ConfigCommand::Show(args) => {
+            let value = configuration.config_value(config_scope(args))?;
+            print_config_document(&value, args.json)
+        }
+        ConfigCommand::Set(args) => set_config(args, configuration),
+        ConfigCommand::Validate(args) => validate_config(args, configuration),
+        ConfigCommand::Doctor(args) | ConfigCommand::Status(args) => {
+            doctor_config(args, configuration)
+        }
+        ConfigCommand::Provider(args) => run_provider_command(args, configuration),
+        ConfigCommand::Permissions(args) => run_permissions_command(args, configuration),
+        ConfigCommand::Path(_) | ConfigCommand::Edit(_) => unreachable!("handled without state"),
+    }
 }
 
 pub(crate) fn edit_config(
@@ -65,7 +65,11 @@ pub(crate) fn edit_config(
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let config_dir = scoped_config_dir(home, cwd, args.global)?;
+    let config_dir = if args.global {
+        home.to_path_buf()
+    } else {
+        canonicalize_cwd(cwd)?.join(".psychevo")
+    };
     fs::create_dir_all(&config_dir)?;
     let path = config_dir.join("config.toml");
     if !path.exists() {
@@ -81,17 +85,11 @@ pub(crate) fn edit_config(
     Ok(())
 }
 
-pub(crate) async fn set_config(
-    args: &ConfigSetArgs,
-    env_map: &std::collections::BTreeMap<String, String>,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<()> {
-    let config_dir = scoped_config_dir(home, cwd, args.global)?;
-    let options = base_run_options(env_map, home, cwd).await?;
+pub(crate) fn set_config(args: &ConfigSetArgs, configuration: &Configuration) -> Result<()> {
+    let scope = mutation_scope(args.global);
     if let Some(provider) = api_key_provider_from_key(&args.key) {
         let api_key = parse_config_set_string_value(&args.value)?;
-        let result = set_provider_api_key(&options, config_dir, &provider, &api_key)?;
+        let result = configuration.set_provider_api_key(scope, &provider, &api_key)?;
         if args.json {
             println!("{}", serde_json::to_string_pretty(&result)?);
         } else {
@@ -104,7 +102,7 @@ pub(crate) async fn set_config(
         return Ok(());
     }
     let value = parse_toml_literal(&args.value)?;
-    let result = set_config_value(config_dir, &args.key, value)?;
+    let result = configuration.set_value(scope, &args.key, value)?;
     if args.json {
         println!(
             "{}",
@@ -158,14 +156,8 @@ pub(crate) fn api_key_provider_from_key(key: &str) -> Option<String> {
     }
 }
 
-pub(crate) async fn validate_config(
-    args: &ConfigShowArgs,
-    env_map: &std::collections::BTreeMap<String, String>,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let value = permission_rules_value(&options, config_scope(args))?;
+pub(crate) fn validate_config(args: &ConfigShowArgs, configuration: &Configuration) -> Result<()> {
+    let value = configuration.permission_rules(config_scope(args))?;
     if args.json {
         println!(
             "{}",
@@ -184,15 +176,9 @@ pub(crate) async fn validate_config(
     Ok(())
 }
 
-pub(crate) async fn doctor_config(
-    args: &ConfigShowArgs,
-    env_map: &std::collections::BTreeMap<String, String>,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let config = config_show_value(&options, config_scope(args))?;
-    let permissions = permission_rules_value(&options, config_scope(args))?;
+pub(crate) fn doctor_config(args: &ConfigShowArgs, configuration: &Configuration) -> Result<()> {
+    let config = configuration.config_value(config_scope(args))?;
+    let permissions = configuration.permission_rules(config_scope(args))?;
     let value = json!({
         "scope": config["scope"],
         "path": config["path"],
@@ -263,50 +249,39 @@ pub(crate) fn print_paths(
     Ok(())
 }
 
-pub(crate) async fn run_provider_command(
+pub(crate) fn run_provider_command(
     args: &ConfigProviderArgs,
-    env_map: &std::collections::BTreeMap<String, String>,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
+    configuration: &Configuration,
 ) -> Result<()> {
     match &args.command {
         ConfigProviderCommand::List(args) => {
-            let options = base_run_options(env_map, home, cwd).await?;
-            let value = config_provider_list_value(&options, config_scope(args))?;
+            let value = configuration.provider_list(config_scope(args))?;
             print_provider_list(&value, args.json)
         }
-        ConfigProviderCommand::Add(args) => add_provider(args, home, cwd),
+        ConfigProviderCommand::Add(args) => add_provider(args, configuration),
     }
 }
 
-pub(crate) async fn run_permissions_command(
+pub(crate) fn run_permissions_command(
     args: &ConfigPermissionsArgs,
-    env_map: &std::collections::BTreeMap<String, String>,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
+    configuration: &Configuration,
 ) -> Result<()> {
     match &args.command {
         ConfigPermissionsCommand::List(args) => {
-            let options = base_run_options(env_map, home, cwd).await?;
-            let value = permission_rules_value(&options, ConfigScope::Local)?;
+            let value = configuration.permission_rules(ConfigScope::Local)?;
             print_permissions_list(&value, args.json)
         }
-        ConfigPermissionsCommand::Remove(args) => remove_permission_rule(args, home, cwd),
+        ConfigPermissionsCommand::Remove(args) => remove_permission_rule(args, configuration),
     }
 }
 
 pub(crate) fn remove_permission_rule(
     args: &ConfigPermissionRemoveArgs,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
+    configuration: &Configuration,
 ) -> Result<()> {
-    let result = remove_local_permission_rule(
-        config_scope_dir(home, cwd, true)?,
-        args.kind.as_str(),
-        &args.rule,
-    )?;
+    let result = configuration.remove_local_permission_rule(args.kind.as_str(), &args.rule)?;
     let value = json!({
-        "scope": scope_label(true),
+        "scope": "local",
         "path": result.config_path,
         "kind": result.kind,
         "rule": result.rule,
@@ -326,22 +301,23 @@ pub(crate) fn remove_permission_rule(
 
 pub(crate) fn add_provider(
     args: &ConfigProviderAddArgs,
-    home: &std::path::Path,
-    cwd: &std::path::Path,
+    configuration: &Configuration,
 ) -> Result<()> {
     let api_key = read_secret_from_stdin(args.api_key_stdin)?;
-    let result = create_scoped_custom_provider(ScopedCustomProviderInput {
-        config_dir: scoped_config_dir(home, cwd, args.global)?,
-        provider_id: args.id.clone(),
-        label: args.label.clone(),
-        base_url: args.base_url.clone(),
-        api_key_env: args.api_key_env.clone(),
-        require_api_key: args.api_key_env.is_none() && api_key.is_none(),
-        api_key,
-        no_auth: args.no_auth,
-    })?;
+    let result = configuration.create_custom_provider(
+        mutation_scope(args.global),
+        CreateCustomProviderRequest {
+            provider_id: args.id.clone(),
+            label: args.label.clone(),
+            base_url: args.base_url.clone(),
+            api_key_env: args.api_key_env.clone(),
+            require_api_key: args.api_key_env.is_none() && api_key.is_none(),
+            api_key,
+            no_auth: args.no_auth,
+        },
+    )?;
     let value = json!({
-        "scope": scoped_label(args.global),
+        "scope": scope_label(mutation_scope(args.global)),
         "provider": result.provider_id,
         "label": result.label,
         "base_url": result.base_url,
@@ -498,6 +474,22 @@ pub(crate) fn config_scope(args: &ConfigShowArgs) -> ConfigScope {
         ConfigScope::Local
     } else {
         ConfigScope::Effective
+    }
+}
+
+fn mutation_scope(global: bool) -> ConfigScope {
+    if global {
+        ConfigScope::Global
+    } else {
+        ConfigScope::Local
+    }
+}
+
+fn scope_label(scope: ConfigScope) -> &'static str {
+    match scope {
+        ConfigScope::Global => "global",
+        ConfigScope::Local => "local",
+        ConfigScope::Effective => "effective",
     }
 }
 

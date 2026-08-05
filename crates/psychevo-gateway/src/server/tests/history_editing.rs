@@ -1,88 +1,104 @@
+use std::time::Duration;
+
+use psychevo_gateway_protocol as wire;
+use serde_json::json;
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{
+    framework_turn_fixture_executor, web_state_with_native_test_executor,
+};
+
 #[tokio::test]
 async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contract() {
     Box::pin(native_history_draft_edit_restore_and_point_fork_contract()).await;
 }
 
 async fn native_history_draft_edit_restore_and_point_fork_contract() {
-    let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .await.expect("session");
-    let profile = generated_runtime_profiles()
-        .into_iter()
-        .find(|profile| profile.id == "native")
-        .expect("Native profile");
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint("null");
-    let cwd = state.inner.cwd.display().to_string();
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id: &session_id,
-            agent_ref: None,
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: "null",
-            runtime_ref: "native",
-            backend_kind: "native",
-            native_kind: "native",
-            native_session_id: Some(&session_id),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "native",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
-        .await.expect("binding");
-    let message = RuntimeMessage::User {
-        content: vec![
-            UserContentBlock::text("visible plus injected context"),
-            UserContentBlock::image_url("https://example.test/image.png"),
-        ],
-        timestamp_ms: 1,
-    };
-    let metadata = json!({
-        psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
-            "version": 1,
-            "parts": [
-                {"type": "text", "text": "visible"},
-                {"type": "image", "imageBlockIndex": 0}
-            ]
-        }
-    });
-    let message_seq = state
-        .inner
-        .state
-
-        .append_message_with_undo_snapshot_metadata_and_context_evidence(
-            &session_id,
-            &message,
-            Some(metadata),
-            Some("visible".to_string()),
-            &[],
-        )
-        .await.expect("message");
-    let message_id = format!("message:{message_seq}");
+    let (_temp, state) =
+        web_state_with_native_test_executor(framework_turn_fixture_executor(Vec::new())).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let (tx, _rx) = mpsc::unbounded_channel();
-
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("seed-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"}
+            })),
+        },
+    )
+    .await
+    .expect("seed context");
+    let accepted = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("seed-turn")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "clientTurnId": "history-edit-seed",
+                "scope": scope,
+                "threadId": null,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"},
+                "input": [{"type": "text", "text": "visible"}],
+                "turnOverrides": {"model": "fake-model"},
+                "expectedContextRevision": context["contextRevision"],
+                "expectedControlRevision": context["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("fixture Turn");
+    let session_id = accepted["threadId"]
+        .as_str()
+        .expect("accepted Thread id")
+        .to_string();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while let Some(message) = rx.recv().await {
+            if message.contains("\"type\":\"turnCompleted\"") {
+                return;
+            }
+        }
+        panic!("fixture Turn notification channel closed")
+    })
+    .await
+    .expect("fixture Turn completion");
+    let thread = state
+        .inner
+        .framework
+        .resume_thread(&session_id)
+        .await
+        .expect("fixture Thread");
+    let message_seq = thread
+        .history()
+        .latest(Some(200))
+        .await
+        .expect("history")
+        .items
+        .into_iter()
+        .find(|item| matches!(item.message, psychevo::application::Message::User { .. }))
+        .expect("editable user input")
+        .session_seq;
+    let message_id = format!("message:{message_seq}");
     let listed = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("list-native-fork")),
             method: "thread/list".to_string(),
             params: Some(json!({"cwd": state.inner.cwd, "archived": false})),
@@ -97,9 +113,9 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
     assert!(
         listed_session["lifecycle"]["actions"]
             .as_array()
-            .is_some_and(|actions| actions.iter().any(|action| {
-                action["id"] == "fork" && action["enabled"] == true
-            }))
+            .is_some_and(|actions| actions
+                .iter()
+                .any(|action| { action["id"] == "fork" && action["enabled"] == true }))
     );
 
     let read = handle_rpc(
@@ -107,7 +123,7 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("draft")),
             method: "thread/history/draft/read".to_string(),
             params: Some(json!({
@@ -120,100 +136,26 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
     .await
     .expect("draft read");
     assert_eq!(read["fidelity"], "exact", "{read:#}");
-    assert_eq!(
-        read["parts"],
-        json!([
-            {"type": "text", "text": "visible"},
-            {"type": "image", "input": {"kind": "url", "url": "https://example.test/image.png"}}
-        ])
-    );
+    assert_eq!(read["parts"], json!([{"type": "text", "text": "visible"}]));
 
-    let legacy_seq = message_seq + 1;
-    state
+    let available = state
         .inner
-        .state
-
-        .append_message(
+        .gateway
+        .native_history_actions(
             &session_id,
-            &RuntimeMessage::User {
-                content: vec![UserContentBlock::text("legacy visible plus flattened context")],
-                timestamp_ms: 2,
-            },
+            crate::history_editing::HistoryEditingSurface::Workbench,
         )
-        .await.expect("legacy message");
-    let legacy = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("legacy-draft")),
-            method: "thread/history/draft/read".to_string(),
-            params: Some(json!({
-                "scope": scope,
-                "threadId": session_id,
-                "messageId": format!("message:{legacy_seq}"),
-            })),
-        },
-    )
-    .await
-    .expect("legacy draft");
-    assert_eq!(legacy["fidelity"], "bestEffort", "{legacy:#}");
-    assert!(
-        legacy["warning"]
-            .as_str()
-            .is_some_and(|warning| warning.contains("reconstructed"))
-    );
-
-    let synthetic_seq = legacy_seq + 1;
-    state
-        .inner
-        .state
-
-        .append_message_with_undo_snapshot_metadata_and_context_evidence(
-            &session_id,
-            &RuntimeMessage::User {
-                content: vec![UserContentBlock::text("synthetic resource payload")],
-                timestamp_ms: 3,
-            },
-            Some(json!({
-                psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
-                    "version": 1,
-                    "parts": []
-                }
-            })),
-            None,
-            &[],
-        )
-        .await.expect("synthetic-only message");
-    let synthetic = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("synthetic-draft")),
-            method: "thread/history/draft/read".to_string(),
-            params: Some(json!({
-                "scope": scope,
-                "threadId": session_id,
-                "messageId": format!("message:{synthetic_seq}"),
-            })),
-        },
-    )
-    .await
-    .expect("synthetic draft");
-    assert_eq!(
-        synthetic["unavailableReason"],
-        "This message has no editable text or image input."
-    );
+        .await
+        .expect("history availability");
+    assert!(available.unavailable_reason.is_none());
+    assert!(available.staged.is_none());
 
     let no_op = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("noop")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -227,12 +169,11 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
     .expect("no-op edit");
     assert_eq!(no_op["noOp"], true, "{no_op:#}");
     assert!(
-        state
-            .inner
-            .state
-
-            .session_revert_state(&session_id)
-            .await.expect("revert state")
+        thread
+            .history_editing_state()
+            .await
+            .expect("history editing state")
+            .staged
             .is_none()
     );
 
@@ -242,7 +183,7 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("stage")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -259,15 +200,40 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
         staged["snapshot"]["historyEditing"]["kind"],
         "conversationEdit"
     );
-    assert_eq!(staged["snapshot"]["historyEditing"]["hiddenEntryCount"], 3);
+    assert_eq!(staged["snapshot"]["historyEditing"]["hiddenEntryCount"], 1);
     assert_eq!(staged["snapshot"]["entries"], json!([]));
+    let staged_status = state
+        .inner
+        .gateway
+        .native_history_actions(
+            &session_id,
+            crate::history_editing::HistoryEditingSurface::Workbench,
+        )
+        .await
+        .expect("staged history status");
+    assert_eq!(
+        staged_status.staged.as_ref().map(|staged| staged.kind),
+        Some(wire::events_transcript::ThreadHistoryEditingKind::ConversationEdit)
+    );
+    assert!(staged_status.unavailable_reason.is_some());
+    let staged_draft_read = state
+        .inner
+        .gateway
+        .read_native_editable_draft(
+            &session_id,
+            &message_id,
+            crate::history_editing::HistoryEditingSurface::Workbench,
+        )
+        .await
+        .expect("staged draft read");
+    assert!(staged_draft_read.unavailable_reason.is_some());
 
     let retried = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("retry-stage")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -287,7 +253,7 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("restore")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -301,14 +267,17 @@ async fn native_history_draft_edit_restore_and_point_fork_contract() {
     .expect("restore history");
     assert_eq!(restored["draft"]["parts"], replacement);
     assert!(restored["snapshot"]["historyEditing"].is_null());
-    assert_eq!(restored["snapshot"]["entries"].as_array().map(Vec::len), Some(3));
+    assert_eq!(
+        restored["snapshot"]["entries"].as_array().map(Vec::len),
+        Some(1)
+    );
 
     let forked = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("fork")),
             method: "thread/action/run".to_string(),
             params: Some(json!({

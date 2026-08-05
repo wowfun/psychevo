@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tui_theme;
+use ratatui::{
+    style::{Modifier, Style},
+    text::Span,
+};
 
 pub(crate) fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
     let theme = tui_theme();

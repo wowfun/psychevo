@@ -1,5 +1,4 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{ComposerHistoryKind, FullscreenUi};
 
 impl<'a> FullscreenUi<'a> {
     pub(crate) fn replace_session_history_prompts(&mut self, prompts: Vec<String>) {

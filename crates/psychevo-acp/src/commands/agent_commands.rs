@@ -1,5 +1,30 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::PathBuf;
+
+use agent_client_protocol::schema::v2::{
+    AuthMethod, AuthMethodAgent, AuthMethodTerminal, PermissionOption, PermissionOptionKind,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionSubject,
+    SessionId, ToolCallStatus, ToolCallUpdate,
+};
+use agent_client_protocol::{Client, ConnectionTo, Error};
+use psychevo::command_registry::normalize_dynamic_skill_name;
+use psychevo::session_export::{
+    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
+    default_session_export_filename,
+};
+use psychevo::skills::{
+    InstallOptions, SkillDiscoveryOptions, discover_skills, install_skill, list_skill_bundles,
+    remove_skill, scan_skill_path, set_skill_config_value, set_skill_enabled,
+};
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+use crate::protocol::acp_internal_error;
+use crate::stdio::{AcpSession, PsychevoAcpAgent};
+
+use super::slash_diff_sessions::{
+    parse_artifact_args, skill_args_without_scope, skill_option_value, skill_scope_from_args,
+};
+
 impl PsychevoAcpAgent {
     pub(crate) async fn request_command_approval(
         &self,
@@ -134,8 +159,7 @@ impl PsychevoAcpAgent {
         let catalog = self.skill_catalog(session)?;
         let Some(skill) = catalog.skills.iter().find(|skill| {
             skill.name == name
-                || psychevo::__product::commands::normalize_dynamic_skill_name(&skill.name)
-                    == psychevo::__product::commands::normalize_dynamic_skill_name(name)
+                || normalize_dynamic_skill_name(&skill.name) == normalize_dynamic_skill_name(name)
         }) else {
             return Ok(format!("skill not found: {name}"));
         };
@@ -167,11 +191,9 @@ impl PsychevoAcpAgent {
     ) -> Result<String, Error> {
         let catalog = self.skill_catalog(session)?;
         if let Some(name) = args.first() {
-            let normalized = psychevo::__product::commands::normalize_dynamic_skill_name(name);
+            let normalized = normalize_dynamic_skill_name(name);
             let Some(skill) = catalog.skills.iter().find(|skill| {
-                skill.name == *name
-                    || psychevo::__product::commands::normalize_dynamic_skill_name(&skill.name)
-                        == normalized
+                skill.name == *name || normalize_dynamic_skill_name(&skill.name) == normalized
             }) else {
                 return Ok(format!("unknown skill: {name}"));
             };
@@ -304,7 +326,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn skill_catalog(
         &self,
         session: &AcpSession,
-    ) -> Result<psychevo::__product::capabilities::SkillCatalog, Error> {
+    ) -> Result<psychevo::skills::SkillCatalog, Error> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.options.home.clone(),
             cwd: session.cwd.clone(),
@@ -365,9 +387,10 @@ impl PsychevoAcpAgent {
         artifact_kind: SessionArtifactKind,
         args: Option<&str>,
     ) -> Result<String, Error> {
-        let Some(runtime_session_id) = session.runtime_session_id.as_deref() else {
+        let Some(thread) = session.thread.as_ref() else {
             return Ok("no runtime session yet".to_string());
         };
+        let runtime_session_id = thread.id();
         let parsed = parse_artifact_args(args.unwrap_or(""), artifact_kind)
             .map_err(|message| Error::invalid_params().data(message))?;
         let format = parsed.format.unwrap_or(SessionExportFormat::Markdown);
@@ -386,19 +409,17 @@ impl PsychevoAcpAgent {
         } else {
             session.cwd.join(path)
         };
-        let store = self.state.clone();
-        let result = psychevo::__product::sessions::write_session_export(
-            &store,
-            runtime_session_id,
-            &path,
-            SessionExportOptions {
-                format,
-                include,
-                artifact_kind,
-            },
-        )
-        .await
-        .map_err(acp_internal_error)?;
+        let result = thread
+            .write_export(
+                &path,
+                SessionExportOptions {
+                    format,
+                    include,
+                    artifact_kind,
+                },
+            )
+            .await
+            .map_err(acp_internal_error)?;
         Ok(format!(
             "{}: {} ({} bytes)",
             artifact_kind.as_str(),
@@ -409,12 +430,15 @@ impl PsychevoAcpAgent {
 
     pub(crate) fn auth_methods(&self, terminal_auth: bool) -> Vec<AuthMethod> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let options = self.probe_run_options(cwd, None);
-        let selected_provider = selected_configured_model(&options)
-            .ok()
+        let configuration = self.configuration(cwd, None, None).ok();
+        let selected_provider = configuration
+            .as_ref()
+            .and_then(|configuration| configuration.selected_model().ok())
             .flatten()
             .map(|model| model.provider);
-        let providers = model_catalog_providers(&options).unwrap_or_default();
+        let providers = configuration
+            .and_then(|configuration| configuration.model_catalog_providers().ok())
+            .unwrap_or_default();
         let mut methods = Vec::new();
         if let Some(provider_id) = selected_provider
             && let Some(provider) = providers

@@ -1,3 +1,21 @@
+use super::formatters::{
+    format_cache_read_percent, format_effective_token_total, is_missing_session_usage_error,
+};
+use crate::tui::app_panels::{
+    agent_action_row, agent_definition_editable, agent_definition_row, agent_diagnostic_row,
+    stats_row,
+};
+use crate::tui::support_model_catalog::TuiSessionDisplaySummary;
+use crate::tui::{
+    AgentAction, AgentEntrypoint, AgentPanel, AgentRunStatus, AgentSource, BTreeMap, BTreeSet,
+    BottomRowStyle, BottomSelectionPanel, BottomSelectionRow, BottomSelectionValue, ConfigScope,
+    MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP, PathBuf, SessionListView, TuiApp,
+    UsageQuery, Value, format_nanodollars, format_session_date, format_session_time,
+    json_array_strings, json_i64, pluralize_count, session_project_label, short_session,
+    string_values, truncate_chars, wall_now_ms,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) async fn session_selection_panel(
         &self,
@@ -21,11 +39,7 @@ impl TuiApp {
                     .cmp(&left.summary.updated_at_ms)
                     .then_with(|| left.summary.id.cmp(&right.summary.id))
             });
-            let limit = self
-                .session_browser_limits
-                .get(&cwd)
-                .copied()
-                .unwrap_or(20);
+            let limit = self.session_browser_limits.get(&cwd).copied().unwrap_or(20);
             let mut visible_count = 0usize;
             let mut hidden_count = 0usize;
             let expanded = limit > 20;
@@ -78,7 +92,7 @@ impl TuiApp {
     }
 
     pub(crate) async fn agent_running_panel(&self) -> BottomSelectionPanel {
-        let control = self.application.agent_control();
+        let control = self.runtime.application().agent_control();
         let paused = self
             .current_session
             .as_deref()
@@ -108,82 +122,60 @@ impl TuiApp {
         }];
         let mut live_count = 0usize;
         if let Some(parent) = self.current_session.as_deref() {
-            let value = control.status_value_for(Some(parent), false).await;
-            if let Some(agents) = value.get("agents").and_then(Value::as_array) {
-                for agent in agents {
-                    let status = agent
-                        .get("status")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    if !matches!(status, "pending_init" | "running") {
-                        continue;
-                    }
-                    let child_session_id = agent
-                        .get("child_session_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    if child_session_id.is_empty() {
-                        continue;
-                    }
-                    live_count = live_count.saturating_add(1);
-                    let id = agent
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or(child_session_id.as_str())
-                        .to_string();
-                    let name = agent
-                        .get("agent_name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("agent");
-                    let task = agent
-                        .get("task")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let task_name = agent.get("task_name").and_then(Value::as_str);
-                    let team_name = agent.get("team_name").and_then(Value::as_str);
-                    let mission_run_id = agent.get("mission_run_id").and_then(Value::as_str);
-                    let team_member_id = agent.get("team_member_id").and_then(Value::as_str);
-                    let labels = [
-                        team_name.map(|value| format!("team {value}")),
-                        team_member_id.map(|value| format!("member {value}")),
-                        mission_run_id.map(|value| format!("mission {value}")),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>();
-                    rows.push(BottomSelectionRow {
-                        label: team_member_id.unwrap_or(name).to_string(),
-                        description: Some(truncate_chars(task, 80)),
-                        detail: Some(
-                            [
-                                task_name.unwrap_or(status).to_string(),
-                                labels.join("  "),
-                            ]
+            for agent in control.status_records(Some(parent), false).await {
+                if !matches!(
+                    agent.status,
+                    AgentRunStatus::PendingInit | AgentRunStatus::Running
+                ) {
+                    continue;
+                }
+                let Some(child_session_id) = agent.child_session_id.as_deref() else {
+                    continue;
+                };
+                live_count = live_count.saturating_add(1);
+                let status = agent.status.as_str();
+                let name = agent.agent_name.as_str();
+                let task = agent.task.as_str();
+                let task_name = agent.task_name.as_deref();
+                let team_name = agent.team_name.as_deref();
+                let mission_run_id = agent.mission_run_id.as_deref();
+                let team_member_id = agent.team_member_id.as_deref();
+                let labels = [
+                    team_name.map(|value| format!("team {value}")),
+                    team_member_id.map(|value| format!("member {value}")),
+                    mission_run_id.map(|value| format!("mission {value}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+                rows.push(BottomSelectionRow {
+                    label: team_member_id.unwrap_or(name).to_string(),
+                    description: Some(truncate_chars(task, 80)),
+                    detail: Some(
+                        [task_name.unwrap_or(status).to_string(), labels.join("  ")]
                             .into_iter()
                             .filter(|value| !value.is_empty())
                             .collect::<Vec<_>>()
                             .join("  "),
-                        ),
-                        group: Some("Live child agents".to_string()),
-                        search_text: format!(
-                            "{id} {child_session_id} {name} {task} {status} {}",
-                            labels.join(" ")
-                        ),
-                        is_current: self.current_session.as_deref()
-                            == Some(child_session_id.as_str()),
-                        is_default: false,
-                        style: BottomRowStyle::Normal,
-                        footer: Some(
-                            "Enter open  S stop subtree  P pause/resume  Esc close  Tab available"
-                                .to_string(),
-                        ),
-                        value: BottomSelectionValue::AgentRunning {
-                            id,
-                            child_session_id,
-                        },
-                    });
-                }
+                    ),
+                    group: Some("Live child agents".to_string()),
+                    search_text: format!(
+                        "{} {child_session_id} {name} {task} {status} {}",
+                        agent.id,
+                        labels.join(" ")
+                    ),
+                    is_current: self.current_session.as_deref() == Some(child_session_id),
+                    is_default: false,
+                    style: BottomRowStyle::Normal,
+                    footer: Some(
+                        "Enter open  S stop subtree  P pause/resume  Esc close  Tab available"
+                            .to_string(),
+                    ),
+                    value: BottomSelectionValue::AgentRunning {
+                        id: agent.id.clone(),
+                        child_session_id: child_session_id.to_string(),
+                    },
+                });
             }
         }
         if live_count == 0 {
@@ -317,22 +309,19 @@ impl TuiApp {
     }
 
     pub(crate) async fn stats_panel(&self) -> Result<BottomSelectionPanel> {
-        let report = usage_stats(StatsOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            all: false,
-            days: None,
-            limit: 8,
-        })
-        .await?;
+        let mut query = UsageQuery::new(&self.cwd);
+        query.limit = 8;
+        let report = self.runtime.client().usage(query).await?;
         let totals = report.get("totals").unwrap_or(&Value::Null);
         let mut rows = Vec::new();
         if let Some(session_id) = self.current_session.as_ref() {
-            let summary = match session_usage_summary(SessionUsageOptions {
-                state: self.state_runtime.clone(),
-                session_id: session_id.clone(),
-            })
-            .await
+            let summary = match self
+                .runtime
+                .client()
+                .resume_thread(session_id.clone())
+                .await?
+                .usage_summary()
+                .await
             {
                 Ok(summary) => Some(summary),
                 Err(error) if is_missing_session_usage_error(&error, session_id) => None,
@@ -519,7 +508,7 @@ impl TuiApp {
     }
 
     pub(crate) fn toolsets_panel(&self) -> Result<BottomSelectionPanel> {
-        let value = toolsets_value(&self.run_options(String::new()), ConfigScope::Effective)?;
+        let value = self.configuration()?.toolsets(ConfigScope::Effective)?;
         let mode_key = self.current_mode.as_str();
         let mode = &value["modes"][mode_key];
         let enabled_toolsets = mode["enabled_toolsets"]
@@ -576,7 +565,6 @@ impl TuiApp {
         panel.footer = "Enter toggle  Esc close  Type search".to_string();
         Ok(panel)
     }
-
 }
 
 fn tui_session_selection_row(

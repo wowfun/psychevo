@@ -37,6 +37,19 @@ optional model/reasoning selection, and execution policy. Run records include
 timing, status, target thread/source information when known, and bounded error
 text.
 
+Automation target kind and run state follow the closed-domain typing rule in
+[001 Architecture](../001-architecture/spec.md), including the definition's
+optional last-run state. A run trigger remains an open caller-provided label
+(for example `scheduler`, `manual`, or a tool-supplied label), so persistence
+preserves it as text rather than rejecting future trigger sources.
+
+Claiming a run is the only operation that creates the `running` state. Finishing
+a claimed run accepts only a terminal result: `completed` for a completed Turn,
+`failed` for a failed Turn or execution error, and `interrupted` for a stopped
+or interrupted Turn. The finish boundary must not be able to write `running`
+together with a completion timestamp, because that would leave the task
+permanently claimed.
+
 Project automations are scoped to a workspace/cwd and use a stable Gateway
 source key shaped like `automation:<task-id>`. They must not rebind the ordinary
 Workbench cwd source.
@@ -189,6 +202,14 @@ users can discover project and thread-bound automations together.
 Automation draft turns and automation-triggered turns must not expose the
 `automation` tool. Scheduled work cannot recursively create, update, or remove
 more scheduled work unless a future spec explicitly changes that boundary.
+
+`automation/draft` executes its model request as a normal Framework Turn on a
+new Thread whose source is `automation-draft`, then waits on that accepted Turn
+for the JSON draft. The request keeps the selected cwd, configured environment,
+and config path, but uses a read-only sandbox with Agents, Skills, runtime tools,
+and clarify disabled. It must not call a Gateway backend or assemble a second
+Turn lifecycle beside the Framework Client seam defined by
+[021 Gateway](../021-gateway/spec.md).
 
 ## Workbench UX
 

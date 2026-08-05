@@ -1,13 +1,9 @@
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use psychevo::__product::persistence::StateRuntime;
-use psychevo::{
-    __product::platform::canonicalize_cwd, __product::runtime::RunMode,
-    __product::runtime::RunOptions,
-};
+use psychevo::{Application, Configuration, ConfigurationQuery};
 use serde_json::json;
 
 use crate::env::{env_path, resolve_state_db};
@@ -23,68 +19,58 @@ pub(crate) fn print_json_error(err: &anyhow::Error) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn base_run_options(
-    env_map: &BTreeMap<String, String>,
-    home: &Path,
-    cwd: &Path,
-) -> Result<RunOptions> {
-    let db_path = resolve_state_db(env_map, home, cwd)?;
-    Ok(RunOptions {
-        state: StateRuntime::open(&db_path).await?,
-        cwd: cwd.to_path_buf(),
-        snapshot_root: None,
-        session: None,
-        continue_latest: false,
-        prompt: String::new(),
-        image_inputs: Vec::new(),
-        extract_prompt_image_sources: false,
-        prompt_display: None,
-        max_context_messages: None,
-        config_path: env_path("PSYCHEVO_CONFIG", env_map, cwd)?,
-        project_context_override: None,
-        sandbox_override: None,
-        model: None,
-        reasoning_effort: None,
-        runtime_ref: None,
-        runtime_session_id: None,
-        runtime_options: BTreeMap::new(),
-        external_agent_delegate: None,
-        include_reasoning: false,
-        mode: RunMode::Default,
-        permission_mode: None,
-        approval_handler: None,
-        clarify_enabled: false,
-        inherited_env: Some(env_map.clone()),
-        agent: None,
-        no_agents: false,
-        no_skills: false,
-        selected_capability_roots: Vec::new(),
-        skill_inputs: Vec::new(),
-        mcp_servers: Vec::new(),
-        mcp_runtime: None,
-        workspace_mutations: None,
-        runtime_tools: Vec::new(),
-    })
+pub(crate) struct CommandConfiguration {
+    application: Application,
+    configuration: Configuration,
 }
 
-pub(crate) fn config_scope_dir(home: &Path, cwd: &Path, local: bool) -> Result<PathBuf> {
-    if local {
-        Ok(canonicalize_cwd(cwd)?.join(".psychevo"))
-    } else {
-        Ok(home.to_path_buf())
+impl CommandConfiguration {
+    pub(crate) async fn open(
+        env_map: &BTreeMap<String, String>,
+        home: &Path,
+        cwd: &Path,
+    ) -> Result<Self> {
+        let db_path = resolve_state_db(env_map, home, cwd)?;
+        let mut builder = Application::builder().home(home).database_path(db_path);
+        if let Some(config_path) = env_path("PSYCHEVO_CONFIG", env_map, cwd)? {
+            builder = builder.config_path(config_path);
+        }
+        let application = builder.build().await?;
+        let mut query = ConfigurationQuery::new(cwd);
+        query.inherited_env = Some(env_map.clone());
+        let configuration = match application.client().configuration(query) {
+            Ok(configuration) => configuration,
+            Err(error) => {
+                let _ = application.shutdown().await;
+                return Err(error.into());
+            }
+        };
+        Ok(Self {
+            application,
+            configuration,
+        })
     }
-}
 
-pub(crate) fn scope_label(local: bool) -> &'static str {
-    if local { "local" } else { "global" }
-}
+    pub(crate) fn configuration(&self) -> &Configuration {
+        &self.configuration
+    }
 
-pub(crate) fn scoped_config_dir(home: &Path, cwd: &Path, global: bool) -> Result<PathBuf> {
-    config_scope_dir(home, cwd, !global)
-}
-
-pub(crate) fn scoped_label(global: bool) -> &'static str {
-    if global { "global" } else { "local" }
+    pub(crate) async fn finish<T>(self, result: Result<T>) -> Result<T> {
+        let shutdown = self
+            .application
+            .shutdown()
+            .await
+            .and_then(|report| report.require_clean())
+            .map(|_| ())
+            .map_err(anyhow::Error::from);
+        match result {
+            Err(error) => Err(error),
+            Ok(value) => {
+                shutdown?;
+                Ok(value)
+            }
+        }
+    }
 }
 
 pub(crate) fn read_secret_from_stdin(required: bool) -> Result<Option<String>> {

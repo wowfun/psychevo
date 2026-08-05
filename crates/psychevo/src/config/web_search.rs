@@ -1,5 +1,19 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+
+use serde_json::{Value, json};
+
+use super::config_catalog_helpers::normalize_provider_id;
+use super::config_file_env::{CONFIG_FILE_NAME, load_toml_config_file, write_toml_config_file};
+use super::config_loading::load_run_config;
+use super::config_types::{
+    WebConfig, WebSearchBackend, WebSearchConfig, WebSearchContentType, WebSearchContextSize,
+    WebSearchExecution, WebSearchExternalAccess, WebSearchImageConfig, WebSearchLocation,
+    WebSearchTokenBudget,
+};
+use crate::types::{ModelCapabilities, PermissionAccess, PermissionConfig, RunOptions};
+use crate::{Error, Result};
 
 pub(crate) fn parse_web_config(value: &Value) -> Result<WebConfig> {
     let object = value
@@ -427,7 +441,17 @@ pub(crate) fn web_search_is_unconditionally_allowed(config: &PermissionConfig) -
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::{
+        WebConfig, WebSearchBackend, WebSearchConfig, WebSearchExecution, parse_web_config,
+        resolve_web_search_execution, update_global_web_search_settings,
+    };
+    use crate::config::CONFIG_FILE_NAME;
+    use crate::types::{ModelCapabilities, PermissionConfig};
 
     #[test]
     fn parses_defaults_and_full_search_config() {

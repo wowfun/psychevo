@@ -1,12 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tempfile::tempdir;
 
 pub(crate) fn install_workspace_root() -> PathBuf {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .expect("workspace root");
-    psychevo::__product::platform::normalized_native_path(&root)
+    psychevo::host_paths::normalized_native_path(&root)
 }
 
 pub(crate) fn install_script_path() -> PathBuf {
@@ -53,7 +54,7 @@ fn install_shell() -> PathBuf {
 
 #[cfg(windows)]
 fn install_shell() -> PathBuf {
-    let runtime = psychevo::__product::platform::GitBashRuntime::discover(
+    let runtime = psychevo::host_process::GitBashRuntime::discover(
         &std::env::vars().collect::<std::collections::BTreeMap<_, _>>(),
     )
     .unwrap_or_else(|error| panic!("native Windows install tests require Git Bash: {error}"));
@@ -73,7 +74,7 @@ fn shell_path(path: &Path) -> String {
 
 #[cfg(windows)]
 fn shell_path(path: &Path) -> String {
-    psychevo::__product::platform::display_path_for_native_path(path)
+    psychevo::host_paths::display_path_for_native_path(path)
 }
 
 #[cfg(unix)]
@@ -136,9 +137,7 @@ pub(crate) async fn install_rejects_removed_options() {
 pub(crate) async fn install_requires_checkout_cwd() {
     let temp = tempdir().expect("temp");
     let output = install_command()
-        .current_dir(psychevo::__product::platform::normalized_native_path(
-            temp.path(),
-        ))
+        .current_dir(psychevo::host_paths::normalized_native_path(temp.path()))
         .output()
         .expect("install");
 

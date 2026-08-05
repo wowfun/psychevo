@@ -1,9 +1,22 @@
-use super::agents::active_profile_config_dir;
-use super::*;
+use std::path::Path;
+
+use psychevo::{Configuration, ConfigurationQuery, Error, config::set_channel_enabled};
+use psychevo_gateway_protocol as wire;
+use serde::Deserialize;
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::gateway_now_ms;
 use crate::im::adapters::{
     WECHAT_ILINK_BASE_URL, WechatQrPoll, check_wechat_ilink_health, fetch_wechat_qr_code,
     poll_wechat_qr_code,
 };
+use psychevo_gateway_protocol::source::GatewayThreadSelector;
+
+use super::agents::active_profile_config_dir;
+use super::binding::WebState;
+use super::channel_runtime;
+use super::scope_session::ResolvedScope;
 
 const WECHAT_QR_INTERVAL_MS: u64 = 3_000;
 const WECHAT_QR_EXPIRES_MS: i64 = 120_000;
@@ -73,16 +86,18 @@ struct RuntimeChannelDoctorCheck {
 pub(super) fn channel_list_result_for_scope(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo::Result<wire::ChannelListResult> {
+) -> psychevo::Result<wire::channels::ChannelListResult> {
     channel_list_result_for_cwd(state, &scope.cwd)
 }
 
 pub(super) fn channel_list_result_for_cwd(
     state: &WebState,
     cwd: &Path,
-) -> psychevo::Result<wire::ChannelListResult> {
-    let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo::__product::configuration::channel_list_value(&options)?;
+) -> psychevo::Result<wire::channels::ChannelListResult> {
+    let mut query = ConfigurationQuery::new(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
+    let value = configuration.channels()?;
     channel_list_result_from_value(state, value)
 }
 
@@ -90,14 +105,16 @@ pub(super) fn channel_show_result(
     state: &WebState,
     scope: &ResolvedScope,
     id: &str,
-) -> psychevo::Result<wire::ChannelEnableResult> {
-    let options = state.run_options(scope.cwd.clone(), None);
-    let value = psychevo::__product::configuration::channel_show_value(&options, id)?;
+) -> psychevo::Result<wire::channels::ChannelEnableResult> {
+    let mut query = ConfigurationQuery::new(&scope.cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
+    let value = configuration.channel(id)?;
     let row = value
         .get("channel")
         .cloned()
         .ok_or_else(|| Error::Message("channel show returned no channel".to_string()))?;
-    Ok(wire::ChannelEnableResult {
+    Ok(wire::channels::ChannelEnableResult {
         channel: channel_config_view_from_runtime(state, serde_json::from_value(row)?)?,
     })
 }
@@ -105,8 +122,8 @@ pub(super) fn channel_show_result(
 pub(super) fn channel_enable_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ChannelEnableParams,
-) -> psychevo::Result<wire::ChannelEnableResult> {
+    params: wire::channels::ChannelEnableParams,
+) -> psychevo::Result<wire::channels::ChannelEnableResult> {
     let config_dir = active_profile_config_dir(state, scope);
     set_channel_enabled(config_dir, &params.id, params.enabled)?;
     channel_runtime::reconcile(state.clone());
@@ -116,8 +133,8 @@ pub(super) fn channel_enable_result(
 pub(super) async fn channel_update_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ChannelUpdateParams,
-) -> psychevo::Result<wire::ChannelEnableResult> {
+    params: wire::channels::ChannelUpdateParams,
+) -> psychevo::Result<wire::channels::ChannelEnableResult> {
     let config_dir = active_profile_config_dir(state, scope);
     let requested_cwd = params.cwd.clone();
     let previous_cwd = if requested_cwd.is_some() {
@@ -135,25 +152,23 @@ pub(super) async fn channel_update_result(
     } else {
         None
     };
-    psychevo::__product::configuration::update_channel_connection(
-        psychevo::__product::configuration::ChannelUpdateInput {
-            config_dir,
-            id: params.id.clone(),
-            label: params.label,
-            enabled: params.enabled,
-            cwd: update_cwd,
-            runtime_ref: params.runtime_ref,
-            model: params.model,
-            permission_mode: params.permission_mode,
-            require_mention: params.require_mention,
-            credential_env: params.credential_env,
-            account_env: params.account_env,
-            base_url_env: params.base_url_env,
-            app_id_env: params.app_id_env,
-            allow_users: params.allow_users,
-            allow_groups: params.allow_groups,
-        },
-    )?;
+    psychevo::config::update_channel_connection(psychevo::config::ChannelUpdateInput {
+        config_dir,
+        id: params.id.clone(),
+        label: params.label,
+        enabled: params.enabled,
+        cwd: update_cwd,
+        runtime_ref: params.runtime_ref,
+        model: params.model,
+        permission_mode: params.permission_mode,
+        require_mention: params.require_mention,
+        credential_env: params.credential_env,
+        account_env: params.account_env,
+        base_url_env: params.base_url_env,
+        app_id_env: params.app_id_env,
+        allow_users: params.allow_users,
+        allow_groups: params.allow_groups,
+    })?;
     if requested_cwd.is_some() && previous_cwd != normalized_cwd_value {
         state
             .inner
@@ -171,9 +186,9 @@ fn normalized_channel_update_cwd(value: &str, cwd: &Path) -> psychevo::Result<Op
     if value.is_empty() {
         return Ok(None);
     }
-    let resolved = psychevo::__product::platform::resolve_input_path(value, cwd)?;
+    let resolved = psychevo::host_paths::resolve_input_path(value, cwd)?;
     Ok(Some(
-        psychevo::__product::platform::canonicalize_cwd(&resolved)?
+        psychevo::paths::canonicalize_cwd(&resolved)?
             .display()
             .to_string(),
     ))
@@ -182,10 +197,10 @@ fn normalized_channel_update_cwd(value: &str, cwd: &Path) -> psychevo::Result<Op
 pub(super) fn channel_delete_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ChannelIdParams,
-) -> psychevo::Result<wire::ChannelListResult> {
+    params: wire::channels::ChannelIdParams,
+) -> psychevo::Result<wire::channels::ChannelListResult> {
     let config_dir = active_profile_config_dir(state, scope);
-    psychevo::__product::configuration::delete_channel_connection(config_dir, &params.id)?;
+    psychevo::config::delete_channel_connection(config_dir, &params.id)?;
     channel_runtime::reconcile(state.clone());
     channel_list_result_for_scope(state, scope)
 }
@@ -193,11 +208,11 @@ pub(super) fn channel_delete_result(
 pub(super) async fn channel_source_list_result(
     state: &WebState,
     _scope: &ResolvedScope,
-    params: wire::ChannelIdParams,
-) -> psychevo::Result<wire::ChannelSourceListResult> {
+    params: wire::channels::ChannelIdParams,
+) -> psychevo::Result<wire::channels::ChannelSourceListResult> {
     let bindings = state
         .inner
-        .state
+        .durability
         .gateway_source_bindings_for_connection_id(&params.id)
         .await?;
     let mut sources = Vec::new();
@@ -226,8 +241,8 @@ pub(super) async fn channel_source_list_result(
             .map(redacted_remote_label);
         let summary = state
             .inner
-            .state
-            .session_summary(&binding.thread_id)
+            .framework
+            .thread_summary(&binding.thread_id)
             .await?;
         let mut activity = state
             .inner
@@ -240,7 +255,7 @@ pub(super) async fn channel_source_list_result(
             .resume_thread(&binding.thread_id)
             .await
         {
-            let framework_activity = thread.__activity();
+            let framework_activity = thread.activity();
             activity.framework_revision = Some(framework_activity.revision.to_string());
             activity.running |= framework_activity.running;
             if framework_activity.active_turn_id.is_some() {
@@ -249,13 +264,13 @@ pub(super) async fn channel_source_list_result(
             if let Some(turn_id) = framework_activity.active_turn_id {
                 let kind = summary
                     .as_ref()
-                    .filter(|summary| summary.parent_session_id.is_some())
-                    .map_or(wire::FrameworkTurnKind::Root, |_| {
-                        wire::FrameworkTurnKind::DelegatedChild
+                    .filter(|summary| summary.parent_thread_id.is_some())
+                    .map_or(wire::events_transcript::FrameworkTurnKind::Root, |_| {
+                        wire::events_transcript::FrameworkTurnKind::DelegatedChild
                     });
                 activity.activities.insert(
                     0,
-                    wire::ThreadActivityView::FrameworkTurn {
+                    wire::events_transcript::ThreadActivityView::FrameworkTurn {
                         activity_id: turn_id.clone(),
                         turn_id,
                         kind,
@@ -284,7 +299,7 @@ pub(super) async fn channel_source_list_result(
             chat_label.as_deref(),
             user_label.as_deref(),
         ));
-        sources.push(wire::ChannelSourceBindingView {
+        sources.push(wire::channels::ChannelSourceBindingView {
             source_key: binding.source_key,
             connection_id: params.id.clone(),
             platform,
@@ -301,7 +316,7 @@ pub(super) async fn channel_source_list_result(
             updated_at_ms: binding.updated_at_ms,
         });
     }
-    Ok(wire::ChannelSourceListResult { sources })
+    Ok(wire::channels::ChannelSourceListResult { sources })
 }
 
 fn redacted_remote_label(value: &str) -> String {
@@ -343,18 +358,16 @@ fn redacted_channel_source_name(
 pub(super) async fn channel_doctor_result_live(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ChannelDoctorParams,
-) -> psychevo::Result<wire::ChannelDoctorResult> {
-    let options = state.run_options(scope.cwd.clone(), None);
+    params: wire::channels::ChannelDoctorParams,
+) -> psychevo::Result<wire::channels::ChannelDoctorResult> {
+    let mut query = ConfigurationQuery::new(&scope.cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
     let live = params.live.unwrap_or(false);
-    let value = psychevo::__product::configuration::channel_doctor_value(
-        &options,
-        params.id.as_deref(),
-        live,
-    )?;
+    let value = configuration.diagnose_channels(params.id.as_deref(), live)?;
     let mut result = channel_doctor_result_from_value(state, value)?;
     if live {
-        enrich_wechat_live_doctor(state, scope, params.id.as_deref(), &mut result).await?;
+        enrich_wechat_live_doctor(&configuration, params.id.as_deref(), &mut result).await?;
     }
     Ok(result)
 }
@@ -362,8 +375,8 @@ pub(super) async fn channel_doctor_result_live(
 pub(super) async fn channel_wechat_qr_start_result(
     state: &WebState,
     _scope: &ResolvedScope,
-    params: wire::ChannelWechatQrStartParams,
-) -> psychevo::Result<wire::ChannelWechatQrStartResult> {
+    params: wire::channels::ChannelWechatQrStartParams,
+) -> psychevo::Result<wire::channels::ChannelWechatQrStartResult> {
     let id = params
         .id
         .as_deref()
@@ -402,7 +415,7 @@ pub(super) async fn channel_wechat_qr_start_result(
         "wechat qr setup started: id={} base_url={}",
         session_id, qr_base_url
     );
-    Ok(wire::ChannelWechatQrStartResult {
+    Ok(wire::channels::ChannelWechatQrStartResult {
         session_id,
         qr_url: qr.qr_url,
         qr_image: qr.qr_image,
@@ -417,8 +430,8 @@ pub(super) async fn channel_wechat_qr_start_result(
 pub(super) async fn channel_wechat_qr_poll_result(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ChannelWechatQrPollParams,
-) -> psychevo::Result<wire::ChannelWechatQrPollResult> {
+    params: wire::channels::ChannelWechatQrPollParams,
+) -> psychevo::Result<wire::channels::ChannelWechatQrPollResult> {
     let session_id = params.session_id.trim();
     let session = {
         let sessions = state
@@ -444,7 +457,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
             .lock()
             .expect("wechat qr sessions poisoned")
             .remove(session_id);
-        return Ok(wire::ChannelWechatQrPollResult {
+        return Ok(wire::channels::ChannelWechatQrPollResult {
             done: false,
             status: "expired".to_string(),
             message: "WeChat QR session expired. Generate a new code.".to_string(),
@@ -472,7 +485,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
                     .entry(session_id.to_string())
                     .and_modify(|session| session.base_url = base_url);
             }
-            Ok(wire::ChannelWechatQrPollResult {
+            Ok(wire::channels::ChannelWechatQrPollResult {
                 done: false,
                 status,
                 message,
@@ -487,7 +500,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
                 .lock()
                 .expect("wechat qr sessions poisoned")
                 .remove(session_id);
-            Ok(wire::ChannelWechatQrPollResult {
+            Ok(wire::channels::ChannelWechatQrPollResult {
                 done: false,
                 status: "expired".to_string(),
                 message,
@@ -515,22 +528,20 @@ pub(super) async fn channel_wechat_qr_poll_result(
                 .remove(session_id);
             let config_dir = active_profile_config_dir(state, scope);
             let allow_users = user_id.into_iter().collect::<Vec<_>>();
-            psychevo::__product::configuration::upsert_channel_connection(
-                psychevo::__product::configuration::ChannelSetupInput {
-                    config_dir: config_dir.clone(),
-                    id: session.id.clone(),
-                    channel: "wechat".to_string(),
-                    label: session.label.clone(),
-                    credential_env: Some("WECHAT_BOT_TOKEN".to_string()),
-                    credential: Some(token),
-                    account_env: Some("WECHAT_ACCOUNT_ID".to_string()),
-                    account_id: Some(account_id),
-                    base_url_env: Some("WECHAT_ILINK_BASE_URL".to_string()),
-                    base_url: Some(base_url.clone()),
-                    allow_users,
-                    allow_groups: Vec::new(),
-                },
-            )?;
+            psychevo::config::upsert_channel_connection(psychevo::config::ChannelSetupInput {
+                config_dir: config_dir.clone(),
+                id: session.id.clone(),
+                channel: "wechat".to_string(),
+                label: session.label.clone(),
+                credential_env: Some("WECHAT_BOT_TOKEN".to_string()),
+                credential: Some(token),
+                account_env: Some("WECHAT_ACCOUNT_ID".to_string()),
+                account_id: Some(account_id),
+                base_url_env: Some("WECHAT_ILINK_BASE_URL".to_string()),
+                base_url: Some(base_url.clone()),
+                allow_users,
+                allow_groups: Vec::new(),
+            })?;
             protect_channel_env_file(&config_dir.join(".env"))?;
             if params.enable.unwrap_or(true) {
                 set_channel_enabled(config_dir, &session.id, true)?;
@@ -548,7 +559,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
             );
             channel_runtime::reconcile(state.clone());
             let shown = channel_show_result(state, scope, &session.id)?;
-            Ok(wire::ChannelWechatQrPollResult {
+            Ok(wire::channels::ChannelWechatQrPollResult {
                 done: true,
                 status: "qr_login_pending".to_string(),
                 message: "WeChat credentials saved. Gateway is starting polling.".to_string(),
@@ -559,16 +570,16 @@ pub(super) async fn channel_wechat_qr_poll_result(
     }
 }
 
-fn channel_list_result_from_value(
+pub(super) fn channel_list_result_from_value(
     state: &WebState,
     value: Value,
-) -> psychevo::Result<wire::ChannelListResult> {
+) -> psychevo::Result<wire::channels::ChannelListResult> {
     let rows = value
         .get("channels")
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()));
     let rows: Vec<RuntimeChannelConfigRow> = serde_json::from_value(rows)?;
-    Ok(wire::ChannelListResult {
+    Ok(wire::channels::ChannelListResult {
         channels: rows
             .into_iter()
             .map(|row| channel_config_view_from_runtime(state, row))
@@ -579,18 +590,18 @@ fn channel_list_result_from_value(
 fn channel_doctor_result_from_value(
     state: &WebState,
     value: Value,
-) -> psychevo::Result<wire::ChannelDoctorResult> {
+) -> psychevo::Result<wire::channels::ChannelDoctorResult> {
     let live = value.get("live").and_then(Value::as_bool).unwrap_or(false);
     let rows = value
         .get("channels")
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()));
     let rows: Vec<RuntimeChannelDoctorRow> = serde_json::from_value(rows)?;
-    Ok(wire::ChannelDoctorResult {
+    Ok(wire::channels::ChannelDoctorResult {
         live,
         channels: rows
             .into_iter()
-            .map(|row| wire::ChannelDoctorChannelView {
+            .map(|row| wire::channels::ChannelDoctorChannelView {
                 runner: state.inner.channel_runtime.runner_view(&row.id),
                 id: row.id,
                 channel: row.channel,
@@ -599,7 +610,7 @@ fn channel_doctor_result_from_value(
                 checks: row
                     .checks
                     .into_iter()
-                    .map(|check| wire::ChannelDoctorCheck {
+                    .map(|check| wire::channels::ChannelDoctorCheck {
                         name: check.name,
                         status: check.status,
                         message: check.message,
@@ -611,14 +622,11 @@ fn channel_doctor_result_from_value(
 }
 
 async fn enrich_wechat_live_doctor(
-    state: &WebState,
-    scope: &ResolvedScope,
+    configuration: &Configuration,
     id: Option<&str>,
-    result: &mut wire::ChannelDoctorResult,
+    result: &mut wire::channels::ChannelDoctorResult,
 ) -> psychevo::Result<()> {
-    let options = state.run_options(scope.cwd.clone(), None);
-    let connections =
-        psychevo::__product::configuration::channel_runtime_connections(&options, &scope.cwd)?;
+    let connections = configuration.channel_runtime_connections()?;
     let client = reqwest::Client::new();
     for connection in connections
         .into_iter()
@@ -634,7 +642,7 @@ async fn enrich_wechat_live_doctor(
         };
         row.checks.retain(|check| check.name != "live");
         let check = match connection.credential.as_deref() {
-            None | Some("") => wire::ChannelDoctorCheck {
+            None | Some("") => wire::channels::ChannelDoctorCheck {
                 name: "live".to_string(),
                 status: "fail".to_string(),
                 message: "WeChat token env is missing; run QR setup".to_string(),
@@ -645,12 +653,12 @@ async fn enrich_wechat_live_doctor(
                     .as_deref()
                     .unwrap_or(WECHAT_ILINK_BASE_URL);
                 match check_wechat_ilink_health(&client, base_url, token, 3).await {
-                    Ok(health) if health.ok => wire::ChannelDoctorCheck {
+                    Ok(health) if health.ok => wire::channels::ChannelDoctorCheck {
                         name: "live".to_string(),
                         status: "ok".to_string(),
                         message: "iLink getupdates accepted the current token".to_string(),
                     },
-                    Ok(health) => wire::ChannelDoctorCheck {
+                    Ok(health) => wire::channels::ChannelDoctorCheck {
                         name: "live".to_string(),
                         status: "fail".to_string(),
                         message: if health.reason.as_deref() == Some("needs_qr_login") {
@@ -663,7 +671,7 @@ async fn enrich_wechat_live_doctor(
                             )
                         },
                     },
-                    Err(err) => wire::ChannelDoctorCheck {
+                    Err(err) => wire::channels::ChannelDoctorCheck {
                         name: "live".to_string(),
                         status: "fail".to_string(),
                         message: format!(
@@ -682,9 +690,9 @@ async fn enrich_wechat_live_doctor(
 fn channel_config_view_from_runtime(
     state: &WebState,
     row: RuntimeChannelConfigRow,
-) -> psychevo::Result<wire::ChannelConfigView> {
+) -> psychevo::Result<wire::channels::ChannelConfigView> {
     let runner = state.inner.channel_runtime.runner_view(&row.id);
-    Ok(wire::ChannelConfigView {
+    Ok(wire::channels::ChannelConfigView {
         id: row.id,
         channel: row.channel,
         domain: row.domain,
@@ -696,23 +704,29 @@ fn channel_config_view_from_runtime(
         model: row.model,
         permission_mode: row.permission_mode,
         require_mention: row.require_mention,
-        credential: wire::ChannelCredentialView {
+        credential: wire::channels::ChannelCredentialView {
             env: row.credential.env,
             status: row.credential.status,
         },
-        account: row.account.map(|credential| wire::ChannelCredentialView {
-            env: credential.env,
-            status: credential.status,
-        }),
-        base_url: row.base_url.map(|credential| wire::ChannelCredentialView {
-            env: credential.env,
-            status: credential.status,
-        }),
-        app_id: row.app_id.map(|credential| wire::ChannelCredentialView {
-            env: credential.env,
-            status: credential.status,
-        }),
-        allowlist: wire::ChannelAllowlistView {
+        account: row
+            .account
+            .map(|credential| wire::channels::ChannelCredentialView {
+                env: credential.env,
+                status: credential.status,
+            }),
+        base_url: row
+            .base_url
+            .map(|credential| wire::channels::ChannelCredentialView {
+                env: credential.env,
+                status: credential.status,
+            }),
+        app_id: row
+            .app_id
+            .map(|credential| wire::channels::ChannelCredentialView {
+                env: credential.env,
+                status: credential.status,
+            }),
+        allowlist: wire::channels::ChannelAllowlistView {
             users: row.allowlist.users,
             groups: row.allowlist.groups,
             status: row.allowlist.status,

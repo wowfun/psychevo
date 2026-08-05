@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-use super::*;
+use std::fs;
+use std::path::PathBuf;
+
+use serde_json::{Value, json};
+
+use super::config_cli_views::config_show_value;
+use super::config_custom_provider::ensure_json_object;
+use super::config_file_env::{CONFIG_FILE_NAME, load_toml_config_file, write_toml_config_file};
+use super::config_parse::parse_run_config;
+use crate::types::{ConfigScope, RunMode, RunOptions};
+use crate::{Error, Result};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolsetMutationResult {
     pub config_path: PathBuf,
@@ -302,8 +312,11 @@ pub(crate) fn push_unique_string(values: &mut Vec<Value>, name: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
+
+    use super::{create_local_toolset, set_local_toolset_enabled};
+    use crate::config::config_file_env::CONFIG_FILE_NAME;
+    use crate::types::RunMode;
 
     #[test]
     fn coding_core_toolset_configuration_is_rejected_without_writing_config() {

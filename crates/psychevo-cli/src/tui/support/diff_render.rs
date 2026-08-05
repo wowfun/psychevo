@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{DiffOverlay, WorkspaceDiff, highlight_code_line, tui_theme};
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
+use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn diff_overlay_from_workspace_diff(diff: &WorkspaceDiff) -> DiffOverlay {
     DiffOverlay::from_lines(workspace_diff_lines(diff))

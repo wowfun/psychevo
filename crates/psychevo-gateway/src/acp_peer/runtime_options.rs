@@ -1,3 +1,14 @@
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{Implementation, InitializeRequest};
+use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol_schema::v1::InitializeResponse;
+use serde_json::Value;
+
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+use psychevo_gateway_protocol as wire;
+
+use super::metadata_permissions::client_capabilities;
+
 const ACP_MAX_RUNTIME_OPTIONS: usize = 128;
 const ACP_MAX_RUNTIME_OPTION_VALUES: usize = 512;
 const ACP_MAX_RUNTIME_OPTION_ID_CHARS: usize = 128;
@@ -8,7 +19,7 @@ const ACP_MAX_RUNTIME_OPTION_TYPE_CHARS: usize = 64;
 const ACP_MAX_RUNTIME_OPTION_VALUE_CHARS: usize = 1_024;
 const ACP_MAX_RUNTIME_OPTION_GROUP_CHARS: usize = 256;
 
-enum AcpV1Initialization {
+pub(super) enum AcpV1Initialization {
     Compatible(Box<InitializeResponse>),
     Incompatible {
         expected: ProtocolVersion,
@@ -16,7 +27,7 @@ enum AcpV1Initialization {
     },
 }
 
-async fn initialize_acp_v1(
+pub(super) async fn initialize_acp_v1(
     cx: &ConnectionTo<Agent>,
     peer: &ResolvedPeerTurn,
     client_name: &str,
@@ -41,7 +52,9 @@ async fn initialize_acp_v1(
     Ok(AcpV1Initialization::Compatible(Box::new(initialized)))
 }
 
-fn project_acp_runtime_options(value: Value) -> Vec<wire::RuntimeConfigOptionView> {
+pub(super) fn project_acp_runtime_options(
+    value: Value,
+) -> Vec<wire::thread_command_turn::RuntimeConfigOptionView> {
     value
         .as_array()
         .into_iter()
@@ -51,11 +64,13 @@ fn project_acp_runtime_options(value: Value) -> Vec<wire::RuntimeConfigOptionVie
         .collect()
 }
 
-fn project_acp_runtime_option(option: &Value) -> Option<wire::RuntimeConfigOptionView> {
+fn project_acp_runtime_option(
+    option: &Value,
+) -> Option<wire::thread_command_turn::RuntimeConfigOptionView> {
     let id = bounded_string_field(option, "id", ACP_MAX_RUNTIME_OPTION_ID_CHARS)?;
     let name = bounded_string_field(option, "name", ACP_MAX_RUNTIME_OPTION_NAME_CHARS)
         .unwrap_or_else(|| id.clone());
-    Some(wire::RuntimeConfigOptionView {
+    Some(wire::thread_command_turn::RuntimeConfigOptionView {
         id,
         name,
         description: bounded_string_field(
@@ -71,7 +86,9 @@ fn project_acp_runtime_option(option: &Value) -> Option<wire::RuntimeConfigOptio
     })
 }
 
-fn project_acp_runtime_option_values(option: &Value) -> Vec<wire::RuntimeConfigOptionValueView> {
+fn project_acp_runtime_option_values(
+    option: &Value,
+) -> Vec<wire::thread_command_turn::RuntimeConfigOptionValueView> {
     let Some(values) = option.get("options").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -107,9 +124,9 @@ fn project_acp_runtime_option_values(option: &Value) -> Vec<wire::RuntimeConfigO
 fn project_acp_runtime_option_value(
     value: &Value,
     group: Option<String>,
-) -> Option<wire::RuntimeConfigOptionValueView> {
+) -> Option<wire::thread_command_turn::RuntimeConfigOptionValueView> {
     let id = bounded_string_field(value, "value", ACP_MAX_RUNTIME_OPTION_VALUE_CHARS)?;
-    Some(wire::RuntimeConfigOptionValueView {
+    Some(wire::thread_command_turn::RuntimeConfigOptionValueView {
         value: id.clone(),
         name: bounded_string_field(value, "name", ACP_MAX_RUNTIME_OPTION_NAME_CHARS).unwrap_or(id),
         description: bounded_string_field(

@@ -1,3 +1,34 @@
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use axum::body::to_bytes;
+use axum::extract::{Path as AxumPath, Query, State};
+use axum::http::header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, LOCATION};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use psychevo::application::{Message as RuntimeMessage, UserContentBlock};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession, LaunchEntry};
+use crate::server::download_static::{
+    DownloadQuery, download_session, read_media_artifact, static_asset,
+};
+use crate::server::event_delivery::ConnectionSender;
+use crate::server::rpc_dispatch::{
+    LaunchQuery, consume_launch, handle_rpc, prune_expired_launches,
+};
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::{
+    framework_message_fixture_executor, response_text, web_state, web_state_with_env,
+    web_state_with_native_test_executor, web_state_with_static, write_project_skill,
+};
+use psychevo_gateway_protocol::source::GatewaySource;
+
 fn terminal_test_env() -> BTreeMap<String, String> {
     #[cfg(unix)]
     let env = BTreeMap::from([("SHELL".to_string(), "/bin/sh".to_string())]);
@@ -5,15 +36,52 @@ fn terminal_test_env() -> BTreeMap<String, String> {
     let env = {
         let mut env = BTreeMap::from([("SHELL".to_string(), "sh".to_string())]);
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let runtime = psychevo::__product::platform::GitBashRuntime::discover(&host_env)
+        let runtime = psychevo::host_paths::GitBashRuntime::discover(&host_env)
             .expect("Git Bash is required by native Windows terminal tests");
         env.insert(
-            psychevo::__product::platform::PSYCHEVO_GIT_BASH_PATH.to_string(),
+            psychevo::host_paths::PSYCHEVO_GIT_BASH_PATH.to_string(),
             runtime.bash.display().to_string(),
         );
         env
     };
     env
+}
+
+async fn start_test_thread(state: &crate::server::binding::WebState) -> psychevo::Thread {
+    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    request.source = "web".to_string();
+    state
+        .inner
+        .framework
+        .start_thread(request)
+        .await
+        .expect("test Thread")
+}
+
+async fn state_with_user_message(
+    prompt: &str,
+) -> (
+    tempfile::TempDir,
+    crate::server::binding::WebState,
+    psychevo::Thread,
+) {
+    let (temp, state) =
+        web_state_with_native_test_executor(framework_message_fixture_executor(vec![
+            RuntimeMessage::User {
+                content: vec![UserContentBlock::text(prompt)],
+                timestamp_ms: 1,
+            },
+        ]))
+        .await;
+    let thread = start_test_thread(&state).await;
+    thread
+        .start_turn(psychevo::TurnRequest::new(prompt))
+        .await
+        .expect("fixture Turn")
+        .wait()
+        .await
+        .expect("fixture Turn completion");
+    (temp, state, thread)
 }
 
 #[tokio::test]
@@ -31,7 +99,7 @@ async fn terminal_start_rejects_cwd_outside_workspace() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "terminal/start".to_string(),
             params: Some(json!({
@@ -62,7 +130,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
         AuthContext::Bearer,
         out_tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "terminal/start".to_string(),
             params: Some(json!({
@@ -85,7 +153,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
         AuthContext::Bearer,
         out_tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "terminal/resize".to_string(),
             params: Some(json!({
@@ -109,7 +177,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
         AuthContext::Bearer,
         out_tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "terminal/write".to_string(),
             params: Some(json!({
@@ -171,7 +239,7 @@ async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() 
         AuthContext::Bearer,
         owner.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "terminal/start".to_string(),
             params: Some(json!({
@@ -194,7 +262,7 @@ async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() 
         AuthContext::Bearer,
         other.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "terminal/write".to_string(),
             params: Some(json!({
@@ -212,7 +280,7 @@ async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() 
         AuthContext::Bearer,
         other,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "terminal/terminate".to_string(),
             params: Some(json!({"terminalId": terminal_id.clone()})),
@@ -232,8 +300,7 @@ async fn terminal_is_connection_private_and_disconnect_cleanup_wins_exit_once() 
                 && notification["params"]["terminalId"] == terminal_id
             {
                 assert_eq!(
-                    notification["params"]["reason"],
-                    "connection_closed",
+                    notification["params"]["reason"], "connection_closed",
                     "{notification:#}"
                 );
                 exits += 1;
@@ -260,7 +327,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/list".to_string(),
             params: Some(json!({
@@ -298,7 +365,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -330,19 +397,14 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
     assert_eq!(diff_completion["groupLabel"], "Commands");
     assert!(diff_completion["scopeLabel"].is_null());
 
-    let parent_session = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
+    let parent_session = start_test_thread(&state).await.id().to_string();
     let (tx, _rx) = mpsc::unbounded_channel();
     let list = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "command/list".to_string(),
             params: Some(json!({
@@ -366,7 +428,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -416,7 +478,7 @@ async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/list".to_string(),
             params: Some(json!({
@@ -443,7 +505,7 @@ async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -471,7 +533,7 @@ async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -495,7 +557,7 @@ async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -541,7 +603,7 @@ async fn command_execute_alias_to_unsupported_target_is_not_prompt_passthrough()
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -581,7 +643,7 @@ async fn command_execute_export_share_invalid_args_return_known_guidance() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(id)),
                 method: "command/execute".to_string(),
                 params: Some(json!({
@@ -620,7 +682,7 @@ async fn command_list_and_execute_include_dynamic_skill_commands() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/list".to_string(),
             params: Some(json!({
@@ -647,7 +709,7 @@ async fn command_list_and_execute_include_dynamic_skill_commands() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -679,7 +741,7 @@ async fn command_list_and_execute_include_dynamic_skill_commands() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -713,7 +775,7 @@ async fn command_execute_known_unsupported_returns_guidance_without_passthrough(
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -742,6 +804,44 @@ async fn command_execute_known_unsupported_returns_guidance_without_passthrough(
 }
 
 #[tokio::test]
+async fn sandbox_command_reads_the_framework_configuration_without_a_thread() {
+    let (_temp, state) = web_state().await;
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        "[sandbox]\nenabled = false\nmode = \"read-only\"\n",
+    )
+    .expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "command/execute".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "command": "/sandbox",
+                "threadId": null
+            })),
+        },
+    )
+    .await
+    .expect("command/execute sandbox");
+
+    assert_eq!(result["accepted"], true);
+    let message = result["message"].as_str().expect("sandbox status");
+    assert!(message.contains("enabled: false"), "{message}");
+    assert!(message.contains("configured_mode: read-only"), "{message}");
+}
+
+#[tokio::test]
 async fn command_execute_unknown_slash_returns_prompt_passthrough() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -755,7 +855,7 @@ async fn command_execute_unknown_slash_returns_prompt_passthrough() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!("1")),
                 method: "command/execute".to_string(),
                 params: Some(json!({
@@ -790,7 +890,7 @@ async fn shell_start_empty_command_returns_bounded_help_without_spawning() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "shell/start".to_string(),
             params: Some(json!({
@@ -823,7 +923,7 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -838,22 +938,26 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
     .expect_err("empty turn should reject");
 
     assert_eq!(err.to_string(), "turn/start requires input");
-    assert_eq!(
+    assert!(
         state
             .inner
-            .state
-
-            .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .await.expect("sessions")
-            .len(),
-        0
+            .framework
+            .list_human_threads(psychevo::application::HumanThreadListQuery {
+                cwd: Some(state.inner.cwd.clone()),
+                ..psychevo::application::HumanThreadListQuery::default()
+            })
+            .await
+            .expect("Threads")
+            .threads
+            .is_empty()
     );
     assert!(
         state
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .await.expect("source lookup")
+            .await
+            .expect("source lookup")
             .is_none()
     );
 }
@@ -871,7 +975,7 @@ async fn shell_start_first_request_can_be_accepted_without_thread_id() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "shell/start".to_string(),
             params: Some(json!({
@@ -898,7 +1002,7 @@ async fn agent_write_rpc_creates_project_backend_ref_shadow() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "agent/write".to_string(),
             params: Some(json!({
@@ -1117,19 +1221,8 @@ async fn static_asset_rejects_symlink_escape() {
 
 #[tokio::test]
 async fn download_session_honors_export_query_options() {
-    let (_temp, state) = web_state_with_static().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    state
-        .inner
-        .state
-
-        .append_message(&session_id, &runtime_user_message("hello export", 1))
-        .await.expect("message");
+    let (_temp, state, thread) = state_with_user_message("hello export").await;
+    let session_id = thread.id().to_string();
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -1170,19 +1263,8 @@ async fn download_session_honors_export_query_options() {
 
 #[tokio::test]
 async fn download_session_defaults_to_markdown_artifact() {
-    let (_temp, state) = web_state_with_static().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    state
-        .inner
-        .state
-
-        .append_message(&session_id, &runtime_user_message("hello markdown", 1))
-        .await.expect("message");
+    let (_temp, state, thread) = state_with_user_message("hello markdown").await;
+    let session_id = thread.id().to_string();
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -1223,10 +1305,10 @@ async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
 
     let (_temp, state) = web_state_with_static().await;
     let bytes = base64::engine::general_purpose::STANDARD
-        .decode(psychevo::__ai::DEFAULT_FAKE_IMAGE_BASE64)
+        .decode(crate::test_support::ONE_PIXEL_PNG_BASE64)
         .expect("png fixture");
     let artifact =
-        psychevo::__product::platform::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
+        psychevo::media::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
             .expect("artifact");
 
     let unauthorized = read_media_artifact(

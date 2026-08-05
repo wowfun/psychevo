@@ -1,7 +1,88 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::transcript_focus::write_home_tui_agent;
+use crate::tui::tests::fixtures::{
+    attach_no_steer_running, buffer_text, drain_starting_turn_cleanups, draw_fullscreen_for_test,
+    finished_turn_result, install_pending_turn_admission, test_app, test_shell_running_control,
+};
+use crate::tui::tests::input_popups::completion_popups::write_tui_agent;
+use crate::tui::tests::{start_thread_fixture, test_app_with_models};
+use crate::tui::{
+    AgentEditorPanel, AgentRelationship, AgentRelationshipStatus, AgentSource, AgentTab,
+    BottomPanel, BottomSelectionValue, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, RunningTask,
+    RunningTurn, RunningTurnEvents, SetThreadMainAgentSelection, StartThreadRequest,
+    ThreadMainAgentSelection, TranscriptKind, TranscriptRow, agent_editor_markdown,
+    bottom_status_context_for_width, textarea_with_text,
+};
+use psychevo::AgentRelationshipAgent;
+use std::time::Duration;
+use tempfile::tempdir;
+use tokio::sync::mpsc;
+
+#[tokio::test]
+pub(crate) async fn agent_run_transfers_starting_turn_cleanup_before_agent_admission() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp).await;
+    write_tui_agent(&app, "general", "General-purpose test agent");
+    app.current_session = None;
+    let mut ui = FullscreenUi::new(&app);
+    let release = install_pending_turn_admission(&app, &mut ui, "old pending prompt");
+
+    app.start_available_agent_run(
+        &mut ui,
+        "general".to_string(),
+        "run independently".to_string(),
+    )
+    .await
+    .expect("Agent Run");
+
+    assert!(ui.starting_turn.is_none());
+    assert_eq!(ui.starting_turn_cleanups.len(), 1);
+    assert!(app.current_session.is_some());
+    release.send(()).expect("cleanup retained admission");
+    drain_starting_turn_cleanups(&mut app, &mut ui).await;
+    let control = app.runtime.application().agent_control();
+    for agent in control
+        .status_records(app.current_session.as_deref(), false)
+        .await
+    {
+        control
+            .stop_with_grace(&agent.id, Duration::ZERO)
+            .await
+            .expect("stop Agent Run fixture");
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn agent_run_transfers_running_turn_to_auxiliary_ownership() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp).await;
+    write_tui_agent(&app, "general", "General-purpose test agent");
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    app.current_session = Some(parent);
+    let mut ui = FullscreenUi::new(&app);
+    attach_no_steer_running(&app, &mut ui);
+
+    app.start_available_agent_run(
+        &mut ui,
+        "general".to_string(),
+        "run independently".to_string(),
+    )
+    .await
+    .expect("Agent Run");
+
+    assert!(ui.running.is_none());
+    assert_eq!(ui.auxiliary_agent_tasks.len(), 1);
+    ui.auxiliary_agent_tasks[0].task.abort();
+    let control = app.runtime.application().agent_control();
+    for agent in control
+        .status_records(app.current_session.as_deref(), false)
+        .await
+    {
+        control
+            .stop_with_grace(&agent.id, Duration::ZERO)
+            .await
+            .expect("stop Agent Run fixture");
+    }
+}
 
 #[tokio::test]
 pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowed_definitions() {
@@ -61,7 +142,12 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
     .await
     .expect("resume spawning");
     let parent = app.current_session.as_deref().expect("session");
-    assert!(!app.application.agent_control().spawning_paused(parent));
+    assert!(
+        !app.runtime
+            .application()
+            .agent_control()
+            .spawning_paused(parent)
+    );
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
@@ -194,11 +280,7 @@ pub(crate) async fn available_agent_use_as_main_is_session_scoped_and_clearable(
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(&app, "translate", "Translate user messages");
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("session");
+    let session = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(session.clone());
     let mut ui = FullscreenUi::new(&app);
     ui.bottom_panel = Some(BottomPanel::Agents(app.agent_panel().await));
@@ -230,17 +312,21 @@ pub(crate) async fn available_agent_use_as_main_is_session_scoped_and_clearable(
 
     assert_eq!(app.current_agent.as_deref(), Some("translate"));
     assert!(!app.current_agent_explicit_default);
-    assert_eq!(
-        app.run_options("next".to_string()).agent.as_deref(),
-        Some("translate")
-    );
-    let metadata = store
-        .session_metadata(&session)
+    let selection = app
+        .runtime
+        .client()
+        .resume_thread(&session)
         .await
-        .expect("metadata")
-        .expect("metadata value");
-    assert_eq!(metadata["main_agent"]["mode"], "agent");
-    assert_eq!(metadata["main_agent"]["name"], "translate");
+        .expect("Thread")
+        .main_agent_selection()
+        .await
+        .expect("main Agent selection");
+    assert_eq!(
+        selection,
+        ThreadMainAgentSelection::Agent {
+            input: "translate".to_string()
+        }
+    );
     assert!(app.status_text().contains("agent: translate"));
     let status = bottom_status_context_for_width(&app, &ui, 80).expect("status");
     assert!(!status.contains("translate"), "{status}");
@@ -281,12 +367,19 @@ pub(crate) async fn available_agent_use_as_main_is_session_scoped_and_clearable(
     assert!(app.current_agent_explicit_default);
     assert_eq!(app.session_identity_label(), None);
     assert!(ui.bottom_panel.is_none());
-    let metadata = store
-        .session_metadata(&session)
+    let selection = app
+        .runtime
+        .client()
+        .resume_thread(&session)
         .await
-        .expect("metadata")
-        .expect("metadata value");
-    assert_eq!(metadata["main_agent"]["mode"], "default");
+        .expect("Thread")
+        .main_agent_selection()
+        .await
+        .expect("main Agent selection");
+    assert!(matches!(
+        selection,
+        ThreadMainAgentSelection::Default { base_agent: None }
+    ));
     assert!(!app.status_text().contains("agent: translate"));
     assert!(!app.cwd.join(".psychevo/config.toml").exists());
 }
@@ -316,33 +409,25 @@ pub(crate) async fn main_agent_identity_renders_in_separator_not_status_line() {
 }
 
 #[tokio::test]
-pub(crate) async fn child_session_identity_separator_uses_child_agent_default() {
+pub(crate) async fn agent_bound_session_identity_separator_uses_base_agent_default() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(&app, "translate", "Translate user messages");
     write_tui_agent(&app, "review", "Review code changes");
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent");
-    let child = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.cwd,
-            "agent",
-            "mock-model",
-            "mock",
-            Some(serde_json::json!({
-                "agent": {
-                    "name": "translate",
-                    "parent_session_id": parent,
-                    "role": "child"
-                }
-            })),
-        )
-        .await
-        .expect("child");
+    let child = start_thread_fixture(
+        &app,
+        &app.cwd,
+        "agent",
+        "mock-model",
+        "mock",
+        Some(serde_json::json!({
+            "agent": {
+                "name": "translate",
+                "role": "child"
+            }
+        })),
+    )
+    .await;
     app.current_session = Some(child.clone());
     app.refresh_current_session_agent()
         .await
@@ -350,17 +435,19 @@ pub(crate) async fn child_session_identity_separator_uses_child_agent_default() 
     assert!(app.current_agent_explicit_default);
     assert_eq!(app.session_identity_label().as_deref(), Some("translate"));
 
-    store
-        .set_session_metadata_field(
-            &child,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_metadata(
-                "review",
-                "review",
-                AgentSource::Project,
-                Some(&app.cwd.join(".psychevo/agents/review.md")),
-            )),
-        )
+    let child_thread = app
+        .runtime
+        .client()
+        .resume_thread(&child)
+        .await
+        .expect("child Thread");
+    child_thread
+        .set_main_agent_selection(SetThreadMainAgentSelection::Agent {
+            input: "review".to_string(),
+            name: "review".to_string(),
+            source: AgentSource::Project,
+            path: Some(app.cwd.join(".psychevo/agents/review.md")),
+        })
         .await
         .expect("child review main");
     app.refresh_current_session_agent()
@@ -368,12 +455,8 @@ pub(crate) async fn child_session_identity_separator_uses_child_agent_default() 
         .expect("child review restore");
     assert_eq!(app.session_identity_label().as_deref(), Some("review"));
 
-    store
-        .set_session_metadata_field(
-            &child,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_default_metadata()),
-        )
+    child_thread
+        .set_main_agent_selection(SetThreadMainAgentSelection::Default)
         .await
         .expect("child default main");
     app.refresh_current_session_agent()
@@ -395,34 +478,27 @@ pub(crate) async fn session_switch_restores_each_sessions_main_agent() {
     let mut app = test_app(&temp).await;
     app.startup_agent = Some("general".to_string());
     write_tui_agent(&app, "translate", "Translate user messages");
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let first = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+    let first = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    let second = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    app.runtime
+        .client()
+        .resume_thread(&first)
         .await
-        .expect("first");
-    let second = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("second");
-    store
-        .set_session_metadata_field(
-            &first,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_metadata(
-                "translate",
-                "translate",
-                AgentSource::Project,
-                Some(&app.cwd.join(".psychevo/agents/translate.md")),
-            )),
-        )
+        .expect("first Thread")
+        .set_main_agent_selection(SetThreadMainAgentSelection::Agent {
+            input: "translate".to_string(),
+            name: "translate".to_string(),
+            source: AgentSource::Project,
+            path: Some(app.cwd.join(".psychevo/agents/translate.md")),
+        })
         .await
         .expect("first main");
-    store
-        .set_session_metadata_field(
-            &second,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_default_metadata()),
-        )
+    app.runtime
+        .client()
+        .resume_thread(&second)
+        .await
+        .expect("second Thread")
+        .set_main_agent_selection(SetThreadMainAgentSelection::Default)
         .await
         .expect("second default");
 
@@ -438,10 +514,7 @@ pub(crate) async fn session_switch_restores_each_sessions_main_agent() {
     assert_eq!(app.current_agent, None);
     assert!(app.current_agent_explicit_default);
 
-    let third = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("third");
+    let third = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.switch_session_no_print(&third)
         .await
         .expect("switch third");
@@ -454,12 +527,16 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(&app, "translate", "Translate user messages");
-    let session = StateRuntime::open(&app.db_path)
+    let mut request = StartThreadRequest::new(&app.cwd);
+    request.source = "tui".to_string();
+    let session = app
+        .runtime
+        .client()
+        .start_thread(request)
         .await
-        .expect("store")
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("session");
+        .expect("Thread")
+        .id()
+        .to_string();
     app.current_session = Some(session);
     let mut ui = FullscreenUi::new(&app);
     ui.bottom_panel = Some(BottomPanel::Agents(app.agent_panel().await));
@@ -482,18 +559,18 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
         .expect("open actions");
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = finished_run_result(&app);
+    let result = finished_turn_result("finished-session");
     let task = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         Ok(result)
     });
-    let (control, _) = run_control();
+    let control = test_shell_running_control(&app);
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
     let selected = ui
@@ -560,28 +637,7 @@ pub(crate) async fn agent_editor_writes_max_spawn_depth_frontmatter() {
 pub(crate) async fn child_status_line_keeps_compact_parent_hint() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent");
-    let child = store
-        .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .await
-        .expect("child");
-    store
-        .upsert_agent_edge(
-            &parent,
-            &child,
-            psychevo::__product::persistence::AgentEdgeStatus::Open,
-            None,
-        )
-        .await
-        .expect("edge");
-    app.current_session = Some(child);
-    app.refresh_current_session_title()
-        .await
-        .expect("child session relationships");
+    app.current_agent_breadcrumb = Some("parent 12345678 · Alt+P".to_string());
     let ui = FullscreenUi::new(&app);
 
     let status = bottom_status_context_for_width(&app, &ui, 52).expect("status");
@@ -595,10 +651,10 @@ pub(crate) async fn hidden_agent_notifications_do_not_render_as_parent_rows() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    let message = serde_json::json!({
-        "role": "user",
-        "content": [{"type": "text", "text": "Agent `translate` completed."}]
-    });
+    let message = serde_json::to_value(psychevo::application::user_text_message(
+        "Agent `translate` completed.",
+    ))
+    .expect("message");
     let metadata = serde_json::json!({
         "agent_notification": {
             "type": "agent_completed",
@@ -619,10 +675,10 @@ pub(crate) async fn visible_agent_notifications_keep_one_clickable_parent_status
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
-    let message = serde_json::json!({
-        "role": "user",
-        "content": [{"type": "text", "text": "Agent `translate` completed."}]
-    });
+    let message = serde_json::to_value(psychevo::application::user_text_message(
+        "Agent `translate` completed.",
+    ))
+    .expect("message");
     let metadata = serde_json::json!({
         "agent_notification": {
             "type": "agent_completed",
@@ -665,38 +721,56 @@ pub(crate) async fn history_agent_edge_reconcile_does_not_make_failed_rows_opena
         TranscriptRow::with_title(TranscriptKind::Ran, "translate(en-to-zh)", "Started");
     success_en.tool_name = Some("spawn_agent".to_string());
     ui.transcript = vec![failed_zh, failed_en, success_zh, success_en];
-    let edges = vec![
-        psychevo::__product::persistence::AgentEdgeRecord {
-            parent_session_id: "parent".to_string(),
-            child_session_id: "child-zh".to_string(),
-            status: psychevo::__product::persistence::AgentEdgeStatus::Closed,
+    let relationships = vec![
+        AgentRelationship {
+            parent_thread_id: "parent".to_string(),
+            child_thread_id: "child-zh".to_string(),
+            status: AgentRelationshipStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
-            metadata: Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-zh",
-                    "name": "translate",
-                    "task_name": "zh-to-en"
-                }
-            })),
+            agent: Some(AgentRelationshipAgent {
+                id: Some("agent-zh".to_string()),
+                name: Some("translate".to_string()),
+                task_name: Some("zh-to-en".to_string()),
+                task: None,
+                description: None,
+                parent_tool_call_id: None,
+                team_run_id: None,
+                mission_run_id: None,
+                team_name: None,
+                team_member_id: None,
+                runtime_ref: None,
+                role: None,
+                background: None,
+                fork_context: None,
+            }),
         },
-        psychevo::__product::persistence::AgentEdgeRecord {
-            parent_session_id: "parent".to_string(),
-            child_session_id: "child-en".to_string(),
-            status: psychevo::__product::persistence::AgentEdgeStatus::Closed,
+        AgentRelationship {
+            parent_thread_id: "parent".to_string(),
+            child_thread_id: "child-en".to_string(),
+            status: AgentRelationshipStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
-            metadata: Some(serde_json::json!({
-                "agent": {
-                    "id": "agent-en",
-                    "name": "translate",
-                    "task_name": "en-to-zh"
-                }
-            })),
+            agent: Some(AgentRelationshipAgent {
+                id: Some("agent-en".to_string()),
+                name: Some("translate".to_string()),
+                task_name: Some("en-to-zh".to_string()),
+                task: None,
+                description: None,
+                parent_tool_call_id: None,
+                team_run_id: None,
+                mission_run_id: None,
+                team_name: None,
+                team_member_id: None,
+                runtime_ref: None,
+                role: None,
+                background: None,
+                fork_context: None,
+            }),
         },
     ];
 
-    ui.reconcile_history_agent_rows(&edges, None);
+    ui.reconcile_history_agent_rows(&relationships, None);
 
     assert!(ui.transcript[0].agent_target.is_none());
     assert!(ui.transcript[1].agent_target.is_none());

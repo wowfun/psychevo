@@ -1,5 +1,32 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+use std::sync::Arc;
+
+use psychevo_agent_core::{
+    ContextualUserBlock, ContextualUserMessage, PromptInstruction, message_to_ai,
+    prompt_instruction_to_ai,
+};
+use psychevo_ai::ToolDeclaration;
+use serde_json::{Map, Value};
+
+use super::message_blocks::render_markdown_message;
+use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message};
+use crate::error::Result;
+use crate::session_export::assembly::{
+    ExportDocument, ExportHeaderValue, ExportMessageValue, ExportOptionsValue,
+    ExportPromptPrefixValue, ExportSections, ExportSessionValue, SessionArtifactKind,
+    SessionExportInclude, SessionExportOptions,
+};
+use crate::session_export::markdown_helpers::{
+    markdown_inline, push_fenced_json, push_fenced_text, push_line,
+};
+use crate::skills::SkillDiscoveryOptions;
+use crate::state::StateRuntime;
+use crate::store::{AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord};
+use crate::tool_surface::{
+    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface, tool_declarations,
+};
+use crate::types::{ModelMetadata, RunMode, SessionSummary};
 
 pub(crate) fn prompt_prefix_hash(metadata: &Option<Value>) -> Option<&str> {
     metadata
@@ -139,8 +166,7 @@ pub(crate) fn prompt_instruction_messages_from_evidence(
             prompt_instruction_to_ai(&PromptInstruction {
                 slot: slot.unwrap_or_else(|| "reconstructed".to_string()),
                 tier: tier.to_string(),
-                semantic_role: semantic_role
-                    .unwrap_or_else(|| "developer_prompt".to_string()),
+                semantic_role: semantic_role.unwrap_or_else(|| "developer_prompt".to_string()),
                 provider_role: item.role.clone(),
                 order: order.unwrap_or_default() as usize,
                 content: item.content_text.clone(),
@@ -433,6 +459,7 @@ pub(crate) fn reconstructed_tool_declarations(
             path_prefixes: Vec::new(),
             sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
             home: cwd.join(".psychevo"),
+            mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
             image_input_enabled: true,
             image_generation: None,
             web_search: Default::default(),

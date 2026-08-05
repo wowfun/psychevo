@@ -56,6 +56,18 @@ Every list, history, transport, and client journal operation must have a bound
 that depends on the requested result, current context window, or documented
 connection capacity rather than total process lifetime.
 
+Framework exposes history only as bounded keyset pages. Production callers
+must either request the one page their operation needs or advance the cursor
+page by page while consuming each page before requesting the next; there is no
+"load all history" API. A surface that presents the complete transcript, such
+as fullscreen TUI reload, preserves that UX by incrementally applying ascending
+pages rather than materializing the complete Thread in one Framework result.
+Questions about history-derived facts use semantic bounded Store queries: for
+example, emptiness reads at most one visible row, latest assistant usage reads
+at most one eligible row, and list-card message counts use SQL aggregation.
+The allocation and decoded payload count of each production history query must
+therefore be independent of total Thread length.
+
 - Last-provider-request reconstruction selects the final eligible
   assistant/prompt boundary first and reconstructs that request once.
 - Projected context and compaction reads apply the latest valid compaction and

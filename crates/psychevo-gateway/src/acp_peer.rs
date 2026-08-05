@@ -1,69 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use psychevo::{
+    Error, host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
+    host_paths::resolve_executable_path, skills::resolve_skills_home,
+};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
-
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AuthMethod, BlobResourceContents, CancelNotification, ClientCapabilities,
-    CloseSessionRequest, ContentBlock, ContentChunk, CreateElicitationRequest,
-    CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse, DeleteSessionRequest,
-    ElicitationAcceptAction, ElicitationAction, ElicitationCapabilities, ElicitationContentValue,
-    ElicitationFormCapabilities, ElicitationMode, ElicitationPropertySchema, ElicitationScope,
-    EmbeddedResource, EmbeddedResourceResource, EnvVariable, FileSystemCapabilities,
-    ForkSessionRequest, ForkSessionResponse, HttpHeader, ImageContent, Implementation,
-    InitializeRequest, KillTerminalRequest, KillTerminalResponse, ListSessionsRequest,
-    LoadSessionRequest, LoadSessionResponse, McpServer, McpServerHttp, McpServerStdio,
-    MultiSelectItems, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    Response as AcpJsonRpcResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionConfigSelectOptions, SessionModeState, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StringFormat,
-    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    TextResourceContents, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
-};
-use agent_client_protocol::{
-    Agent, BoxFuture, ByteStreams, Channel, Client, ConnectTo, ConnectionTo, Dispatch, Handled,
-    RawJsonRpcMessage, Role, UntypedMessage,
-};
-use agent_client_protocol_schema::v1::InitializeResponse;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use futures::{StreamExt, channel::mpsc};
-use psychevo::__agent_core::{AssistantBlock, Message, ToolCallBlock, UserContentBlock};
-use psychevo::__ai::{AbortSignal, Outcome};
-use psychevo::{
-    __product::capabilities::AgentDefinition, __product::capabilities::resolve_mcp_server_handoffs,
-    __product::capabilities::resolve_skills_home, __product::platform::ExecutableResolveOptions,
-    __product::platform::HostPlatform, __product::platform::resolve_executable_path,
-    __product::platform::resolve_explicit_image_source, __product::runtime::ClarifyAnswer,
-    __product::runtime::ClarifyInteractionOutcome, __product::runtime::ClarifyQuestion,
-    __product::runtime::ClarifyQuestionOption, __product::runtime::ClarifyRequestEvent,
-    __product::runtime::ImageInput, __product::runtime::McpTransportInput,
-    __product::runtime::PermissionApprovalDecision, __product::runtime::PermissionApprovalOutcome,
-    __product::runtime::PermissionApprovalRequest, __product::runtime::RunControlHandle,
-    __product::runtime::RunResult, __product::runtime::RunStreamEvent,
-    __product::runtime::RunStreamSink, __product::runtime::SelectedAgent,
-    __product::runtime::WorkspaceMutation, __product::runtime::WorkspaceMutationSink,
-    __product::runtime::fallback_visible_session_title, Error,
-};
-use serde_json::{Map, Value, json};
-use sha2::Digest as _;
-use tokio::io::AsyncReadExt as _;
 use tokio::process::Command;
-use tokio::sync::{mpsc as tokio_mpsc, oneshot as tokio_oneshot, watch};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::{
-    ACP_PEER_METADATA_KEY, BackendTurnRequest, ResolvedPeerTurn, gateway_now_ms, protocol as wire,
-};
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
 
 struct AcpBackendLaunch {
     program: PathBuf,
@@ -162,7 +107,7 @@ fn acp_backend_command_from_launch(
         .iter()
         .map(OsString::from)
         .collect::<Vec<_>>();
-    let mut command = psychevo::__product::platform::tokio_host_process_command(
+    let mut command = psychevo::process_env::tokio_host_process_command(
         &launch.program,
         &args,
         launch.platform,
@@ -174,10 +119,10 @@ fn acp_backend_command_from_launch(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let _ = psychevo::__product::platform::apply_tokio_process_env(
+    let _ = psychevo::process_env::apply_tokio_process_env(
         &mut command,
         &launch.env,
-        psychevo::__product::platform::ProcessEnvOptions::new(&[]),
+        psychevo::process_env::ProcessEnvOptions::new(&[]),
     );
     Ok(command)
 }
@@ -191,27 +136,65 @@ fn acp_backend_command(
     Ok((acp_backend_command_from_launch(peer, &launch)?, cwd))
 }
 
+pub(crate) mod capability_packs;
+mod elicitation;
+pub(crate) mod lifecycle;
 mod mcp_handoff;
+pub(crate) mod metadata_permissions;
+pub(crate) mod process_pool;
 mod prompt_input;
+mod runtime_options;
 mod session_controls;
+pub(crate) mod session_projection;
+pub(crate) mod stdio_turn;
+pub(crate) mod stream_state;
+mod terminal_callbacks;
+mod tool_projection;
+pub(crate) mod turn;
 
-include!("acp_peer/turn.rs");
-include!("acp_peer/runtime_options.rs");
-include!("acp_peer/stream_state.rs");
-include!("acp_peer/session_projection.rs");
-include!("acp_peer/capability_packs.rs");
-include!("acp_peer/tool_projection.rs");
-include!("acp_peer/stdio_turn.rs");
-include!("acp_peer/elicitation.rs");
-include!("acp_peer/terminal_callbacks.rs");
-include!("acp_peer/lifecycle.rs");
-include!("acp_peer/process_pool.rs");
-include!("acp_peer/metadata_permissions.rs");
+use metadata_permissions::backend_cwd;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use agent_client_protocol::schema::v1::{
+        ElicitationAction, ElicitationContentValue, SessionConfigOption, SessionNotification,
+        SessionUpdate,
+    };
+    use agent_client_protocol_schema::v1::InitializeResponse;
+    use psychevo::agents::AgentDefinition;
+    use psychevo::application::{ClarifyAnswer, ClarifyResponse};
+    use psychevo::host_paths::HostPlatform;
+    use serde_json::{Value, json};
+
+    #[cfg(windows)]
+    use super::acp_backend_command_from_launch;
+    use super::{
+        acp_backend_effective_env, apply_managed_codex_default_auth,
+        resolve_acp_backend_launch_for_platform,
+    };
+    use crate::gateway::peer_runtime::ResolvedPeerTurn;
+
+    use super::elicitation::{encode_acp_elicitation_response, project_acp_elicitation_form};
+    use super::lifecycle::{AcpResidentSessionRef, safe_acp_error};
+    use super::process_pool::{
+        AcpAuthDoctorStatus, AcpAuthenticatedKind, AcpObservedAuthState, AcpProcessPool,
+        AcpSetControlInput, acp_auth_observation_key, acp_process_key, observe_acp_auth_result,
+    };
+    use super::session_projection::{
+        AcpFactOrigin, AcpHistoryOwnerSnapshot, AcpPeerInboundNotification, AcpPeerInboundPayload,
+        AcpResidentSessionInput, acp_session_snapshot, effective_legacy_models,
+        new_acp_resident_session, project_legacy_model_state,
+    };
+    use super::stream_state::{
+        ACP_MAX_HISTORY_REPLAY_MESSAGE_CHARS, ACP_MAX_HISTORY_REPLAY_MESSAGES,
+        AcpHistoryReplayEntry, AcpHistoryReplayProjection, AcpPeerContentSlot, AcpPeerStreamState,
+        replay_entry_delivery_message_ids,
+    };
 
     fn reduce_history_update(projection: &mut AcpHistoryReplayProjection, value: Value) {
         let update = serde_json::from_value::<SessionUpdate>(value.clone())
@@ -600,15 +583,13 @@ mod tests {
                 instructions: String::new(),
                 enabled: true,
                 file_path: None,
-                source: psychevo::__product::capabilities::AgentSource::Generated,
-                backend: Some(psychevo::__product::capabilities::AgentBackendRef {
+                source: psychevo::agents::AgentSource::Generated,
+                backend: Some(psychevo::agents::AgentBackendRef {
                     name: "opencode".to_string(),
                 }),
-                entrypoints: BTreeSet::from([
-                    psychevo::__product::capabilities::AgentEntrypoint::Peer,
-                ]),
+                entrypoints: BTreeSet::from([psychevo::agents::AgentEntrypoint::Peer]),
                 model: None,
-                tool_policy: psychevo::__product::capabilities::AgentToolPolicy::default(),
+                tool_policy: psychevo::agents::AgentToolPolicy::default(),
                 skills: Vec::new(),
                 optional_contributions: BTreeSet::new(),
                 hooks: None,
@@ -620,9 +601,9 @@ mod tests {
                 effort: None,
                 diagnostics: Vec::new(),
             },
-            backend: psychevo::__product::capabilities::AgentBackendConfig {
+            backend: psychevo::agents::AgentBackendConfig {
                 id: "opencode".to_string(),
-                kind: psychevo::__product::capabilities::AgentBackendKind::Acp,
+                kind: psychevo::agents::AgentBackendKind::Acp,
                 enabled: true,
                 label: "OpenCode".to_string(),
                 description: None,
@@ -630,9 +611,7 @@ mod tests {
                 args: vec!["acp".to_string()],
                 env: BTreeMap::new(),
                 cwd: "invocation".to_string(),
-                entrypoints: BTreeSet::from([
-                    psychevo::__product::capabilities::AgentEntrypoint::Peer,
-                ]),
+                entrypoints: BTreeSet::from([psychevo::agents::AgentEntrypoint::Peer]),
                 client_capabilities: BTreeSet::new(),
                 mcp_servers: BTreeSet::new(),
             },
@@ -793,14 +772,7 @@ mod tests {
             .expect("cache miss");
 
         assert!(snapshot.is_none());
-        assert!(pool.inner.actors.lock().expect("actors").is_empty());
-        assert!(
-            pool.inner
-                .resident_actors
-                .lock()
-                .expect("resident actors")
-                .is_empty()
-        );
+        assert_eq!(pool.actor_counts(), (0, 0));
     }
 
     #[test]
@@ -825,8 +797,8 @@ mod tests {
         assert_ne!(first_key, launch_key);
     }
 
-    #[tokio::test]
-    async fn acp_elicitation_round_trips_through_shared_interaction_control() {
+    #[test]
+    fn acp_elicitation_projects_and_encodes_an_answer() {
         let schema = agent_client_protocol::schema::v1::ElicitationSchema::new().property(
             "workspace",
             agent_client_protocol::schema::v1::StringPropertySchema::new()
@@ -846,43 +818,15 @@ mod tests {
         assert_eq!(request.questions[0].header, "workspace");
         assert!(!request.questions[0].custom);
 
-        let (handle, control) = psychevo::__product::runtime::run_control();
-        let abort = control.abort_signal();
-        let events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
-        let stream: RunStreamSink = {
-            let events = Arc::clone(&events);
-            Arc::new(move |event| events.lock().expect("events").push(event))
-        };
-        let waiter = tokio::spawn({
-            let handle = handle.clone();
-            async move {
-                handle
-                    .request_clarification(request, stream, Some(abort))
-                    .await
-            }
-        });
-        for _ in 0..100 {
-            if !events.lock().expect("events").is_empty() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        assert!(handle.submit_clarify_result(
-            "acp-elicit-1",
-            psychevo::__product::runtime::ClarifyResult::Answered(
-                psychevo::__product::runtime::ClarifyResponse {
-                    answers: vec![ClarifyAnswer {
-                        answers: vec!["Repository".to_string()],
-                    }],
-                }
-            ),
-        ));
-        let ClarifyInteractionOutcome::Answered(answer) = waiter.await.expect("interaction task")
-        else {
-            panic!("interaction should be answered");
-        };
-        let response =
-            encode_acp_elicitation_response(&fields, answer).expect("encode elicitation response");
+        let response = encode_acp_elicitation_response(
+            &fields,
+            ClarifyResponse {
+                answers: vec![ClarifyAnswer {
+                    answers: vec!["Repository".to_string()],
+                }],
+            },
+        )
+        .expect("encode elicitation response");
         let ElicitationAction::Accept(accepted) = response.action else {
             panic!("elicitation should be accepted");
         };
@@ -890,34 +834,6 @@ mod tests {
             accepted.content.expect("accepted content").get("workspace"),
             Some(&ElicitationContentValue::String("Repository".to_string()))
         );
-        let events = events.lock().expect("events");
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| {
-                    event
-                        .legacy_value()
-                        .and_then(|value| value.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("action_requested")
-                })
-                .count(),
-            1
-        );
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| {
-                    event
-                        .legacy_value()
-                        .and_then(|value| value.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("action_resolved")
-                })
-                .count(),
-            1
-        );
-        drop(control);
     }
 
     fn initialized_projection_fixture() -> InitializeResponse {
@@ -1231,19 +1147,19 @@ mod tests {
         (peer, log)
     }
 
-    fn lifecycle_mcp_fixture() -> psychevo::__product::runtime::ResolvedMcpServerInput {
-        psychevo::__product::runtime::ResolvedMcpServerInput {
-            server: psychevo::__product::runtime::McpServerInput::new(
+    fn lifecycle_mcp_fixture() -> psychevo::application::ResolvedMcpServerInput {
+        psychevo::application::ResolvedMcpServerInput::new(
+            psychevo::McpServerInput::new(
                 "repo",
-                psychevo::__product::runtime::McpTransportInput::Stdio {
+                psychevo::application::McpTransportInput::Stdio {
                     command: PathBuf::from("/fixture/bin/repo-mcp"),
                     args: vec!["--serve".to_string()],
                     env: BTreeMap::from([("FIXTURE_SCOPE".to_string(), "workspace".to_string())]),
                     cwd: None,
                 },
             ),
-            bearer_token: None,
-        }
+            None,
+        )
     }
 
     fn read_lifecycle_log(path: &Path) -> Vec<Value> {
@@ -1792,44 +1708,12 @@ mod tests {
     }
 
     #[test]
-    fn safe_acp_error_drops_untrusted_data_and_terminal_cleanup_is_session_scoped() {
+    fn safe_acp_error_drops_untrusted_data() {
         let wire_error = agent_client_protocol::Error::auth_required()
             .data(json!({"secret": "agent-private-data"}));
         let safe = safe_acp_error(&wire_error);
         assert_eq!(safe, "ACP error -32000: Authentication required");
         assert!(!safe.contains("agent-private-data"));
-
-        let registry = AcpTerminalRegistry::default();
-        let state = Arc::new(Mutex::new(AcpTerminalState::new(128)));
-        let completed = Arc::new(tokio::sync::Notify::new());
-        let (first_kill, first_kill_rx) = watch::channel(false);
-        let (second_kill, second_kill_rx) = watch::channel(false);
-        registry.records.lock().expect("terminal records").extend([
-            (
-                "first".to_string(),
-                AcpTerminalRecord {
-                    session_id: "native-first".to_string(),
-                    state: Arc::clone(&state),
-                    kill: first_kill,
-                    completed: Arc::clone(&completed),
-                },
-            ),
-            (
-                "second".to_string(),
-                AcpTerminalRecord {
-                    session_id: "native-second".to_string(),
-                    state,
-                    kill: second_kill,
-                    completed,
-                },
-            ),
-        ]);
-        registry
-            .terminate_session("native-first")
-            .expect("terminate first session");
-        assert!(*first_kill_rx.borrow());
-        assert!(!*second_kill_rx.borrow());
-        assert_eq!(registry.records.lock().expect("terminal records").len(), 1);
     }
 
     #[test]

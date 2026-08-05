@@ -2,18 +2,14 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::{
-    __product::configuration::create_local_toolset, __product::configuration::remove_local_toolset,
-    __product::configuration::set_local_toolset_enabled, __product::configuration::toolsets_value,
-    __product::runtime::ConfigScope,
-};
+use psychevo::{Configuration, config::ConfigScope};
 use serde_json::{Value, json};
 
 use crate::args::{
     ToolArgs, ToolCommand, ToolCreateArgs, ToolListArgs, ToolModeMutationArgs, ToolRemoveArgs,
     ToolShowArgs,
 };
-use crate::commands::common::{base_run_options, config_scope_dir, print_json_error, scope_label};
+use crate::commands::common::{CommandConfiguration, print_json_error};
 use crate::env::{inherited_env, resolve_psychevo_home};
 
 pub(crate) async fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
@@ -28,32 +24,30 @@ pub(crate) async fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
 }
 
 pub(crate) async fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
-    let Some(command) = args.command.as_ref() else {
-        list_toolsets(&ToolListArgs { json: false }).await?;
-        return Ok(ExitCode::SUCCESS);
+    let (env_map, home, cwd) = command_context()?;
+    let context = CommandConfiguration::open(&env_map, &home, &cwd).await?;
+    let result = match args.command.as_ref() {
+        None => list_toolsets(&ToolListArgs { json: false }, context.configuration()),
+        Some(ToolCommand::List(args)) => list_toolsets(args, context.configuration()),
+        Some(ToolCommand::Show(args)) => show_toolset(args, context.configuration()),
+        Some(ToolCommand::Enable(args)) => set_toolset_enabled(args, context.configuration(), true),
+        Some(ToolCommand::Disable(args)) => {
+            set_toolset_enabled(args, context.configuration(), false)
+        }
+        Some(ToolCommand::Create(args)) => create_toolset(args, context.configuration()),
+        Some(ToolCommand::Remove(args)) => remove_toolset(args, context.configuration()),
     };
-    match command {
-        ToolCommand::List(args) => list_toolsets(args).await?,
-        ToolCommand::Show(args) => show_toolset(args).await?,
-        ToolCommand::Enable(args) => set_toolset_enabled(args, true)?,
-        ToolCommand::Disable(args) => set_toolset_enabled(args, false)?,
-        ToolCommand::Create(args) => create_toolset(args)?,
-        ToolCommand::Remove(args) => remove_toolset(args)?,
-    }
+    context.finish(result).await?;
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) async fn list_toolsets(args: &ToolListArgs) -> Result<()> {
-    let (env_map, home, cwd) = command_context()?;
-    let options = base_run_options(&env_map, &home, &cwd).await?;
-    let value = toolsets_value(&options, ConfigScope::Effective)?;
+pub(crate) fn list_toolsets(args: &ToolListArgs, configuration: &Configuration) -> Result<()> {
+    let value = configuration.toolsets(ConfigScope::Effective)?;
     print_toolsets_value(&value, args.json)
 }
 
-pub(crate) async fn show_toolset(args: &ToolShowArgs) -> Result<()> {
-    let (env_map, home, cwd) = command_context()?;
-    let options = base_run_options(&env_map, &home, &cwd).await?;
-    let value = toolsets_value(&options, ConfigScope::Effective)?;
+pub(crate) fn show_toolset(args: &ToolShowArgs, configuration: &Configuration) -> Result<()> {
+    let value = configuration.toolsets(ConfigScope::Effective)?;
     let row = value["toolsets"]
         .as_array()
         .and_then(|rows| {
@@ -70,16 +64,16 @@ pub(crate) async fn show_toolset(args: &ToolShowArgs) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) -> Result<()> {
-    let (env_map, home, cwd) = command_context()?;
-    let result = set_local_toolset_enabled(
-        config_scope_dir(&home, &cwd, args.local)?,
-        args.mode.run_mode(),
-        &args.name,
-        enabled,
-    )?;
+pub(crate) fn set_toolset_enabled(
+    args: &ToolModeMutationArgs,
+    configuration: &Configuration,
+    enabled: bool,
+) -> Result<()> {
+    let scope = mutation_scope(args.local);
+    let result =
+        configuration.set_toolset_enabled(scope, args.mode.run_mode(), &args.name, enabled)?;
     let value = json!({
-        "scope": scope_label(args.local),
+        "scope": scope_label(scope),
         "path": result.config_path,
         "name": result.name,
         "mode": args.mode.run_mode().as_str(),
@@ -97,14 +91,13 @@ pub(crate) fn set_toolset_enabled(args: &ToolModeMutationArgs, enabled: bool) ->
         );
         println!("path: {}", value["path"].as_str().unwrap_or("-"));
     }
-    drop(env_map);
     Ok(())
 }
 
-pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
-    let (_env_map, home, cwd) = command_context()?;
-    let result = create_local_toolset(
-        config_scope_dir(&home, &cwd, args.local)?,
+pub(crate) fn create_toolset(args: &ToolCreateArgs, configuration: &Configuration) -> Result<()> {
+    let scope = mutation_scope(args.local);
+    let result = configuration.create_toolset(
+        scope,
         &args.name,
         args.description.clone(),
         args.tools.clone(),
@@ -112,7 +105,7 @@ pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
         args.force,
     )?;
     let value = json!({
-        "scope": scope_label(args.local),
+        "scope": scope_label(scope),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,
@@ -127,11 +120,11 @@ pub(crate) fn create_toolset(args: &ToolCreateArgs) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
-    let (_env_map, home, cwd) = command_context()?;
-    let result = remove_local_toolset(config_scope_dir(&home, &cwd, args.local)?, &args.name)?;
+pub(crate) fn remove_toolset(args: &ToolRemoveArgs, configuration: &Configuration) -> Result<()> {
+    let scope = mutation_scope(args.local);
+    let result = configuration.remove_toolset(scope, &args.name)?;
     let value = json!({
-        "scope": scope_label(args.local),
+        "scope": scope_label(scope),
         "path": result.config_path,
         "name": result.name,
         "changed": result.changed,
@@ -152,6 +145,22 @@ pub(crate) fn remove_toolset(args: &ToolRemoveArgs) -> Result<()> {
         println!("path: {}", value["path"].as_str().unwrap_or("-"));
     }
     Ok(())
+}
+
+fn mutation_scope(local: bool) -> ConfigScope {
+    if local {
+        ConfigScope::Local
+    } else {
+        ConfigScope::Global
+    }
+}
+
+fn scope_label(scope: ConfigScope) -> &'static str {
+    match scope {
+        ConfigScope::Global => "global",
+        ConfigScope::Local => "local",
+        ConfigScope::Effective => "effective",
+    }
 }
 
 pub(crate) fn command_context() -> Result<(

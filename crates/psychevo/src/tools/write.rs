@@ -1,5 +1,25 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::PathBuf;
+
+use futures::future::BoxFuture;
+use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+
+use super::ToolRuntimeContext;
+use super::args::required_string;
+use super::cwd::CwdTool;
+use super::file_mutation::{
+    FileMutationBackend, LOCAL_FILE_MUTATION, MutationConflict, acquire_path_locks,
+    record_written_file, require_fresh_read,
+};
+use super::truncation::normalize_lf;
+use super::write_support::patch_lsp::snapshot_lsp_baseline;
+use super::write_support::text_edit::{
+    read_text_snapshot, restore_text_file, result_output, write_success_value,
+};
+use crate::error::{Error, Result};
+use crate::types::WorkspaceMutation;
+
 pub(crate) struct WriteTool(CwdTool);
 
 impl WriteTool {
@@ -118,7 +138,18 @@ pub(crate) fn write_tool_impl_for_call(
 
 #[cfg(test)]
 pub(crate) mod write_tool_tests {
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, SystemTime};
+
+    use super::super::read::read_tool_impl;
+    use super::super::write_support::patch_lsp::default_lsp_manager;
     pub(crate) use super::*;
+    use crate::config::LspConfig;
+    use crate::sandbox::SandboxPolicy;
+    use crate::types::{RunMode, WorkspaceMutationSink};
 
     fn cwd_tool(path: &Path) -> CwdTool {
         CwdTool::with_context(

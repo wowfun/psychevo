@@ -1,6 +1,30 @@
-pub(crate) fn acp_command_capabilities()
--> &'static [psychevo::__product::commands::CommandCapability] {
-    use psychevo::__product::commands::CommandCapability;
+use std::fmt;
+use std::path::PathBuf;
+
+use agent_client_protocol::schema::v2::{
+    AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, ConfigOptionUpdate,
+    ContentBlock, ContentChunk, Diff as AcpDiff, DiffChange, MessageId, PermissionOption,
+    PermissionOptionKind, PromptResponse, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionSubject, SessionConfigOption, SessionId, SessionUpdate, TextCommandInput,
+    TextContent, ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolKind,
+    UpdateSessionNotification,
+};
+use agent_client_protocol::{Client, ConnectionTo};
+use futures::future::BoxFuture;
+use psychevo::ThreadSummary;
+use psychevo::application::{
+    ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest,
+};
+use psychevo::command_registry::{AvailableSlashCommands, CommandArgumentKind, CommandCapability};
+use psychevo::session_export::{SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet};
+use psychevo::skills::SkillTarget;
+use psychevo::workspace_diff::{WorkspaceDiff, WorkspaceDiffFile};
+use serde_json::{Value, json};
+use uuid::Uuid;
+
+use super::agent_commands::SlashPromptAction;
+
+pub(crate) fn acp_command_capabilities() -> &'static [CommandCapability] {
     &[
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
@@ -60,7 +84,7 @@ pub(crate) fn send_diff_tool_call(
     SlashPromptAction::Handled(PromptResponse::new())
 }
 
-fn diff_tool_call_updates(
+pub(super) fn diff_tool_call_updates(
     call_id: impl Into<String>,
     diff: &WorkspaceDiff,
 ) -> (SessionUpdate, SessionUpdate) {
@@ -133,8 +157,8 @@ fn diff_file_summary(file: &WorkspaceDiffFile) -> Value {
 
 pub(crate) fn resolve_session_reference(
     reference: &str,
-    sessions: &[SessionSummary],
-) -> Option<SessionSummary> {
+    sessions: &[ThreadSummary],
+) -> Option<ThreadSummary> {
     if sessions.is_empty() {
         return None;
     }
@@ -166,8 +190,8 @@ pub(crate) fn resolve_session_reference(
 
 pub(crate) fn ambiguous_session_matches(
     reference: &str,
-    sessions: &[SessionSummary],
-) -> Vec<SessionSummary> {
+    sessions: &[ThreadSummary],
+) -> Vec<ThreadSummary> {
     if reference.is_empty() || reference == "latest" {
         return Vec::new();
     }
@@ -195,9 +219,7 @@ pub(crate) fn reasoning_effort_value(value: &str) -> Option<String> {
     (value != "none").then(|| value.to_string())
 }
 
-pub(crate) fn available_commands_from(
-    available: psychevo::__product::commands::AvailableSlashCommands,
-) -> Vec<AvailableCommand> {
+pub(crate) fn available_commands_from(available: AvailableSlashCommands) -> Vec<AvailableCommand> {
     available
         .commands
         .into_iter()
@@ -212,7 +234,7 @@ pub(crate) fn available_commands_from(
                 )
             };
             let input = match command.argument_kind {
-                psychevo::__product::commands::CommandArgumentKind::None => None,
+                CommandArgumentKind::None => None,
                 _ => Some(AvailableCommandInput::Text(TextCommandInput::new(
                     command.usage,
                 ))),

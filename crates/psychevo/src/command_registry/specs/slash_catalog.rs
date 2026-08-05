@@ -1,3 +1,8 @@
+use super::types_presentation::{
+    COMMANDS, CommandArgumentKind, CommandOutputKind, CommandStatus, SlashCommandAction,
+    SlashCommandSpec, TUI_SLASH,
+};
+
 pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         canonical: "/help",

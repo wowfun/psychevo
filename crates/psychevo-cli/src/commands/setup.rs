@@ -8,13 +8,11 @@ use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use psychevo::{
-    __product::configuration::fetch_model_catalog,
-    __product::configuration::model_catalog_providers, __product::configuration::set_default_model,
-    __product::configuration::set_provider_api_key, __product::runtime::ModelCatalogEntry,
+    Configuration, ConfigureProviderRequest, config::ConfigScope, config::ModelCatalogEntry,
 };
 
 use crate::args::{DoctorArgs, InitArgs, SetupArgs};
-use crate::commands::common::{base_run_options, scoped_config_dir};
+use crate::commands::common::CommandConfiguration;
 use crate::commands::doctor::run_doctor_command;
 use crate::commands::init::run_init_command;
 use crate::commands::serve::{
@@ -23,7 +21,7 @@ use crate::commands::serve::{
 use crate::env::{inherited_env, resolve_psychevo_home};
 use crate::provider_setup::{
     ProviderSetupBaseUrl, default_provider_setup_api_key_env, looks_like_api_key,
-    provider_setup_presets, upsert_provider_options, validate_api_key_env, validate_base_url,
+    provider_setup_presets, validate_api_key_env, validate_base_url,
     validate_custom_setup_provider_id,
 };
 
@@ -138,30 +136,40 @@ async fn configure_provider_with_io<I: SetupIo>(
         "API key [Enter to set later]: ".to_string()
     };
     let api_key = io.prompt_secret(&secret_prompt)?;
+    let context = CommandConfiguration::open(env_map, home, cwd).await?;
+    let result: Result<()> = async {
+        let configuration = context.configuration();
+        configuration.configure_provider(
+            ConfigScope::Global,
+            ConfigureProviderRequest {
+                provider_id: provider.provider_id.clone(),
+                label: provider.label.clone(),
+                base_url,
+                api_key_env,
+            },
+        )?;
+        if !api_key.trim().is_empty() {
+            configuration.set_provider_api_key(
+                ConfigScope::Global,
+                &provider.provider_id,
+                &api_key,
+            )?;
+        }
 
-    let config_dir = scoped_config_dir(home, cwd, true)?;
-    upsert_provider_options(
-        &config_dir,
-        &provider.provider_id,
-        &provider.label,
-        &base_url,
-        &api_key_env,
-    )?;
-    if !api_key.trim().is_empty() {
-        let options = base_run_options(env_map, home, cwd).await?;
-        set_provider_api_key(&options, config_dir, &provider.provider_id, &api_key)?;
+        let model = select_model(configuration, &provider, io).await?;
+        let model_spec = format!("{}/{}", provider.provider_id, model);
+        let default_model =
+            configuration.set_default_model(ConfigScope::Global, &model_spec, None)?;
+        io.print_line(&format!("provider: {}", provider.provider_id))?;
+        io.print_line(&format!(
+            "model: {}",
+            default_model["model"].as_str().unwrap_or("-")
+        ))?;
+        io.print_line("scope: global")?;
+        Ok(())
     }
-
-    let model = select_model(home, cwd, env_map, &provider, io).await?;
-    let model_spec = format!("{}/{}", provider.provider_id, model);
-    let default_model = set_default_model(home, cwd, true, &model_spec)?;
-    io.print_line(&format!("provider: {}", provider.provider_id))?;
-    io.print_line(&format!(
-        "model: {}",
-        default_model["model"].as_str().unwrap_or("-")
-    ))?;
-    io.print_line("scope: global")?;
-    Ok(())
+    .await;
+    context.finish(result).await
 }
 
 fn choose_provider<I: SetupIo>(io: &mut I) -> Result<SetupProviderSelection> {
@@ -261,15 +269,13 @@ fn prompt_api_key_env<I: SetupIo>(io: &mut I, default: &str) -> Result<String> {
 }
 
 async fn select_model<I: SetupIo>(
-    home: &Path,
-    cwd: &Path,
-    env_map: &std::collections::BTreeMap<String, String>,
+    configuration: &Configuration,
     provider: &SetupProviderSelection,
     io: &mut I,
 ) -> Result<String> {
     io.print_line("")?;
     io.print_line("Model")?;
-    match fetch_models_for_setup(home, cwd, env_map, &provider.provider_id).await {
+    match fetch_models_for_setup(configuration, &provider.provider_id).await {
         Ok(models) if !models.is_empty() => {
             io.print_line("Fetched models:")?;
             for (index, model) in models.iter().enumerate() {
@@ -299,13 +305,10 @@ async fn select_model<I: SetupIo>(
 }
 
 async fn fetch_models_for_setup(
-    home: &Path,
-    cwd: &Path,
-    env_map: &std::collections::BTreeMap<String, String>,
+    configuration: &Configuration,
     provider_id: &str,
 ) -> Result<Vec<ModelCatalogEntry>> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let providers = model_catalog_providers(&options)?;
+    let providers = configuration.model_catalog_providers()?;
     let provider = providers
         .into_iter()
         .find(|provider| provider.provider == provider_id)
@@ -317,7 +320,7 @@ async fn fetch_models_for_setup(
             .unwrap_or_else(|| "provider is not fetchable".to_string());
         return Err(anyhow!("{reason}"));
     }
-    Ok(fetch_model_catalog(&provider).await?)
+    Ok(configuration.fetch_model_catalog(&provider).await?)
 }
 
 fn prompt_model_id<I: SetupIo>(io: &mut I, default_model: &str) -> Result<String> {

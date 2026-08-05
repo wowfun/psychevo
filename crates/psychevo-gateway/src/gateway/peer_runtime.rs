@@ -1,58 +1,70 @@
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use psychevo::{
+    Error,
+    agents::{AgentDiscoveryOptions, AgentEntrypoint, discover_agents, resolve_agent_definition},
+    config::load_agent_backend_configs,
+    skills::resolve_skills_home,
+};
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PeerResolutionContext<'a> {
+    pub(crate) cwd: &'a Path,
+    pub(crate) base_env: &'a BTreeMap<String, String>,
+    pub(crate) runtime_ref: Option<&'a str>,
+    pub(crate) agent_ref: Option<&'a str>,
+    pub(crate) no_agents: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedPeerTurn {
-    pub(crate) agent: psychevo::__product::capabilities::AgentDefinition,
-    pub(crate) backend: psychevo::__product::capabilities::AgentBackendConfig,
+    pub(crate) agent: psychevo::agents::AgentDefinition,
+    pub(crate) backend: psychevo::agents::AgentBackendConfig,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) process_scope_fingerprint: Option<String>,
 }
 
 pub(crate) fn resolve_peer_turn(
-    options: &RunOptions,
+    context: PeerResolutionContext<'_>,
 ) -> psychevo::Result<Option<ResolvedPeerTurn>> {
-    if options.no_agents {
+    if context.no_agents {
         return Ok(None);
     }
-    let native_runtime_requested = options
+    let native_runtime_requested = context
         .runtime_ref
-        .as_deref()
         .map(str::trim)
         .is_some_and(|value| value == "native");
-    let runtime_ref = options
+    let runtime_ref = context
         .runtime_ref
-        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "native");
-    let agent_input = options.agent.as_ref();
+    let agent_input = context.agent_ref;
     if runtime_ref.is_none() && agent_input.is_none() {
         return Ok(None);
     }
-    let env = options
-        .inherited_env
-        .clone()
-        .unwrap_or_else(|| std::env::vars().collect());
-    let agents_home = resolve_skills_home(&env, &options.cwd)?;
+    let env = context.base_env.clone();
+    let agents_home = resolve_skills_home(&env, context.cwd)?;
     let explicit_inputs = match (agent_input, runtime_ref) {
         (Some(agent), Some(runtime)) if agent != runtime => {
-            vec![agent.clone(), runtime.to_string()]
+            vec![agent.to_string(), runtime.to_string()]
         }
-        (Some(agent), _) => vec![agent.clone()],
+        (Some(agent), _) => vec![agent.to_string()],
         (None, Some(runtime)) => vec![runtime.to_string()],
         (None, None) => Vec::new(),
     };
     let catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home.clone(),
-        cwd: options.cwd.clone(),
+        cwd: context.cwd.to_path_buf(),
         env: env.clone(),
         explicit_inputs,
         no_agents: false,
     })?;
     let agent = match (agent_input, runtime_ref) {
         (Some(agent_input), _) => {
-            resolve_agent_definition(&catalog, agent_input, &options.cwd, &env)?
+            resolve_agent_definition(&catalog, agent_input, context.cwd, &env)?
         }
-        (None, Some(runtime)) => {
-            resolve_agent_definition(&catalog, runtime, &options.cwd, &env)?
-        }
+        (None, Some(runtime)) => resolve_agent_definition(&catalog, runtime, context.cwd, &env)?,
         (None, None) => return Ok(None),
     };
     let Some(backend_ref) = agent.backend.as_ref() else {
@@ -84,7 +96,7 @@ pub(crate) fn resolve_peer_turn(
             agent.name, backend_ref.name
         )));
     }
-    let backends = load_agent_backend_configs(&agents_home, &options.cwd, &env)?;
+    let backends = load_agent_backend_configs(&agents_home, context.cwd, &env)?;
     let backend = backends
         .get(&backend_ref.name)
         .cloned()
@@ -111,26 +123,4 @@ pub(crate) fn resolve_peer_turn(
         env,
         process_scope_fingerprint: None,
     }))
-}
-
-async fn clear_acp_peer_usage_update(
-    state: &StateRuntime,
-    session_id: &str,
-) -> psychevo::Result<()> {
-    let Some(metadata) = state.session_metadata(session_id).await? else {
-        return Ok(());
-    };
-    let Some(peer) = metadata.get(ACP_PEER_METADATA_KEY) else {
-        return Ok(());
-    };
-    let Some(mut peer) = peer.as_object().cloned() else {
-        return Ok(());
-    };
-    if peer.remove("usageUpdate").is_none() {
-        return Ok(());
-    }
-    let value = (!peer.is_empty()).then_some(Value::Object(peer));
-    state
-        .set_session_metadata_field(session_id, ACP_PEER_METADATA_KEY, value)
-        .await
 }

@@ -1,13 +1,18 @@
-include!("session_bridge/imports.rs");
-include!("session_bridge/slash_and_status.rs");
-include!("session_bridge/session_controls.rs");
+mod session_controls;
+mod slash_and_status;
 
 #[cfg(test)]
 mod mission_tests {
-    use super::*;
+    use std::collections::BTreeMap;
+
+    use agent_client_protocol::schema::v2::SessionId;
+    use psychevo::ThreadListQuery;
+    use uuid::Uuid;
+
+    use crate::stdio::{AcpOptions, AcpSession, PsychevoAcpAgent};
 
     #[tokio::test]
-    async fn acp_mission_records_team_metadata_before_prompt_run() {
+    async fn acp_mission_resolves_and_registers_team_before_prompt_run() {
         let root = std::env::temp_dir().join(format!("psychevo-acp-mission-{}", Uuid::now_v7()));
         let cwd = root.join("work");
         let home = root.join("home");
@@ -48,12 +53,7 @@ mod mission_tests {
         .await
         .expect("agent");
         let session_id = SessionId::new("acp-mission");
-        let thread = agent
-            .framework
-            .start_thread(StartThreadRequest::new(&cwd))
-            .await
-            .expect("thread");
-        let session = AcpSession::new(cwd, thread, Vec::new());
+        let session = AcpSession::new(cwd.clone(), Vec::new());
         agent
             .sessions
             .lock()
@@ -65,27 +65,23 @@ mod mission_tests {
             .await
             .expect("metadata");
 
-        let runtime_session_id = agent
+        let thread = agent
             .sessions
             .lock()
             .expect("sessions")
             .get(&session_id.to_string())
-            .and_then(|session| session.runtime_session_id.clone())
-            .expect("runtime session");
-        let team = agent
-            .state
-            .find_active_agent_team_run(&runtime_session_id)
+            .and_then(|session| session.thread.clone())
+            .expect("mission materializes a runtime thread");
+        let snapshot = thread.snapshot().await.expect("registered mission thread");
+        assert_eq!(snapshot.summary.id, thread.id());
+        let threads = agent
+            .framework
+            .list_threads(ThreadListQuery {
+                cwd: Some(cwd),
+                ..Default::default()
+            })
             .await
-            .expect("team lookup")
-            .expect("team run");
-        let mission = agent
-            .state
-            .find_active_agent_mission_run(&runtime_session_id)
-            .await
-            .expect("mission lookup")
-            .expect("mission run");
-        assert_eq!(team.team_name, "release");
-        assert_eq!(team.max_parallel_agents, 2);
-        assert_eq!(mission.goal, "Ship it");
+            .expect("thread list");
+        assert_eq!(threads.threads.len(), 1);
     }
 }

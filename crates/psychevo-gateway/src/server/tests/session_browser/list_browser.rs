@@ -1,3 +1,40 @@
+use std::collections::BTreeSet;
+use std::path::Path;
+
+use psychevo::application::{
+    GatewayActivityClaimInput, GatewayActivityKind, Message as RuntimeMessage, UserContentBlock,
+};
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::gateway::activity::GatewayActivity;
+use crate::gateway_now_ms;
+use crate::server::binding::{AuthContext, WebState, merge_framework_activity};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::tests::helpers::{
+    framework_message_fixture_executor, web_state, web_state_with_native_test_executor,
+};
+
+async fn start_thread(
+    state: &WebState,
+    cwd: &Path,
+    source: &str,
+    metadata: Option<Value>,
+) -> psychevo::Thread {
+    let mut request = psychevo::StartThreadRequest::new(cwd);
+    request.source = source.to_string();
+    request.metadata = metadata;
+    state
+        .inner
+        .framework
+        .start_thread(request)
+        .await
+        .expect("thread")
+}
+
 #[test]
 fn framework_activity_merge_projects_application_owned_turn_state() {
     let mut activity = GatewayActivity {
@@ -13,7 +50,7 @@ fn framework_activity_merge_projects_application_owned_turn_state() {
         true,
         Some("framework-turn".to_string()),
         2,
-        wire::FrameworkTurnKind::Root,
+        wire::events_transcript::FrameworkTurnKind::Root,
     );
 
     assert!(activity.running);
@@ -23,57 +60,26 @@ fn framework_activity_merge_projects_application_owned_turn_state() {
     assert_eq!(activity.owner_surface.as_deref(), Some("tui"));
     assert!(matches!(
         activity.activities.first(),
-        Some(wire::ThreadActivityView::FrameworkTurn {
+        Some(wire::events_transcript::ThreadActivityView::FrameworkTurn {
             activity_id,
             turn_id,
-            kind: wire::FrameworkTurnKind::Root,
+            kind: wire::events_transcript::FrameworkTurnKind::Root,
             queued_turns: 2,
         }) if activity_id == "framework-turn" && turn_id == "framework-turn"
     ));
 }
 
 #[tokio::test]
-async fn thread_list_returns_global_top_level_sessions_without_source_partition() {
-    let (temp, state) = web_state().await;
-    let other_cwd = temp.path().join("other-work");
-    std::fs::create_dir_all(&other_cwd).expect("other cwd");
-    let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let store = &state.inner.state;
-    let top_level = store
-        .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("top level");
-    store
-        .append_message(
-            &top_level,
-            &RuntimeMessage::User {
-                content: vec![UserContentBlock::text(format!(
-                    "{}   {}",
-                    "fallback ".repeat(14),
-                    "title"
-                ))],
-                timestamp_ms: gateway_now_ms(),
-            },
-        )
-        .await.expect("fallback title message");
-    let internal = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "tui-side-conversation",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("internal");
-    let child = store
-        .create_child_session_with_metadata(
-            &top_level,
-            &other_cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("child");
+async fn thread_trace_reads_through_the_framework_thread_owner() {
+    let (_temp, state) = web_state().await;
+    let thread_id = state
+        .inner
+        .framework
+        .start_thread(psychevo::StartThreadRequest::new(&state.inner.cwd))
+        .await
+        .expect("thread")
+        .id()
+        .to_string();
     let (out_tx, _out_rx) = mpsc::unbounded_channel();
 
     let value = handle_rpc(
@@ -81,7 +87,55 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
         AuthContext::Bearer,
         out_tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!(1)),
+            method: "thread/trace".to_string(),
+            params: Some(json!({"threadId": thread_id, "limit": 1})),
+        },
+    )
+    .await
+    .expect("thread/trace");
+
+    assert_eq!(value["threadId"], thread_id);
+    assert_eq!(value["available"], false);
+    assert_eq!(value["events"], json!([]));
+}
+
+#[tokio::test]
+async fn thread_list_returns_global_top_level_sessions_without_source_partition() {
+    let fallback_title = format!("{}   {}", "fallback ".repeat(14), "title");
+    let (temp, state) =
+        web_state_with_native_test_executor(framework_message_fixture_executor(vec![
+            RuntimeMessage::User {
+                content: vec![UserContentBlock::text(fallback_title)],
+                timestamp_ms: gateway_now_ms(),
+            },
+        ]))
+        .await;
+    let other_cwd = temp.path().join("other-work");
+    std::fs::create_dir_all(&other_cwd).expect("other cwd");
+    let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
+    let top_level_thread = start_thread(&state, &other_cwd, "web", None).await;
+    let top_level = top_level_thread.id().to_string();
+    top_level_thread
+        .start_turn(psychevo::TurnRequest::new("seed fallback title"))
+        .await
+        .expect("fallback title turn")
+        .wait()
+        .await
+        .expect("fallback title completion");
+    let internal = start_thread(&state, &state.inner.cwd, "tui-side-conversation", None)
+        .await
+        .id()
+        .to_string();
+    let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+    let value = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        out_tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/list".to_string(),
             params: None,
@@ -97,7 +151,6 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
 
     assert!(ids.contains(&top_level.as_str()));
     assert!(!ids.contains(&internal.as_str()));
-    assert!(!ids.contains(&child.as_str()));
     let listed = sessions
         .iter()
         .find(|session| session["id"].as_str() == Some(top_level.as_str()))
@@ -123,20 +176,13 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
 async fn thread_list_uses_stable_keyset_pages_and_filter_scoped_cursors() {
     let (_temp, state) = web_state().await;
     let cwd = state.inner.cwd.display().to_string();
-    let store = &state.inner.state;
     let mut expected = BTreeSet::new();
-    for index in 0..3 {
+    for _ in 0..3 {
         expected.insert(
-            store
-                .create_session_with_metadata(
-                    &state.inner.cwd,
-                    "web",
-                    &format!("model-{index}"),
-                    "provider",
-                    None,
-                )
+            start_thread(&state, &state.inner.cwd, "web", None)
                 .await
-                .expect("session"),
+                .id()
+                .to_string(),
         );
     }
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -146,7 +192,7 @@ async fn thread_list_uses_stable_keyset_pages_and_filter_scoped_cursors() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/list".to_string(),
             params: Some(json!({ "cwd": cwd.clone(), "limit": 2 })),
@@ -165,7 +211,7 @@ async fn thread_list_uses_stable_keyset_pages_and_filter_scoped_cursors() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "thread/list".to_string(),
             params: Some(json!({ "cwd": cwd, "limit": 2, "cursor": cursor.clone() })),
@@ -190,7 +236,7 @@ async fn thread_list_uses_stable_keyset_pages_and_filter_scoped_cursors() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(3)),
             method: "thread/list".to_string(),
             params: Some(json!({ "archived": true, "cursor": cursor })),
@@ -211,41 +257,27 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
     let other_cwd = temp.path().join("large-other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let store = &state.inner.state;
     for index in 0..2_000 {
         let cwd = if index % 2 == 0 {
             &state.inner.cwd
         } else {
             &other_cwd
         };
-        store
-            .create_session_with_metadata(
-                cwd,
-                "web",
-                "fake-model",
-                "fake-provider",
-                None,
-            )
-            .await.expect("large candidate session");
+        start_thread(&state, cwd, "web", None).await;
     }
-    let internal = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "tui-side-conversation",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("internal session");
-    let reserved = store
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            Some(json!({ "agentSessionImportState": { "phase": "reserved" } })),
-        )
-        .await.expect("import reserved session");
+    let internal = start_thread(&state, &state.inner.cwd, "tui-side-conversation", None)
+        .await
+        .id()
+        .to_string();
+    let reserved = start_thread(
+        &state,
+        &state.inner.cwd,
+        "web",
+        Some(json!({ "agentSessionImportState": { "phase": "reserved" } })),
+    )
+    .await
+    .id()
+    .to_string();
     let (tx, _rx) = mpsc::unbounded_channel();
     let mut samples = Vec::new();
     let mut value = None;
@@ -257,7 +289,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
                 AuthContext::Bearer,
                 tx.clone(),
                 RpcRequest {
-                    jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                    jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                     id: Some(json!(request_id)),
                     method: "thread/browser".to_string(),
                     params: Some(json!({ "limit": 20, "recentDays": 7 })),
@@ -279,7 +311,9 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
     let workspaces = value["workspaces"].as_array().expect("workspaces");
     assert_eq!(workspaces.len(), 2);
     assert!(workspaces.iter().all(|workspace| {
-        workspace["sessions"].as_array().is_some_and(|sessions| sessions.len() == 20)
+        workspace["sessions"]
+            .as_array()
+            .is_some_and(|sessions| sessions.len() == 20)
             && workspace["hiddenCount"] == 980
             && workspace["nextCursor"]["offset"] == 20
     }));
@@ -296,18 +330,12 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
 async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() {
     let (_temp, state) = web_state().await;
     let cwd_string = state.inner.cwd.display().to_string();
-    let store = &state.inner.state;
     let mut ids = Vec::new();
-    for index in 0..25 {
-        let id = store
-            .create_session_with_metadata(
-                &state.inner.cwd,
-                "web",
-                &format!("fake-model-{index}"),
-                "fake-provider",
-                None,
-            )
-            .await.expect("session");
+    for _ in 0..25 {
+        let id = start_thread(&state, &state.inner.cwd, "web", None)
+            .await
+            .id()
+            .to_string();
         ids.push(id);
     }
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -317,7 +345,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/browser".to_string(),
             params: Some(json!({ "cwd": cwd_string.clone(), "limit": 20 })),
@@ -338,7 +366,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(2)),
             method: "thread/browser".to_string(),
             params: Some(json!({ "cursor": workspace["nextCursor"].clone(), "limit": 20 })),
@@ -371,7 +399,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(3)),
             method: "thread/browser".to_string(),
             params: Some(json!({
@@ -391,13 +419,15 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
     assert_eq!(included["workspaces"][0]["hiddenCount"], 4);
 
     let running_id = ids[0].clone();
-    store
-        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
+    state
+        .inner
+        .durability
+        .claim_gateway_activity(GatewayActivityClaimInput {
             activity_id: "browser-running-activity",
             thread_id: Some(&running_id),
             source_key: None,
             turn_id: Some("browser-running-turn"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "other-gateway",
             owner_surface: Some("test"),
             lease_expires_at_ms: gateway_now_ms() + 30_000,
@@ -405,13 +435,14 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
             superseded_activity_id: None,
             intent: None,
         })
-        .await.expect("running browser activity");
+        .await
+        .expect("running browser activity");
     let running = handle_rpc(
         state,
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(4)),
             method: "thread/browser".to_string(),
             params: Some(json!({ "cwd": cwd_string, "limit": 1 })),
@@ -423,7 +454,9 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         .as_array()
         .expect("running sessions");
     assert_eq!(running_sessions.len(), 2);
-    assert!(running_sessions.iter().any(|session| {
-        session["id"] == running_id && session["activity"]["running"] == true
-    }));
+    assert!(
+        running_sessions.iter().any(|session| {
+            session["id"] == running_id && session["activity"]["running"] == true
+        })
+    );
 }

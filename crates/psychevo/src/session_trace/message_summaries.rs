@@ -1,4 +1,12 @@
-fn event_timestamp_ms(event: &AgentEvent) -> Option<i64> {
+use psychevo_agent_core::{AgentEvent, AssistantBlock, Message};
+use serde_json::{Map, Value, json};
+
+const TRACE_MAX_DEPTH: usize = 8;
+const TRACE_MAX_OBJECT_FIELDS: usize = 64;
+const TRACE_MAX_ARRAY_ITEMS: usize = 64;
+const TRACE_MAX_STRING_CHARS: usize = 4 * 1024;
+
+pub(super) fn event_timestamp_ms(event: &AgentEvent) -> Option<i64> {
     match event {
         AgentEvent::GenerationStart { started_at_ms, .. } => Some(*started_at_ms),
         AgentEvent::ToolExecutionStart { started_at_ms, .. } => Some(*started_at_ms),
@@ -17,7 +25,7 @@ fn message_timestamp_ms(message: &Message) -> Option<i64> {
     }
 }
 
-fn message_role_for_event(event: &AgentEvent) -> Option<&'static str> {
+pub(super) fn message_role_for_event(event: &AgentEvent) -> Option<&'static str> {
     match event {
         AgentEvent::MessageStart { message }
         | AgentEvent::MessageUpdate { message }
@@ -26,7 +34,7 @@ fn message_role_for_event(event: &AgentEvent) -> Option<&'static str> {
     }
 }
 
-fn message_trace(kind: &'static str, message: &Message) -> (&'static str, Value) {
+pub(super) fn message_trace(kind: &'static str, message: &Message) -> (&'static str, Value) {
     let payload = json!({
         "role": message.role(),
         "timestamp_ms": message_timestamp_ms(message),
@@ -88,7 +96,7 @@ fn message_summary(message: &Message) -> Value {
     }
 }
 
-fn insert_tool_correlation(
+pub(super) fn insert_tool_correlation(
     correlation: &mut Map<String, Value>,
     tool_call_id: &str,
     tool_name: &str,
@@ -103,11 +111,11 @@ fn insert_tool_correlation(
     );
 }
 
-fn bounded_redacted_value(value: &Value) -> Value {
+pub(super) fn bounded_redacted_value(value: &Value) -> Value {
     bounded_redacted_value_at(value, 0)
 }
 
-fn bounded_public_value(value: &Value) -> Value {
+pub(super) fn bounded_public_value(value: &Value) -> Value {
     bounded_public_value_at(value, 0)
 }
 
@@ -209,7 +217,7 @@ fn bounded_redacted_value_at(value: &Value, depth: usize) -> Value {
     }
 }
 
-fn bounded_string(value: &str) -> Value {
+pub(super) fn bounded_string(value: &str) -> Value {
     let mut chars = value.chars();
     let preview = chars
         .by_ref()
@@ -225,7 +233,7 @@ fn bounded_string(value: &str) -> Value {
     })
 }
 
-fn is_sensitive_key(key: &str) -> bool {
+pub(super) fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     key.contains("api_key")
         || key.contains("apikey")
@@ -236,7 +244,7 @@ fn is_sensitive_key(key: &str) -> bool {
         || key.contains("authorization")
 }
 
-fn validate_session_trace_id(session_id: &str) -> Result<(), String> {
+pub(super) fn validate_session_trace_id(session_id: &str) -> Result<(), String> {
     if session_id.is_empty()
         || session_id == "."
         || session_id == ".."

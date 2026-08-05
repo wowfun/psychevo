@@ -1,8 +1,19 @@
+use crate::tui::support_formatting::format_configured_model;
+use crate::tui::{
+    BTreeMap, BottomPanel, BottomRowStyle, BottomSelectionPanel, BottomSelectionRow,
+    BottomSelectionValue, ConfiguredModel, ModelCatalogStatus, ModelPanel,
+    ModelProviderCatalogState, ModelRowSource, ProviderSetupPresetId, TuiApp, VARIANTS,
+    configured_model_display_label, format_count, format_model_spec, model_capability_tags,
+    model_pricing_label, provider_setup_preset, provider_setup_presets, short_fetch_error,
+    variant_description,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) fn model_selection_panel(&mut self) -> Result<BottomSelectionPanel> {
         self.sync_model_catalog_providers()?;
         let current = self.model_display_value();
-        let local_models = configured_models(&self.run_options(String::new()))?;
+        let local_models = self.configuration()?.configured_models()?;
         let mut local_by_provider: BTreeMap<String, Vec<ConfiguredModel>> = BTreeMap::new();
         let mut known_specs = BTreeMap::new();
         for model in local_models {
@@ -294,13 +305,14 @@ impl TuiApp {
     }
 
     pub(crate) fn sync_model_catalog_providers(&mut self) -> Result<()> {
-        let providers = model_catalog_providers(&self.run_options(String::new()))?;
+        let configuration = self.configuration()?;
+        let providers = configuration.model_catalog_providers()?;
         let active = providers
             .iter()
             .map(|provider| provider.provider.clone())
             .collect::<Vec<_>>();
         for provider in providers {
-            let cached = read_cached_model_catalog(&self.home, &provider);
+            let cached = configuration.cached_model_catalog(&provider);
             self.model_catalog
                 .providers
                 .entry(provider.provider.clone())
@@ -489,7 +501,7 @@ impl TuiApp {
     }
 
     pub(crate) fn configured_model_lines(&self) -> Result<Vec<String>> {
-        let models = configured_models(&self.run_options(String::new()))?;
+        let models = self.configuration()?.configured_models()?;
         if models.is_empty() {
             return Ok(vec!["no configured models".to_string()]);
         }

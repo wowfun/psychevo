@@ -13,11 +13,23 @@ use crate::session_trace::{
 };
 use crate::types::SessionSummary;
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 29;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 32;
 pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 29;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
+
+fn invalid_persisted_domain_value(table: &str, field: &str, value: &str) -> crate::Error {
+    crate::Error::structured(
+        "Persisted domain value is invalid.",
+        serde_json::json!({
+            "kind": "invalid_persisted_domain_value",
+            "table": table,
+            "field": field,
+            "value": value,
+        }),
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -129,9 +141,15 @@ pub struct ChildSessionSnapshotInput<'a> {
     pub model: &'a str,
     pub provider: &'a str,
     pub metadata: Option<Value>,
-    pub max_context_messages: Option<usize>,
     pub inherited_message_metadata: Value,
     pub boundary_text: &'a str,
+    pub runtime_binding: Option<ChildSessionRuntimeBindingSnapshotInput<'a>>,
+}
+
+pub struct ChildSessionRuntimeBindingSnapshotInput<'a> {
+    pub expected_binding_revision: i64,
+    pub expected_control_revision: i64,
+    pub effective_controls: &'a BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,18 +218,59 @@ pub struct GatewayTurnDeliveryInput<'a> {
     pub input_hash: &'a str,
 }
 
+pub(crate) struct ExistingFrameworkThreadTurnInput<'a> {
+    pub delivery: GatewayTurnDeliveryInput<'a>,
+    pub client_turn_id: Option<&'a str>,
+    pub runtime_binding: Option<GatewayRuntimeBindingInput<'a>>,
+    pub initial_thread_preferences: &'a BTreeMap<String, Value>,
+    pub mission: Option<crate::application::AgentMissionRegistration>,
+}
+
+pub(crate) struct NewFrameworkThreadTurnInput<'a> {
+    pub thread_id: &'a str,
+    pub cwd: &'a Path,
+    pub source: &'a str,
+    pub metadata: Option<Value>,
+    pub delivery: GatewayTurnDeliveryInput<'a>,
+    pub client_turn_id: Option<&'a str>,
+    pub source_lane: Option<GatewaySourceLaneInput<'a>>,
+    pub runtime_binding: Option<GatewayRuntimeBindingInput<'a>>,
+    pub initial_thread_preferences: &'a BTreeMap<String, Value>,
+    pub mission: Option<crate::application::AgentMissionRegistration>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayTurnDeliveryRecord {
     pub turn_id: String,
     pub thread_id: String,
     pub runtime_ref: String,
-    pub status: String,
+    pub status: GatewayTurnDeliveryStatus,
     pub input_json: Option<String>,
     pub input_hash: String,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub delivery_confirmed_at_ms: Option<i64>,
     pub terminal_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayTurnDeliveryStatus {
+    NotDelivered,
+    Delivered,
+    Unknown,
+    Terminal,
+}
+
+impl GatewayTurnDeliveryStatus {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "not_delivered" => Some(Self::NotDelivered),
+            "delivered" => Some(Self::Delivered),
+            "unknown" => Some(Self::Unknown),
+            "terminal" => Some(Self::Terminal),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,12 +291,30 @@ pub struct GatewayChannelOutboxRecord {
     pub turn_id: String,
     pub connection_id: String,
     pub source_key: String,
-    pub status: String,
+    pub status: GatewayChannelOutboxStatus,
     pub payload_text: Option<String>,
     pub payload_hash: String,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub acknowledged_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayChannelOutboxStatus {
+    Pending,
+    Acknowledged,
+    Failed,
+}
+
+impl GatewayChannelOutboxStatus {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "acknowledged" => Some(Self::Acknowledged),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +383,29 @@ pub struct GatewayRuntimeBindingInput<'a> {
     pub parent_thread_id: Option<&'a str>,
 }
 
+pub(crate) struct AgentThreadImportCommitInput<'a> {
+    pub(crate) thread_id: &'a str,
+    pub(crate) parent_thread_id: Option<&'a str>,
+    pub(crate) cwd: &'a Path,
+    pub(crate) source: &'a str,
+    pub(crate) binding: GatewayRuntimeBindingInput<'a>,
+    pub(crate) messages: &'a [AgentThreadImportMessageInput<'a>],
+    pub(crate) metadata: &'a BTreeMap<String, Value>,
+    pub(crate) title: Option<&'a str>,
+}
+
+pub(crate) struct AgentThreadImportMessageInput<'a> {
+    pub(crate) message: &'a Message,
+    pub(crate) usage: &'a Option<Value>,
+    pub(crate) metadata: &'a Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AgentThreadImportCommit {
+    Published,
+    Existing { thread_id: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayRuntimeBindingRecord {
     pub thread_id: String,
@@ -348,7 +448,7 @@ pub struct GatewayActivityClaimInput<'a> {
     pub thread_id: Option<&'a str>,
     pub source_key: Option<&'a str>,
     pub turn_id: Option<&'a str>,
-    pub kind: &'a str,
+    pub kind: GatewayActivityKind,
     pub owner_id: &'a str,
     pub owner_surface: Option<&'a str>,
     pub lease_expires_at_ms: i64,
@@ -363,8 +463,8 @@ pub struct GatewayActivityRecord {
     pub thread_id: Option<String>,
     pub source_key: Option<String>,
     pub turn_id: Option<String>,
-    pub kind: String,
-    pub status: String,
+    pub kind: GatewayActivityKind,
+    pub status: GatewayActivityState,
     pub owner_id: String,
     pub owner_surface: Option<String>,
     pub generation: i64,
@@ -376,25 +476,89 @@ pub struct GatewayActivityRecord {
     pub intent: Option<Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayActivityKind {
+    Turn,
+    Shell,
+}
+
+impl GatewayActivityKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Turn => "turn",
+            Self::Shell => "shell",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "turn" => Some(Self::Turn),
+            "shell" => Some(Self::Shell),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayActivityState {
+    Running,
+    Queued,
+    Superseded,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl GatewayActivityState {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "running" => Some(Self::Running),
+            "queued" => Some(Self::Queued),
+            "superseded" => Some(Self::Superseded),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayActivityTerminalStatus {
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl GatewayActivityTerminalStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GatewayTurnStartReceiptRecord {
-    pub client_turn_id: String,
-    pub turn_id: String,
+pub(crate) struct GatewayTurnStartReceiptRecord {
+    pub(crate) client_turn_id: String,
+    pub(crate) turn_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SessionListProjection {
-    pub summary: SessionSummary,
-    pub first_user_text: Option<String>,
-    pub metadata: Option<Value>,
-    pub runtime_backend_kind: Option<String>,
-    pub runtime_ref: Option<String>,
+pub(crate) struct SessionListProjection {
+    pub(crate) summary: SessionSummary,
+    pub(crate) first_user_text: Option<String>,
+    pub(crate) metadata: Option<Value>,
+    pub(crate) runtime_backend_kind: Option<String>,
+    pub(crate) runtime_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionListCursor {
-    pub updated_at_ms: i64,
-    pub id: String,
+pub(crate) struct SessionListCursor {
+    pub(crate) updated_at_ms: i64,
+    pub(crate) id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -404,29 +568,29 @@ pub(crate) struct SessionSummaryPage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SessionListProjectionPage {
-    pub sessions: Vec<SessionListProjection>,
-    pub next_cursor: Option<SessionListCursor>,
+pub(crate) struct SessionListProjectionPage {
+    pub(crate) sessions: Vec<SessionListProjection>,
+    pub(crate) next_cursor: Option<SessionListCursor>,
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionBrowserRequest<'a> {
-    pub cwd: Option<&'a str>,
-    pub archived: bool,
-    pub cursor_cwd: Option<&'a str>,
-    pub cursor_offset: usize,
-    pub limit: usize,
-    pub recent_since_ms: i64,
-    pub include_session_ids: &'a [String],
-    pub active_session_ids: &'a [String],
+pub(crate) struct SessionBrowserRequest<'a> {
+    pub(crate) cwd: Option<&'a str>,
+    pub(crate) archived: bool,
+    pub(crate) cursor_cwd: Option<&'a str>,
+    pub(crate) cursor_offset: usize,
+    pub(crate) limit: usize,
+    pub(crate) recent_since_ms: i64,
+    pub(crate) include_session_ids: &'a [String],
+    pub(crate) active_session_ids: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SessionBrowserWorkspaceProjection {
-    pub cwd: String,
-    pub sessions: Vec<SessionListProjection>,
-    pub hidden_count: usize,
-    pub next_offset: Option<usize>,
+pub(crate) struct SessionBrowserWorkspaceProjection {
+    pub(crate) cwd: String,
+    pub(crate) sessions: Vec<SessionListProjection>,
+    pub(crate) hidden_count: usize,
+    pub(crate) next_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -436,8 +600,16 @@ pub struct GatewayLiveEventRecord {
     pub owner_id: Option<String>,
     pub thread_id: Option<String>,
     pub turn_id: Option<String>,
+    pub idempotency_key: Option<String>,
     pub event: Value,
     pub created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayLiveEventCommit {
+    pub seq: i64,
+    pub idempotency_key: Option<String>,
+    pub inserted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -469,7 +641,7 @@ pub struct GatewayLiveSnapshotRecord {
 pub struct GatewayControlCommandInput<'a> {
     pub activity_id: &'a str,
     pub owner_id: &'a str,
-    pub command_kind: &'a str,
+    pub command_kind: GatewayControlCommandKind,
     pub payload: Value,
 }
 
@@ -478,23 +650,87 @@ pub struct GatewayControlCommandRecord {
     pub id: i64,
     pub activity_id: String,
     pub owner_id: String,
-    pub command_kind: String,
-    pub status: String,
+    pub command_kind: GatewayControlCommandKind,
+    pub status: GatewayControlCommandStatus,
     pub payload: Value,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayControlCommandKind {
+    Interrupt,
+    Steer,
+    Permission,
+    Clarify,
+}
+
+impl GatewayControlCommandKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Interrupt => "interrupt",
+            Self::Steer => "steer",
+            Self::Permission => "permission",
+            Self::Clarify => "clarify",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "interrupt" => Some(Self::Interrupt),
+            "steer" => Some(Self::Steer),
+            "permission" => Some(Self::Permission),
+            "clarify" => Some(Self::Clarify),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayControlCommandStatus {
+    Pending,
+    Applying,
+    Applied,
+    Failed,
+    OutcomeIndeterminate,
+}
+
+impl GatewayControlCommandStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Applying => "applying",
+            Self::Applied => "applied",
+            Self::Failed => "failed",
+            Self::OutcomeIndeterminate => "outcome_indeterminate",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "applying" => Some(Self::Applying),
+            "applied" => Some(Self::Applied),
+            "failed" => Some(Self::Failed),
+            "outcome_indeterminate" => Some(Self::OutcomeIndeterminate),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GatewayTurnTerminalInput<'a> {
     pub turn_id: &'a str,
     pub thread_id: &'a str,
-    pub status: &'a str,
-    pub outcome: Option<&'a str>,
+    pub status: crate::application::FrameworkTurnTerminalStatus,
+    pub outcome: Option<crate::application::FrameworkTurnTerminalOutcome>,
     pub error_message: Option<&'a str>,
     pub started_at_ms: Option<i64>,
     pub completed_at_ms: i64,
+    /// Last committed message sequence visible when this terminal settles.
+    /// `None` captures the Thread's current boundary in the same transaction.
+    pub boundary_session_seq: Option<i64>,
     pub metadata: Option<Value>,
 }
 
@@ -502,11 +738,12 @@ pub struct GatewayTurnTerminalInput<'a> {
 pub struct GatewayTurnTerminalRecord {
     pub turn_id: String,
     pub thread_id: String,
-    pub status: String,
-    pub outcome: Option<String>,
+    pub status: crate::application::FrameworkTurnTerminalStatus,
+    pub outcome: Option<crate::application::FrameworkTurnTerminalOutcome>,
     pub error_message: Option<String>,
     pub started_at_ms: Option<i64>,
     pub completed_at_ms: i64,
+    pub boundary_session_seq: i64,
     pub metadata: Option<Value>,
 }
 
@@ -515,19 +752,45 @@ pub(crate) struct FrameworkInteractionRecord {
     pub interaction_id: String,
     pub thread_id: String,
     pub turn_id: String,
-    pub kind: String,
-    pub status: String,
+    pub kind: crate::types::BlockingActionKind,
+    pub status: FrameworkInteractionStatus,
     pub payload: Value,
     pub resolution: Option<Value>,
     pub requested_at_ms: i64,
     pub resolved_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameworkInteractionStatus {
+    Pending,
+    Resolved,
+    Cancelled,
+}
+
+impl FrameworkInteractionStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Resolved => "resolved",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "resolved" => Some(Self::Resolved),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutomationTaskInput {
     pub id: Option<String>,
     pub cwd: String,
-    pub kind: String,
+    pub kind: AutomationTaskKind,
     pub target_thread_id: Option<String>,
     pub title: String,
     pub prompt: String,
@@ -544,7 +807,7 @@ pub struct AutomationTaskInput {
 pub struct AutomationTaskRecord {
     pub id: String,
     pub cwd: String,
-    pub kind: String,
+    pub kind: AutomationTaskKind,
     pub target_thread_id: Option<String>,
     pub title: String,
     pub prompt: String,
@@ -558,7 +821,7 @@ pub struct AutomationTaskRecord {
     pub updated_at_ms: i64,
     pub last_run_at_ms: Option<i64>,
     pub next_run_at_ms: Option<i64>,
-    pub last_status: Option<String>,
+    pub last_status: Option<AutomationRunStatus>,
     pub last_error: Option<String>,
 }
 
@@ -567,7 +830,7 @@ pub struct AutomationRunRecord {
     pub id: String,
     pub automation_id: String,
     pub trigger: String,
-    pub status: String,
+    pub status: AutomationRunStatus,
     pub started_at_ms: i64,
     pub completed_at_ms: Option<i64>,
     pub thread_id: Option<String>,
@@ -585,12 +848,81 @@ pub struct AutomationRunRecoveryCandidate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutomationRunFinishInput<'a> {
     pub run_id: &'a str,
-    pub status: &'a str,
+    pub status: AutomationRunTerminalStatus,
     pub thread_id: Option<&'a str>,
     pub source_key: Option<&'a str>,
     pub error: Option<&'a str>,
     pub metadata: Option<Value>,
     pub next_run_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutomationTaskKind {
+    Project,
+    ThreadHeartbeat,
+}
+
+impl AutomationTaskKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::ThreadHeartbeat => "thread_heartbeat",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "project" => Some(Self::Project),
+            "thread_heartbeat" => Some(Self::ThreadHeartbeat),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutomationRunStatus {
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutomationRunTerminalStatus {
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl AutomationRunTerminalStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+}
+
+impl AutomationRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "running" => Some(Self::Running),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +1029,7 @@ pub struct StateRuntime {
 pub(crate) struct StateRuntimeInner {
     pub(crate) db_path: PathBuf,
     pub(crate) pool: sqlx::SqlitePool,
+    pub(crate) connection_limit: u32,
     pub(crate) in_flight_operations: AtomicU64,
     pub(crate) completed_operations: AtomicU64,
     pub(crate) failed_operations: AtomicU64,
@@ -709,12 +1042,21 @@ pub(crate) struct StateRuntimeInner {
     #[cfg(test)]
     pub(crate) fail_next_agent_terminal: AtomicU64,
     #[cfg(test)]
+    pub(crate) fail_next_agent_thread_import_commit: AtomicU64,
+    #[cfg(test)]
     pub(crate) gateway_turn_acceptance_barrier:
+        Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
+    #[cfg(test)]
+    pub(crate) native_history_fork_barrier:
+        Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
+    #[cfg(test)]
+    pub(crate) state_close_barrier:
         Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StateRuntimeDiagnostics {
+    pub connection_limit: u32,
     pub pool_size: u32,
     pub pool_idle: usize,
     pub in_flight_operations: u64,
@@ -740,6 +1082,7 @@ impl StateRuntime {
             .failed_operations
             .load(std::sync::atomic::Ordering::Relaxed);
         StateRuntimeDiagnostics {
+            connection_limit: self.inner.connection_limit,
             pool_size: self.inner.pool.size(),
             pool_idle: self.inner.pool.num_idle(),
             in_flight_operations: self
@@ -811,6 +1154,8 @@ impl StateRuntime {
     }
 }
 
+pub(crate) const DEFAULT_STATE_CONNECTION_LIMIT: u32 = 5;
+
 pub(crate) struct TurnFilesystemGrantGuard {
     state: StateRuntime,
     session_id: String,
@@ -847,12 +1192,17 @@ pub(crate) mod store_schema;
 pub(crate) mod store_sessions;
 #[path = "store/undo_state.rs"]
 pub(crate) mod store_undo_state;
-pub use store_agents::{
-    AgentEdgeRecord, AgentEdgeStatus, AgentMissionRunInput, AgentMissionRunRecord,
-    AgentTeamRunInput, AgentTeamRunRecord,
+#[cfg(test)]
+pub(crate) use store_agents::{
+    AgentCoordinationRunStatus, AgentMissionRunInput, AgentTeamRunInput,
+};
+pub(crate) use store_agents::{
+    AgentEdgeRecord, AgentEdgeStatus, AgentMissionRunRecord, AgentTeamRunRecord,
 };
 #[path = "store/agent_mailbox.rs"]
 pub(crate) mod store_agent_mailbox;
+#[path = "store/agent_thread_import.rs"]
+pub(crate) mod store_agent_thread_import;
 #[path = "store/automations.rs"]
 pub(crate) mod store_automations;
 #[path = "store/compactions.rs"]

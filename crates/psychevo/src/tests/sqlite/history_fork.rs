@@ -1,7 +1,16 @@
-#[allow(unused_imports)]
-use super::*;
-use crate::store::PromptPrefixRecord;
-use psychevo_agent_core::now_ms;
+use crate::application::{FrameworkTurnTerminalOutcome, FrameworkTurnTerminalStatus};
+use crate::paths::canonical_cwd;
+use crate::state::{SessionRevertState, StateRuntime};
+use crate::store::{
+    ContextEvidenceInput, GatewayActivityClaimInput, GatewayActivityKind,
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewaySourceBindingInput,
+    GatewayTurnDeliveryInput, GatewayTurnTerminalInput, NativeSessionForkInput, PromptPrefixRecord,
+    SessionCompactionInput,
+};
+use crate::tests::sessions_titles::{assistant_message, user_message};
+use psychevo_agent_core::{Message, now_ms};
+use serde_json::json;
+use tempfile::tempdir;
 
 fn native_binding_input<'a>(
     thread_id: &'a str,
@@ -26,6 +35,72 @@ fn native_binding_input<'a>(
         ownership: GatewayRuntimeBindingOwnership::ReadWrite,
         parent_thread_id: None,
     }
+}
+
+fn assert_native_history_unavailable(error: crate::Error, expected_reason: &str) {
+    let evidence = error
+        .structured_data()
+        .expect("Native history rejection must be structured");
+    assert_eq!(evidence["kind"], "native_history_unavailable");
+    assert_eq!(evidence["reason"], expected_reason);
+}
+
+fn assert_thread_busy(error: crate::Error, expected_operation: &str) {
+    let evidence = error
+        .structured_data()
+        .expect("busy rejection must be structured");
+    assert_eq!(evidence["kind"], "thread_busy");
+    assert_eq!(evidence["blockingOperation"], expected_operation);
+}
+
+async fn session_count(store: &StateRuntime) -> i64 {
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+        .fetch_one(&mut *conn)
+        .await
+        .expect("session count")
+}
+
+async fn assert_fork_unavailable_without_child(
+    store: &StateRuntime,
+    thread_id: &str,
+    expected_reason: &str,
+) {
+    let before = session_count(store).await;
+    assert_native_history_unavailable(
+        store
+            .fork_native_session_history(NativeSessionForkInput {
+                source_session_id: thread_id,
+                before_session_seq: None,
+            })
+            .await
+            .expect_err("ineligible fork must fail"),
+        expected_reason,
+    );
+    assert_eq!(
+        session_count(store).await,
+        before,
+        "failed fork created a child"
+    );
+}
+
+async fn assert_fork_busy_without_child(store: &StateRuntime, thread_id: &str) {
+    let before = session_count(store).await;
+    assert_thread_busy(
+        store
+            .fork_native_session_history(NativeSessionForkInput {
+                source_session_id: thread_id,
+                before_session_seq: None,
+            })
+            .await
+            .expect_err("busy fork must fail"),
+        "gateway_activity",
+    );
+    assert_eq!(
+        session_count(store).await,
+        before,
+        "busy fork created a child"
+    );
 }
 
 #[tokio::test]
@@ -154,11 +229,12 @@ async fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
             turn_id: "turn-kept",
             thread_id: &source,
-            status: "failed",
-            outcome: Some("failure"),
+            status: FrameworkTurnTerminalStatus::Failed,
+            outcome: Some(FrameworkTurnTerminalOutcome::Failed),
             error_message: Some("kept failure"),
             started_at_ms: Some(1),
             completed_at_ms: 2,
+            boundary_session_seq: Some(2),
             metadata: Some(json!({"firstCommittedSeq": 1, "lastCommittedSeq": 2})),
         })
         .await
@@ -167,11 +243,12 @@ async fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
             turn_id: "turn-suffix",
             thread_id: &source,
-            status: "failed",
-            outcome: Some("failure"),
+            status: FrameworkTurnTerminalStatus::Failed,
+            outcome: Some(FrameworkTurnTerminalOutcome::Failed),
             error_message: Some("suffix failure"),
             started_at_ms: Some(3),
             completed_at_ms: 4,
+            boundary_session_seq: Some(4),
             metadata: Some(json!({"firstCommittedSeq": 3, "lastCommittedSeq": 4})),
         })
         .await
@@ -183,16 +260,15 @@ async fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
         )
         .await
         .expect("source revert");
-    assert!(
+    assert_native_history_unavailable(
         store
             .fork_native_session_history(NativeSessionForkInput {
                 source_session_id: &source,
                 before_session_seq: Some(selected),
             })
             .await
-            .expect_err("staged source must reject fork")
-            .to_string()
-            .contains("not an eligible root Thread")
+            .expect_err("staged source must reject fork"),
+        "workspace_undo_staged",
     );
     store
         .clear_session_revert_state(&source)
@@ -326,7 +402,7 @@ async fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
 }
 
 #[tokio::test]
-async fn native_history_fork_accepts_any_root_source_and_rejects_child_side_and_running_threads() {
+async fn native_history_fork_requires_interactive_native_writable_root_and_idle_durable_state() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
@@ -350,18 +426,6 @@ async fn native_history_fork_accepts_any_root_source_and_rejects_child_side_and_
         .create_gateway_runtime_binding(native_binding_input(&child, &cwd_text, Some(&child)))
         .await
         .expect("child binding");
-    let dedicated = store
-        .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
-        .await
-        .expect("dedicated");
-    store
-        .create_gateway_runtime_binding(native_binding_input(
-            &dedicated,
-            &cwd_text,
-            Some(&dedicated),
-        ))
-        .await
-        .expect("dedicated binding");
     let side = store
         .create_session_with_metadata(
             &cwd,
@@ -377,35 +441,156 @@ async fn native_history_fork_accepts_any_root_source_and_rejects_child_side_and_
         .await
         .expect("side binding");
 
-    for session_id in [&child, &side] {
-        assert!(
-            store
-                .fork_native_session_history(NativeSessionForkInput {
-                    source_session_id: session_id,
-                    before_session_seq: None,
-                })
-                .await
-                .expect_err("ineligible session")
-                .to_string()
-                .contains("not an eligible root Thread")
-        );
-    }
-    let dedicated_fork = store
-        .fork_native_session_history(NativeSessionForkInput {
-            source_session_id: &dedicated,
-            before_session_seq: None,
-        })
-        .await
-        .expect("root Framework Thread source is eligible");
-    assert_eq!(
-        store
-            .session_summary(&dedicated_fork)
+    assert_fork_unavailable_without_child(&store, &child, "child_thread").await;
+    assert_fork_unavailable_without_child(&store, &side, "side_conversation").await;
+
+    for source in ["channel", "automation"] {
+        let dedicated = store
+            .create_session_with_metadata(&cwd, source, "model", "provider", None)
             .await
-            .expect("fork summary")
-            .expect("fork exists")
-            .source,
-        "channel"
+            .expect("dedicated source");
+        store
+            .create_gateway_runtime_binding(native_binding_input(
+                &dedicated,
+                &cwd_text,
+                Some(&dedicated),
+            ))
+            .await
+            .expect("dedicated binding");
+        assert_fork_unavailable_without_child(&store, &dedicated, "unsupported_source").await;
+    }
+
+    let missing_binding = store
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
+        .expect("missing binding");
+    assert_fork_unavailable_without_child(&store, &missing_binding, "runtime_binding_missing")
+        .await;
+
+    let unresolved = store
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
+        .expect("unresolved");
+    store
+        .create_gateway_runtime_binding(native_binding_input(
+            &unresolved,
+            &cwd_text,
+            Some(&unresolved),
+        ))
+        .await
+        .expect("unresolved binding");
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query(
+        "UPDATE gateway_runtime_bindings SET resolution_status = 'unresolved', \
+         unresolved_reason = 'test' WHERE thread_id = ?1",
+    )
+    .bind(&unresolved)
+    .execute(&mut *conn)
+    .await
+    .expect("mark unresolved");
+    drop(conn);
+    assert_fork_unavailable_without_child(&store, &unresolved, "runtime_binding_unresolved").await;
+
+    let non_native = store
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
+        .expect("non-native");
+    store
+        .create_gateway_runtime_binding(native_binding_input(
+            &non_native,
+            &cwd_text,
+            Some(&non_native),
+        ))
+        .await
+        .expect("non-native binding");
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query("UPDATE gateway_runtime_bindings SET backend_kind = 'acp' WHERE thread_id = ?1")
+        .bind(&non_native)
+        .execute(&mut *conn)
+        .await
+        .expect("mark ACP binding");
+    drop(conn);
+    assert_fork_unavailable_without_child(&store, &non_native, "runtime_binding_not_native").await;
+
+    let read_only = store
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
+        .expect("read-only");
+    store
+        .create_gateway_runtime_binding(native_binding_input(
+            &read_only,
+            &cwd_text,
+            Some(&read_only),
+        ))
+        .await
+        .expect("read-only binding");
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query("UPDATE gateway_runtime_bindings SET ownership = 'read_only' WHERE thread_id = ?1")
+        .bind(&read_only)
+        .execute(&mut *conn)
+        .await
+        .expect("mark read-only binding");
+    drop(conn);
+    assert_fork_unavailable_without_child(&store, &read_only, "runtime_binding_read_only").await;
+
+    let no_editable_input = store
+        .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
+        .expect("no editable input");
+    store
+        .create_gateway_runtime_binding(native_binding_input(
+            &no_editable_input,
+            &cwd_text,
+            Some(&no_editable_input),
+        ))
+        .await
+        .expect("no editable input binding");
+    let empty_user_seq = store
+        .append_message_with_undo_snapshot_and_context_evidence(
+            &no_editable_input,
+            &Message::User {
+                content: Vec::new(),
+                timestamp_ms: 1,
+            },
+            None,
+            &[],
+        )
+        .await
+        .expect("empty user message");
+    let before = session_count(&store).await;
+    assert_native_history_unavailable(
+        store
+            .fork_native_session_history(NativeSessionForkInput {
+                source_session_id: &no_editable_input,
+                before_session_seq: Some(empty_user_seq),
+            })
+            .await
+            .expect_err("point fork requires editable input"),
+        "no_editable_input",
     );
+    assert_eq!(session_count(&store).await, before);
+
+    let non_user_boundary = store
+        .append_message_with_undo_snapshot_and_context_evidence(
+            &no_editable_input,
+            &assistant_message("answer", 2),
+            None,
+            &[],
+        )
+        .await
+        .expect("assistant boundary");
+    let before = session_count(&store).await;
+    assert_native_history_unavailable(
+        store
+            .fork_native_session_history(NativeSessionForkInput {
+                source_session_id: &no_editable_input,
+                before_session_seq: Some(non_user_boundary),
+            })
+            .await
+            .expect_err("point fork boundary must be a user message"),
+        "not_user_message",
+    );
+    assert_eq!(session_count(&store).await, before);
 
     store
         .claim_gateway_activity(GatewayActivityClaimInput {
@@ -413,7 +598,7 @@ async fn native_history_fork_accepts_any_root_source_and_rejects_child_side_and_
             thread_id: Some(&root),
             source_key: Some("web:history-fork"),
             turn_id: Some("turn:history-fork"),
-            kind: "turn",
+            kind: GatewayActivityKind::Turn,
             owner_id: "test-owner",
             owner_surface: Some("test"),
             lease_expires_at_ms: now_ms() + 60_000,
@@ -423,15 +608,29 @@ async fn native_history_fork_accepts_any_root_source_and_rejects_child_side_and_
         })
         .await
         .expect("running activity");
-    assert!(
-        store
-            .fork_native_session_history(NativeSessionForkInput {
-                source_session_id: &root,
-                before_session_seq: None,
-            })
-            .await
-            .expect_err("running session")
-            .to_string()
-            .contains("running Thread cannot be forked")
-    );
+    assert_fork_busy_without_child(&store, &root).await;
+
+    let pending_delivery = store
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
+        .expect("pending delivery");
+    store
+        .create_gateway_runtime_binding(native_binding_input(
+            &pending_delivery,
+            &cwd_text,
+            Some(&pending_delivery),
+        ))
+        .await
+        .expect("pending delivery binding");
+    store
+        .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
+            turn_id: "pending-history-fork",
+            thread_id: &pending_delivery,
+            runtime_ref: "native-default",
+            input_json: "[]",
+            input_hash: "pending-history-fork-hash",
+        })
+        .await
+        .expect("pending delivery");
+    assert_fork_busy_without_child(&store, &pending_delivery).await;
 }

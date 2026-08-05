@@ -65,6 +65,7 @@ export const gatewaySchemas = {
   AppThreadIdParams: appServerSchemas.AppThreadIdParams,
   AppThreadForkParams: appServerSchemas.AppThreadForkParams,
   AppThreadCompactParams: appServerSchemas.AppThreadCompactParams,
+  AppThreadCompactResult: appServerSchemas.AppThreadCompactResult,
   AppThreadListParams: appServerSchemas.AppThreadListParams,
   AppTurnStartParams: appServerSchemas.AppTurnStartParams,
   AppTurnIdParams: appServerSchemas.AppTurnIdParams,

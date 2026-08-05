@@ -1,4 +1,46 @@
+use std::{
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+use psychevo_agent_core::{ToolBinding, ToolOutput};
+use psychevo_ai::AbortSignal;
+use serde_json::{Value, json};
+use sha2::Digest;
+
+use super::super::rules::{action_summary, permission_error};
+use super::actions::PermissionAction;
+use super::state::{
+    ApprovalDecisionRequest, PermissionDecision, PermissionRuntime, PermissionRuntimeInner,
+};
+use super::tool::PermissionTool;
+use crate::types::{
+    ApprovalsReviewer, PermissionApprovalOutcome, PermissionConfig, PermissionMode,
+};
+
 impl PermissionRuntime {
+    pub(crate) fn update_cache_identity_hasher(&self, hasher: &mut sha2::Sha256) {
+        fn update_value(hasher: &mut sha2::Sha256, value: &str) {
+            hasher.update(value.len().to_le_bytes());
+            hasher.update(value.as_bytes());
+        }
+
+        update_value(hasher, &self.inner.cwd.to_string_lossy());
+        update_value(hasher, &self.inner.project_config_dir.to_string_lossy());
+        update_value(hasher, self.inner.mode.as_str());
+        update_value(hasher, &format!("{:?}", self.inner.config));
+        update_value(hasher, &format!("{:?}", self.inner.sandbox_policy));
+        for path in &self.inner.protected_config_paths {
+            update_value(hasher, &path.to_string_lossy());
+        }
+        hasher.update([
+            u8::from(self.inner.approval_handler.is_some()),
+            u8::from(self.inner.smart_approval_handler.is_some()),
+            u8::from(self.inner.hook_runtime.is_some()),
+        ]);
+    }
+
     pub(crate) fn new(
         cwd: PathBuf,
         project_config_dir: PathBuf,
@@ -38,8 +80,7 @@ impl PermissionRuntime {
         let inner = Arc::get_mut(&mut self.inner)
             .expect("protected paths must be attached before PermissionRuntime is cloned");
         for path in paths {
-            if let Ok(path) =
-                crate::filesystem_identity::canonicalize_deepest_existing(&path)
+            if let Ok(path) = crate::filesystem_identity::canonicalize_deepest_existing(&path)
                 && !inner.protected_config_paths.contains(&path)
             {
                 inner.protected_config_paths.push(path);
@@ -97,15 +138,15 @@ impl PermissionRuntime {
             "mcp_startup",
             &args,
         )
-            .await
-            .map_err(|output| {
-                output
-                    .json
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("permission denied")
-                    .to_string()
-            })
+        .await
+        .map_err(|output| {
+            output
+                .json
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("permission denied")
+                .to_string()
+        })
     }
 
     pub(crate) async fn cancel_authorization(&self, tool_call_id: &str) {
@@ -128,7 +169,7 @@ impl PermissionRuntime {
             .await
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn authorize_with_abort(
         &self,
         tool_call_id: &str,
@@ -140,7 +181,7 @@ impl PermissionRuntime {
             .await
     }
 
-    pub(crate) async fn authorize_with_expected_identity(
+    pub(super) async fn authorize_with_expected_identity(
         &self,
         tool_call_id: &str,
         tool_name: &str,
@@ -158,7 +199,7 @@ impl PermissionRuntime {
         .await
     }
 
-    pub(crate) async fn authorize_inner(
+    async fn authorize_inner(
         &self,
         tool_call_id: &str,
         tool_name: &str,
@@ -169,8 +210,8 @@ impl PermissionRuntime {
         if abort.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(ToolOutput::error("aborted"));
         }
-        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
-            .map_err(|err| {
+        let action =
+            PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args).map_err(|err| {
                 permission_error(
                     "denied",
                     &format!("filesystem identity resolution failed: {err}"),
@@ -190,7 +231,9 @@ impl PermissionRuntime {
         match self.evaluate_resolved_action(action.as_ref()) {
             PermissionDecision::Allow => {
                 let sandbox_grant = match action.as_ref() {
-                    Some(action) => self.sandbox_write_grant_request(action)?,
+                    Some(action) => self
+                        .sandbox_write_grant_request(action)
+                        .map_err(ToolOutput::error)?,
                     None => None,
                 };
                 if let Some(grant) = sandbox_grant {
@@ -216,13 +259,7 @@ impl PermissionRuntime {
                         return Ok(());
                     }
                     return self
-                        .authorize_sandbox_write_grant(
-                            tool_call_id,
-                            tool_name,
-                            args,
-                            grant,
-                            abort,
-                        )
+                        .authorize_sandbox_write_grant(tool_call_id, tool_name, args, grant, abort)
                         .await;
                 }
                 Ok(())
@@ -240,7 +277,9 @@ impl PermissionRuntime {
                 persistent_grants,
             } => {
                 let sandbox_grant = match action.as_ref() {
-                    Some(action) => self.sandbox_write_grant_request(action)?,
+                    Some(action) => self
+                        .sandbox_write_grant_request(action)
+                        .map_err(ToolOutput::error)?,
                     None => None,
                 };
                 if self.inner.mode.bypasses_prompt_asks() {

@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{Notify, broadcast, mpsc};
 
-use crate::GatewayEvent;
+use psychevo_gateway_protocol::events_transcript::GatewayEvent;
 
-use super::rpc_notification;
+use super::rpc_json::rpc_notification;
 
 pub(super) const EVENT_HUB_CAPACITY: usize = 512;
 pub(super) const CONNECTION_OUTBOX_FRAMES: usize = 128;
@@ -273,7 +273,9 @@ pub(super) fn connection_outbox() -> (ConnectionSender, ConnectionOutboxReceiver
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GatewayActivityView, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole};
+    use psychevo_gateway_protocol::events_transcript::{
+        GatewayActivityView, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    };
 
     fn entry_update(body: &str) -> GatewayEvent {
         GatewayEvent::EntryUpdated {

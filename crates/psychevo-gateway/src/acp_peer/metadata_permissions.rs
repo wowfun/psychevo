@@ -1,62 +1,27 @@
-struct LocalPeerSession {
-    session_id: String,
-    native_session_id: Option<String>,
-    created: bool,
-}
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-async fn ensure_local_session(
-    peer: &ResolvedPeerTurn,
-    options: &psychevo::__product::runtime::RunOptions,
-) -> psychevo::Result<LocalPeerSession> {
-    let store = &options.state;
-    if let Some(session_id) = &options.session {
-        store.resume_session(session_id).await?;
-        let metadata_native = store
-            .session_metadata(session_id)
-            .await?
-            .and_then(|metadata| peer_native_session_id(&metadata, &peer.backend.id));
-        let native = match metadata_native {
-            Some(native) => Some(native),
-            None => store
-                .gateway_runtime_binding(session_id)
-                .await?
-                .filter(|binding| {
-                    binding.status == psychevo::__product::persistence::GatewayRuntimeBindingStatus::Resolved
-                        && binding.native_kind.as_deref()
-                            == Some(psychevo::__product::configuration::RuntimeProfileKind::Acp.as_str())
-                })
-                .and_then(|binding| binding.native_session_id),
-        };
-        let top_level = store
-            .session_summary(session_id)
-            .await?
-            .is_some_and(|summary| summary.parent_session_id.is_none());
-        let created =
-            native.is_none() && top_level && store.load_messages(session_id).await?.is_empty();
-        return Ok(LocalPeerSession {
-            session_id: session_id.clone(),
-            native_session_id: native,
-            // Gateway materializes the public thread before backend dispatch so the immutable
-            // Runtime binding can be persisted first. An empty top-level shell is still the first
-            // visible ACP turn; managed child titles remain owned by their parent lifecycle.
-            created,
-        });
-    }
-    let session_id = store
-        .create_session_with_metadata(
-            &options.cwd,
-            "peer_agent",
-            &peer.agent.name,
-            &format!("acp:{}", peer.backend.id),
-            Some(peer_root_metadata(peer, None)),
-        )
-        .await?;
-    Ok(LocalPeerSession {
-        session_id,
-        native_session_id: None,
-        created: true,
-    })
-}
+use agent_client_protocol::schema::v1::{
+    ClientCapabilities, ElicitationCapabilities, ElicitationFormCapabilities,
+    FileSystemCapabilities, PermissionOption, PermissionOptionKind, ReadTextFileRequest,
+    ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, WriteTextFileRequest,
+    WriteTextFileResponse,
+};
+use psychevo::{
+    agents::AgentDefinition,
+    application::{
+        ImageInput, PermissionApprovalDecision, PermissionApprovalOutcome,
+        PermissionApprovalRequest, RunStreamEvent, RunStreamSink,
+    },
+};
+use serde_json::{Value, json};
+
+use crate::gateway::peer_runtime::ResolvedPeerTurn;
+
+use super::session_projection::AcpSessionSnapshot;
+use super::turn::AcpClientContext;
 
 pub(crate) fn peer_session_metadata(
     peer: &ResolvedPeerTurn,
@@ -97,42 +62,20 @@ pub(crate) fn peer_session_metadata(
     {
         object.insert(
             "sessionProjection".to_string(),
-            serde_json::to_value(session_projection).expect("product-safe ACP projection serializes"),
+            serde_json::to_value(session_projection)
+                .expect("product-safe ACP projection serializes"),
         );
     }
     value
 }
 
-fn peer_root_metadata(peer: &ResolvedPeerTurn, native_session_id: Option<&str>) -> Value {
-    json!({
-        ACP_PEER_METADATA_KEY: peer_session_metadata(
-            peer,
-            native_session_id,
-            None,
-            &BTreeMap::new(),
-            None,
-        ),
-    })
-}
-
-fn peer_native_session_id(metadata: &Value, backend_id: &str) -> Option<String> {
-    let peer = metadata.get(ACP_PEER_METADATA_KEY)?;
-    let stored_backend = peer.get("backendId").and_then(Value::as_str)?;
-    if stored_backend != backend_id {
-        return None;
-    }
-    peer.get("nativeSessionId")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-}
-
-fn emit_runtime_event(stream: &Option<psychevo::__product::runtime::RunStreamSink>, value: Value) {
+pub(super) fn emit_runtime_event(stream: &Option<RunStreamSink>, value: Value) {
     if let Some(stream) = stream {
         stream(RunStreamEvent::value(value));
     }
 }
 
-fn prompt_history_text(prompt: &str, images: &[ImageInput]) -> String {
+pub(super) fn prompt_history_text(prompt: &str, images: &[ImageInput]) -> String {
     let mut parts = vec![prompt.to_string()];
     for image in images {
         match image {
@@ -143,7 +86,7 @@ fn prompt_history_text(prompt: &str, images: &[ImageInput]) -> String {
     parts.join("\n\n")
 }
 
-fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities {
+pub(super) fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities {
     ClientCapabilities::new()
         .fs(FileSystemCapabilities::new()
             .read_text_file(peer_allows_fs_read(peer))
@@ -152,17 +95,17 @@ fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities {
         .terminal(peer_allows_terminal(peer))
 }
 
-fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
+pub(super) fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
     peer.backend.client_capabilities.contains("fs.read")
         && agent_allows_any_tool(&peer.agent, &["read"])
 }
 
-fn peer_allows_fs_write(peer: &ResolvedPeerTurn) -> bool {
+pub(super) fn peer_allows_fs_write(peer: &ResolvedPeerTurn) -> bool {
     peer.backend.client_capabilities.contains("fs.write")
         && agent_allows_any_tool(&peer.agent, &["write", "edit"])
 }
 
-fn peer_allows_terminal(peer: &ResolvedPeerTurn) -> bool {
+pub(super) fn peer_allows_terminal(peer: &ResolvedPeerTurn) -> bool {
     peer.backend.client_capabilities.contains("terminal")
         && agent_allows_any_tool(&peer.agent, &["exec_command", "write_stdin"])
 }
@@ -179,7 +122,7 @@ fn agent_allows_any_tool(agent: &AgentDefinition, tools: &[&str]) -> bool {
     allowed && !denied
 }
 
-fn acp_request_context(
+pub(super) fn acp_request_context(
     contexts: &Arc<std::sync::Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     session_id: &str,
 ) -> Result<Arc<AcpClientContext>, agent_client_protocol::Error> {
@@ -196,7 +139,7 @@ fn acp_request_context(
         })
 }
 
-async fn read_text_file(
+pub(super) async fn read_text_file(
     context: Arc<AcpClientContext>,
     request: ReadTextFileRequest,
 ) -> Result<ReadTextFileResponse, agent_client_protocol::Error> {
@@ -221,7 +164,7 @@ async fn read_text_file_content(
     Ok(apply_line_window(text, line, limit))
 }
 
-async fn write_text_file(
+pub(super) async fn write_text_file(
     context: Arc<AcpClientContext>,
     request: WriteTextFileRequest,
 ) -> Result<WriteTextFileResponse, agent_client_protocol::Error> {
@@ -265,7 +208,7 @@ async fn write_text_file_content(
     Ok(())
 }
 
-async fn request_permission(
+pub(super) async fn request_permission(
     context: Arc<AcpClientContext>,
     request: RequestPermissionRequest,
 ) -> Result<RequestPermissionResponse, agent_client_protocol::Error> {
@@ -318,9 +261,7 @@ fn permission_option_id(
         PermissionApprovalOutcome::AllowAlways => PermissionOptionKind::AllowAlways,
         PermissionApprovalOutcome::AllowOnce
         | PermissionApprovalOutcome::AllowTurn
-        | PermissionApprovalOutcome::AllowSession => {
-            PermissionOptionKind::AllowOnce
-        }
+        | PermissionApprovalOutcome::AllowSession => PermissionOptionKind::AllowOnce,
         PermissionApprovalOutcome::Deny => PermissionOptionKind::RejectOnce,
     };
     options
@@ -395,7 +336,7 @@ fn apply_line_window(text: String, line: Option<u32>, limit: Option<u32>) -> Str
         .join("\n")
 }
 
-fn backend_cwd(value: &str, cwd: &Path) -> PathBuf {
+pub(super) fn backend_cwd(value: &str, cwd: &Path) -> PathBuf {
     let value = value.trim();
     if value.is_empty() || value == "invocation" {
         return cwd.to_path_buf();
@@ -408,6 +349,6 @@ fn backend_cwd(value: &str, cwd: &Path) -> PathBuf {
     }
 }
 
-fn acp_internal_error(err: impl std::fmt::Display) -> agent_client_protocol::Error {
+pub(super) fn acp_internal_error(err: impl std::fmt::Display) -> agent_client_protocol::Error {
     agent_client_protocol::Error::internal_error().data(err.to_string())
 }

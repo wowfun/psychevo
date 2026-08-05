@@ -4,16 +4,11 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::CommandFactory;
 use psychevo::{
-    __product::capabilities::PluginInspectOptions, __product::capabilities::PluginInstallOptions,
-    __product::capabilities::PluginMarketplaceEntry, __product::capabilities::PluginScope,
-    __product::capabilities::PluginSourceKind, __product::capabilities::plugin_doctor_value,
-    __product::capabilities::plugin_import_inspect_value,
-    __product::capabilities::plugin_install_value, __product::capabilities::plugin_list_value,
-    __product::capabilities::plugin_marketplace_add_value,
-    __product::capabilities::plugin_marketplace_list_value,
-    __product::capabilities::plugin_marketplace_remove_value,
-    __product::capabilities::plugin_set_enabled_value,
-    __product::capabilities::plugin_uninstall_value, __product::capabilities::plugin_view_value,
+    plugins::PluginInspectOptions, plugins::PluginInstallOptions, plugins::PluginMarketplaceEntry,
+    plugins::PluginScope, plugins::PluginSourceKind, plugins::plugin_import_inspect_value,
+    plugins::plugin_install_value, plugins::plugin_marketplace_add_value,
+    plugins::plugin_marketplace_list_value, plugins::plugin_marketplace_remove_value,
+    plugins::plugin_set_enabled_value, plugins::plugin_uninstall_value,
 };
 use serde_json::Value;
 
@@ -21,7 +16,7 @@ use crate::args::{
     PluginArgs, PluginCommand, PluginDoctorArgs, PluginInspectArgs, PluginInstallArgs,
     PluginListArgs, PluginMarketplaceArgs, PluginMarketplaceCommand, PluginViewArgs,
 };
-use crate::commands::common::base_run_options;
+use crate::commands::common::CommandConfiguration;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
 pub(crate) async fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
@@ -85,9 +80,9 @@ async fn list_plugins(
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let value = plugin_list_value(&options)?;
-    print_plugin_value(&value, args.json)
+    let context = CommandConfiguration::open(env_map, home, cwd).await?;
+    let result = plugin_value_result(context.configuration().plugins(), args.json);
+    context.finish(result).await
 }
 
 async fn view_plugin(
@@ -96,9 +91,9 @@ async fn view_plugin(
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let value = plugin_view_value(&options, &args.selector)?;
-    print_plugin_value(&value, args.json)
+    let context = CommandConfiguration::open(env_map, home, cwd).await?;
+    let result = plugin_value_result(context.configuration().plugin(&args.selector), args.json);
+    context.finish(result).await
 }
 
 async fn doctor_plugins(
@@ -107,9 +102,17 @@ async fn doctor_plugins(
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd).await?;
-    let value = plugin_doctor_value(&options, args.selector.as_deref()).await?;
-    print_plugin_value(&value, args.json)
+    let context = CommandConfiguration::open(env_map, home, cwd).await?;
+    let value = context
+        .configuration()
+        .diagnose_plugins(args.selector.as_deref())
+        .await;
+    let result = plugin_value_result(value, args.json);
+    context.finish(result).await
+}
+
+fn plugin_value_result(value: psychevo::Result<Value>, json_output: bool) -> Result<()> {
+    print_plugin_value(&value?, json_output)
 }
 
 fn inspect_plugin(

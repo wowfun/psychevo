@@ -6,15 +6,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    PluginPolicyConfig, ToolsetContribution, load_mcp_oauth_access_token, load_run_config,
-    resolve_psychevo_home,
+    McpOAuthCredentialStore, PluginPolicyConfig, ToolsetContribution,
+    load_mcp_oauth_access_token_with_store, load_run_config_from,
 };
 use crate::hooks::HookSourceDescriptor;
 use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
 use crate::paths::canonical_cwd;
 use crate::plugins::{load_enabled_plugin_contributions, load_plugin_manifest};
 use crate::types::{
-    McpServerInput, McpTransportInput, ResolvedMcpServerInput, RunOptions, RunWarning, RuntimeTool,
+    McpServerInput, McpTransportInput, ResolvedMcpServerInput, RunWarning, RuntimeTool,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +65,55 @@ pub enum CapabilityRootAuthority {
 impl CapabilityRootAuthority {
     fn is_local(&self) -> bool {
         matches!(self, Self::Local)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct McpServerResolution {
+    profile_home: PathBuf,
+    mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
+    cwd: PathBuf,
+    config_path: Option<PathBuf>,
+    inherited_env: BTreeMap<String, String>,
+    selected_capability_roots: Vec<SelectedCapabilityRoot>,
+    mcp_servers: Vec<McpServerInput>,
+}
+
+impl std::fmt::Debug for McpServerResolution {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpServerResolution")
+            .field("cwd", &self.cwd)
+            .field("config_path", &self.config_path)
+            .field("environment_entries", &self.inherited_env.len())
+            .field(
+                "capability_root_count",
+                &self.selected_capability_roots.len(),
+            )
+            .field("mcp_server_count", &self.mcp_servers.len())
+            .finish()
+    }
+}
+
+impl McpServerResolution {
+    pub(crate) fn new(
+        profile_home: PathBuf,
+        mcp_oauth_credentials: Arc<dyn McpOAuthCredentialStore>,
+        cwd: PathBuf,
+        config_path: Option<PathBuf>,
+        inherited_env: BTreeMap<String, String>,
+        selected_capability_roots: Vec<SelectedCapabilityRoot>,
+        mcp_servers: Vec<McpServerInput>,
+    ) -> Self {
+        Self {
+            profile_home,
+            mcp_oauth_credentials,
+            cwd,
+            config_path,
+            inherited_env,
+            selected_capability_roots,
+            mcp_servers,
+        }
     }
 }
 
@@ -142,7 +191,6 @@ impl ExtensionAssembly {
         self.worker_owner = PluginWorkerOwner::new(self.worker_runtimes.clone());
         self.worker_lease = self.worker_owner.as_ref().map(PluginWorkerOwner::acquire);
     }
-
 }
 
 impl AcceptedExtensionInputs {
@@ -218,8 +266,8 @@ impl Drop for PluginWorkerLease {
 /// extension assembly used by the Native runtime, without starting an MCP
 /// client. Agent adapters use this to hand an explicitly selected subset to an
 /// external Agent.
-pub fn resolve_mcp_server_handoffs<'a>(
-    options: &'a RunOptions,
+pub(crate) fn resolve_mcp_server_handoffs<'a>(
+    resolution: &'a McpServerResolution,
     names: &'a std::collections::BTreeSet<String>,
 ) -> futures::future::BoxFuture<'a, crate::Result<Vec<ResolvedMcpServerInput>>> {
     Box::pin(async move {
@@ -227,17 +275,21 @@ pub fn resolve_mcp_server_handoffs<'a>(
             return Ok(Vec::new());
         }
 
-        let cwd = canonical_cwd(&options.cwd)?;
-        let loaded = load_run_config(options, &cwd)?;
-        let home = resolve_psychevo_home(&loaded.env)?;
-        let mut mcp_servers = options.mcp_servers.clone();
+        let cwd = canonical_cwd(&resolution.cwd)?;
+        let loaded = load_run_config_from(
+            resolution.config_path.as_deref(),
+            &resolution.inherited_env,
+            &cwd,
+        )?;
+        let home = &resolution.profile_home;
+        let mut mcp_servers = resolution.mcp_servers.clone();
         mcp_servers.extend(loaded.config.mcp_servers.clone());
         let mut assembly = assemble_extensions(ExtensionAssemblyInput {
-            home: &home,
+            home,
             cwd: &cwd,
             env: &loaded.env,
             plugin_policy: &loaded.config.plugins,
-            selected_capability_roots: &options.selected_capability_roots,
+            selected_capability_roots: &resolution.selected_capability_roots,
             mcp_servers,
             runtime_tools: Vec::new(),
         })
@@ -247,68 +299,70 @@ pub fn resolve_mcp_server_handoffs<'a>(
             let mut resolved = Vec::with_capacity(names.len());
             for name in names {
                 let mut matches = available.iter().filter(|server| server.name == *name);
-            let mut server = matches.next().cloned().ok_or_else(|| {
-                crate::Error::Config(format!(
-                    "Agent MCP server `{name}` is not declared in the effective configuration"
-                ))
-            })?;
-            if matches.next().is_some() {
-                return Err(crate::Error::Config(format!(
-                    "Agent MCP server `{name}` has multiple effective declarations"
-                )));
-            }
-            if !server.policy.enabled {
-                return Err(crate::Error::Config(format!(
-                    "Agent MCP server `{name}` is disabled in the effective configuration"
-                )));
-            }
-            if let McpTransportInput::Stdio {
-                command,
-                env: server_env,
-                ..
-            } = &mut server.transport
-            {
-                let mut executable_env = loaded.env.clone();
-                executable_env.extend(server_env.clone());
-                let command_text = command.to_string_lossy().into_owned();
-                let resolved_command = resolve_executable_path(
-                    &command_text,
-                    &cwd,
-                    &ExecutableResolveOptions {
-                        platform: HostPlatform::current(),
-                        env: &executable_env,
-                    },
-                )
-                .ok_or_else(|| {
+                let mut server = matches.next().cloned().ok_or_else(|| {
                     crate::Error::Config(format!(
-                        "Agent MCP server `{name}` command `{command_text}` was not found"
+                        "Agent MCP server `{name}` is not declared in the effective configuration"
                     ))
                 })?;
-                *command = resolved_command;
-            }
-            let bearer_token = match &server.transport {
-                McpTransportInput::StreamableHttp {
-                    url,
-                    bearer_token_env_var,
+                if matches.next().is_some() {
+                    return Err(crate::Error::Config(format!(
+                        "Agent MCP server `{name}` has multiple effective declarations"
+                    )));
+                }
+                if !server.policy.enabled {
+                    return Err(crate::Error::Config(format!(
+                        "Agent MCP server `{name}` is disabled in the effective configuration"
+                    )));
+                }
+                if let McpTransportInput::Stdio {
+                    command,
+                    env: server_env,
                     ..
-                } => bearer_token_env_var
-                    .as_ref()
-                    .and_then(|env_var| loaded.env.get(env_var))
-                    .map(String::as_str)
-                    .map(str::trim)
-                    .filter(|token| !token.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        load_mcp_oauth_access_token(&home, &server.name, url)
+                } = &mut server.transport
+                {
+                    let mut executable_env = loaded.env.clone();
+                    executable_env.extend(server_env.clone());
+                    let command_text = command.to_string_lossy().into_owned();
+                    let resolved_command = resolve_executable_path(
+                        &command_text,
+                        &cwd,
+                        &ExecutableResolveOptions {
+                            platform: HostPlatform::current(),
+                            env: &executable_env,
+                        },
+                    )
+                    .ok_or_else(|| {
+                        crate::Error::Config(format!(
+                            "Agent MCP server `{name}` command `{command_text}` was not found"
+                        ))
+                    })?;
+                    *command = resolved_command;
+                }
+                let bearer_token = match &server.transport {
+                    McpTransportInput::StreamableHttp {
+                        url,
+                        bearer_token_env_var,
+                        ..
+                    } => bearer_token_env_var
+                        .as_ref()
+                        .and_then(|env_var| loaded.env.get(env_var))
+                        .map(String::as_str)
+                        .map(str::trim)
+                        .filter(|token| !token.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| {
+                            load_mcp_oauth_access_token_with_store(
+                                resolution.mcp_oauth_credentials.as_ref(),
+                                home,
+                                &server.name,
+                                url,
+                            )
                             .ok()
                             .flatten()
-                    }),
-                _ => None,
-            };
-                resolved.push(ResolvedMcpServerInput {
-                    server,
-                    bearer_token: bearer_token.map(psychevo_ai::SecretValue::new),
-                });
+                        }),
+                    _ => None,
+                };
+                resolved.push(ResolvedMcpServerInput::new(server, bearer_token));
             }
             Ok(resolved)
         }
@@ -523,25 +577,31 @@ mod tests {
         );
         options.mcp_servers.push(server.clone());
         let names = std::collections::BTreeSet::from(["repo".to_string()]);
+        let mut resolution = McpServerResolution::new(
+            crate::tests::home_dir(&temp),
+            Arc::new(crate::config::SystemMcpOAuthCredentialStore),
+            options.cwd,
+            options.config_path,
+            options.inherited_env.expect("isolated env"),
+            options.selected_capability_roots,
+            options.mcp_servers,
+        );
 
-        let resolved = resolve_mcp_server_handoffs(&options, &names)
+        let resolved = resolve_mcp_server_handoffs(&resolution, &names)
             .await
             .expect("handoff");
 
         assert_eq!(resolved.len(), 1);
-        assert_eq!(
-            resolved[0]
-                .bearer_token
-                .as_ref()
-                .map(psychevo_ai::SecretValue::expose_secret),
-            Some("bearer-test-secret")
-        );
+        assert_eq!(resolved[0].bearer_token(), Some("bearer-test-secret"));
+        let resolution_debug = format!("{resolution:?}");
+        assert!(!resolution_debug.contains("bearer-test-secret"));
+        assert!(!resolution_debug.contains("header-test-secret"));
         let debug = format!("{:?}", resolved[0]);
         assert!(!debug.contains("bearer-test-secret"));
         assert!(!debug.contains("header-test-secret"));
 
-        options.mcp_servers.push(server);
-        let error = resolve_mcp_server_handoffs(&options, &names)
+        resolution.mcp_servers.push(server);
+        let error = resolve_mcp_server_handoffs(&resolution, &names)
             .await
             .expect_err("ambiguous declaration must fail closed");
         assert!(
@@ -604,11 +664,12 @@ mod tests {
         );
         assert_eq!(
             contributions.agent_inputs,
-            vec![root
-                .join("agents")
-                .join("reviewer.md")
-                .display()
-                .to_string()]
+            vec![
+                root.join("agents")
+                    .join("reviewer.md")
+                    .display()
+                    .to_string()
+            ]
         );
         assert_eq!(contributions.hook_sources.len(), 1);
         assert!(contributions.hook_sources[0].worker.is_none());

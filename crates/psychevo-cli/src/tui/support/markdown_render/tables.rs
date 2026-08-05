@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::MarkdownTable;
+use crate::tui::{TuiTheme, tui_theme};
+use ratatui::{
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 impl MarkdownTable {
     pub(crate) fn new(alignments: Vec<pulldown_cmark::Alignment>) -> Self {

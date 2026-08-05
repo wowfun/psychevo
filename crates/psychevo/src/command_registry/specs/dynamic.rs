@@ -1,3 +1,7 @@
+use super::types_presentation::{
+    CommandArgumentKind, CommandPresentation, SlashCommandAction, SlashCommandSpec,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommandParse {
     NotSlash,

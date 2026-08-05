@@ -1,10 +1,24 @@
-#[allow(unused_imports)]
-use super::*;
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde_json::{Value, json};
+
+use crate::types::RunOptions;
+use crate::{Error, Result};
 pub(crate) fn resolve_config_path(
     options: &RunOptions,
     env_map: &BTreeMap<String, String>,
 ) -> Result<Option<PathBuf>> {
-    if let Some(path) = &options.config_path {
+    resolve_config_path_from(options.config_path.as_deref(), env_map)
+}
+
+pub(crate) fn resolve_config_path_from(
+    config_path: Option<&Path>,
+    env_map: &BTreeMap<String, String>,
+) -> Result<Option<PathBuf>> {
+    if let Some(path) = config_path {
         return Ok(Some(resolve_explicit_path(path, env_map)?));
     }
     env_map

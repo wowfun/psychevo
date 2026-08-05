@@ -1,5 +1,623 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::snapshot::SnapshotStore;
+use crate::state::{ConversationDraftPart, SessionRevertState, StateRuntime};
+use crate::store::{
+    AgentEdgeStatus, GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, SessionRevertKind,
+};
+use crate::tests::sessions_titles::{assistant_message, user_message};
+use crate::types::{EDITABLE_INPUT_METADATA_KEY, SessionUndoOptions};
+use crate::undo::{redo_session, undo_session};
+use psychevo_agent_core::{Message, UserContentBlock};
+use serde_json::json;
+use std::fs;
+use tempfile::tempdir;
+
+use crate::state::store_undo_state::{
+    ConversationEditConflict, ConversationEditDraftFidelity, ConversationEditDraftRead,
+    ConversationEditDraftReadOutcome, ConversationEditDraftUnavailable,
+    ConversationEditRestoreOutcome, ConversationEditStageOutcome, ConversationEditUnavailable,
+    HistoryEditingEligibility, HistoryEditingFacts, HistoryEditingRevertFacts,
+    HistoryEditingUnavailable,
+};
+
+async fn make_native_history_eligible(
+    store: &StateRuntime,
+    session_id: &str,
+    cwd: &std::path::Path,
+) {
+    make_history_binding(
+        store,
+        session_id,
+        cwd,
+        "native",
+        GatewayRuntimeBindingOwnership::ReadWrite,
+        None,
+    )
+    .await;
+}
+
+async fn make_history_binding(
+    store: &StateRuntime,
+    session_id: &str,
+    cwd: &std::path::Path,
+    backend_kind: &str,
+    ownership: GatewayRuntimeBindingOwnership,
+    parent_thread_id: Option<&str>,
+) {
+    let cwd = cwd.display().to_string();
+    store
+        .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
+            thread_id: session_id,
+            agent_ref: None,
+            agent_fingerprint: "agent-fingerprint",
+            agent_definition_json: "null",
+            runtime_ref: "native",
+            backend_kind,
+            native_kind: "native",
+            native_session_id: Some(session_id),
+            cwd: &cwd,
+            profile_fingerprint: "profile-fingerprint",
+            profile_revision: "profile-revision",
+            profile_config_json: "{}",
+            adapter_kind: "native",
+            adapter_revision: "test",
+            ownership,
+            parent_thread_id,
+        })
+        .await
+        .expect("native binding");
+}
+
+async fn assert_history_editing_ineligible(
+    store: &StateRuntime,
+    session_id: &str,
+    boundary_seq: i64,
+    expected: HistoryEditingUnavailable,
+) {
+    let baseline = store.session_metadata(session_id).await.expect("baseline");
+    assert_eq!(
+        store
+            .history_editing_facts(session_id)
+            .await
+            .expect("eligibility facts"),
+        HistoryEditingFacts {
+            eligibility: HistoryEditingEligibility::Unavailable(expected),
+            staged: None,
+        }
+    );
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(session_id, boundary_seq, replacement_draft("edited"),)
+            .await
+            .expect("ineligible stage"),
+        ConversationEditStageOutcome::Unavailable(ConversationEditUnavailable::HistoryEditing(
+            expected
+        ))
+    );
+    assert_eq!(
+        store
+            .session_metadata(session_id)
+            .await
+            .expect("unchanged metadata"),
+        baseline
+    );
+    assert!(
+        store
+            .session_revert_state(session_id)
+            .await
+            .expect("revert state")
+            .is_none()
+    );
+}
+
+async fn append_exact_editable_user(store: &StateRuntime, session_id: &str) -> i64 {
+    store
+        .append_message_with_undo_snapshot_metadata_and_context_evidence(
+            session_id,
+            &Message::User {
+                content: vec![
+                    UserContentBlock::text("durable text plus synthetic context"),
+                    UserContentBlock::local_image("local.png"),
+                    UserContentBlock::image_url("https://example.test/remote.png"),
+                ],
+                timestamp_ms: 1,
+            },
+            Some(json!({
+                EDITABLE_INPUT_METADATA_KEY: {
+                    "version": 1,
+                    "parts": [
+                        {"type": "image", "imageBlockIndex": 1},
+                        {"type": "text", "text": "visible text"},
+                        {"type": "image", "imageBlockIndex": 0}
+                    ]
+                }
+            })),
+            Some("visible text".to_string()),
+            &[],
+        )
+        .await
+        .expect("exact editable user")
+}
+
+fn replacement_draft(text: &str) -> Vec<ConversationDraftPart> {
+    vec![ConversationDraftPart::Text {
+        text: text.to_string(),
+    }]
+}
+
+#[tokio::test]
+pub(crate) async fn conversation_edit_draft_read_preserves_exact_order_and_marks_legacy_fidelity() {
+    let temp = tempdir().expect("temp");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let session_id = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("session");
+    make_native_history_eligible(&store, &session_id, temp.path()).await;
+    let exact_seq = append_exact_editable_user(&store, &session_id).await;
+    assert_eq!(
+        store
+            .conversation_editable_draft(&session_id, exact_seq)
+            .await
+            .expect("exact draft"),
+        ConversationEditDraftReadOutcome::Available(ConversationEditDraftRead {
+            session_seq: exact_seq,
+            draft: vec![
+                ConversationDraftPart::ImageUrl {
+                    url: "https://example.test/remote.png".to_string(),
+                },
+                ConversationDraftPart::Text {
+                    text: "visible text".to_string(),
+                },
+                ConversationDraftPart::LocalImage {
+                    path: "local.png".to_string(),
+                },
+            ],
+            fidelity: ConversationEditDraftFidelity::Exact,
+        })
+    );
+
+    let legacy_seq = store
+        .append_message_with_undo_snapshot_metadata_and_context_evidence(
+            &session_id,
+            &Message::User {
+                content: vec![
+                    UserContentBlock::text("legacy text"),
+                    UserContentBlock::image_url("https://example.test/legacy.png"),
+                ],
+                timestamp_ms: 2,
+            },
+            None,
+            None,
+            &[],
+        )
+        .await
+        .expect("legacy message");
+    assert_eq!(
+        store
+            .conversation_editable_draft(&session_id, legacy_seq)
+            .await
+            .expect("legacy draft"),
+        ConversationEditDraftReadOutcome::Available(ConversationEditDraftRead {
+            session_seq: legacy_seq,
+            draft: vec![
+                ConversationDraftPart::Text {
+                    text: "legacy text".to_string(),
+                },
+                ConversationDraftPart::ImageUrl {
+                    url: "https://example.test/legacy.png".to_string(),
+                },
+            ],
+            fidelity: ConversationEditDraftFidelity::BestEffort,
+        })
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn conversation_edit_stage_restore_is_atomic_idempotent_and_preserves_metadata() {
+    let temp = tempdir().expect("temp");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let session_id = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("session");
+    make_native_history_eligible(&store, &session_id, temp.path()).await;
+    store
+        .set_session_metadata_field(&session_id, "unrelated", Some(json!({"kept": true})))
+        .await
+        .expect("unrelated metadata");
+    let boundary_seq = append_exact_editable_user(&store, &session_id).await;
+    store
+        .append_message(&session_id, &assistant_message("suffix", 2))
+        .await
+        .expect("suffix");
+    let replacement = replacement_draft("edited");
+
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(&session_id, boundary_seq, replacement.clone(),)
+            .await
+            .expect("stage"),
+        ConversationEditStageOutcome::Staged
+    );
+    assert_eq!(
+        store
+            .history_editing_facts(&session_id)
+            .await
+            .expect("facts"),
+        HistoryEditingFacts {
+            eligibility: HistoryEditingEligibility::Eligible,
+            staged: Some(HistoryEditingRevertFacts::ConversationEdit {
+                boundary_seq,
+                hidden_entry_count: 2,
+                draft: replacement.clone(),
+            }),
+        }
+    );
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(&session_id, boundary_seq, replacement.clone(),)
+            .await
+            .expect("idempotent retry"),
+        ConversationEditStageOutcome::AlreadyStaged
+    );
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(
+                &session_id,
+                boundary_seq,
+                replacement_draft("different"),
+            )
+            .await
+            .expect("conflicting retry"),
+        ConversationEditStageOutcome::Conflict(ConversationEditConflict::ConversationEditStaged)
+    );
+    assert_eq!(
+        store
+            .restore_conversation_edit_atomic(&session_id)
+            .await
+            .expect("restore"),
+        ConversationEditRestoreOutcome::Restored(replacement)
+    );
+    assert_eq!(
+        store
+            .history_editing_facts(&session_id)
+            .await
+            .expect("restored facts"),
+        HistoryEditingFacts {
+            eligibility: HistoryEditingEligibility::Eligible,
+            staged: None,
+        }
+    );
+    assert_eq!(
+        store
+            .session_metadata(&session_id)
+            .await
+            .expect("metadata")
+            .and_then(|metadata| metadata.get("unrelated").cloned()),
+        Some(json!({"kept": true}))
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn conversation_edit_faults_leave_metadata_and_workspace_undo_unchanged() {
+    let temp = tempdir().expect("temp");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let session_id = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("session");
+    make_native_history_eligible(&store, &session_id, temp.path()).await;
+    let boundary_seq = append_exact_editable_user(&store, &session_id).await;
+    let baseline = store.session_metadata(&session_id).await.expect("baseline");
+
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(&session_id, boundary_seq, replacement_draft("   "),)
+            .await
+            .expect("empty replacement"),
+        ConversationEditStageOutcome::Unavailable(ConversationEditUnavailable::Draft(
+            ConversationEditDraftUnavailable::EmptyReplacement
+        ))
+    );
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(
+                &session_id,
+                boundary_seq + 100,
+                replacement_draft("edited"),
+            )
+            .await
+            .expect("missing boundary"),
+        ConversationEditStageOutcome::Unavailable(ConversationEditUnavailable::Draft(
+            ConversationEditDraftUnavailable::MessageNotFound
+        ))
+    );
+    assert_eq!(
+        store
+            .session_metadata(&session_id)
+            .await
+            .expect("unchanged"),
+        baseline
+    );
+
+    let workspace_undo =
+        SessionRevertState::workspace_undo(boundary_seq, "workspace-snapshot".to_string());
+    store
+        .set_session_revert_state(&session_id, workspace_undo.clone())
+        .await
+        .expect("workspace undo");
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic(&session_id, boundary_seq, replacement_draft("edited"),)
+            .await
+            .expect("workspace conflict"),
+        ConversationEditStageOutcome::Conflict(ConversationEditConflict::WorkspaceUndoStaged)
+    );
+    assert_eq!(
+        store
+            .restore_conversation_edit_atomic(&session_id)
+            .await
+            .expect("workspace restore conflict"),
+        ConversationEditRestoreOutcome::Conflict(ConversationEditConflict::WorkspaceUndoStaged)
+    );
+    assert_eq!(
+        store
+            .session_revert_state(&session_id)
+            .await
+            .expect("workspace undo remains"),
+        Some(workspace_undo)
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn concurrent_store_handles_cannot_overwrite_conversation_edits() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let first = StateRuntime::open(&db).await.expect("first store");
+    let second = StateRuntime::open(&db).await.expect("second store");
+    let session_id = first
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("session");
+    make_native_history_eligible(&first, &session_id, temp.path()).await;
+    let boundary_seq = append_exact_editable_user(&first, &session_id).await;
+    let (left, right) = tokio::join!(
+        first.stage_conversation_edit_atomic(&session_id, boundary_seq, replacement_draft("left"),),
+        second.stage_conversation_edit_atomic(
+            &session_id,
+            boundary_seq,
+            replacement_draft("right"),
+        ),
+    );
+    let outcomes = [left.expect("left"), right.expect("right")];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == ConversationEditStageOutcome::Staged)
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| {
+                **outcome
+                    == ConversationEditStageOutcome::Conflict(
+                        ConversationEditConflict::ConversationEditStaged,
+                    )
+            })
+            .count(),
+        1
+    );
+    let staged = first
+        .session_revert_state(&session_id)
+        .await
+        .expect("revert")
+        .expect("staged");
+    assert!(matches!(
+        staged.kind,
+        SessionRevertKind::ConversationEdit { ref draft, .. }
+            if draft == &replacement_draft("left") || draft == &replacement_draft("right")
+    ));
+}
+
+#[tokio::test]
+pub(crate) async fn conversation_edit_transaction_rechecks_every_native_history_eligibility_fact() {
+    let temp = tempdir().expect("temp");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+
+    assert_eq!(
+        store
+            .history_editing_facts("missing-thread")
+            .await
+            .expect("missing facts")
+            .eligibility,
+        HistoryEditingEligibility::Unavailable(HistoryEditingUnavailable::SessionNotFound)
+    );
+    assert_eq!(
+        store
+            .stage_conversation_edit_atomic("missing-thread", 1, replacement_draft("edited"),)
+            .await
+            .expect("missing stage"),
+        ConversationEditStageOutcome::Unavailable(ConversationEditUnavailable::HistoryEditing(
+            HistoryEditingUnavailable::SessionNotFound
+        ))
+    );
+
+    let unsupported = store
+        .create_session_with_metadata(temp.path(), "automation", "model", "provider", None)
+        .await
+        .expect("unsupported session");
+    make_native_history_eligible(&store, &unsupported, temp.path()).await;
+    let unsupported_seq = append_exact_editable_user(&store, &unsupported).await;
+    assert_history_editing_ineligible(
+        &store,
+        &unsupported,
+        unsupported_seq,
+        HistoryEditingUnavailable::UnsupportedSource,
+    )
+    .await;
+
+    let parent = store
+        .create_session_with_metadata(temp.path(), "web", "model", "provider", None)
+        .await
+        .expect("parent");
+    let child = store
+        .create_child_session_with_metadata(&parent, temp.path(), "web", "model", "provider", None)
+        .await
+        .expect("child");
+    make_history_binding(
+        &store,
+        &child,
+        temp.path(),
+        "native",
+        GatewayRuntimeBindingOwnership::ReadWrite,
+        Some(&parent),
+    )
+    .await;
+    let child_seq = append_exact_editable_user(&store, &child).await;
+    assert_history_editing_ineligible(
+        &store,
+        &child,
+        child_seq,
+        HistoryEditingUnavailable::ChildThread,
+    )
+    .await;
+
+    let agent_child = store
+        .create_session_with_metadata(temp.path(), "web", "model", "provider", None)
+        .await
+        .expect("agent child");
+    make_native_history_eligible(&store, &agent_child, temp.path()).await;
+    store
+        .upsert_agent_edge(&parent, &agent_child, AgentEdgeStatus::Closed, None)
+        .await
+        .expect("agent edge");
+    let agent_child_seq = append_exact_editable_user(&store, &agent_child).await;
+    assert_history_editing_ineligible(
+        &store,
+        &agent_child,
+        agent_child_seq,
+        HistoryEditingUnavailable::AgentChildThread,
+    )
+    .await;
+
+    let side = store
+        .create_session_with_metadata(
+            temp.path(),
+            "web",
+            "model",
+            "provider",
+            Some(json!({"side_conversation": true})),
+        )
+        .await
+        .expect("side root");
+    make_native_history_eligible(&store, &side, temp.path()).await;
+    let side_seq = append_exact_editable_user(&store, &side).await;
+    assert_history_editing_ineligible(
+        &store,
+        &side,
+        side_seq,
+        HistoryEditingUnavailable::SideConversation,
+    )
+    .await;
+
+    let missing_binding = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("missing binding session");
+    let missing_binding_seq = append_exact_editable_user(&store, &missing_binding).await;
+    assert_history_editing_ineligible(
+        &store,
+        &missing_binding,
+        missing_binding_seq,
+        HistoryEditingUnavailable::RuntimeBindingMissing,
+    )
+    .await;
+
+    let unresolved = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("unresolved session");
+    make_native_history_eligible(&store, &unresolved, temp.path()).await;
+    let unresolved_seq = append_exact_editable_user(&store, &unresolved).await;
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query(
+        "UPDATE gateway_runtime_bindings SET resolution_status = 'unresolved', \
+         unresolved_reason = 'test' WHERE thread_id = ?1",
+    )
+    .bind(&unresolved)
+    .execute(&mut *conn)
+    .await
+    .expect("unresolve binding");
+    drop(conn);
+    assert_history_editing_ineligible(
+        &store,
+        &unresolved,
+        unresolved_seq,
+        HistoryEditingUnavailable::RuntimeBindingUnresolved,
+    )
+    .await;
+
+    let non_native = store
+        .create_session_with_metadata(temp.path(), "web", "model", "provider", None)
+        .await
+        .expect("non-native session");
+    make_native_history_eligible(&store, &non_native, temp.path()).await;
+    let non_native_seq = append_exact_editable_user(&store, &non_native).await;
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query("UPDATE gateway_runtime_bindings SET backend_kind = 'acp' WHERE thread_id = ?1")
+        .bind(&non_native)
+        .execute(&mut *conn)
+        .await
+        .expect("non-native binding");
+    drop(conn);
+    assert_history_editing_ineligible(
+        &store,
+        &non_native,
+        non_native_seq,
+        HistoryEditingUnavailable::RuntimeBindingNotNative,
+    )
+    .await;
+
+    let changed_after_precheck = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
+        .expect("prechecked session");
+    make_native_history_eligible(&store, &changed_after_precheck, temp.path()).await;
+    let changed_seq = append_exact_editable_user(&store, &changed_after_precheck).await;
+    assert_eq!(
+        store
+            .history_editing_facts(&changed_after_precheck)
+            .await
+            .expect("eligible precheck")
+            .eligibility,
+        HistoryEditingEligibility::Eligible
+    );
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query("UPDATE gateway_runtime_bindings SET ownership = 'read_only' WHERE thread_id = ?1")
+        .bind(&changed_after_precheck)
+        .execute(&mut *conn)
+        .await
+        .expect("change ownership after precheck");
+    drop(conn);
+    assert_history_editing_ineligible(
+        &store,
+        &changed_after_precheck,
+        changed_seq,
+        HistoryEditingUnavailable::RuntimeBindingReadOnly,
+    )
+    .await;
+}
+
 #[tokio::test]
 pub(crate) async fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let temp = tempdir().expect("temp");

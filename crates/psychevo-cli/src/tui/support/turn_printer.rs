@@ -1,5 +1,24 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::support_turn_event::turn_event_presentation_value;
+use crate::tui::{
+    plain::{TuiRenderer, assistant_text_from_event},
+    support_evidence::{
+        TurnMetaProjection, active_tool_title, assistant_message_stream_event_type,
+        evidence_kind_for_value, format_duration_compact, format_tool_result_summary,
+        format_tool_summary, scoped_tool_position_key, streaming_tool_calls_from_event,
+        tool_id_key, tool_title_for_update, turn_meta_text, user_shell_title,
+    },
+    support_history::metadata_elapsed_duration,
+    ui_fullscreen::shell_outcome_label,
+    ui_types::TranscriptKind,
+};
+use psychevo::{ShellCommandEvent, ShellCommandOutcome, TurnEvent, application::ToolDisplaySpec};
+use serde_json::Value;
+use std::{
+    collections::BTreeMap,
+    io::{self, Write},
+    time::Duration,
+};
+
 pub(crate) struct TurnPrinter {
     pub(crate) renderer: TuiRenderer,
     pub(crate) last_assistant_text: String,
@@ -14,6 +33,7 @@ pub(crate) struct TurnPrinter {
     pub(crate) pending_tool_keys: BTreeMap<String, String>,
     pub(crate) streaming_tool_message_seq: u64,
     pub(crate) streaming_tool_message_open: bool,
+    pub(crate) projection_invalid: bool,
 }
 
 impl TurnPrinter {
@@ -32,19 +52,27 @@ impl TurnPrinter {
             pending_tool_keys: BTreeMap::new(),
             streaming_tool_message_seq: 0,
             streaming_tool_message_open: false,
+            projection_invalid: false,
         }
     }
 
     pub(crate) fn render_event(
         &mut self,
-        event: &RunStreamEvent,
+        event: &TurnEvent,
         out: &mut impl Write,
     ) -> io::Result<()> {
+        if self.projection_invalid {
+            match event {
+                TurnEvent::Scoped { event, .. } => return self.render_event(event, out),
+                TurnEvent::ResyncRequired { .. } => {}
+                _ => return out.flush(),
+            }
+        }
         match event {
-            RunStreamEvent::AssistantTextDelta { text } => {
+            TurnEvent::MessageDelta { text } => {
                 self.last_assistant_text.push_str(text);
             }
-            RunStreamEvent::ReasoningDelta { text } => {
+            TurnEvent::ReasoningDelta { text } => {
                 if self.thinking_enabled {
                     if !self.reasoning_active {
                         self.reasoning_active = true;
@@ -53,7 +81,14 @@ impl TurnPrinter {
                     write!(out, "{}", self.renderer.dim(text))?;
                 }
             }
-            RunStreamEvent::ReasoningEnd => {
+            TurnEvent::ReasoningCompleted { text } => {
+                if !self.reasoning_active
+                    && self.thinking_enabled
+                    && let Some(text) = text.as_deref().filter(|text| !text.trim().is_empty())
+                {
+                    write!(out, "Thinking: {}", self.renderer.dim(text))?;
+                    self.reasoning_active = true;
+                }
                 if self.reasoning_active {
                     self.reasoning_active = false;
                     if self.thinking_enabled {
@@ -61,9 +96,97 @@ impl TurnPrinter {
                     }
                 }
             }
-            RunStreamEvent::Event(value) => self.render_value_event(value.as_value(), out)?,
-            RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => {}
-            RunStreamEvent::Scoped { event, .. } => self.render_event(event, out)?,
+            event @ (TurnEvent::Runtime { .. }
+            | TurnEvent::Message { .. }
+            | TurnEvent::Tool { .. }
+            | TurnEvent::Warning { .. }) => {
+                if let Some(value) = turn_event_presentation_value(event) {
+                    self.render_value_event(value.as_ref(), out)?;
+                }
+            }
+            TurnEvent::InteractionRequested { .. } | TurnEvent::InteractionResolved { .. } => {}
+            TurnEvent::Scoped { event, .. } => self.render_event(event, out)?,
+            TurnEvent::ResyncRequired { missed } => {
+                self.projection_invalid = true;
+                self.last_assistant_text.clear();
+                self.reasoning_active = false;
+                self.tool_titles.clear();
+                self.pending_tool_keys.clear();
+                self.streaming_tool_message_seq = 0;
+                self.streaming_tool_message_open = false;
+                writeln!(
+                    out,
+                    "{}",
+                    self.renderer
+                        .status(&format!("warning: missed {missed} live turn events"))
+                )?;
+            }
+            TurnEvent::ActivityChanged { .. }
+            | TurnEvent::Accepted { .. }
+            | TurnEvent::Started { .. }
+            | TurnEvent::Completed { .. }
+            | TurnEvent::Failed { .. } => {}
+        }
+        out.flush()
+    }
+
+    pub(crate) fn render_shell_event(
+        &mut self,
+        event: &ShellCommandEvent,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        match event {
+            ShellCommandEvent::Started { command, .. } => {
+                let title = user_shell_title(command.lines().find(|line| !line.trim().is_empty()));
+                self.tool_titles
+                    .insert("user_shell".to_string(), title.clone());
+                writeln!(out, "{title}: running")?;
+            }
+            ShellCommandEvent::Completed {
+                output,
+                outcome,
+                elapsed_ms,
+                ..
+            } => {
+                let title = self
+                    .tool_titles
+                    .get("user_shell")
+                    .map(String::as_str)
+                    .unwrap_or("!");
+                let display = ToolDisplaySpec::for_name("exec_command");
+                let summary = format_tool_result_summary(
+                    "exec_command",
+                    shell_outcome_label(*outcome),
+                    output,
+                    &display,
+                );
+                let elapsed = format!(
+                    " {}",
+                    format_duration_compact(Duration::from_millis(*elapsed_ms))
+                );
+                if *outcome == ShellCommandOutcome::Completed {
+                    writeln!(
+                        out,
+                        "{}",
+                        self.renderer
+                            .success(&format!("{title}{elapsed}: {summary}"))
+                    )?;
+                } else {
+                    writeln!(
+                        out,
+                        "{}",
+                        self.renderer
+                            .error(&format!("{title}{elapsed}: failed {summary}"))
+                    )?;
+                }
+            }
+            ShellCommandEvent::Warning { message, .. } => {
+                writeln!(
+                    out,
+                    "{}",
+                    self.renderer.status(&format!("warning: {message}"))
+                )?;
+            }
         }
         out.flush()
     }
@@ -263,5 +386,24 @@ impl TurnPrinter {
             self.reasoning_active = false;
         }
         out.flush()
+    }
+
+    pub(crate) fn needs_authoritative_reload(&self) -> bool {
+        self.projection_invalid
+    }
+
+    pub(crate) fn finish_after_authoritative_reload(
+        &mut self,
+        authoritative_answer: &str,
+        out: &mut impl Write,
+    ) -> io::Result<()> {
+        if self.projection_invalid {
+            if !authoritative_answer.trim().is_empty() {
+                writeln!(out, "Answer:\n{authoritative_answer}")?;
+                self.last_assistant_text = authoritative_answer.to_string();
+            }
+            self.projection_invalid = false;
+        }
+        self.finish(out)
     }
 }

@@ -1,17 +1,19 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
-const ARTIFACT_ROOT_ENV: &str = "PSYCHEVO_WDIO_ARTIFACT_ROOT";
+const ARTIFACT_ROOT_ENV: &str = "PSYCHEVO_DESKTOP_STARTUP_TRACE_ROOT";
 const TRACE_FILENAME: &str = "desktop-startup-rust.jsonl";
 
 static TRACE_CLOCK: OnceLock<Instant> = OnceLock::new();
+static TRACE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static PROCESS_START_RECORDED: OnceLock<()> = OnceLock::new();
 static WINDOW_READY_RECORDED: OnceLock<()> = OnceLock::new();
 static MANAGED_GATEWAY_READY_RECORDED: OnceLock<()> = OnceLock::new();
@@ -28,11 +30,15 @@ struct StartupTraceMark<'a> {
     source_clock: &'a str,
     epoch_ms: u64,
     monotonic_offset_ms: f64,
+    pid: u32,
 }
 
 pub(crate) fn record_process_start() {
-    TRACE_CLOCK.get_or_init(Instant::now);
     record_once(&PROCESS_START_RECORDED, "process_start");
+}
+
+pub(crate) fn enabled() -> bool {
+    trace_path().is_some()
 }
 
 pub(crate) fn record_window_ready() {
@@ -44,25 +50,28 @@ pub(crate) fn record_managed_gateway_ready() {
 }
 
 pub(crate) fn record_bridge_connected(connection_id: &str) {
-    if connection_label(connection_id) != "workbench" {
+    if !enabled() || connection_label(connection_id) != "workbench" {
         return;
     }
     record_once(&WORKBENCH_BRIDGE_CONNECTED_RECORDED, "bridge_connected");
 }
 
 fn record_once(recorded: &OnceLock<()>, id: &'static str) {
+    let Some(path) = trace_path() else {
+        return;
+    };
     if recorded.set(()).is_err() {
         return;
     }
-    if let Err(error) = append_mark(id) {
-        eprintln!("failed to write Desktop WDIO startup trace mark {id}: {error}");
+    if let Err(error) = append_mark(path, id) {
+        eprintln!("failed to write Desktop startup trace mark {id}: {error}");
     }
 }
 
-fn append_mark(id: &'static str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let Some(path) = trace_path() else {
-        return Ok(());
-    };
+fn append_mark(
+    path: &Path,
+    id: &'static str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let clock = TRACE_CLOCK.get_or_init(Instant::now);
     let mark = StartupTraceMark {
         schema_version: 1,
@@ -74,6 +83,7 @@ fn append_mark(id: &'static str) -> Result<(), Box<dyn std::error::Error + Send 
             .as_millis()
             .try_into()?,
         monotonic_offset_ms: clock.elapsed().as_secs_f64() * 1_000.0,
+        pid: std::process::id(),
     };
     let line = serde_json::to_string(&mark)?;
     let _writer = TRACE_WRITER
@@ -87,8 +97,14 @@ fn append_mark(id: &'static str) -> Result<(), Box<dyn std::error::Error + Send 
     Ok(())
 }
 
-fn trace_path() -> Option<PathBuf> {
-    env::var_os(ARTIFACT_ROOT_ENV)
+fn trace_path() -> Option<&'static Path> {
+    TRACE_PATH
+        .get_or_init(|| configured_trace_path(env::var_os(ARTIFACT_ROOT_ENV)))
+        .as_deref()
+}
+
+fn configured_trace_path(value: Option<OsString>) -> Option<PathBuf> {
+    value
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .map(|root| root.join(TRACE_FILENAME))
@@ -112,6 +128,16 @@ mod tests {
     }
 
     #[test]
+    fn startup_trace_is_default_off_and_requires_an_explicit_root() {
+        assert_eq!(configured_trace_path(None), None);
+        assert_eq!(configured_trace_path(Some(OsString::new())), None);
+        assert_eq!(
+            configured_trace_path(Some(OsString::from("artifacts"))),
+            Some(PathBuf::from("artifacts").join(TRACE_FILENAME))
+        );
+    }
+
+    #[test]
     fn trace_shape_contains_only_bounded_timing_evidence() {
         let value = serde_json::to_value(StartupTraceMark {
             schema_version: 1,
@@ -120,6 +146,7 @@ mod tests {
             source_clock: "desktop-rust-monotonic",
             epoch_ms: 123,
             monotonic_offset_ms: 12.5,
+            pid: 42,
         })
         .expect("trace mark");
         let fields = value
@@ -134,6 +161,7 @@ mod tests {
                 "epochMs",
                 "id",
                 "monotonicOffsetMs",
+                "pid",
                 "schemaVersion",
                 "sequence",
                 "sourceClock",

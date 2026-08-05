@@ -1,16 +1,12 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 
-use psychevo::__product::persistence::StateRuntime;
-use psychevo::{
-    __product::configuration::fetch_and_cache_model_catalog,
-    __product::configuration::model_catalog_provider,
-    __product::configuration::provider_models_cache_path_for_home,
-    __product::configuration::read_cached_model_catalog, __product::runtime::RunOptions,
-    __product::runtime::run_live,
+use psychevo::RunMode;
+use psychevo::application::{
+    Application, Configuration, ConfigurationQuery, Message, StartThreadRequest, TurnOutcome,
+    TurnRequest,
 };
-use psychevo_ai::Outcome;
-use rusqlite::Connection;
 use tempfile::tempdir;
 
 const PRIMARY_XIAOMI_FAMILY_PROVIDER: &str = "xiaomi-token-plan";
@@ -33,73 +29,78 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         return;
     }
     let temp = tempdir().expect("temp");
-    let cwd = temp.path().join("work");
-    std::fs::create_dir_all(&cwd).expect("cwd");
+    let mut environment = live_environment(&temp);
+    let cwd = environment.cwd.clone();
     std::fs::write(cwd.join("fixture.txt"), format!("fixture for {provider}\n")).expect("fixture");
     let db = temp.path().join("state.db");
-    let mut inherited_env = env::vars().collect::<std::collections::BTreeMap<_, _>>();
-    inherited_env.insert(
+    environment.inherited_env.insert(
         "PSYCHEVO_INFERENCE_PROVIDER".to_string(),
         provider.to_string(),
     );
-    let result = run_live(RunOptions {
-        state: StateRuntime::open(&db).await.expect("state runtime"),
-        cwd: cwd.clone(),
-        snapshot_root: Some(temp.path().join("snapshots")),
-        session: None,
-        continue_latest: false,
-        prompt: "Use the read tool to read fixture.txt, then answer with one short sentence."
-            .to_string(),
-        image_inputs: Vec::new(),
-        extract_prompt_image_sources: true,
-        prompt_display: None,
-        max_context_messages: None,
-        config_path: None,
-        project_context_override: None,
-        sandbox_override: None,
-        model: Some(live_model(provider).to_string()),
-        reasoning_effort: None,
-        runtime_ref: None,
-        runtime_session_id: None,
-        runtime_options: std::collections::BTreeMap::new(),
-        workspace_mutations: None,
-        runtime_tools: Vec::new(),
-        include_reasoning: true,
-        mode: psychevo::__product::runtime::RunMode::Default,
-        permission_mode: None,
-        approval_handler: None,
-        clarify_enabled: false,
-        inherited_env: Some(inherited_env),
-        agent: None,
-        external_agent_delegate: None,
-        no_agents: false,
-        no_skills: false,
-        selected_capability_roots: Vec::new(),
-        skill_inputs: Vec::new(),
-        mcp_servers: Vec::new(),
-        mcp_runtime: None,
-    })
-    .await
-    .expect("live run");
-    assert_eq!(result.outcome, Outcome::Normal);
-
-    let conn = Connection::open(db).expect("db");
-    let read_results: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE role = 'tool_result' AND tool_name = 'read' AND outcome = 'normal'",
-            [],
-            |row| row.get(0),
+    let application = build_live_application(&environment, db).await;
+    let thread = application
+        .client()
+        .start_thread(StartThreadRequest::new(&cwd))
+        .await
+        .expect("live thread");
+    let result = thread
+        .start_turn(
+            TurnRequest::new(
+                "Use the read tool to read fixture.txt, then answer with one short sentence.",
+            )
+            .with_identity("live-test", None)
+            .with_model(Some(live_model(provider).to_string()), None)
+            .with_reasoning_output(true)
+            .with_execution_policy(RunMode::Default, None, environment.config_path.clone())
+            .with_environment(Some(environment.inherited_env.clone()), None, None)
+            .with_framework_context(
+                Some(temp.path().join("snapshots")),
+                None,
+                Vec::new(),
+                None,
+            ),
         )
-        .expect("read results");
+        .await
+        .expect("accepted live turn")
+        .wait()
+        .await
+        .expect("live turn");
+    assert_eq!(result.outcome, TurnOutcome::Completed);
+
+    let history = thread
+        .history()
+        .latest(Some(200))
+        .await
+        .expect("live history")
+        .items;
+    let read_results = history
+        .iter()
+        .filter(|item| {
+            matches!(
+                &item.message,
+                Message::ToolResult {
+                    tool_name,
+                    is_error: false,
+                    ..
+                } if tool_name == "read"
+            )
+        })
+        .count();
     assert!(
         read_results >= 1,
         "expected {provider} to complete at least one successful read tool call"
     );
+    application.shutdown().await.expect("shutdown");
 }
 
-async fn live_provider_options_with_temp_home(
-    temp: &tempfile::TempDir,
-) -> (RunOptions, PathBuf, PathBuf) {
+struct LiveEnvironment {
+    home: PathBuf,
+    cwd: PathBuf,
+    config_path: Option<PathBuf>,
+    inherited_env: BTreeMap<String, String>,
+}
+
+fn live_environment(temp: &tempfile::TempDir) -> LiveEnvironment {
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&home).expect("home");
@@ -136,52 +137,26 @@ async fn live_provider_options_with_temp_home(
         "PSYCHEVO_HOME".to_string(),
         home.to_string_lossy().to_string(),
     );
-    (
-        RunOptions {
-            state: StateRuntime::open(temp.path().join("state.db"))
-                .await
-                .expect("state runtime"),
-            cwd: cwd.clone(),
-            snapshot_root: Some(temp.path().join("snapshots")),
-            session: None,
-            continue_latest: false,
-            prompt: String::new(),
-            image_inputs: Vec::new(),
-            extract_prompt_image_sources: true,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: explicit_config,
-            project_context_override: None,
-            sandbox_override: None,
-            model: None,
-            reasoning_effort: None,
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
-            include_reasoning: false,
-            mode: psychevo::__product::runtime::RunMode::Default,
-            permission_mode: None,
-            approval_handler: None,
-            clarify_enabled: false,
-            inherited_env: Some(inherited_env),
-            agent: None,
-            external_agent_delegate: None,
-            no_agents: false,
-            no_skills: false,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-        },
+    LiveEnvironment {
         home,
         cwd,
-    )
+        config_path: explicit_config,
+        inherited_env,
+    }
 }
 
-fn skip_if_xiaomi_catalog_unavailable(options: &RunOptions) -> bool {
-    match model_catalog_provider(options, PRIMARY_XIAOMI_FAMILY_PROVIDER) {
+async fn build_live_application(environment: &LiveEnvironment, database: PathBuf) -> Application {
+    let mut builder = Application::builder()
+        .home(&environment.home)
+        .database_path(database);
+    if let Some(config_path) = &environment.config_path {
+        builder = builder.config_path(config_path.clone());
+    }
+    builder.build().await.expect("live application")
+}
+
+fn skip_if_xiaomi_catalog_unavailable(configuration: &Configuration) -> bool {
+    match configuration.model_catalog_provider(PRIMARY_XIAOMI_FAMILY_PROVIDER) {
         Ok(Some(provider)) if provider.fetchable() => false,
         Ok(Some(provider)) => {
             eprintln!(
@@ -214,28 +189,37 @@ pub(crate) async fn live_xiaomi_token_plan_read_tool() {
 #[ignore = "live provider opt-in"]
 pub(crate) async fn live_xiaomi_token_plan_model_fetch() {
     let temp = tempdir().expect("temp");
-    let (options, home, _cwd) = live_provider_options_with_temp_home(&temp).await;
-    if skip_if_xiaomi_catalog_unavailable(&options) {
+    let environment = live_environment(&temp);
+    let application = build_live_application(&environment, temp.path().join("state.db")).await;
+    let mut query = ConfigurationQuery::new(&environment.cwd);
+    query.inherited_env = Some(environment.inherited_env.clone());
+    let configuration = application
+        .client()
+        .configuration(query)
+        .expect("configuration");
+    if skip_if_xiaomi_catalog_unavailable(&configuration) {
+        application.shutdown().await.expect("shutdown");
         return;
     }
-    let provider = model_catalog_provider(&options, PRIMARY_XIAOMI_FAMILY_PROVIDER)
+    let provider = configuration
+        .model_catalog_provider(PRIMARY_XIAOMI_FAMILY_PROVIDER)
         .expect("provider lookup")
         .expect("provider");
-    let models = fetch_and_cache_model_catalog(&home, &provider)
+    let models = configuration
+        .fetch_and_cache_model_catalog(&provider)
         .await
         .expect("live model catalog fetch");
     assert!(!models.is_empty(), "expected live /models to return models");
-    let cached = read_cached_model_catalog(&home, &provider).expect("cached live models");
+    let cached = configuration
+        .cached_model_catalog(&provider)
+        .expect("cached live models");
     assert_eq!(cached.len(), models.len());
     let cache_text =
-        std::fs::read_to_string(provider_models_cache_path_for_home(&home)).expect("cache text");
+        std::fs::read_to_string(configuration.model_catalog_cache_path()).expect("cache text");
     let visible_api_key = provider.api_key_env.as_deref().and_then(|key| {
-        env::var(key).ok().or_else(|| {
-            options
-                .inherited_env
-                .as_ref()
-                .and_then(|env_map| env_map.get(key).cloned())
-        })
+        env::var(key)
+            .ok()
+            .or_else(|| environment.inherited_env.get(key).cloned())
     });
     if let Some(api_key) = visible_api_key.as_deref() {
         assert!(
@@ -244,4 +228,5 @@ pub(crate) async fn live_xiaomi_token_plan_model_fetch() {
         );
     }
     assert!(cache_text.contains(&models[0].id));
+    application.shutdown().await.expect("shutdown");
 }

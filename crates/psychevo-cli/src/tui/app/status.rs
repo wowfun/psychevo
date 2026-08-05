@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use anyhow::Result;
+use psychevo::{
+    ConfigurationQuery, ImageInput, RefreshThreadContextRequest, ShellCommandRequest, TurnRequest,
+    config::ConfigScope,
+};
+use serde_json::Value;
+
+use crate::tui::{
+    TUI_CONTINUE_SESSION_SOURCES, app_state::TuiApp, plain::format_session_line,
+    render_helpers::on_off, ui_types::SessionListView,
+};
+
 impl TuiApp {
     pub(crate) fn framework_turn_request_with_images(
         &self,
@@ -21,103 +31,54 @@ impl TuiApp {
             .with_skills(self.skill_inputs.clone())
     }
 
-    pub(crate) async fn framework_thread(&self) -> psychevo::Result<psychevo::Thread> {
-        if let Some(thread_id) = self.current_session.as_ref()
-            && let Ok(thread) = self.framework.resume_thread(thread_id.clone()).await
-        {
-            return Ok(thread);
-        }
-        if !self.force_new_once
-            && let Some(snapshot) = self
-                .framework
-                .list_threads(ThreadListQuery {
-                    cwd: Some(self.cwd.clone()),
-                    archived: false,
-                    sources: TUI_CONTINUE_SESSION_SOURCES
-                        .iter()
-                        .map(|source| (*source).to_string())
-                        .collect(),
-                    limit: 1,
-                    ..ThreadListQuery::default()
-                })
-                .await?
-                .threads
-                .into_iter()
-                .next()
-        {
-            return self.framework.resume_thread(snapshot.id).await;
-        }
-        let mut request = StartThreadRequest::new(&self.cwd);
-        request.source = "tui".to_string();
-        request.metadata = Some(serde_json::json!({
-            "caller": "pevo TUI",
-            "pid": std::process::id(),
-        }));
-        self.framework.start_thread(request).await
+    pub(crate) fn configuration(&self) -> Result<psychevo::Configuration> {
+        let mut query = ConfigurationQuery::new(&self.cwd);
+        query.model = self.current_model.clone();
+        query.reasoning_effort = self.current_variant.clone();
+        query.inherited_env = Some(self.env_map.clone());
+        Ok(self.runtime.client().configuration(query)?)
     }
 
-    pub(crate) fn run_options(&self, prompt: String) -> RunOptions {
-        self.run_options_with_images(prompt, Vec::new())
-    }
-
-    pub(crate) fn run_options_with_images(
+    pub(crate) fn refresh_thread_context_request(
         &self,
-        prompt: String,
-        image_inputs: Vec<ImageInput>,
-    ) -> RunOptions {
-        RunOptions {
-            state: self.state_runtime.clone(),
-            cwd: self.cwd.clone(),
-            snapshot_root: Some(self.home.join("snapshots")),
-            session: self.current_session.clone(),
-            continue_latest: self.current_session.is_none() && !self.force_new_once,
-            prompt,
-            image_inputs,
-            extract_prompt_image_sources: false,
-            prompt_display: None,
-            max_context_messages: None,
-            config_path: self.config_path.clone(),
-            project_context_override: None,
-            sandbox_override: None,
-            model: self.current_model.clone(),
-            reasoning_effort: self.current_variant.clone(),
-            runtime_ref: None,
-            runtime_session_id: None,
-            runtime_options: std::collections::BTreeMap::new(),
-            external_agent_delegate: None,
-            include_reasoning: false,
-            mode: self.current_mode,
-            permission_mode: Some(self.current_permission_mode),
-            approval_handler: None,
-            clarify_enabled: true,
+        invalidation_reason: impl Into<String>,
+        notice: Option<String>,
+    ) -> RefreshThreadContextRequest {
+        RefreshThreadContextRequest {
+            mode: Some(self.current_mode),
             inherited_env: Some(self.env_map.clone()),
             agent: self.current_agent.clone(),
             no_agents: self.no_agents,
             no_skills: self.no_skills,
-            selected_capability_roots: Vec::new(),
-            skill_inputs: self.skill_inputs.clone(),
-            mcp_servers: Vec::new(),
-            mcp_runtime: None,
-            workspace_mutations: None,
-            runtime_tools: Vec::new(),
+            invalidation_reason: invalidation_reason.into(),
+            notice,
         }
     }
 
-    pub(crate) fn user_shell_context_options(&self) -> UserShellContextOptions {
-        UserShellContextOptions {
-            state: self.state_runtime.clone(),
-            session: self.current_session.clone(),
-            continue_latest: self.current_session.is_none() && !self.force_new_once,
-            source: "tui".to_string(),
-            continue_sources: TUI_CONTINUE_SESSION_SOURCES
-                .iter()
-                .map(|source| (*source).to_string())
-                .collect(),
-            config_path: self.config_path.clone(),
-            model: self.current_model.clone(),
-            reasoning_effort: self.current_variant.clone(),
-            mode: self.current_mode,
-            inherited_env: Some(self.env_map.clone()),
+    pub(crate) fn shell_command_request(&self, command: String) -> ShellCommandRequest {
+        self.shell_command_request_for_session(command, self.current_session.clone())
+    }
+
+    pub(crate) fn shell_command_request_for_session(
+        &self,
+        command: String,
+        session_id: Option<String>,
+    ) -> ShellCommandRequest {
+        let request = ShellCommandRequest::new(&self.cwd, command)
+            .source("tui")
+            .model(self.current_model.clone(), self.current_variant.clone())
+            .mode(self.current_mode)
+            .inherited_environment(self.env_map.clone());
+        if let Some(thread_id) = session_id {
+            request.thread(thread_id)
+        } else if !self.force_new_once {
+            request.continue_latest(
+                TUI_CONTINUE_SESSION_SOURCES
+                    .iter()
+                    .map(|source| (*source).to_string()),
+            )
+        } else {
+            request
         }
     }
 
@@ -141,7 +102,7 @@ impl TuiApp {
     }
 
     pub(crate) fn toolsets_status_text(&self) -> Result<String> {
-        let value = toolsets_value(&self.run_options(String::new()), ConfigScope::Effective)?;
+        let value = self.configuration()?.toolsets(ConfigScope::Effective)?;
         let mode_key = self.current_mode.as_str();
         let tools = value["modes"][mode_key]["effective_tools"]
             .as_array()
@@ -227,7 +188,7 @@ impl TuiApp {
     }
 
     pub(crate) async fn undo_session_print(&mut self) -> Result<()> {
-        let result = undo_session(self.undo_options()?).await?;
+        let result = self.current_framework_thread().await?.undo().await?;
         println!(
             "{}",
             self.renderer.status(&format!(
@@ -239,7 +200,7 @@ impl TuiApp {
     }
 
     pub(crate) async fn redo_session_print(&mut self) -> Result<()> {
-        let result = redo_session(self.undo_options()?).await?;
+        let result = self.current_framework_thread().await?.redo().await?;
         let suffix = if result.complete {
             "complete"
         } else {

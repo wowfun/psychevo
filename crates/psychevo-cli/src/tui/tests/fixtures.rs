@@ -1,5 +1,27 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AuxiliaryAgentTask, BTreeMap, BottomRowStyle, BottomSelectionPanel, BottomSelectionRow,
+    BottomSelectionValue, Color, EffectiveSlashConfig, FocusMode, FullscreenUi, GatewayApplication,
+    ModelCatalogCache, ModelState, PermissionMode, RunMode, RunningTask, RunningTurn,
+    RunningTurnControl, RunningTurnEvents, SessionListView, SidebarSnapshot, StartThreadRequest,
+    StartedTurn, StartingTurn, TUI_ROLE_ACCENT, TUI_ROLE_DANGER, TUI_ROLE_DIM, TUI_ROLE_IDENTITY,
+    TUI_ROLE_THINKING, TranscriptHitTarget, TranscriptKind, TranscriptRow, TuiApp,
+    TuiJourneyProfileProbe, TuiRenderer, TuiState, TurnEvent, TurnMetaProjection, TurnOutcome,
+    TurnRequest, TurnResult, turn_meta_text,
+};
+use psychevo::Application;
+use psychevo::context_usage::{
+    ContextCategory, ContextScope, ContextSnapshot, ContextTokenizer, ContextTotal,
+};
+use ratatui::Terminal;
+use ratatui::backend::{Backend, TestBackend};
+use ratatui::layout::Position;
+use serde_json::Value;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::{mpsc, oneshot};
+
 pub(crate) fn draw_fullscreen_for_test(
     app: &TuiApp,
     ui: &mut FullscreenUi<'_>,
@@ -12,6 +34,90 @@ pub(crate) fn draw_fullscreen_for_test(
         .draw(|frame| app.render_fullscreen(frame, ui))
         .expect("draw");
     terminal.backend().buffer().clone()
+}
+
+pub(crate) fn test_context_snapshot() -> ContextSnapshot {
+    let mut categories = BTreeMap::new();
+    categories.insert(
+        "base_policy".to_string(),
+        ContextCategory {
+            label: "Base policy".to_string(),
+            tokens: 10,
+            estimated: true,
+            status: "estimated".to_string(),
+            percent: Some(10.0),
+            details: Value::Null,
+        },
+    );
+    categories.insert(
+        "history".to_string(),
+        ContextCategory {
+            label: "History".to_string(),
+            tokens: 40,
+            estimated: true,
+            status: "estimated".to_string(),
+            percent: Some(40.0),
+            details: serde_json::json!({
+                "roles": {"user": {"count": 1, "tokens": 40}},
+            }),
+        },
+    );
+    categories.insert(
+        "free_space".to_string(),
+        ContextCategory {
+            label: "Free space".to_string(),
+            tokens: 50,
+            estimated: true,
+            status: "derived".to_string(),
+            percent: Some(50.0),
+            details: Value::Null,
+        },
+    );
+    ContextSnapshot {
+        event_type: "context_snapshot".to_string(),
+        scope: ContextScope::LastProviderRequest,
+        status: "estimated".to_string(),
+        basis: "latest_provider_request".to_string(),
+        applies_to_session_seq: None,
+        session_id: Some("session".to_string()),
+        provider: "mock".to_string(),
+        model: "model".to_string(),
+        mode: Some("default".to_string()),
+        context_limit: Some(100),
+        tokenizer: ContextTokenizer {
+            encoding: "o200k_base".to_string(),
+            source: "fallback".to_string(),
+            fallback: true,
+        },
+        total: ContextTotal {
+            tokens: 50,
+            estimated_tokens: 50,
+            estimated: true,
+            source: "estimate".to_string(),
+            percent: Some(50.0),
+        },
+        categories,
+        advice: Vec::new(),
+    }
+}
+
+pub(crate) fn finished_turn_result(thread_id: impl Into<String>) -> TurnResult {
+    TurnResult {
+        thread_id: thread_id.into(),
+        outcome: TurnOutcome::Completed,
+        terminal_reason: None,
+        final_answer: "done".to_string(),
+        provider: "mock".to_string(),
+        model: "mock-model".to_string(),
+        reasoning_effort: None,
+        context_limit: None,
+        tool_failures: 0,
+        selected_agent: None,
+        selected_skills: Vec::new(),
+        context_snapshot: None,
+        terminal_error: None,
+        warnings: Vec::new(),
+    }
 }
 
 pub(crate) fn draw_fullscreen_with_cursor_for_test(
@@ -38,7 +144,8 @@ pub(crate) fn draw_fullscreen_with_cursor_for_test(
 pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
-        if ui.running.is_none()
+        if ui.starting_turn.is_none()
+            && ui.running.is_none()
             && ui.queued_inputs.is_empty()
             && ui.auxiliary_shell_tasks.is_empty()
         {
@@ -49,30 +156,175 @@ pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut Fulls
     panic!("fullscreen work did not become idle");
 }
 
+pub(crate) fn install_pending_turn_admission(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    display_prompt: &str,
+) -> oneshot::Sender<()> {
+    let (release_tx, release_rx) = oneshot::channel();
+    let task: tokio::task::JoinHandle<psychevo::Result<StartedTurn>> = tokio::spawn(async move {
+        let _ = release_rx.await;
+        Err(psychevo::Error::Message(
+            "old admission completed after session switch".to_string(),
+        ))
+    });
+    let optimistic_start = ui.transcript.len();
+    ui.push_user(display_prompt.to_string());
+    ui.mark_optimistic_rows_from(optimistic_start);
+    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    ui.starting_turn = Some(StartingTurn {
+        session_id: app.current_session.clone(),
+        queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),
+        display_prompt: display_prompt.to_string(),
+        images: Vec::new(),
+        cancellation,
+        task,
+    });
+    ui.start_assistant();
+    release_tx
+}
+
+pub(crate) struct AcceptedTurnAdmissionFixture {
+    application: Application,
+    accepted: Option<oneshot::Receiver<()>>,
+    release: Option<oneshot::Sender<()>>,
+    pub(crate) thread_id: String,
+}
+
+impl AcceptedTurnAdmissionFixture {
+    pub(crate) async fn wait_until_accepted(&mut self) {
+        self.accepted
+            .take()
+            .expect("acceptance receiver")
+            .await
+            .expect("accepted Turn signal");
+    }
+
+    pub(crate) fn release_to_tui_cleanup(&mut self) {
+        self.release
+            .take()
+            .expect("admission release")
+            .send(())
+            .expect("TUI cleanup retained admission task");
+    }
+
+    pub(crate) async fn assert_turn_settled(&self) {
+        let summary = self
+            .application
+            .client()
+            .thread_summary(&self.thread_id)
+            .await
+            .expect("accepted fixture summary")
+            .expect("accepted fixture Thread");
+        assert_eq!(summary.active_turn_id, None);
+    }
+
+    pub(crate) async fn shutdown(self) {
+        self.application
+            .shutdown()
+            .await
+            .expect("accepted fixture shutdown")
+            .require_clean()
+            .expect("accepted fixture clean shutdown");
+    }
+}
+
+pub(crate) async fn install_accepted_turn_admission(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    display_prompt: &str,
+) -> AcceptedTurnAdmissionFixture {
+    let application = Application::builder()
+        .home(&app.home)
+        .database_path(":memory:")
+        .agent_session_adapter(Arc::new(PendingAgentAdapter))
+        .build()
+        .await
+        .expect("accepted fixture Application");
+    let client = application.client();
+    let thread_id = uuid::Uuid::now_v7().to_string();
+    let start = StartThreadRequest::new(&app.cwd).with_initial_context(
+        thread_id.clone(),
+        None,
+        BTreeMap::new(),
+    );
+    let (accepted_tx, accepted_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        let handle = client
+            .start_thread_with_turn(start, TurnRequest::new("accepted fixture"))
+            .await?;
+        let _ = accepted_tx.send(());
+        let _ = release_rx.await;
+        let (_approval_tx, approval_rx) = mpsc::unbounded_channel();
+        Ok(StartedTurn {
+            handle,
+            approval_rx,
+        })
+    });
+    let optimistic_start = ui.transcript.len();
+    ui.push_user(display_prompt.to_string());
+    ui.mark_optimistic_rows_from(optimistic_start);
+    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    ui.starting_turn = Some(StartingTurn {
+        session_id: app.current_session.clone(),
+        queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),
+        display_prompt: display_prompt.to_string(),
+        images: Vec::new(),
+        cancellation,
+        task,
+    });
+    ui.start_assistant();
+    AcceptedTurnAdmissionFixture {
+        application,
+        accepted: Some(accepted_rx),
+        release: Some(release_tx),
+        thread_id,
+    }
+}
+
+pub(crate) async fn drain_starting_turn_cleanups(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
+    for _ in 0..100 {
+        app.drain_fullscreen_events(ui)
+            .await
+            .expect("drain StartingTurn cleanup");
+        if ui.starting_turn_cleanups.is_empty() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("StartingTurn cleanup did not settle");
+}
+
+pub(crate) async fn drain_side_delete_tasks(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
+    for _ in 0..100 {
+        app.drain_fullscreen_events(ui)
+            .await
+            .expect("drain side deletion");
+        if app.side_delete_tasks.is_empty() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("side deletion did not settle");
+}
+
 pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
-    let temp_root = psychevo::__product::platform::normalized_native_path(temp.path());
+    let temp_root = psychevo::host_paths::normalized_native_path(temp.path());
     let home = temp_root.join("home");
     let cwd = temp_root.join("work");
     std::fs::create_dir_all(&home).expect("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::write(home.join("config.toml"), "\n").expect("config");
-    let cwd = psychevo::__product::platform::canonicalize_cwd(&cwd).expect("canonical");
+    let cwd = psychevo::paths::canonicalize_cwd(&cwd).expect("canonical");
     let mut env_map = BTreeMap::new();
     env_map.insert("HOME".to_string(), temp_root.display().to_string());
     env_map.insert("PSYCHEVO_HOME".to_string(), home.display().to_string());
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let db_path = home.join("state.db");
-    let state_runtime = StateRuntime::open(&db_path).await.expect("state");
-    let gateway = Gateway::new(state_runtime.clone());
-    let application = Application::__from_open_state(
-        home.clone(),
-        None,
-        state_runtime.clone(),
-        Arc::new(psychevo_gateway::GatewayAgentSessionAdapter::new(
-            gateway.clone(),
-        )),
-    );
-    let framework = application.client();
+    let runtime = GatewayApplication::open(home.clone(), db_path.clone(), None, env_map.clone())
+        .await
+        .expect("runtime");
     TuiApp {
         env_map,
         home: home.clone(),
@@ -80,10 +332,7 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         state: TuiState::default(),
         model_state_path: ModelState::path_for_home(&home),
         model_state: ModelState::default(),
-        state_runtime,
-        application,
-        framework,
-        gateway,
+        runtime,
         db_path,
         config_path: None,
         cwd: cwd.clone(),
@@ -123,6 +372,7 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         gateway_live_snapshot_revisions: BTreeMap::new(),
         session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
+        side_delete_tasks: Vec::new(),
         compaction_task: None,
         diff_task: None,
         journey_profile: TuiJourneyProfileProbe::disabled(),
@@ -170,8 +420,8 @@ pub(crate) fn fixture_ui<'a>(app: &TuiApp, kind: FixtureKind) -> FullscreenUi<'a
                 false,
             );
             ui.turn_started = None;
-            ui.apply_stream_event(
-                RunStreamEvent::ReasoningDelta {
+            ui.apply_turn_event(
+                TurnEvent::ReasoningDelta {
                     text: "Read the TUI renderer and identify stable evidence blocks.".to_string(),
                 },
                 true,
@@ -626,8 +876,8 @@ pub(crate) fn push_active_reasoning_write_turn(ui: &mut FullscreenUi<'_>) {
         }),
         false,
     );
-    ui.apply_stream_event(
-        RunStreamEvent::ReasoningDelta {
+    ui.apply_turn_event(
+        TurnEvent::ReasoningDelta {
             text: "Let me compose the full report now. I have all the data. Let me write it out."
                 .to_string(),
         },
@@ -779,43 +1029,131 @@ pub(crate) fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
     text
 }
 
-pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
+pub(crate) fn test_shell_running_control(app: &TuiApp) -> RunningTurnControl {
+    app.runtime
+        .client()
+        .shell_command(app.shell_command_request("typed control fixture".to_string()))
+        .expect("typed Shell control fixture")
+        .control()
+        .into()
+}
+
+pub(crate) fn attach_no_steer_running(app: &TuiApp, ui: &mut FullscreenUi<'_>) {
     let (_tx, rx) = mpsc::unbounded_channel();
-    let (control, run_control) = run_control();
-    let task = tokio::spawn(async move {
-        let result =
-            std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>()
-                .await;
-        drop(run_control);
-        result
-    });
+    let control = test_shell_running_control(app);
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
     ui.running = Some(RunningTurn {
         session_id: None,
         control,
         selector: None,
         turn_id: None,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task: RunningTask::Agent(task),
     });
 }
 
-pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
+#[derive(Debug)]
+struct PendingAgentAdapter;
+
+impl psychevo::AgentSessionAdapter for PendingAgentAdapter {
+    fn prepare_turn(
+        self: Arc<Self>,
+        _request: psychevo::AgentTurnPreparation,
+    ) -> futures::future::BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>>
+    {
+        Box::pin(async { Ok(Box::new(PendingAgentTurn) as Box<dyn psychevo::PreparedAgentTurn>) })
+    }
+}
+
+#[derive(Debug)]
+struct PendingAgentTurn;
+
+impl psychevo::PreparedAgentTurn for PendingAgentTurn {
+    fn invoke(
+        self: Box<Self>,
+        invocation: psychevo::AgentTurnInvocation,
+    ) -> futures::future::BoxFuture<'static, psychevo::Result<TurnResult>> {
+        Box::pin(async move {
+            invocation.control.wait_for_interrupt().await;
+            Err(psychevo::Error::Message(
+                "pending agent fixture interrupted".to_string(),
+            ))
+        })
+    }
+}
+
+pub(crate) async fn attach_pending_framework_agent_running(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+) {
+    attach_pending_framework_agent_running_with_session(app, ui, None).await;
+}
+
+pub(crate) async fn attach_pending_framework_agent_running_for_session(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    session_id: &str,
+) {
+    attach_pending_framework_agent_running_with_session(app, ui, Some(session_id)).await;
+}
+
+async fn attach_pending_framework_agent_running_with_session(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    session_id: Option<&str>,
+) {
+    let application = Application::builder()
+        .home(&app.home)
+        .database_path(":memory:")
+        .agent_session_adapter(Arc::new(PendingAgentAdapter))
+        .build()
+        .await
+        .expect("pending fixture Application");
+    let mut start = StartThreadRequest::new(&app.cwd);
+    if let Some(session_id) = session_id {
+        start = start.with_initial_context(session_id.to_string(), None, BTreeMap::new());
+    }
+    let handle = application
+        .client()
+        .start_thread_with_turn(start, TurnRequest::new("pending fixture"))
+        .await
+        .expect("pending fixture Turn");
+    let control = handle.clone();
     let (_tx, rx) = mpsc::unbounded_channel();
-    let (control, run_control) = run_control();
     let task = tokio::spawn(async move {
-        let result =
-            std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>()
-                .await;
-        drop(run_control);
+        let result = handle.wait().await;
+        application.shutdown().await?.require_clean()?;
         result
     });
+    let session_id = control.receipt().thread_id.clone();
+    let turn_id = control.receipt().turn_id.clone();
+    ui.running = Some(RunningTurn {
+        session_id: Some(session_id),
+        control: RunningTurnControl::Agent(control),
+        selector: None,
+        turn_id: Some(turn_id),
+        events: RunningTurnEvents::TurnTest(rx),
+        task: RunningTask::Agent(task),
+    });
+}
+
+pub(crate) fn attach_background_agent_running(
+    app: &TuiApp,
+    ui: &mut FullscreenUi<'_>,
+    session_id: &str,
+) {
+    let (_tx, rx) = mpsc::unbounded_channel();
+    let control = test_shell_running_control(app);
+    let task = tokio::spawn(async { std::future::pending::<psychevo::Result<TurnResult>>().await });
     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
         session_id: Some(session_id.to_string()),
+        turn_id: None,
         child_session_id: None,
         visible_live: true,
         pending_unowned_live_events: Vec::new(),
+        approval_rx: None,
         control,
-        events: RunningTurnEvents::Runtime(rx),
+        events: RunningTurnEvents::TurnTest(rx),
         task,
     });
 }

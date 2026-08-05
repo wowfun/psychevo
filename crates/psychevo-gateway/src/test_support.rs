@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use psychevo::__product::platform::{
-    ExecutableResolveOptions, HostPlatform, resolve_executable_path,
-};
+use psychevo::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
+
+pub(crate) const ONE_PIXEL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mOsvmfPfwAH5QMm7n0ViwAAAABJRU5ErkJggg==";
 
 pub(crate) struct AcpFixture {
     pub(crate) program: PathBuf,

@@ -1,10 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
 
-use futures::StreamExt;
-use psychevo_agent_core::ToolDisplaySpec;
+use futures::{StreamExt, future::BoxFuture};
+use psychevo_agent_core::{ToolBinding, ToolDisplaySpec, ToolExecutionMode, ToolOutput};
+use psychevo_ai::AbortSignal;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use serde_json::{Value, json};
 
+#[cfg(test)]
+use super::ToolRuntimeContext;
 use crate::config::{WebSearchBackend, WebSearchConfig};
 
 pub(crate) const WEB_SEARCH_DEFAULT_LIMIT: usize = 8;
@@ -778,7 +783,10 @@ fn item_value(item: &WebSearchItem) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+    use crate::tools::tool_by_name;
 
     #[test]
     fn resolver_uses_hermes_order_and_explicit_mcp_without_key() {

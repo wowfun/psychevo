@@ -107,6 +107,18 @@ Agent snapshot), plus the Runtime Profile fingerprint and snapshot. A later
 turn may omit its target to inherit the binding, but an explicit Agent or
 Profile change requires a new public thread.
 
+Framework is the sole reader and mutation owner for that durable binding.
+Gateway receives a typed `missing | unresolved | resolved` Thread binding
+view; the resolved view contains the validated immutable Agent/Profile capture,
+read/write ownership, sticky preferences, runtime-observed controls, and their
+revisions. Gateway never imports the persistence record, interprets nullable
+columns as a resolved capture, or reads the state runtime to assemble this
+view. A control mutation calls one Thread use case that compare-and-sets both
+revisions and returns the resulting typed view. Adapter-owned persisted session
+projection is read through a narrow Thread query and remains opaque until the
+owning Adapter decodes it; a generic metadata or state pass-through is not an
+equivalent interface.
+
 The Runtime Profile and Runnable Target catalogs are prospective configuration
 for unbound Threads only. Once bound, every turn, control mutation, history or
 session lifecycle action resolves the captured Agent Definition and Runtime
@@ -362,6 +374,20 @@ atomically promoted to initial sticky Thread preferences, while explicit
 `turnOverrides` remain one-turn-only. Gateway clears the source draft only
 after its values have been captured by the new binding.
 
+The validated snapshot is the sole Agent-session input for that Turn. It
+contains the selected Agent Definition, Runtime Profile revision and
+fingerprint, immutable binding identity, optional prepared native session, and
+resolved initial controls. The Framework Agent Session Adapter consumes this
+capture without reading the target catalog or resolving the Runtime Profile a
+second time. Configuration changes after acceptance apply only to later
+preflight operations.
+
+For an unbound source, Thread creation, immutable runtime binding, source-lane
+promotion, initial sticky preferences, and first Turn delivery are one durable
+Framework admission. A failure before acceptance leaves none of those records.
+After acceptance, source-draft cleanup is idempotent projection cleanup and
+cannot revoke or fail the accepted Turn.
+
 Source-bound callers, including Channels, resolve an existing public Thread
 before constructing `ThreadContext` or applying control precedence. Once the
 source is bound, sticky Thread preferences are authoritative; treating a later
@@ -386,8 +412,12 @@ public response contract.
 `thread/history/read` reads Psychevo's projected transcript for one authorized
 Thread. The initial read returns the latest tail; a subsequent opaque `before`
 cursor is derived from the oldest stable entry id already held and returns only
-older entries. Unknown and cross-Thread cursors fail closed. The default page
-is 100 entries and the hard maximum is 200. Pages preserve the
+older entries. Cursor containment uses the same visible projection as the
+page: the indexed message identity must belong to that Thread, precede any
+staged revert boundary, and not be hidden inherited side-conversation context.
+Unknown, reverted, hidden, and cross-Thread cursors fail closed without scanning
+or decoding Thread history. The default page is 100 entries and the hard maximum
+is 200. Pages preserve the
 `ThreadHistoryView` owner and fidelity reported by `ThreadContext`, have Store
 and allocation cost bounded by the requested page, and never read an
 adapter-native session history directly. Search and export use the same bounded
@@ -604,6 +634,15 @@ partial generation. Idle eviction may reclaim a zero-reference process but must
 not evict an active turn or pending interaction. Process exit wakes every
 waiter, classifies accepted turns, and prevents an implicit resend.
 
+One generation exposes its connection, negotiated initialization, callback
+contexts, resident sessions, terminal registry, ordered notification ingress,
+session-epoch allocator, and generation id through one internal typed context.
+Prompt and lifecycle helpers receive that context plus an operation-specific
+typed request; they do not copy the same loose process-state argument list into
+each operation. Operation requests retain semantic identities such as local and
+native session ids, cwd, MCP declarations, and replay target instead of using
+positional tuples or untyped parameter bags.
+
 The Adapter owns typed, internal lifecycle operations for list, resume, fork,
 close, and delete even while the sealed public Thread action union exposes none
 of them. Every operation is gated by the initialize capability before sending
@@ -631,20 +670,33 @@ session ids and cursors stay behind this seam. Public import candidates and
 cursors are bounded, expiring, opaque handles; a restart or expiry requires a
 new discovery request.
 
+Gateway asks Framework whether a discovered `(runtime profile, native
+session)` identity already belongs to a public Thread. Framework performs the
+single indexed binding lookup and returns only that `Thread` identity; Gateway
+does not read or scan durable bindings.
+
 Import reserves an unpublished public Thread and requires stable ACP
 `session/load` so the selected Agent session can replay its product-visible
-history. Gateway reduces replay through the response barrier, persists every
-bounded transcript fact that the public Message model can represent (user and
-assistant text, reasoning, tool calls and results, and plan metadata), then
-atomically publishes the immutable binding and Thread snapshot. Import never
-claims `fidelity=full` when a replay fact was omitted, truncated, or could not
-be projected. A stable-v1 content chunk without a non-empty `messageId` is not
-given a synthetic durable message identity: its projectable display content
-and reliable neighboring facts are published, the Thread remains writable, and
-history is explicitly `partial` with a recovery hint. Bounded internal replay
-ids may make unidentified content, tool-only, and Plan facts idempotent, but
-only real Agent-supplied message ids may participate in delivery
-reconciliation.
+history. Gateway captures the already-resolved Profile, process peer, and
+candidate behind one opaque, single-use preparation token. Application invokes
+the Adapter's typed import operation inside the reserved Thread's FIFO mutation
+lane. The Adapter returns only persistable product facts: the immutable Agent
+binding, ordered Messages with optional usage and metadata, optional title,
+Adapter metadata, and typed lifecycle/history-fidelity facts. Gateway wire
+types, `RunOptions`, `StateRuntime`, repositories, arbitrary callbacks, and
+caller-supplied generic futures do not cross this interface.
+
+The replay reducer is a pure projection reused by both import and the live
+journal. Application, not Gateway, atomically publishes the Thread, binding,
+ordered history, title, lifecycle, history fidelity, and Adapter metadata in
+one durable transaction. Import never claims `fidelity=full` when a replay fact
+was omitted, truncated, or could not be projected. A stable-v1 content chunk
+without a non-empty `messageId` is not given a synthetic durable message
+identity: its projectable display content and reliable neighboring facts are
+published, the Thread remains writable, and history is explicitly `partial`
+with a recovery hint. Bounded internal replay ids may make unidentified
+content, tool-only, and Plan facts idempotent, but only real Agent-supplied
+message ids may participate in delivery reconciliation.
 
 History replay preserves notification order inside assistant content. Text or
 reasoning chunks for the active message may continue after an intervening tool
@@ -658,12 +710,25 @@ Plan identity treated as message delivery evidence.
 Import never
 falls back to `session/resume`, because that lifecycle operation does not replay
 history; an Agent without `session/load` fails explicitly and no empty public
-Thread is published. An existing
-`(runtime_ref, native_session_id)` binding wins an import race and is returned
-instead of being duplicated. Fork follows the same publish-after-ready rule and
+Thread is published. An existing `(runtime_ref, native_session_id)` binding
+wins an import race and is returned instead of being duplicated. The uniqueness
+check and publication are serialized by the same write transaction, so
+concurrent imports cannot publish two Threads. The losing or failed import
+invokes the Adapter's typed abort/release operation and rolls back only its
+unpublished local Thread; it never maps import rollback to Agent-owned remote
+deletion. A load or projection failure is released by the Adapter before it
+returns the error. Fork follows the same publish-after-ready rule and
 records the source Thread as parent. It is exposed only when the negotiated
 Agent capability includes `session/fork`; Native and Agents without that
 capability do not receive an emulated fork.
+
+Framework invokes fork inside the source Thread's mutation FIFO and supplies
+only the immutable source Thread/binding facts, a reserved destination Thread
+identity, and the semantic MCP resolver. The Adapter returns the same
+persistable publication value as import. Framework then commits destination,
+parent relationship, binding, lifecycle/history facts, metadata, and any
+projected Messages in one transaction. No pending destination Thread is
+created, and Gateway never repairs or deletes a partially published fork.
 
 Archive closes a resident ACP session before local archival when close is
 advertised. A non-resident session or an Agent without close support may still
@@ -680,14 +745,16 @@ intents before allowing another lifecycle mutation.
 
 ### Replay And Projection
 
-History replay and live notifications enter the same typed reducer. Every fact
+History replay and live notifications enter the same pure typed reducer. Every fact
 has history/live origin, process generation, session epoch, ordering identity,
 and a bounded product projection. Replay-origin transcript facts retain source
 order and stable Agent message or tool identities so repeated loads deduplicate
 against durable history. Replay completion uses an explicit barrier; time-based
-notification draining is forbidden. Import commits the completed replay before
-publishing its Thread and releases both the reserved Thread and resident Agent
-session if load, reduction, or persistence fails.
+notification draining is forbidden. Application commits the completed
+projection and all import identity facts before exposing the Thread.
+Adapter/load failure self-releases its resident session; Application commit
+failure sends the typed abort/release request and leaves no local Thread or
+binding.
 
 The resident Adapter exposes one immutable per-session snapshot as the only
 read interface for negotiated Agent identity/capabilities, prompt input support,
@@ -769,6 +836,10 @@ Each accepted turn produces exactly one terminal. Delivery is
 `notDelivered`, `delivered`, or `unknown`. Unknown delivery enters a
 reconciliation-required state and is never automatically retried. Interaction
 tokens are opaque, source-scoped, expiring, and single use.
+
+The Native Adapter's prior-terminal decision is an indexed existence probe over
+the Thread id. It never loads, orders, allocates, or decodes the Thread's
+terminal history merely to answer whether one terminal exists.
 
 The authoritative interactive terminal covers the Agent turn, delivery ledger,
 and required transcript persistence; it does not cover optional display-only

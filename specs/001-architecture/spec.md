@@ -33,6 +33,29 @@ Out of scope:
   channel, automation, App Server, and outbound ACP concerns live in
   `psychevo-gateway`, while all Thread and Turn use cases call an injected
   `psychevo::Client`.
+- The product composition root owns both the Framework `Application` and the
+  Gateway runtime and shuts each owner down explicitly. Gateway may retain the
+  cloneable Framework `Client` needed by its callers. The Framework Agent
+  Session Adapter must not retain a `Gateway`, `Application`, or strong
+  `Client`; child-Agent dispatch is a Framework-owned capability carried by an
+  accepted invocation. These ownership rules prohibit a strong reference cycle
+  or an Adapter shutdown callback that recursively shuts down its owner.
+- In-process Gateway products use one named composition owner. It asks
+  `ApplicationBuilder` to open the configured state database exactly once; no
+  other production owner opens or adopts a SQLite pool. Application may issue
+  one opaque, typed `GatewayDurability` capability over that same pool so
+  Gateway can perform only its source-lane, activity-lease, durable-control,
+  retained-live, channel-outbox, and automation durability operations. Thread
+  and Turn lifecycle, Agent bindings, history, Framework Turn delivery, and
+  terminal evidence remain Framework-owned operations outside this capability.
+  The capability cannot expose `StateRuntime`, a pool or connection, SQL,
+  diagnostics, shutdown, or a way to open another database. The composition
+  owner also supplies one build-time base environment to Application, installs
+  the outbound Agent Session Adapter, attaches the resulting Client, and
+  exposes only Gateway, Application, and Client handles. It remains alive for
+  the product lifetime and closes Gateway producers before Application shuts
+  down the Adapter and state; test-only construction may retain injected owners
+  without adding a production state pass-through interface.
 - Native Psychevo Agents and external ACP Agents are equal execution Adapters
   behind one Framework-owned Agent Session seam. ACP is an external protocol at
   that seam; it is not Psychevo's internal application interface and Native is
@@ -40,11 +63,24 @@ Out of scope:
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
 - Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files expose named module namespaces; they must not become item-level compatibility facades that obscure ownership.
 - Optional compilation seams must correspond to a real dependency or startup-cost difference. Product taxonomy alone is not a reason to introduce a Cargo feature.
+- Framework's default-off `native-keyring` seam owns only the host credential
+  backend dependency. The feature-free Framework keeps the same injectable MCP
+  OAuth credential-store interface and fails explicit system-store operations
+  with an actionable capability error; first-party product compositions enable
+  the native backend. This is a platform-cost boundary, not a product facade.
 - `psychevo-gateway` owns one default-on `native-channels` seam for native
   channel adapter dependencies. `psychevo-cli` forwards that feature and omits
   the channel setup command when built without default features. The default
   product remains complete; the no-default build is an executable dependency
   graph invariant, not a separate edition.
+
+Gateway's typed Framework-to-wire projection is one named namespace whose
+ordinary child modules own live state, assistant, Agent, Tool, runtime-event,
+write-preview state, and helper responsibilities. Tool event projection owns
+execution/session reconciliation while write-preview projection alone owns the
+incremental argument tracker and its UX phase metadata. The namespace
+coordinates those owners without textually assembling implementation fragments
+or republishing their private helpers as a compatibility surface.
 
 ## Internal Module Layout
 
@@ -58,6 +94,16 @@ ordinal buckets are not acceptable refactor endpoints, even when they satisfy
 line-count thresholds. If a file cannot be split further without obscuring the
 owning boundary, the facade or entrypoint role must be explicit in the file name
 or documented by the owning spec.
+
+Handwritten production Rust source uses ordinary named modules with explicit
+imports and the narrowest practical visibility. It must not use `include!` to
+assemble implementation fragments, inherit a shared wildcard parent prelude,
+preserve old item paths through a compatibility facade, or suppress
+`dead_code`/`unused_imports` to keep a shared namespace compiling. Generated
+code may use `include!` only from `OUT_DIR`. Platform-specific items use target
+reachability instead of broad lint suppression. Test files are reachable only
+through an exact `#[cfg(test)] mod ...;` declaration and import the seams they
+exercise explicitly instead of relying on production textual assembly.
 
 For ordinary source and specification files under `apps/`, `crates/`,
 `packages/`, and `specs/`, production modules should normally remain below 900
@@ -82,6 +128,14 @@ pruning, and built-in tool assembly remain internal Framework modules.
 helpers, and transaction helpers remain implementation details; no public store
 handle, repository family, or pass-through state facade is added.
 
+The Framework Interface is exposed through named owning modules and high-level
+`Application`, `Client`, `Thread`, and `TurnHandle` vocabulary. It must not be
+republished through a product-taxonomy Cargo feature, crate-root item glob, or
+hidden compatibility namespace. Product callers migrate to the owning named
+interface instead of preserving a parallel root facade. Architecture checks
+assert dependency direction and public-interface invariants rather than an
+exact list of files, crates, or product consumers.
+
 `application.rs` declares the public Framework vocabulary and facade. Private
 modules own Application lifecycle, Thread operations, Turn execution, Agent
 Session adaptation, accepted-work supervision and serialization, interaction
@@ -96,6 +150,14 @@ they never borrow a connection, hold a database lock, select a pool member, or
 implement busy retry. In-memory runtime state that performs no database I/O may
 remain synchronous behind the same Module. The pool does not create a second
 database, read repository, actor, or storage ownership layer.
+
+Focused state modules own their queries, transactions, invariants, and domain
+types while sharing that one `StateRuntime` and pool. A closed persisted status
+or kind is a Rust enum at the state-module boundary and becomes text only in
+SQL or an external wire projection; row decoding rejects unknown persisted
+values. Open namespaces and caller-defined labels remain strings. This typing
+rule does not justify pass-through repository objects or a generic domain
+framework.
 
 `psychevo-cli` should keep process and terminal concerns in transport-owned
 modules. CLI argument parsing, environment/path setup, command handlers, and
@@ -213,6 +275,32 @@ accepted Turn. Web may return acceptance without awaiting completion, while
 synchronous callers may await the same handle. Dropping a handle never cancels
 accepted work.
 
+Creating a Thread together with its first Turn is one Application-owned
+admission use case. Before returning acceptance, Framework reserves capacity
+and the Thread lane and durably creates the Thread and Turn delivery as one
+commit. A rejected admission leaves no Thread, delivery receipt, or caller
+source association. Caller-supplied mission/team registration that must exist
+before execution is part of that same Turn admission commit for both new and
+existing Threads. Explicit creation of an empty Thread remains a separate use
+case.
+
+Optional Thread resume is one Client lookup that returns `None` only for an
+authoritatively absent Thread and propagates every State or lifecycle error.
+Surfaces must not probe existence and then repeat the same lookup to resume.
+
+Archive, restore, delete, reset, import, compaction, and Turn start for an
+existing Thread all enter the same Framework-owned Thread mutation lane.
+Adapter-session and MCP cleanup or restoration occurs inside that serialized
+lifecycle operation; a caller must not mutate the durable Thread first or
+perform Adapter cleanup outside the lane.
+
+Target/profile resolution is preflight work. The selected Agent Definition,
+Runtime Profile revision and fingerprint, binding, prepared session identity,
+and initial controls are captured once before durable Turn acceptance. The
+accepted Agent invocation consumes that immutable capture and must not resolve
+configuration again or turn later configuration drift into a post-acceptance
+delivery failure.
+
 Must not own:
 - agent loop behavior
 - provider protocol behavior
@@ -299,6 +387,15 @@ Prohibited dependency rules:
 - `psychevo-cli` and `psychevo-gateway` must not depend directly on
   `psychevo-agent-core` or `psychevo-ai`
 - business logic must not be introduced into `psychevo-cli`
+
+Every production Rust crate under `crates/` declares its numeric inward-to-
+outward layer with `package.metadata.psychevo.architecture-layer`. Architecture
+validation discovers the workspace members and dependency graph, and rejects a
+dependency on a higher layer without encoding a crate-name inventory. Any
+workspace crate that transitively depends on `psychevo` is discovered as a
+Framework consumer and is checked against the Framework implementation-module
+boundary. Crate-root and production wildcard-export checks apply to every
+discovered Rust crate rather than only to a named Framework or Adapter list.
 
 ## Local Ownership And Boundedness
 

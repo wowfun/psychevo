@@ -1,3 +1,148 @@
+use std::collections::{BTreeMap, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use psychevo::paths::canonicalize_cwd;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use tokio::sync::mpsc;
+
+use crate::server::binding::{AuthContext, BrowserSession, WebState};
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::{RpcRequest, cwd_source};
+use crate::server::scope_session::{ResolvedScope, bind_source_to_thread, default_resolved_scope};
+use crate::server::tests::automations::helpers::{
+    AutomationTurnProbe, web_state_with_automation_turn_probe,
+};
+use crate::server::tests::helpers::{git, web_state, write_project_skill};
+use crate::server::workspace;
+use psychevo_gateway_protocol::events_transcript::GatewayEvent;
+use psychevo_gateway_protocol::source::{GatewayTurn, GatewayTurnStatus};
+
+async fn start_test_thread(state: &WebState, cwd: &Path, source: &str) -> String {
+    let mut request = psychevo::StartThreadRequest::new(cwd);
+    request.source = source.to_string();
+    state
+        .inner
+        .framework
+        .start_thread(request)
+        .await
+        .expect("test Thread")
+        .id()
+        .to_string()
+}
+
+async fn web_state_with_scripted_workspace_turns() -> (
+    tempfile::TempDir,
+    WebState,
+    Arc<std::sync::Mutex<Option<PathBuf>>>,
+) {
+    let writes = Arc::new(std::sync::Mutex::new(VecDeque::from([
+        "after first\n".to_string(),
+        "after second\n".to_string(),
+    ])));
+    let file_slot = Arc::new(std::sync::Mutex::new(None::<PathBuf>));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind scripted provider");
+    let provider_addr = listener.local_addr().expect("scripted provider addr");
+    let provider = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post({
+            let writes = Arc::clone(&writes);
+            let file_slot = Arc::clone(&file_slot);
+            move |axum::extract::Json(request): axum::extract::Json<Value>| {
+                let writes = Arc::clone(&writes);
+                let file_slot = Arc::clone(&file_slot);
+                async move {
+                    if request["model"] == "fixture-title" {
+                        return axum::http::Response::builder()
+                            .header("content-type", "text/event-stream")
+                            .body(axum::body::Body::from(
+                                "data: {\"choices\":[{\"delta\":{\"content\":\"Workspace history\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                            ))
+                            .expect("scripted title response");
+                    }
+                    let content = writes
+                        .lock()
+                        .expect("workspace writes")
+                        .pop_front()
+                        .expect("queued workspace write");
+                    let file = file_slot
+                        .lock()
+                        .expect("workspace file")
+                        .clone()
+                        .expect("workspace file path");
+                    std::fs::write(file, content).expect("workspace mutation");
+                    axum::http::Response::builder()
+                        .header("content-type", "text/event-stream")
+                        .body(axum::body::Body::from(
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                        ))
+                        .expect("scripted provider response")
+                }
+            }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, provider)
+            .await
+            .expect("scripted provider");
+    });
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&home).expect("home");
+    let config_path = home.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"model = "fixture/fixture-model"
+
+[provider.fixture]
+api = "http://{provider_addr}/v1"
+no_auth = true
+
+[provider.fixture.models."fixture-model"]
+
+[provider.fixture.models."fixture-title"]
+
+[auxiliary.title_generation]
+provider = "fixture"
+model = "fixture-title"
+"#,
+        ),
+    )
+    .expect("scripted provider config");
+    let env = BTreeMap::from([
+        (
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        ),
+        (
+            "PSYCHEVO_HOME".to_string(),
+            home.to_string_lossy().to_string(),
+        ),
+    ]);
+    let runtime = crate::composition::GatewayApplication::open(
+        home,
+        temp.path().join("state.db"),
+        Some(config_path),
+        env,
+    )
+    .await
+    .expect("test composition");
+    let config = crate::server::GatewayWebServerConfig::with_static(
+        runtime,
+        cwd,
+        temp.path().join("static"),
+    );
+    (temp, WebState::new(config), file_slot)
+}
+
 #[tokio::test]
 async fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
     assert_eq!(
@@ -42,7 +187,7 @@ async fn workspace_external_actions_rpc_classifies_regular_files_without_launchi
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("external-actions")),
             method: "workspace/file/externalActions".to_string(),
             params: Some(json!({ "scope": scope, "path": "index.html" })),
@@ -83,9 +228,9 @@ async fn browser_external_file_rpcs_reject_a_scope_outside_the_current_session()
                 state.inner.source.clone(),
             ),
         );
-    let outside_scope = wire::GatewayRequestScope {
+    let outside_scope = wire::source::GatewayRequestScope {
         cwd: outside.to_string_lossy().to_string(),
-        source: wire::GatewaySourceInput {
+        source: wire::source::GatewaySourceInput {
             kind: "web".to_string(),
             raw_id: Some("outside".to_string()),
             lifetime: None,
@@ -115,7 +260,7 @@ async fn browser_external_file_rpcs_reject_a_scope_outside_the_current_session()
             auth.clone(),
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(method)),
                 method: method.to_string(),
                 params: Some(params),
@@ -162,7 +307,7 @@ async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scop
         auth.clone(),
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("pivot")),
             method: "thread/draft/open".to_string(),
             params: Some(json!({
@@ -189,7 +334,7 @@ async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scop
         auth,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("external-after-pivot")),
             method: "workspace/file/externalActions".to_string(),
             params: Some(json!({ "scope": scope, "path": "README.md" })),
@@ -203,23 +348,14 @@ async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scop
 #[tokio::test]
 async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
     let (temp, state) = web_state().await;
-    let thread_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("stored thread");
+    let thread_id = start_test_thread(&state, &state.inner.cwd, "web").await;
     let trusted_scope = ResolvedScope {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    bind_source_to_thread(&state, &trusted_scope, &thread_id).await.expect("source binding");
+    bind_source_to_thread(&state, &trusted_scope, &thread_id)
+        .await
+        .expect("source binding");
     let arbitrary = temp.path().join("paired-cwd");
     std::fs::create_dir_all(&arbitrary).expect("paired cwd");
     let arbitrary = canonicalize_cwd(&arbitrary).expect("canonical paired cwd");
@@ -247,7 +383,7 @@ async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
         },
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("source-default-resume")),
             method: "thread/resume".to_string(),
             params: Some(json!({ "scope": caller_scope })),
@@ -291,7 +427,7 @@ async fn workspace_external_actions_reject_directories_and_symlink_escapes() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(path)),
                 method: "workspace/file/externalActions".to_string(),
                 params: Some(json!({ "scope": scope.clone(), "path": path })),
@@ -325,7 +461,7 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("folders-1")),
             method: "workspace/folders".to_string(),
             params: Some(json!({ "scope": scope.clone(), "path": root })),
@@ -354,7 +490,7 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("folders-2")),
             method: "workspace/folders".to_string(),
             params: Some(json!({ "scope": scope.clone(), "path": alpha })),
@@ -376,7 +512,7 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("folders-3")),
             method: "workspace/folders".to_string(),
             params: Some(json!({ "scope": scope, "path": temp.path() })),
@@ -403,7 +539,7 @@ async fn workspace_git_branches_reports_a_non_repository_without_an_rpc_error() 
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("non-repository")),
             method: "workspace/git/branches".to_string(),
             params: Some(json!({ "scope": scope.clone() })),
@@ -422,7 +558,7 @@ async fn workspace_git_branches_reports_a_non_repository_without_an_rpc_error() 
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("unborn-repository")),
             method: "workspace/git/branches".to_string(),
             params: Some(json!({ "scope": scope })),
@@ -459,7 +595,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/git/branches".to_string(),
             params: Some(json!({ "scope": scope.clone() })),
@@ -479,7 +615,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "workspace/git/checkout".to_string(),
             params: Some(json!({
@@ -498,7 +634,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "workspace/git/checkout".to_string(),
             params: Some(json!({
@@ -540,7 +676,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/files".to_string(),
             params: Some(json!({ "scope": scope.clone() })),
@@ -570,7 +706,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "workspace/file/read".to_string(),
             params: Some(json!({
@@ -589,7 +725,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "workspace/file/write".to_string(),
             params: Some(json!({
@@ -614,7 +750,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "workspace/file/read".to_string(),
             params: Some(json!({
@@ -642,7 +778,7 @@ async fn workspace_file_write_creates_a_new_file_in_an_existing_parent() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/file/write".to_string(),
             params: Some(json!({
@@ -663,7 +799,7 @@ async fn workspace_file_write_creates_a_new_file_in_an_existing_parent() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "workspace/file/read".to_string(),
             params: Some(json!({
@@ -721,7 +857,7 @@ async fn workspace_file_read_and_write_reject_symlink_escapes() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!(id)),
                 method: method.to_string(),
                 params: Some(params),
@@ -738,7 +874,7 @@ async fn workspace_file_read_and_write_reject_symlink_escapes() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "workspace/file/write".to_string(),
             params: Some(json!({
@@ -781,7 +917,7 @@ async fn workspace_diff_rpc_returns_selected_file_diff_preview() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/diff".to_string(),
             params: Some(json!({
@@ -821,7 +957,7 @@ async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/file/read".to_string(),
             params: Some(json!({
@@ -841,7 +977,7 @@ async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "workspace/file/write".to_string(),
             params: Some(json!({
@@ -862,7 +998,7 @@ async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "workspace/file/write".to_string(),
             params: Some(json!({
@@ -909,7 +1045,7 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
     state.inner.review.observe_mutation(
         "turn-1",
         &state.inner.cwd,
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "notes.txt".to_string(),
             before: Some("user dirty\n".to_string()),
             after: Some("agent changed\n".to_string()),
@@ -949,7 +1085,7 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "workspace/change/reject".to_string(),
             params: Some(json!({
@@ -986,35 +1122,35 @@ async fn workspace_review_records_patch_paths_and_opaque_invalidations() {
         .review
         .begin_turn("turn-patch", Some("thread-patch".to_string()), cwd);
     for mutation in [
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "add.txt".to_string(),
             before: None,
             after: Some("added\n".to_string()),
         },
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "update.txt".to_string(),
             before: Some("before update\n".to_string()),
             after: Some("after update\n".to_string()),
         },
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "delete.txt".to_string(),
             before: Some("before delete\n".to_string()),
             after: None,
         },
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "move-from.txt".to_string(),
             before: Some("before move\n".to_string()),
             after: None,
         },
-        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo::application::WorkspaceMutation::ExactUtf8 {
             path: "move-to.txt".to_string(),
             before: None,
             after: Some("before move\n".to_string()),
         },
-        psychevo::__product::runtime::WorkspaceMutation::Opaque {
+        psychevo::application::WorkspaceMutation::Opaque {
             source: "exec_command".to_string(),
         },
-        psychevo::__product::runtime::WorkspaceMutation::Opaque {
+        psychevo::application::WorkspaceMutation::Opaque {
             source: "acp.edit".to_string(),
         },
     ] {
@@ -1072,7 +1208,7 @@ async fn completion_list_ranks_dollar_prefix_matches_first() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "completion/list".to_string(),
             params: Some(json!({
@@ -1124,7 +1260,7 @@ async fn command_execute_opens_web_utility_panels() {
             AuthContext::Bearer,
             tx.clone(),
             RpcRequest {
-                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
                 id: Some(json!("1")),
                 method: "command/execute".to_string(),
                 params: Some(json!({
@@ -1150,7 +1286,7 @@ async fn command_execute_opens_web_utility_panels() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1185,7 +1321,7 @@ async fn command_execute_queue_preserves_original_slash_display_text() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1212,12 +1348,7 @@ async fn command_execute_queue_preserves_original_slash_display_text() {
 #[tokio::test]
 async fn command_execute_compact_returns_native_compaction_action() {
     let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .await.expect("session");
+    let session_id = start_test_thread(&state, &state.inner.cwd, "web").await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1228,7 +1359,7 @@ async fn command_execute_compact_returns_native_compaction_action() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1249,46 +1380,11 @@ async fn command_execute_compact_returns_native_compaction_action() {
 
 #[tokio::test]
 async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
-    let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .await.expect("session");
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend).await;
+    let session_id = start_test_thread(&state, &state.inner.cwd, "web").await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let profile = generated_runtime_profiles()
-        .into_iter()
-        .find(|profile| profile.id == "native")
-        .expect("Native profile");
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint("null");
-    let cwd = state.inner.cwd.display().to_string();
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id: &session_id,
-            agent_ref: None,
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: "null",
-            runtime_ref: "native",
-            backend_kind: "native",
-            native_kind: "native",
-            native_session_id: Some(&session_id),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "native",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
-        .await.expect("binding");
+    bind_native_runtime_to_thread(&state, &session_id).await;
     let scope = scope.to_wire_scope();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -1297,7 +1393,7 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "thread/action/run".to_string(),
             params: Some(json!({
@@ -1343,134 +1439,9 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
 }
 
 #[tokio::test]
-async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_binding() {
-    let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .await.expect("session");
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    state
-        .inner
-        .state
-
-        .upsert_gateway_source_binding(psychevo::__product::persistence::GatewaySourceBindingInput {
-            source_key: "legacy:test-lane",
-            source_kind: "legacy",
-            raw_identity: json!({"lane": "test-lane"}),
-            visible_name: Some("Legacy test lane"),
-            thread_id: &session_id,
-            backend_kind: "acp",
-            backend_native_id: Some("retired-native-session"),
-            lineage: Some(json!({"runtimeRef": "codex"})),
-        })
-        .await.expect("legacy source-row evidence");
-    assert!(
-        state
-            .inner
-            .state
-
-            .gateway_runtime_binding(&session_id)
-            .await.expect("runtime binding lookup")
-            .is_none(),
-        "the Thread remains unbound"
-    );
-
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let result = handle_rpc(
-        state,
-        AuthContext::Bearer,
-        tx,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("1")),
-            method: "thread/action/run".to_string(),
-            params: Some(json!({
-                "scope": scope.to_wire_scope(),
-                "threadId": session_id,
-                "action": { "kind": "compact" }
-            })),
-        },
-    )
-    .await
-    .expect("thread/action/run compact");
-
-    assert_eq!(result["kind"], "compact");
-    assert_eq!(result["result"]["accepted"], true);
-    assert_eq!(result["result"]["compacted"], false);
-    assert_eq!(result["result"]["reason"], "manual");
-    assert_eq!(
-        result["result"]["message"],
-        "not enough messages to compact"
-    );
-}
-
-#[tokio::test]
-async fn thread_transcript_projects_compaction_checkpoint_divider() {
-    let (_temp, state) = web_state().await;
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .await.expect("session");
-    let store = &state.inner.state;
-    store
-        .append_message(&session_id, &runtime_user_message("first task", 1))
-        .await.expect("user message");
-    store
-        .append_message(&session_id, &runtime_assistant_message("done", 2))
-        .await.expect("assistant message");
-    let record = store
-        .append_session_compaction(psychevo::__product::persistence::SessionCompactionInput {
-            session_id: session_id.clone(),
-            reason: "manual".to_string(),
-            summary_text: "Keep the decision trail.".to_string(),
-            first_kept_session_seq: 2,
-            created_after_session_seq: 2,
-            tokens_before: Some(120),
-            tokens_after: Some(42),
-            summary_provider: "fake".to_string(),
-            summary_model: "fake-model".to_string(),
-            instructions: Some("keep decisions".to_string()),
-            metadata: Some(json!({"test": true})),
-        })
-        .await.expect("compaction");
-
-    let entries = state
-        .inner
-        .gateway
-        .thread_transcript(&session_id)
-        .await.expect("transcript");
-    let divider = entries
-        .iter()
-        .find(|entry| entry.id == format!("compaction:{}", record.id))
-        .expect("compaction divider");
-    assert_eq!(divider.role, TranscriptEntryRole::Diagnostic);
-    assert_eq!(divider.blocks[0].kind, TranscriptBlockKind::Compaction);
-    assert_eq!(
-        divider.blocks[0].title.as_deref(),
-        Some("Session compacted")
-    );
-    assert_eq!(
-        divider.blocks[0].detail.as_deref(),
-        Some("Keep the decision trail.")
-    );
-    assert_eq!(
-        divider.blocks[0]
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get("checkpoint_id"))
-            .and_then(Value::as_i64),
-        Some(record.id)
-    );
-}
-
-#[tokio::test]
 async fn command_execute_mission_records_team_metadata_and_returns_thread() {
     let (_temp, state) = web_state().await;
+    let thread_id = start_test_thread(&state, &state.inner.cwd, "web").await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1481,7 +1452,7 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("seed")),
             method: "team/write".to_string(),
             params: Some(json!({
@@ -1503,13 +1474,13 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
                 "scope": scope,
                 "command": "/mission --team ship implement feature",
-                "threadId": null
+                "threadId": thread_id
             })),
         },
     )
@@ -1528,47 +1499,114 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
             .expect("mission prompt")
             .contains("Team template: ship")
     );
-    let thread_id = result["action"]["threadId"]
-        .as_str()
-        .expect("thread id")
-        .to_string();
-    let team = state
+    assert_eq!(result["action"]["threadId"], thread_id);
+    let coordination = state
         .inner
-        .state
-
-        .find_active_agent_team_run(&thread_id)
-        .await.expect("team")
-        .expect("active team");
-    let mission = state
-        .inner
-        .state
-
-        .find_active_agent_mission_run(&thread_id)
-        .await.expect("mission")
-        .expect("active mission");
+        .framework
+        .resume_thread(&thread_id)
+        .await
+        .expect("mission Thread")
+        .agent_coordination_status()
+        .await
+        .expect("coordination status");
+    let team = coordination.team.expect("active team");
+    let mission = coordination.mission.expect("active mission");
+    assert!(!team.id.is_empty());
+    assert!(!mission.id.is_empty());
+    assert_ne!(team.id, mission.id);
+    assert_eq!(team.parent_thread_id, thread_id);
+    assert_eq!(mission.parent_thread_id, thread_id);
+    assert_eq!(team.mission_run_id.as_deref(), Some(mission.id.as_str()));
     assert_eq!(team.team_name, "ship");
+    assert_eq!(team.description.as_deref(), Some("Ship changes"));
+    assert_eq!(team.leader_agent_name, "general");
+    assert_eq!(team.max_parallel_agents, 4);
+    assert_eq!(team.status, "running");
+    assert!(
+        Path::new(team.source_path.as_deref().expect("team source path"))
+            .ends_with(Path::new(".psychevo").join("teams").join("ship.md"))
+    );
+    assert_eq!(
+        serde_json::to_value(&team.members).expect("team members"),
+        json!([{
+            "id": "researcher",
+            "agent": "general",
+            "runtimeRef": null,
+            "runtimeOptions": {},
+            "runtimeProfileRevision": null,
+            "role": null,
+            "description": null,
+            "maxTurns": null
+        }])
+    );
     assert_eq!(mission.goal, "implement feature");
+    assert_eq!(mission.team_name.as_deref(), Some("ship"));
+    assert_eq!(mission.lead_agent_name, "general");
+    assert_eq!(mission.status, "running");
     assert_eq!(mission.team_run_id.as_deref(), Some(team.id.as_str()));
 }
 
 #[tokio::test]
-async fn command_execute_btw_creates_side_chat_session() {
+async fn command_execute_mission_without_team_preserves_default_lead_metadata() {
     let (_temp, state) = web_state().await;
+    let thread_id = start_test_thread(&state, &state.inner.cwd, "web").await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let parent_session = state
-        .inner
-        .state
+    let (tx, _rx) = mpsc::unbounded_channel();
 
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
-    state
-        .inner
-        .state
+    let result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("mission-without-team")),
+            method: "command/execute".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "command": "/mission inspect the release",
+                "threadId": thread_id
+            })),
+        },
+    )
+    .await
+    .expect("command/execute mission");
 
-        .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
-        .await.expect("parent message");
+    assert_eq!(result["accepted"], true);
+    assert_eq!(result["action"]["type"], "submitPrompt");
+    assert_eq!(
+        result["action"]["displayText"],
+        "/mission inspect the release"
+    );
+    assert_eq!(result["action"]["threadId"], thread_id);
+    let coordination = state
+        .inner
+        .framework
+        .resume_thread(&thread_id)
+        .await
+        .expect("mission Thread")
+        .agent_coordination_status()
+        .await
+        .expect("coordination status");
+    assert!(coordination.team.is_none());
+    let mission = coordination.mission.expect("active mission");
+    assert_eq!(mission.parent_thread_id, thread_id);
+    assert_eq!(mission.team_run_id, None);
+    assert_eq!(mission.team_name, None);
+    assert_eq!(mission.goal, "inspect the release");
+    assert_eq!(mission.lead_agent_name, "general");
+    assert_eq!(mission.status, "running");
+}
+
+#[tokio::test]
+async fn command_execute_btw_creates_side_chat_session() {
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend).await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let parent_session = start_test_thread(&state, &state.inner.cwd, "web").await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let no_thread = handle_rpc(
@@ -1576,7 +1614,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1600,7 +1638,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("unbound")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1625,7 +1663,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1651,41 +1689,32 @@ async fn command_execute_btw_creates_side_chat_session() {
 
     let side_summary = state
         .inner
-        .state
-
-        .session_summary(side_thread_id)
-        .await.expect("summary")
+        .framework
+        .thread_summary(side_thread_id)
+        .await
+        .expect("summary")
         .expect("side chat");
     assert_eq!(
-        side_summary.parent_session_id.as_deref(),
+        side_summary.parent_thread_id.as_deref(),
         Some(parent_session.as_str())
     );
     assert_eq!(side_summary.source, "web-side-conversation");
     assert_eq!(side_summary.model, "fake-model");
     assert_eq!(side_summary.provider, "fake-provider");
-    let side_metadata = state
-        .inner
-        .state
-
-        .session_metadata(side_thread_id)
-        .await.expect("metadata")
-        .expect("metadata value");
-    assert_eq!(
-        side_metadata["side_conversation"]["parent_session_id"].as_str(),
-        Some(parent_session.as_str())
-    );
-    assert_eq!(
-        side_metadata["side_conversation"]["ephemeral"].as_bool(),
-        Some(true)
-    );
     let side_binding = state
         .inner
-        .state
-
-        .gateway_runtime_binding(side_thread_id)
-        .await.expect("side binding")
+        .framework
+        .thread_agent_binding(side_thread_id)
+        .await
+        .expect("side binding")
         .expect("resolved side binding");
-    assert_eq!(side_binding.status, GatewayRuntimeBindingStatus::Resolved);
+    let psychevo::ThreadAgentBinding::Resolved {
+        binding: side_binding,
+        ..
+    } = side_binding
+    else {
+        panic!("resolved side binding")
+    };
     assert_eq!(side_binding.agent_ref, parent_binding.agent_ref);
     assert_eq!(side_binding.runtime_ref, parent_binding.runtime_ref);
     assert_eq!(
@@ -1693,111 +1722,18 @@ async fn command_execute_btw_creates_side_chat_session() {
         parent_binding.profile_fingerprint
     );
     assert_eq!(side_binding.native_session_id, None);
-    assert_eq!(side_binding.parent_thread_id, None);
-}
-
-#[tokio::test]
-async fn command_execute_btw_snapshots_live_effective_acp_controls() {
-    let (_temp, state) = web_state().await;
-    let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let parent_session = state
-        .inner
-        .state
-
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "stale-summary-model",
-            "fake-provider",
-            None,
-        )
-        .await.expect("parent session");
-    bind_persisted_acp_runtime_to_thread(&state, &parent_session).await;
-    let (tx, _rx) = mpsc::unbounded_channel();
-
-    let parent_context = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("parent-context")),
-            method: "thread/context/read".to_string(),
-            params: Some(json!({
-                "scope": resolved_scope.to_wire_scope(),
-                "threadId": parent_session,
-                "target": null
-            })),
-        },
-    )
-    .await
-    .expect("parent Thread Context");
-    let effective_controls = parent_context["controls"]
-        .as_array()
-        .expect("parent controls")
-        .iter()
-        .filter_map(|control| {
-            Some((
-                control["id"].as_str()?.to_string(),
-                control["effectiveValue"].clone(),
-            ))
-        })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(effective_controls["model"], json!("live-acp-model"));
-    assert_eq!(effective_controls["mode"], json!("plan"));
-
-    let result = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("btw")),
-            method: "command/execute".to_string(),
-            params: Some(json!({
-                "scope": resolved_scope.to_wire_scope(),
-                "command": "/btw",
-                "threadId": parent_session
-            })),
-        },
-    )
-    .await
-    .expect("command/execute btw");
-    let side_thread_id = result["action"]["threadId"]
-        .as_str()
-        .expect("side thread id");
-    let side_binding = state
-        .inner
-        .state
-
-        .gateway_runtime_binding(side_thread_id)
-        .await.expect("side binding")
-        .expect("resolved side binding");
-
-    assert_eq!(side_binding.thread_preferences, effective_controls);
-    assert!(side_binding.runtime_observed.is_empty());
-    assert_eq!(side_binding.native_session_id, None);
 }
 
 #[tokio::test]
 async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
-    let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend).await;
+    let backend = Arc::new(AutomationTurnProbe::default());
+    let (_temp, state) = web_state_with_automation_turn_probe(backend).await;
     let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let scope = resolved_scope.to_wire_scope();
-    let parent_session = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("parent session");
-    state
-        .inner
-        .state
-
-        .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
-        .await.expect("parent message");
-    bind_source_to_thread(&state, &resolved_scope, &parent_session).await.expect("bind parent source");
+    let parent_session = start_test_thread(&state, &state.inner.cwd, "web").await;
+    bind_source_to_thread(&state, &resolved_scope, &parent_session)
+        .await
+        .expect("bind parent source");
     let parent_binding = bind_native_runtime_to_thread(&state, &parent_session).await;
     let mut parent_preferences = BTreeMap::new();
     parent_preferences.insert("mode".to_string(), json!("plan"));
@@ -1805,18 +1741,18 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     parent_observed.insert("model".to_string(), json!("fake-model"));
     state
         .inner
-        .state
-
-        .compare_and_set_gateway_runtime_control_state(
-            &parent_session,
-            parent_binding.binding_revision,
-            parent_binding.control_revision,
-            GatewayRuntimeControlStatePatch {
-                thread_preferences: Some(&parent_preferences),
-                runtime_observed: Some(&parent_observed),
-            },
-        )
-        .await.expect("parent control state");
+        .framework
+        .resume_thread(&parent_session)
+        .await
+        .expect("parent Thread")
+        .update_agent_control_state(psychevo::UpdateThreadAgentControlState {
+            expected_binding_revision: parent_binding.binding_revision,
+            expected_control_revision: parent_binding.control_revision,
+            thread_preferences: Some(parent_preferences),
+            runtime_observed: Some(parent_observed),
+        })
+        .await
+        .expect("parent control state");
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -1824,7 +1760,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -1845,7 +1781,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("side-context")),
             method: "thread/context/read".to_string(),
             params: Some(json!({
@@ -1863,17 +1799,23 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     assert_eq!(context["sendability"]["allowed"], true, "{context:#}");
     let side_binding = state
         .inner
-        .state
-
-        .gateway_runtime_binding(&side_thread_id)
-        .await.expect("side binding")
+        .framework
+        .thread_agent_binding(&side_thread_id)
+        .await
+        .expect("side binding")
         .expect("resolved side binding");
-    assert_eq!(side_binding.thread_preferences["mode"], json!("plan"));
-    assert_eq!(
-        side_binding.thread_preferences["model"],
-        json!("fake-model")
-    );
-    assert!(side_binding.runtime_observed.is_empty());
+    let psychevo::ThreadAgentBinding::Resolved {
+        binding: side_binding,
+        thread_preferences,
+        runtime_observed,
+        ..
+    } = side_binding
+    else {
+        panic!("resolved side binding")
+    };
+    assert_eq!(thread_preferences["mode"], json!("plan"));
+    assert_eq!(thread_preferences["model"], json!("fake-model"));
+    assert!(runtime_observed.is_empty());
     assert_eq!(side_binding.native_session_id, None);
 
     let accepted = handle_rpc(
@@ -1881,7 +1823,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "turn/start".to_string(),
             params: Some(json!({
@@ -1916,7 +1858,8 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             .inner
             .gateway
             .resolve_source_thread(&resolved_scope.source)
-            .await.expect("source binding")
+            .await
+            .expect("source binding")
             .as_deref(),
         Some(parent_session.as_str())
     );
@@ -1926,7 +1869,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "thread/delete".to_string(),
             params: Some(json!({ "threadId": side_thread_id.clone() })),
@@ -1938,10 +1881,10 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     assert!(
         state
             .inner
-            .state
-
-            .session_summary(&side_thread_id)
-            .await.expect("side summary")
+            .framework
+            .thread_summary(&side_thread_id)
+            .await
+            .expect("side summary")
             .is_none()
     );
 }
@@ -1949,263 +1892,183 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
 async fn bind_native_runtime_to_thread(
     state: &WebState,
     thread_id: &str,
-) -> GatewayRuntimeBindingRecord {
-    let profile = generated_runtime_profiles()
-        .into_iter()
-        .find(|profile| profile.id == "native")
-        .expect("Native profile");
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint("null");
-    let cwd = state.inner.cwd.display().to_string();
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id,
-            agent_ref: None,
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: "null",
-            runtime_ref: "native",
-            backend_kind: "native",
-            native_kind: "native",
-            native_session_id: Some(thread_id),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "native",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
-        .await.expect("native runtime binding")
-}
-
-async fn bind_persisted_acp_runtime_to_thread(
-    state: &WebState,
-    thread_id: &str,
-) -> GatewayRuntimeBindingRecord {
-    std::fs::create_dir_all(&state.inner.home).expect("profile home");
-    let executable = std::env::current_exe().expect("test executable");
-    std::fs::write(
-        state.inner.home.join("config.toml"),
-        format!(
-            r#"[agents.backends.ephemeral]
-kind = "acp"
-label = "Ephemeral"
-command = {}
-entrypoints = ["peer"]
-
-[runtime_profiles.ephemeral]
-runtime = "acp"
-enabled = true
-label = "Ephemeral ACP"
-backend_ref = "ephemeral"
-default_model = "profile-default-model"
-default_mode = "default"
-"#,
-            serde_json::to_string(&executable.to_string_lossy()).expect("test executable path")
-        ),
-    )
-    .expect("ACP profile config");
-    let profile = RuntimeProfileConfig {
-        id: "ephemeral".to_string(),
-        runtime: RuntimeProfileKind::Acp,
-        enabled: true,
-        label: "Ephemeral ACP".to_string(),
-        backend_ref: Some("ephemeral".to_string()),
-        default_model: Some("profile-default-model".to_string()),
-        default_mode: Some("default".to_string()),
-        default_agent: None,
-        sandbox: None,
-        workspace_roots: Vec::new(),
-        options: Value::Null,
-    };
-    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
-    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
-    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let agent_json = r#"{"name":"ephemeral","instructions":"captured"}"#;
-    let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
-    let cwd = state.inner.cwd.display().to_string();
-    let binding = state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
-            thread_id,
-            agent_ref: Some("ephemeral"),
-            agent_fingerprint: &agent_fingerprint,
-            agent_definition_json: agent_json,
-            runtime_ref: "ephemeral",
-            backend_kind: "acp",
-            native_kind: "acp",
-            native_session_id: Some("ephemeral-native-1"),
-            cwd: &cwd,
-            profile_fingerprint: &profile_fingerprint,
-            profile_revision: &profile_revision,
-            profile_config_json: &profile_json,
-            adapter_kind: "acp",
-            adapter_revision: "test",
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
-        .await.expect("ACP runtime binding");
-    let persisted_projection = crate::acp_peer::AcpSessionSnapshot {
-        native_session_id: "ephemeral-native-1".to_string(),
-        agent: Some(crate::acp_peer::AcpAgentIdentitySnapshot {
-            name: "ephemeral-test".to_string(),
-            title: Some("Ephemeral".to_string()),
-            version: "1.0.0".to_string(),
-        }),
-        capabilities: crate::acp_peer::AcpNegotiatedCapabilitiesSnapshot {
-            prompt_input: crate::acp_peer::AcpPromptInputCapabilitiesSnapshot {
-                text: true,
-                image: false,
-                audio: false,
-                resource: false,
-                resource_link: false,
-                embedded_context: true,
-            },
-            session: crate::acp_peer::AcpSessionLifecycleCapabilitiesSnapshot {
-                load: true,
-                list: false,
-                delete: false,
-                fork: false,
-                resume: true,
-                close: false,
-                additional_directories: false,
-            },
-            auth_logout: false,
-            auth_methods: Vec::new(),
-            providers: false,
-            mcp_http: false,
-            mcp_sse: false,
-            mcp_acp: false,
-        },
-        options: vec![wire::RuntimeConfigOptionView {
-            id: "model".to_string(),
-            name: "Model".to_string(),
-            description: None,
-            category: Some("model".to_string()),
-            option_type: "select".to_string(),
-            current_value: Some("live-acp-model".to_string()),
-            values: vec![wire::RuntimeConfigOptionValueView {
-                value: "live-acp-model".to_string(),
-                name: "Live ACP Model".to_string(),
-                description: None,
-                group: None,
-            }],
-        }],
-        available_commands: Vec::new(),
-        available_modes: vec![crate::acp_peer::AcpSessionModeSnapshot {
-            id: "plan".to_string(),
-            name: "Plan".to_string(),
-            description: None,
-        }],
-        current_mode_id: Some("plan".to_string()),
-        legacy_models: None,
-        history: crate::acp_peer::AcpHistorySnapshot {
-            owner: crate::acp_peer::AcpHistoryOwnerSnapshot::Agent,
-            resumable: true,
-            load_supported: true,
-            resume_supported: true,
-            loaded_from_agent: true,
-            replay_complete: true,
-            replay_update_count: 0,
-            live_update_count: 0,
-        },
-        session_info: crate::acp_peer::AcpSessionInfoSnapshot::default(),
-        generation: 1,
-        session_epoch: 1,
-        control_revision: "live-controls".to_string(),
-        projection_revision: "live-projection".to_string(),
-    };
-    state
-        .inner
-        .state
-
-        .set_session_metadata_field(
-            thread_id,
-            ACP_PEER_METADATA_KEY,
-            Some(json!({
-                "agentName": "ephemeral",
-                "backendId": "ephemeral",
-                "backendKind": "acp",
-                "nativeSessionId": "ephemeral-native-1",
-                "sessionProjection": persisted_projection,
+) -> psychevo::AgentBindingSnapshot {
+    let scope = default_resolved_scope(state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("bind-native-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "threadId": thread_id,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"}
             })),
-        )
-        .await.expect("persist ACP projection");
-    binding
+        },
+    )
+    .await
+    .expect("native binding context");
+    handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("bind-native-turn")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "clientTurnId": format!("bind-native-{thread_id}"),
+                "scope": scope,
+                "threadId": thread_id,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"},
+                "input": [{"type": "text", "text": "establish native binding"}],
+                "turnOverrides": {"model": "fake-model"},
+                "expectedContextRevision": context["contextRevision"],
+                "expectedControlRevision": context["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("native binding turn");
+    let terminal = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            if message.contains("\"type\":\"turnCompleted\"") {
+                return message;
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("native binding terminal");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
+    let thread = state
+        .inner
+        .framework
+        .resume_thread(thread_id)
+        .await
+        .expect("native Thread");
+    thread
+        .set_model_selection(psychevo::ThreadModelSelection {
+            provider: "fake-provider".to_string(),
+            model: "fake-model".to_string(),
+            reasoning_effort: None,
+        })
+        .await
+        .expect("native model selection");
+    let binding = thread
+        .agent_binding()
+        .await
+        .expect("native binding read")
+        .expect("native binding");
+    let psychevo::ThreadAgentBinding::Resolved { binding, .. } = binding else {
+        panic!("resolved native binding")
+    };
+    *binding
 }
 
 #[tokio::test]
 async fn command_execute_undo_redo_restores_session_snapshot() {
-    let (_temp, state) = web_state().await;
+    let (_temp, state, file_slot) = web_state_with_scripted_workspace_turns().await;
     git(&state.inner.cwd, ["init"]);
     let file = state.inner.cwd.join("tracked.txt");
     std::fs::write(&file, "base\n").expect("base");
-    let session_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("session");
-    let snapshot_root = state.inner.home.join("snapshots");
-    let before_first = track_snapshot(&snapshot_root, &state.inner.cwd);
-    state
-        .inner
-        .state
-
-        .append_message_with_undo_snapshot(
-            &session_id,
-            &runtime_user_message("first prompt", 1),
-            Some(before_first),
-        )
-        .await.expect("first user");
-    std::fs::write(&file, "after first\n").expect("after first");
-    state
-        .inner
-        .state
-
-        .append_message(&session_id, &runtime_assistant_message("first answer", 2))
-        .await.expect("first assistant");
-    let before_second = track_snapshot(&snapshot_root, &state.inner.cwd);
-    state
-        .inner
-        .state
-
-        .append_message_with_undo_snapshot(
-            &session_id,
-            &runtime_user_message("second prompt", 3),
-            Some(before_second),
-        )
-        .await.expect("second user");
-    std::fs::write(&file, "after second\n").expect("after second");
-    state
-        .inner
-        .state
-
-        .append_message(&session_id, &runtime_assistant_message("second answer", 4))
-        .await.expect("second assistant");
+    *file_slot.lock().expect("workspace file") = Some(file.clone());
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let prospective = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("first-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "target": {"agentRef": null, "runtimeProfileRef": "native"}
+            })),
+        },
+    )
+    .await
+    .expect("first context");
+    let first = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("first-turn")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "clientTurnId": "undo-first-turn",
+                "scope": scope.clone(),
+                "threadId": null,
+                "target": {"agentRef": null, "runtimeProfileRef": "native"},
+                "input": [{"type": "text", "text": "first prompt"}],
+                "expectedContextRevision": prospective["contextRevision"],
+                "expectedControlRevision": prospective["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("first turn");
+    let session_id = first["threadId"].as_str().expect("Thread id").to_string();
+    wait_for_turn_completed(&mut rx).await;
+
+    let context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("second-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({"scope": scope.clone(), "threadId": session_id})),
+        },
+    )
+    .await
+    .expect("second context");
+    handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("second-turn")),
+            method: "turn/start".to_string(),
+            params: Some(json!({
+                "clientTurnId": "undo-second-turn",
+                "scope": scope.clone(),
+                "threadId": session_id,
+                "input": [{"type": "text", "text": "second prompt"}],
+                "expectedContextRevision": context["contextRevision"],
+                "expectedControlRevision": context["controlRevision"]
+            })),
+        },
+    )
+    .await
+    .expect("second turn");
+    wait_for_turn_completed(&mut rx).await;
 
     let undo = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("1")),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("undo")),
             method: "command/execute".to_string(),
             params: Some(json!({
-                "scope": scope,
+                "scope": scope.clone(),
                 "command": "/undo",
                 "threadId": session_id
             })),
@@ -2224,24 +2087,30 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
         std::fs::read_to_string(&file).expect("file"),
         "after first\n"
     );
+    let thread = state
+        .inner
+        .framework
+        .resume_thread(&session_id)
+        .await
+        .expect("Thread");
     assert_eq!(
-        state
-            .inner
-            .state
-
-            .load_tui_message_summaries(&session_id)
-            .await.expect("visible")
+        thread
+            .history()
+            .latest(Some(200))
+            .await
+            .expect("visible")
+            .items
             .len(),
         2
     );
 
     let redo = handle_rpc(
-        state.clone(),
+        state,
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("2")),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("redo")),
             method: "command/execute".to_string(),
             params: Some(json!({
                 "scope": scope,
@@ -2264,15 +2133,29 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
         "after second\n"
     );
     assert_eq!(
-        state
-            .inner
-            .state
-
-            .load_tui_message_summaries(&session_id)
-            .await.expect("visible")
+        thread
+            .history()
+            .latest(Some(200))
+            .await
+            .expect("visible")
+            .items
             .len(),
         4
     );
+}
+
+async fn wait_for_turn_completed(rx: &mut mpsc::UnboundedReceiver<String>) {
+    let terminal = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            if message.contains("\"type\":\"turnCompleted\"") {
+                return message;
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("turn terminal");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
 }
 
 #[tokio::test]
@@ -2288,7 +2171,7 @@ async fn command_execute_undo_redo_bounded_without_matching_session() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "command/execute".to_string(),
             params: Some(json!({
@@ -2307,18 +2190,13 @@ async fn command_execute_undo_redo_bounded_without_matching_session() {
 
     let other_cwd = temp.path().join("other");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
-    let other_session = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .await.expect("other session");
+    let other_session = start_test_thread(&state, &other_cwd, "web").await;
     let cross_cwd = handle_rpc(
         state,
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "command/execute".to_string(),
             params: Some(json!({

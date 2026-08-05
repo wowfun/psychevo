@@ -1,4 +1,17 @@
-fn automation_draft_prompt(request: &str, cwd: &str, current_thread_id: Option<&str>) -> String {
+use psychevo::Error;
+use psychevo::automations::next_run_at_ms;
+use psychevo::model_state::normalize_reasoning_effort;
+use psychevo_gateway_protocol as wire;
+use serde_json::Value;
+
+use super::support::{automation_schedule_from_value, normalize_optional};
+use crate::gateway_now_ms;
+
+pub(super) fn automation_draft_prompt(
+    request: &str,
+    cwd: &str,
+    current_thread_id: Option<&str>,
+) -> String {
     let thread_guidance = match current_thread_id {
         Some(thread_id) => format!(
             r#"A current thread is available. Use {{"kind":"threadHeartbeat","threadId":"{thread_id}"}} only when the user asks to continue, check, or heartbeat the current thread."#
@@ -46,12 +59,12 @@ User request:
     )
 }
 
-fn parse_automation_draft_response(
+pub(super) fn parse_automation_draft_response(
     text: &str,
     current_thread_id: Option<&str>,
-) -> psychevo::Result<wire::AutomationDraftView> {
+) -> psychevo::Result<wire::automations::AutomationDraftView> {
     let value = extract_json_object(text)?;
-    let mut draft: wire::AutomationDraftView = serde_json::from_value(value)?;
+    let mut draft: wire::automations::AutomationDraftView = serde_json::from_value(value)?;
     draft.title = draft.title.trim().to_string();
     if draft.title.is_empty() {
         return Err(Error::Message(
@@ -65,8 +78,8 @@ fn parse_automation_draft_response(
         ));
     }
     match &mut draft.target {
-        wire::AutomationTargetInput::Project => {}
-        wire::AutomationTargetInput::ThreadHeartbeat { thread_id } => {
+        wire::automations::AutomationTargetInput::Project => {}
+        wire::automations::AutomationTargetInput::ThreadHeartbeat { thread_id } => {
             let Some(current_thread_id) = current_thread_id else {
                 return Err(Error::Message(
                     "automation draft requested a thread target without a current thread"

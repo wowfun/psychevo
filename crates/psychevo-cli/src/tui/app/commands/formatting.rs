@@ -1,16 +1,108 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    AgentDiscoveryOptions, AgentMissionRegistration, AgentTeamRegistration, AuxiliaryShellTask,
+    CompactThreadRequest, CompactionReason, CompactionResult, CompactionTask, FrameworkClient,
+    FullscreenUi, PendingAuxiliaryShellCommand, PendingImageAttachment, Result, RunningTask,
+    RunningTurn, RunningTurnControl, RunningTurnEvents, SessionArtifactKind, SessionExportFormat,
+    ShellCommandEvent, ShellCommandOutcome, SkillTarget, SlashCommand, StartThreadRequest,
+    StartedTurn, StartingTurn, TUI_CONTINUE_SESSION_SOURCES, TuiApp, TuiApprovalHandler,
+    TurnAdmissionCancellation, TurnPrinter, USER_SHELL_HELP, Value,
+    discover_agent_teams_with_catalog, discover_agents, normalize_context_bar_width,
+    presented_shell_event_channel, prompt_display_metadata, resolve_agent_team_definition,
+};
+use anyhow::anyhow;
+use psychevo::{Thread, ThreadListQuery};
+use std::{
+    collections::BTreeMap,
+    io,
+    sync::{Arc, Mutex},
+};
+use tokio::sync::mpsc;
+
+pub(crate) enum TuiTurnAdmissionTarget {
+    Existing(Thread),
+    New {
+        request: Box<StartThreadRequest>,
+        session_id: String,
+    },
+}
+
+impl TuiTurnAdmissionTarget {
+    pub(crate) fn session_id(&self) -> &str {
+        match self {
+            Self::Existing(thread) => thread.id(),
+            Self::New { session_id, .. } => session_id,
+        }
+    }
+
+    pub(crate) async fn start(
+        self,
+        client: &FrameworkClient,
+        request: psychevo::TurnRequest,
+    ) -> psychevo::Result<psychevo::TurnHandle> {
+        match self {
+            Self::Existing(thread) => thread.start_turn(request).await,
+            Self::New { request: start, .. } => {
+                client.start_thread_with_turn(*start, request).await
+            }
+        }
+    }
+}
+
+pub(crate) async fn resolve_tui_turn_admission_target(
+    client: &FrameworkClient,
+    current_session: Option<&str>,
+    force_new_once: bool,
+    cwd: &std::path::Path,
+) -> psychevo::Result<TuiTurnAdmissionTarget> {
+    if let Some(thread_id) = current_session
+        && let Some(thread) = client.try_resume_thread(thread_id.to_string()).await?
+    {
+        return Ok(TuiTurnAdmissionTarget::Existing(thread));
+    }
+    if !force_new_once
+        && let Some(snapshot) = client
+            .list_threads(ThreadListQuery {
+                cwd: Some(cwd.to_path_buf()),
+                archived: false,
+                sources: TUI_CONTINUE_SESSION_SOURCES
+                    .iter()
+                    .map(|source| (*source).to_string())
+                    .collect(),
+                limit: 1,
+                ..ThreadListQuery::default()
+            })
+            .await?
+            .threads
+            .into_iter()
+            .next()
+    {
+        return Ok(TuiTurnAdmissionTarget::Existing(
+            client.resume_thread(snapshot.id).await?,
+        ));
+    }
+    let session_id = uuid::Uuid::now_v7().to_string();
+    let mut request = StartThreadRequest::new(cwd);
+    request.source = "tui".to_string();
+    request.metadata = Some(serde_json::json!({
+        "caller": "pevo TUI",
+        "pid": std::process::id(),
+    }));
+    let request = request.with_initial_context(session_id.clone(), None, BTreeMap::new());
+    Ok(TuiTurnAdmissionTarget::New {
+        request: Box::new(request),
+        session_id,
+    })
+}
 
 impl TuiApp {
-    pub(crate) async fn record_mission_metadata(
-        &mut self,
+    pub(crate) fn mission_registration(
+        &self,
         team: Option<&str>,
         goal: &str,
-    ) -> Result<()> {
-        let parent_session_id = self.ensure_mission_parent_session().await?;
+    ) -> Result<AgentMissionRegistration> {
         let mission_id = uuid::Uuid::now_v7().to_string();
         let metadata = Some(serde_json::json!({"source": "tui:/mission"}));
-        if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
+        let request = if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
             let options = AgentDiscoveryOptions {
                 home: self.home.clone(),
                 cwd: self.cwd.clone(),
@@ -27,69 +119,32 @@ impl TuiApp {
                 .file_path
                 .as_ref()
                 .map(|path| path.display().to_string());
-            self.state_runtime
-                .create_agent_team_run(AgentTeamRunInput {
-                    id: &team_id,
-                    parent_session_id: &parent_session_id,
-                    mission_run_id: Some(&mission_id),
-                    team_name: &team.name,
-                    description: Some(&team.description),
-                    source_path: source_path.as_deref(),
-                    leader_agent_name: &team.leader,
+            AgentMissionRegistration {
+                id: mission_id,
+                goal: goal.to_string(),
+                lead_agent_name: team.leader.clone(),
+                team: Some(AgentTeamRegistration {
+                    id: team_id,
+                    name: team.name.clone(),
+                    description: Some(team.description.clone()),
+                    source_path,
+                    leader_agent_name: team.leader.clone(),
                     members,
                     max_parallel_agents: team.max_parallel_agents,
-                    status: "running",
-                    metadata: metadata.clone(),
-                })
-                .await?;
-            self.state_runtime
-                .create_agent_mission_run(AgentMissionRunInput {
-                    id: &mission_id,
-                    parent_session_id: &parent_session_id,
-                    team_run_id: Some(&team_id),
-                    team_name: Some(&team.name),
-                    goal,
-                    lead_agent_name: &team.leader,
-                    status: "running",
-                    metadata,
-                })
-                .await?;
+                }),
+                metadata,
+            }
         } else {
             let lead_agent_name = self.current_agent.as_deref().unwrap_or("general");
-            self.state_runtime
-                .create_agent_mission_run(AgentMissionRunInput {
-                    id: &mission_id,
-                    parent_session_id: &parent_session_id,
-                    team_run_id: None,
-                    team_name: None,
-                    goal,
-                    lead_agent_name,
-                    status: "running",
-                    metadata,
-                })
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn ensure_mission_parent_session(&mut self) -> Result<String> {
-        if let Some(session_id) = self.current_session.clone()
-            && self
-                .state_runtime
-                .session_summary(&session_id)
-                .await?
-                .is_some()
-        {
-            return Ok(session_id);
-        }
-        let session_id = self
-            .state_runtime
-            .create_session_with_metadata(&self.cwd, "tui", "pending", "pending", None)
-            .await?;
-        self.current_session = Some(session_id.clone());
-        self.current_session_title = None;
-        self.clear_new_session_draft();
-        Ok(session_id)
+            AgentMissionRegistration {
+                id: mission_id,
+                goal: goal.to_string(),
+                lead_agent_name: lead_agent_name.to_string(),
+                team: None,
+                metadata,
+            }
+        };
+        Ok(request)
     }
 
     pub(crate) async fn submit_shell_command(&mut self, command: String) -> Result<()> {
@@ -105,35 +160,28 @@ impl TuiApp {
         )));
         let turn_for_sink = Arc::clone(&turn);
         let stdout_for_sink = Arc::clone(&stdout);
-        let sink: RunStreamSink = Arc::new(move |event| {
+        let emit = move |event: ShellCommandEvent| {
             let mut turn = turn_for_sink.lock().expect("turn lock poisoned");
             let mut stdout = stdout_for_sink.lock().expect("stdout lock poisoned");
-            let _ = turn.render_event(&event, &mut *stdout);
-        });
-        let (_control_handle, control) = run_control();
-        let result = run_user_shell_command_streaming_controlled(
-            UserShellOptions {
-                cwd: self.cwd.clone(),
-                command,
-                context: Some(self.user_shell_context_options()),
-                inject_into: None,
-            },
-            sink,
-            control,
-        )
-        .await?;
+            let _ = turn.render_shell_event(&event, &mut *stdout);
+        };
+        let shell = self
+            .runtime
+            .client()
+            .shell_command(self.shell_command_request(command))?;
+        let result = shell.run(emit).await?;
         {
             let mut turn = turn.lock().expect("turn lock poisoned");
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
             turn.finish(&mut *stdout)?;
         }
-        if let Some(session_id) = result.session_id {
+        if let Some(session_id) = result.thread_id {
             self.current_session = Some(session_id);
             self.reset_live_agent_reload_poll();
             self.refresh_current_session_title().await?;
             self.clear_new_session_draft();
         }
-        if result.outcome != Outcome::Normal || result.tool_failures > 0 {
+        if result.outcome != ShellCommandOutcome::Completed || result.tool_failures > 0 {
             self.had_error = true;
         }
         Ok(())
@@ -146,8 +194,19 @@ impl TuiApp {
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
-        if ui.running.is_some() || self.compaction_task.is_some() {
-            self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
+        self.start_fullscreen_turn_with_mission(ui, prompt, display_prompt, images, None)
+    }
+
+    pub(crate) fn start_fullscreen_turn_with_mission(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        prompt: String,
+        display_prompt: String,
+        images: Vec<PendingImageAttachment>,
+        mission: Option<AgentMissionRegistration>,
+    ) -> Result<()> {
+        if ui.foreground_turn_active() || self.compaction_task.is_some() {
+            self.queue_fullscreen_prompt_with_mission(ui, prompt, display_prompt, images, mission);
             return Ok(());
         }
         let image_inputs = images
@@ -162,75 +221,54 @@ impl TuiApp {
         let optimistic_start = ui.transcript.len();
         ui.push_user_with_images(display_prompt.clone(), &images);
         ui.mark_optimistic_rows_from(optimistic_start);
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (approval_tx, approval_rx) = mpsc::unbounded_channel();
-        ui.approval_rx = Some(approval_rx);
-        let (control_handle, control) = run_control();
-        let mut request = self.framework_turn_request_with_images(prompt, image_inputs);
-        request = request
-            .with_prompt_display(prompt_display_metadata(display_prompt, &images, &self.cwd))
-            .with_approval(
+        let cancellation = TurnAdmissionCancellation::new();
+        let request = self
+            .framework_turn_request_with_images(prompt, image_inputs)
+            .with_prompt_display(prompt_display_metadata(&display_prompt, &images, &self.cwd))
+            .with_framework_context(Some(self.home.join("snapshots")), None, Vec::new(), None)
+            .with_admission_cancellation(cancellation.clone());
+        let framework = self.runtime.client().clone();
+        let current_session = self.current_session.clone();
+        let force_new_once = self.force_new_once;
+        let cwd = self.cwd.clone();
+        let task = tokio::spawn(async move {
+            let target = resolve_tui_turn_admission_target(
+                &framework,
+                current_session.as_deref(),
+                force_new_once,
+                &cwd,
+            )
+            .await?;
+            let session_id = target.session_id().to_string();
+            let (approval_tx, approval_rx) = mpsc::unbounded_channel();
+            let request = if let Some(mission) = mission {
+                request.with_admission_mission(mission)
+            } else {
+                request
+            };
+            let request = request.with_approval(
                 Some(Arc::new(TuiApprovalHandler {
-                    session_id: self.current_session.clone(),
+                    session_id: Some(session_id.clone()),
                     sender: approval_tx,
                 })),
                 true,
             );
-        request.__set_adapter_options(psychevo::AdapterTurnOptions {
-            snapshot_root: Some(self.home.join("snapshots")),
-            run_stream_observer: Some(Arc::new(move |event| {
-                let _ = tx.send(event);
-            })),
-            ..Default::default()
-        });
-        request.__set_control(control_handle.clone(), control);
-        let framework = self.framework.clone();
-        let current_session = self.current_session.clone();
-        let force_new_once = self.force_new_once;
-        let cwd = self.cwd.clone();
-        let db_path = self.db_path.clone();
-        let task = tokio::spawn(async move {
-            let thread = if let Some(thread_id) = current_session
-                && let Ok(thread) = framework.resume_thread(thread_id).await
-            {
-                thread
-            } else if !force_new_once
-                && let Some(snapshot) = framework
-                    .list_threads(ThreadListQuery {
-                        cwd: Some(cwd.clone()),
-                        archived: false,
-                        sources: TUI_CONTINUE_SESSION_SOURCES
-                            .iter()
-                            .map(|source| (*source).to_string())
-                            .collect(),
-                        limit: 1,
-                        ..ThreadListQuery::default()
-                    })
-                    .await?
-                    .threads
-                    .into_iter()
-                    .next()
-            {
-                framework.resume_thread(snapshot.id).await?
-            } else {
-                let mut start = StartThreadRequest::new(&cwd);
-                start.source = "tui".to_string();
-                framework.start_thread(start).await?
-            };
-            let handle = thread.start_turn(request).await?;
-            handle
-                .wait()
-                .await
-                .map(|result| framework_result_to_runtime(result, db_path, cwd))
+            let handle = target.start(&framework, request).await?;
+            Ok(StartedTurn {
+                handle,
+                approval_rx,
+            })
         });
         ui.scroll_to_bottom();
-        ui.running = Some(RunningTurn {
+        ui.approval_rx = None;
+        let queue_owner_id = format!("starting:{}", uuid::Uuid::now_v7());
+        ui.starting_turn = Some(StartingTurn {
             session_id: self.current_session.clone(),
-            control: control_handle,
-            selector: None,
-            turn_id: None,
-            events: RunningTurnEvents::Runtime(rx),
-            task: RunningTask::Agent(task),
+            queue_owner_id,
+            display_prompt,
+            images,
+            cancellation,
+            task,
         });
         ui.start_assistant();
         ui.refresh_sidebar(self);
@@ -242,7 +280,7 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         command: String,
     ) -> Result<()> {
-        if ui.running.is_some() || self.compaction_task.is_some() {
+        if ui.foreground_turn_active() || self.compaction_task.is_some() {
             self.queue_fullscreen_shell(ui, command);
             return Ok(());
         }
@@ -250,27 +288,20 @@ impl TuiApp {
             ui.push_status(USER_SHELL_HELP);
             return Ok(());
         }
-        let (tx, rx) = mpsc::unbounded_channel();
-        let sink: RunStreamSink = Arc::new(move |event| {
-            let _ = tx.send(event);
-        });
-        let (control_handle, control) = run_control();
-        let options = UserShellOptions {
-            cwd: self.cwd.clone(),
-            command,
-            context: Some(self.user_shell_context_options()),
-            inject_into: None,
-        };
-        let task = tokio::spawn(async move {
-            run_user_shell_command_streaming_controlled(options, sink, control).await
-        });
+        let shell = self
+            .runtime
+            .client()
+            .shell_command(self.shell_command_request(command))?;
+        let control = shell.control();
+        let (rx, emit) = presented_shell_event_channel();
+        let task = tokio::spawn(async move { shell.run(emit).await });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),
-            control: control_handle,
+            control: control.into(),
             selector: None,
             turn_id: None,
-            events: RunningTurnEvents::Runtime(rx),
+            events: RunningTurnEvents::Shell(rx),
             task: RunningTask::UserShell(task),
         });
         ui.start_assistant();
@@ -287,27 +318,47 @@ impl TuiApp {
             ui.push_status(USER_SHELL_HELP);
             return Ok(());
         }
-        let Some(inject_into) = ui.running.as_ref().map(|running| running.control.clone()) else {
+        let Some(running) = ui.running.as_ref() else {
             return self.start_fullscreen_shell(ui, command);
         };
-        let (tx, rx) = mpsc::unbounded_channel();
-        let sink: RunStreamSink = Arc::new(move |event| {
-            let _ = tx.send(event);
-        });
-        let (control_handle, control) = run_control();
-        let options = UserShellOptions {
-            cwd: self.cwd.clone(),
-            command,
-            context: Some(self.user_shell_context_options()),
-            inject_into: Some(inject_into),
+        let owner_session_id = running
+            .session_id
+            .clone()
+            .or_else(|| self.current_session.clone());
+        let pending = PendingAuxiliaryShellCommand {
+            owner_session_id: owner_session_id.clone(),
+            owner_turn_id: running.turn_id.clone(),
+            request: self.shell_command_request_for_session(command, owner_session_id.clone()),
         };
-        let task = tokio::spawn(async move {
-            run_user_shell_command_streaming_controlled(options, sink, control).await
-        });
-        ui.scroll_to_bottom();
+        let owner_control = running.control.clone();
+        self.start_owned_auxiliary_fullscreen_shell(ui, owner_session_id, owner_control, pending)
+    }
+
+    fn start_owned_auxiliary_fullscreen_shell(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session_id: Option<String>,
+        owner_control: RunningTurnControl,
+        pending: PendingAuxiliaryShellCommand,
+    ) -> Result<()> {
+        let agent_handle = owner_control
+            .agent_handle()
+            .ok_or_else(|| anyhow!("active Framework Turn control is unavailable"))?;
+        let request = match owner_session_id.as_deref() {
+            Some(session_id) => pending.request.thread(session_id),
+            None => pending.request,
+        }
+        .inject_into(agent_handle);
+        let shell = self.runtime.client().shell_command(request)?;
+        let control = shell.control();
+        let (rx, emit) = presented_shell_event_channel();
+        let task = tokio::spawn(async move { shell.run(emit).await });
+        if self.current_session.as_deref() == owner_session_id.as_deref() {
+            ui.scroll_to_bottom();
+        }
         ui.auxiliary_shell_tasks.push(AuxiliaryShellTask {
-            session_id: self.current_session.clone(),
-            control: control_handle,
+            session_id: owner_session_id,
+            control,
             rx,
             task,
         });
@@ -328,8 +379,56 @@ impl TuiApp {
         {
             return Ok(());
         }
-        while let Some(command) = ui.pending_auxiliary_shell_commands.pop_front() {
-            self.start_auxiliary_fullscreen_shell(ui, command)?;
+        let running = ui.running.as_ref().expect("checked Agent Turn");
+        let owner_session_id = running
+            .session_id
+            .clone()
+            .or_else(|| self.current_session.clone());
+        let owner_turn_id = running.turn_id.clone();
+        let owner_control = running.control.clone();
+        self.start_pending_auxiliary_shells_for_owner(
+            ui,
+            owner_session_id,
+            owner_turn_id,
+            owner_control,
+        )
+    }
+
+    pub(crate) fn start_pending_auxiliary_shells_for_agent(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        agent: &crate::tui::AuxiliaryAgentTask,
+    ) -> Result<()> {
+        self.start_pending_auxiliary_shells_for_owner(
+            ui,
+            agent.session_id.clone(),
+            agent.turn_id.clone(),
+            agent.control.clone(),
+        )
+    }
+
+    fn start_pending_auxiliary_shells_for_owner(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session_id: Option<String>,
+        owner_turn_id: Option<String>,
+        owner_control: RunningTurnControl,
+    ) -> Result<()> {
+        while let Some(index) = ui
+            .pending_auxiliary_shell_commands
+            .iter()
+            .position(|pending| {
+                pending.matches_owner(owner_session_id.as_deref(), owner_turn_id.as_deref())
+            })
+        {
+            let pending = ui.pending_auxiliary_shell_commands[index].clone();
+            self.start_owned_auxiliary_fullscreen_shell(
+                ui,
+                owner_session_id.clone(),
+                owner_control.clone(),
+                pending,
+            )?;
+            ui.pending_auxiliary_shell_commands.remove(index);
         }
         Ok(())
     }
@@ -340,11 +439,16 @@ impl TuiApp {
         instructions: Option<String>,
         command_echo: String,
     ) -> Result<()> {
+        if ui.foreground_turn_active() {
+            self.queue_fullscreen_compaction(ui, instructions, command_echo);
+            ui.set_ephemeral_status("compaction queued");
+            return Ok(());
+        }
         if self.current_session.is_none() {
             ui.push_command_result(command_echo, None, "error: no session context yet", true);
             return Ok(());
         }
-        if ui.running.is_some() || self.compaction_task.is_some() {
+        if self.compaction_task.is_some() {
             self.queue_fullscreen_compaction(ui, instructions, command_echo);
             ui.set_ephemeral_status("compaction queued");
             return Ok(());
@@ -383,7 +487,7 @@ impl TuiApp {
             instructions,
             force,
         };
-        let framework = self.framework.clone();
+        let framework = self.runtime.client().clone();
         let task_session_id = session_id.clone();
         let task = tokio::spawn(async move {
             let thread = framework
@@ -414,7 +518,7 @@ impl TuiApp {
             .current_session
             .clone()
             .ok_or_else(|| anyhow!("no session context yet"))?;
-        let thread = self.framework.resume_thread(session).await?;
+        let thread = self.runtime.client().resume_thread(session).await?;
         let result = thread
             .compact(CompactThreadRequest {
                 config_path: self.config_path.clone(),
@@ -524,7 +628,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push("--format json".to_string());
             }
             if options.include
-                != psychevo::__product::sessions::SessionExportIncludeSet::default_for(
+                != psychevo::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Export,
                 )
             {
@@ -538,7 +642,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push(path.clone());
             }
             if options.include
-                != psychevo::__product::sessions::SessionExportIncludeSet::default_for(
+                != psychevo::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Share,
                 )
             {

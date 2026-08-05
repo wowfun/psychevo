@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use super::{BrowserSession, gateway_now_ms};
+use crate::gateway_now_ms;
+
+use super::binding::BrowserSession;
 
 pub(super) const MAX_BROWSER_SESSIONS: usize = 2_048;
 pub(super) const BROWSER_SESSION_ABSOLUTE_TTL_MS: i64 = 24 * 60 * 60 * 1_000;
@@ -117,7 +119,7 @@ impl BrowserSessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GatewaySource;
+    use psychevo_gateway_protocol::source::GatewaySource;
     use std::path::PathBuf;
 
     fn session(path: &str) -> BrowserSession {

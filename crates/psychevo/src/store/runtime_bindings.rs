@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use psychevo_agent_core::now_ms;
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{Row, Sqlite, Transaction};
 
 use crate::error::{Error, Result};
 
@@ -76,94 +76,6 @@ impl StateRuntime {
             )));
         }
         Ok(record)
-    }
-
-    /// Creates a fresh Thread binding from a resolved parent snapshot.
-    ///
-    /// Immutable Agent/Profile identity is copied, while runtime session identity
-    /// and adapter observations are intentionally reset. The caller supplies the
-    /// parent's resolved live controls so the child requests the same effective
-    /// values from its new runtime session.
-    pub async fn create_gateway_runtime_binding_from_parent_snapshot(
-        &self,
-        parent_thread_id: &str,
-        child_thread_id: &str,
-        effective_controls: &BTreeMap<String, Value>,
-    ) -> Result<GatewayRuntimeBindingRecord> {
-        if parent_thread_id == child_thread_id {
-            return Err(Error::Message(
-                "runtime binding snapshot requires a distinct child Thread".to_string(),
-            ));
-        }
-        let parent = self
-            .gateway_runtime_binding(parent_thread_id)
-            .await?
-            .ok_or_else(|| {
-                Error::Message(format!(
-                    "resolved runtime binding not found for parent Thread `{parent_thread_id}`"
-                ))
-            })?;
-        if parent.status != GatewayRuntimeBindingStatus::Resolved {
-            return Err(Error::Message(format!(
-                "runtime binding for parent Thread `{parent_thread_id}` is unresolved"
-            )));
-        }
-        let child = self
-            .session_summary(child_thread_id)
-            .await?
-            .ok_or_else(|| Error::Message(format!("session not found: {child_thread_id}")))?;
-        if child.cwd != parent.cwd {
-            return Err(Error::Message(format!(
-                "runtime binding snapshot cwd does not match child Thread `{child_thread_id}`"
-            )));
-        }
-
-        validate_runtime_control_map("inherited preference", effective_controls)?;
-        let inherited_preferences_json = (!effective_controls.is_empty())
-            .then(|| serde_json::to_string(effective_controls))
-            .transpose()?;
-        let now = now_ms();
-        let inserted = self
-            .runtime_binding_write(
-                sqlx::query(
-                    r#"
-                INSERT INTO gateway_runtime_bindings (
-                    thread_id, resolution_status, agent_ref, agent_fingerprint,
-                    agent_definition_json, runtime_ref, backend_kind, native_kind,
-                    native_session_id, cwd, profile_fingerprint, profile_revision,
-                    profile_config_json, adapter_kind, adapter_revision, ownership,
-                    parent_thread_id, binding_revision, thread_preferences_json,
-                    runtime_observed_json, control_revision, unresolved_reason,
-                    created_at_ms, updated_at_ms
-                )
-                SELECT ?1, resolution_status, agent_ref, agent_fingerprint,
-                       agent_definition_json, runtime_ref, backend_kind, native_kind,
-                       NULL, cwd, profile_fingerprint, profile_revision,
-                       profile_config_json, adapter_kind, adapter_revision, ownership,
-                       NULL, 1, ?2, NULL, 1, NULL, ?3, ?3
-                FROM gateway_runtime_bindings
-                WHERE thread_id = ?4 AND resolution_status = 'resolved'
-                ON CONFLICT(thread_id) DO NOTHING
-                "#,
-                )
-                .bind(child_thread_id)
-                .bind(inherited_preferences_json)
-                .bind(now)
-                .bind(parent_thread_id),
-            )
-            .await?;
-        if inserted != 1 {
-            return Err(Error::Message(format!(
-                "runtime binding conflict for child Thread `{child_thread_id}`"
-            )));
-        }
-        self.gateway_runtime_binding(child_thread_id)
-            .await?
-            .ok_or_else(|| {
-                Error::Message(format!(
-                    "runtime binding not found after snapshot: {child_thread_id}"
-                ))
-            })
     }
 
     pub async fn resolve_gateway_runtime_binding(
@@ -537,6 +449,72 @@ impl StateRuntime {
     }
 }
 
+pub(super) async fn snapshot_resolved_writable_runtime_binding_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    parent_thread_id: &str,
+    child_thread_id: &str,
+    expected_binding_revision: i64,
+    expected_control_revision: i64,
+    effective_controls: &BTreeMap<String, Value>,
+    now: i64,
+) -> Result<GatewayRuntimeBindingRecord> {
+    if expected_binding_revision < 1 || expected_control_revision < 1 {
+        return Err(Error::Message(
+            "runtime binding snapshot revisions must be positive".to_string(),
+        ));
+    }
+    validate_runtime_control_map("inherited preference", effective_controls)?;
+    let inherited_preferences_json = (!effective_controls.is_empty())
+        .then(|| serde_json::to_string(effective_controls))
+        .transpose()?;
+    let inserted = sqlx::query(
+        r#"
+        INSERT INTO gateway_runtime_bindings (
+            thread_id, resolution_status, agent_ref, agent_fingerprint,
+            agent_definition_json, runtime_ref, backend_kind, native_kind,
+            native_session_id, cwd, profile_fingerprint, profile_revision,
+            profile_config_json, adapter_kind, adapter_revision, ownership,
+            parent_thread_id, binding_revision, thread_preferences_json,
+            runtime_observed_json, control_revision, unresolved_reason,
+            created_at_ms, updated_at_ms
+        )
+        SELECT ?1, 'resolved', agent_ref, agent_fingerprint,
+               agent_definition_json, runtime_ref, backend_kind, native_kind,
+               NULL, cwd, profile_fingerprint, profile_revision,
+               profile_config_json, adapter_kind, adapter_revision, 'read_write',
+               NULL, 1, ?2, NULL, 1, NULL, ?3, ?3
+        FROM gateway_runtime_bindings
+        WHERE thread_id = ?4
+          AND resolution_status = 'resolved'
+          AND ownership = 'read_write'
+          AND binding_revision = ?5
+          AND control_revision = ?6
+          AND cwd = (SELECT cwd FROM sessions WHERE id = ?1)
+        "#,
+    )
+    .bind(child_thread_id)
+    .bind(inherited_preferences_json)
+    .bind(now)
+    .bind(parent_thread_id)
+    .bind(expected_binding_revision)
+    .bind(expected_control_revision)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    if inserted != 1 {
+        return Err(Error::Message(format!(
+            "resolved writable runtime binding snapshot no longer matches parent Thread `{parent_thread_id}`"
+        )));
+    }
+
+    let sql = runtime_binding_select_sql("WHERE thread_id = ?1");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(child_thread_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    gateway_runtime_binding_from_row(&row)
+}
+
 fn validate_runtime_control_cas(
     record: &GatewayRuntimeBindingRecord,
     expected_binding_revision: i64,
@@ -578,7 +556,7 @@ fn validate_runtime_control_map(label: &str, values: &BTreeMap<String, Value>) -
     Ok(())
 }
 
-fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Result<()> {
+pub(super) fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Result<()> {
     for (field, value) in [
         ("thread_id", input.thread_id),
         ("agent_fingerprint", input.agent_fingerprint),

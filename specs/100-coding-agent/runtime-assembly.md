@@ -116,25 +116,23 @@ exceeds the budget is truncated and marked in the model-visible context.
 
 ## Live Run Provider
 
-The live run entrypoint uses provider/model resolution from
+A live Framework Turn uses provider/model resolution from
 [120 Provider Registry](../120-provider-registry/spec.md). Runtime receives a
 concrete provider configuration and assembles the same coding-agent toolset and
-SQLite persistence sink used by deterministic runtime harnesses.
+SQLite persistence sink used by deterministic runtime harnesses. Product and
+validation callers enter through `Application`/`Thread`; no separate public
+Native run-loop entrypoint exists.
 
 Live run does not use deterministic fake scripts. It sends caller prompt input
 and retained session history to the resolved Chat-compatible provider.
 
 ## Control Signals
 
-Deterministic runtime validation can exercise these internal control modes:
-
-- `none`
-- `stop-after-turn`
-- `abort-on-agent-start`
-
-`stop-after-turn` finishes the current assistant response and tool batch, then
-ends with outcome `stopped` before another model generation. `abort-on-agent-start`
-requests abort after `agent_start`; the invocation must end with outcome
+Deterministic runtime validation exercises stop and abort through the same
+runtime control handle used by product callers; there is no parallel smoke-only
+control mode in the persistence sink. Stop finishes the current assistant
+response and tool batch before another model generation and ends with outcome
+`stopped`. Abort requests immediate cancellation and ends with outcome
 `aborted`.
 
 ## Related Topics

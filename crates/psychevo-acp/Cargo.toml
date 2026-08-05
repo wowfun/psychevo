@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.psychevo]
+architecture-layer = 3
+
 [lib]
 name = "psychevo_acp"
 path = "src/lib.rs"
@@ -17,8 +20,11 @@ path = "src/main.rs"
 [dependencies]
 agent-client-protocol.workspace = true
 futures.workspace = true
-psychevo = { path = "../psychevo", features = ["product"] }
+psychevo = { path = "../psychevo", features = ["native-keyring"] }
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true

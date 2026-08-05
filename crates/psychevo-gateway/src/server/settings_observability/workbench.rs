@@ -1,14 +1,42 @@
-async fn settings_read_value(
+use std::path::{Path, PathBuf};
+
+use psychevo::Error;
+use psychevo::agents::resolve_agent_definition;
+use psychevo::config::REASONING_EFFORT_VALUES;
+use psychevo::model_state::ModelState;
+use psychevo::{
+    Configuration, ConfigurationQuery, PermissionMode, RunMode, SetThreadMainAgentSelection,
+    ThreadMainAgentSelection,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+
+use super::super::channels::channel_list_result_from_value;
+use super::super::scope_session::{ResolvedScope, gateway_backend_info_for_thread};
+use super::models::model_options_with_cached_catalog;
+use super::{WebState, discover_gateway_agents};
+
+pub(in super::super) async fn settings_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo::Result<Value> {
-    let normalized_cwd = psychevo::__product::platform::normalized_native_path(cwd);
+    let normalized_cwd = psychevo::host_paths::normalized_native_path(cwd);
     let cwd = normalized_cwd.as_path();
-    let controls = workbench_controls_value(state, cwd, thread_id).await?;
+    let mut query = ConfigurationQuery::new(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
+    let controls = workbench_controls_value(state, cwd, thread_id, &configuration).await?;
     let project = workbench_project_value(cwd);
-    let channels = channel_list_result_for_cwd(state, cwd).unwrap_or_default();
-    let web_search = web_search_settings_value(state, cwd)?;
+    let channels = configuration
+        .channels()
+        .and_then(|value| channel_list_result_from_value(state, value))
+        .unwrap_or_default();
+    let web_search = web_search_settings_result(
+        configuration
+            .web_search_settings()
+            .unwrap_or_else(|_| default_web_search_settings()),
+    );
     Ok(json!({
         "cwd": cwd.display().to_string(),
         "project": project,
@@ -20,20 +48,33 @@ async fn settings_read_value(
     }))
 }
 
-fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<Value> {
-    let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo::__product::configuration::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
-        json!({
-            "execution": "local", "backend": "exa", "external_access": "live",
-            "context_size": "medium", "return_token_budget": "default",
-            "content_types": ["text"], "allowed_domains": [], "blocked_domains": [],
-            "background_storage_acknowledged": false,
-            "location": {"country":"", "region":"", "city":"", "timezone":""},
-            "image": {"max_results": 3, "caption": true},
-            "credentials": {"exa":"missing", "parallel":"missing", "brave":"missing", "searxng":"missing"}
-        })
-    });
-    Ok(json!({
+pub(in super::super) fn web_search_settings_value(
+    state: &WebState,
+    cwd: &Path,
+) -> psychevo::Result<Value> {
+    let mut query = ConfigurationQuery::new(cwd);
+    query.inherited_env = Some(state.inner.inherited_env.clone());
+    let configuration = state.inner.framework.configuration(query)?;
+    let value = configuration
+        .web_search_settings()
+        .unwrap_or_else(|_| default_web_search_settings());
+    Ok(web_search_settings_result(value))
+}
+
+fn default_web_search_settings() -> Value {
+    json!({
+        "execution": "local", "backend": "exa", "external_access": "live",
+        "context_size": "medium", "return_token_budget": "default",
+        "content_types": ["text"], "allowed_domains": [], "blocked_domains": [],
+        "background_storage_acknowledged": false,
+        "location": {"country":"", "region":"", "city":"", "timezone":""},
+        "image": {"max_results": 3, "caption": true},
+        "credentials": {"exa":"missing", "parallel":"missing", "brave":"missing", "searxng":"missing"}
+    })
+}
+
+fn web_search_settings_result(value: Value) -> Value {
+    json!({
         "execution": value["execution"],
         "backend": value["backend"],
         "externalAccess": value["external_access"],
@@ -46,13 +87,13 @@ fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<V
         "location": value["location"],
         "image": value["image"],
         "credentials": value["credentials"],
-    }))
+    })
 }
 
-fn web_search_settings_update_value(
+pub(in super::super) fn web_search_settings_update_value(
     state: &WebState,
     cwd: &Path,
-    params: wire::WebSearchSettingsUpdateParams,
+    params: wire::settings_workspace_context::WebSearchSettingsUpdateParams,
 ) -> psychevo::Result<Value> {
     let search = params.search;
     let value = json!({
@@ -68,7 +109,7 @@ fn web_search_settings_update_value(
         "location": search.location,
         "image": search.image,
     });
-    psychevo::__product::configuration::update_global_web_search_settings(
+    psychevo::config::update_global_web_search_settings(
         &state.inner.home,
         value,
         params.credential_values,
@@ -80,8 +121,8 @@ async fn workbench_controls_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo::Result<wire::WorkbenchControlsView> {
-    let options = state.run_options(cwd.to_path_buf(), None);
+    configuration: &Configuration,
+) -> psychevo::Result<wire::settings_workspace_context::WorkbenchControlsView> {
     let agent = session_control_agent(state, thread_id).await?;
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
     let cwd_key = cwd.to_string_lossy().to_string();
@@ -91,20 +132,26 @@ async fn workbench_controls_value(
     };
     let state_model = model_state.model_for(&cwd_key);
     let state_reasoning_effort = model_state.reasoning_effort_for(&cwd_key);
-    let selected = selected_configured_model(&options);
+    let selected = configuration.selected_model();
     let (config_model, config_status, config_error) = match selected {
         Ok(Some(model)) => (
             Some(format!("{}/{}", model.provider, model.model)),
-            wire::WorkbenchModelStatus::Resolved,
+            wire::settings_workspace_context::WorkbenchModelStatus::Resolved,
             None,
         ),
-        Ok(None) => (None, wire::WorkbenchModelStatus::Unconfigured, None),
-        Err(error) if model_resolution_unconfigured_error(&error.to_string()) => {
-            (None, wire::WorkbenchModelStatus::Unconfigured, None)
-        }
+        Ok(None) => (
+            None,
+            wire::settings_workspace_context::WorkbenchModelStatus::Unconfigured,
+            None,
+        ),
+        Err(error) if model_resolution_unconfigured_error(&error.to_string()) => (
+            None,
+            wire::settings_workspace_context::WorkbenchModelStatus::Unconfigured,
+            None,
+        ),
         Err(error) => (
             None,
-            wire::WorkbenchModelStatus::Error,
+            wire::settings_workspace_context::WorkbenchModelStatus::Error,
             Some(error.to_string()),
         ),
     };
@@ -114,7 +161,7 @@ async fn workbench_controls_value(
         .or(state_model)
         .or(config_model);
     let model_status = if model.is_some() {
-        wire::WorkbenchModelStatus::Resolved
+        wire::settings_workspace_context::WorkbenchModelStatus::Resolved
     } else {
         config_status
     };
@@ -123,22 +170,23 @@ async fn workbench_controls_value(
         .as_ref()
         .and_then(|selection| selection.reasoning_effort.clone())
         .or(state_reasoning_effort)
-        .or_else(|| options.reasoning_effort.clone())
         .or_else(|| Some("none".to_string()));
-    let configured = configured_models(&options).unwrap_or_default();
-    let model_details = model_options_with_cached_catalog(state, &options, &configured);
+    let configured = configuration.configured_models().unwrap_or_default();
+    let model_details = model_options_with_cached_catalog(configuration, &configured);
     let model_options = model_details
         .iter()
         .map(|model| model.value.clone())
         .collect();
     let runtime_ref = match thread_id {
-        Some(thread_id) => gateway_backend_info_for_thread(state, thread_id)
-            .await?
-            .runtime_ref,
+        Some(thread_id) => {
+            gateway_backend_info_for_thread(state, thread_id)
+                .await?
+                .runtime_ref
+        }
         None => None,
     }
     .unwrap_or_else(|| "native".to_string());
-    Ok(wire::WorkbenchControlsView {
+    Ok(wire::settings_workspace_context::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
         runtime_ref,
@@ -166,28 +214,26 @@ async fn workbench_controls_value(
 }
 
 #[derive(Debug, Clone)]
-struct ComposerModelSelection {
-    model: Option<String>,
-    reasoning_effort: Option<String>,
+pub(super) struct ComposerModelSelection {
+    pub(super) model: Option<String>,
+    pub(super) reasoning_effort: Option<String>,
 }
 
-async fn session_model_state_selection(
+pub(super) async fn session_model_state_selection(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo::Result<Option<ComposerModelSelection>> {
-    let Some(summary) = state.inner.state.session_summary(thread_id).await? else {
+    let Some(selection) = state
+        .inner
+        .framework
+        .thread_model_selection(thread_id)
+        .await?
+    else {
         return Ok(None);
     };
-    let metadata = state.inner.state.session_metadata(thread_id).await?;
-    let reasoning_effort = metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get(SESSION_COMPOSER_MODEL_METADATA_KEY))
-        .and_then(|metadata| metadata.get("reasoningEffort"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
     Ok(Some(ComposerModelSelection {
-        model: Some(format!("{}/{}", summary.provider, summary.model)),
-        reasoning_effort: normalize_reasoning_effort(reasoning_effort),
+        model: Some(format!("{}/{}", selection.provider, selection.model)),
+        reasoning_effort: selection.reasoning_effort,
     }))
 }
 
@@ -196,8 +242,9 @@ fn model_resolution_unconfigured_error(message: &str) -> bool {
         || message.contains("Psychevo home is not initialized")
 }
 
-fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {
-    wire::RuntimeConfigOptionView {
+pub(in super::super) fn native_runtime_mode_option()
+-> wire::thread_command_turn::RuntimeConfigOptionView {
+    wire::thread_command_turn::RuntimeConfigOptionView {
         id: "mode".to_string(),
         name: "Psychevo mode".to_string(),
         description: None,
@@ -206,43 +253,46 @@ fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {
         current_value: Some(RunMode::Default.as_str().to_string()),
         values: [RunMode::Default, RunMode::Plan]
             .into_iter()
-            .map(|mode| wire::RuntimeConfigOptionValueView {
-                value: mode.as_str().to_string(),
-                name: mode.as_str().to_string(),
-                description: None,
-                group: None,
-            })
+            .map(
+                |mode| wire::thread_command_turn::RuntimeConfigOptionValueView {
+                    value: mode.as_str().to_string(),
+                    name: mode.as_str().to_string(),
+                    description: None,
+                    group: None,
+                },
+            )
             .collect(),
     }
 }
 
-async fn session_control_agent(
+pub(in super::super) async fn session_control_agent(
     state: &WebState,
     thread_id: Option<&str>,
 ) -> psychevo::Result<Option<String>> {
     let Some(thread_id) = thread_id else {
         return Ok(None);
     };
-    let metadata = state.inner.state.session_metadata(thread_id).await?;
-    Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
-        LoadedMainAgent::Agent(agent) => Some(agent),
-        LoadedMainAgent::Default | LoadedMainAgent::Missing => None,
+    let selection = state
+        .inner
+        .framework
+        .resume_thread(thread_id)
+        .await?
+        .main_agent_selection()
+        .await?;
+    Ok(match selection {
+        ThreadMainAgentSelection::Agent { input } => Some(input),
+        ThreadMainAgentSelection::Default { .. } | ThreadMainAgentSelection::Missing { .. } => None,
     })
 }
 
-async fn update_session_agent_setting(
+pub(in super::super) async fn update_session_agent_setting(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
     input: Option<&str>,
 ) -> psychevo::Result<()> {
-    let summary = state
-        .inner
-        .state
-
-        .session_summary(thread_id)
-        .await?
-        .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+    let thread = state.inner.framework.resume_thread(thread_id).await?;
+    let summary = thread.summary().await?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
         return Err(Error::Message(format!(
             "session {thread_id} does not belong to {}",
@@ -250,14 +300,8 @@ async fn update_session_agent_setting(
         )));
     }
     let Some(input) = input else {
-        state
-            .inner
-            .state
-            .set_session_metadata_field(
-                thread_id,
-                SESSION_MAIN_AGENT_METADATA_KEY,
-                Some(main_agent_default_metadata()),
-            )
+        thread
+            .set_main_agent_selection(SetThreadMainAgentSelection::Default)
             .await?;
         return Ok(());
     };
@@ -278,40 +322,33 @@ async fn update_session_agent_setting(
             "shadowed agent definitions cannot be used as main: {input}"
         )));
     }
-    let agent =
-        resolve_agent_definition(&catalog, input, &scope.cwd, &state.inner.inherited_env)?;
-    state
-        .inner
-        .state
-        .set_session_metadata_field(
-            thread_id,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_metadata(
-                input,
-                &agent.name,
-                agent.source,
-                agent.file_path.as_ref(),
-            )),
-        )
+    let agent = resolve_agent_definition(&catalog, input, &scope.cwd, &state.inner.inherited_env)?;
+    thread
+        .set_main_agent_selection(SetThreadMainAgentSelection::Agent {
+            input: input.to_string(),
+            name: agent.name,
+            source: agent.source,
+            path: agent.file_path,
+        })
         .await?;
     Ok(())
 }
 
-fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
-    let cwd = psychevo::__product::platform::normalized_native_path(cwd);
-    wire::WorkbenchProjectView {
+fn workbench_project_value(cwd: &Path) -> wire::settings_workspace_context::WorkbenchProjectView {
+    let cwd = psychevo::host_paths::normalized_native_path(cwd);
+    wire::settings_workspace_context::WorkbenchProjectView {
         path: cwd.display().to_string(),
         display_path: display_cwd(&cwd),
         branch: current_git_branch(&cwd),
     }
 }
 
-fn display_cwd(cwd: &Path) -> String {
-    let cwd_display = psychevo::__product::platform::display_path_for_native_path(cwd);
+pub(in super::super) fn display_cwd(cwd: &Path) -> String {
+    let cwd_display = psychevo::host_paths::display_path_for_native_path(cwd);
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
         && let Some(display) = display_relative_to_home(
             &cwd_display,
-            &psychevo::__product::platform::display_path_for_native_path(&home),
+            &psychevo::host_paths::display_path_for_native_path(&home),
         )
     {
         return display;
@@ -319,7 +356,10 @@ fn display_cwd(cwd: &Path) -> String {
     cwd_display
 }
 
-fn display_relative_to_home(cwd_display: &str, home_display: &str) -> Option<String> {
+pub(in super::super) fn display_relative_to_home(
+    cwd_display: &str,
+    home_display: &str,
+) -> Option<String> {
     let home = if home_display == "/" {
         home_display
     } else {

@@ -1,15 +1,24 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::{
+    attach_no_steer_running, drain_side_delete_tasks, drain_starting_turn_cleanups,
+    draw_fullscreen_for_test, install_pending_turn_admission, test_app,
+};
+use crate::tui::tests::{
+    insert_tui_message_with_metadata, start_thread_fixture, test_app_with_models,
+};
+use crate::tui::{
+    BottomPanel, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind, PermissionMode, Rect, RunMode, SessionListView, SideConversationSurface,
+    SlashCommand, StartSideConversationRequest, ThreadModelSelection, TranscriptKind,
+    TranscriptRow, new_textarea, textarea_text, textarea_with_text,
+};
+use std::time::Duration;
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent");
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     insert_tui_message_with_metadata(
         &app.db_path,
         &parent,
@@ -41,6 +50,18 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
         .clone();
     assert_eq!(app.current_session.as_deref(), Some(side.as_str()));
     assert!(ui.transcript.is_empty());
+    assert!(
+        app.runtime
+            .client()
+            .resume_thread(&side)
+            .await
+            .expect("side Thread")
+            .agent_binding()
+            .await
+            .expect("side binding")
+            .is_none(),
+        "the TUI side conversation must remain unbound"
+    );
     assert!(
         app.tui_sessions(SessionListView::Active)
             .await
@@ -81,11 +102,11 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
 
     assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
     assert!(app.side_conversation.is_none());
+    drain_side_delete_tasks(&mut app, &mut ui).await;
     assert!(
-        StateRuntime::open(&app.db_path)
-            .await
-            .expect("store")
-            .session_summary(&side)
+        app.runtime
+            .client()
+            .thread_summary(&side)
             .await
             .expect("summary")
             .is_none()
@@ -98,17 +119,67 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
 }
 
 #[tokio::test]
+pub(crate) async fn fullscreen_btw_ctrl_c_cancels_pending_admission_before_returning_parent() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    app.current_session = Some(parent.clone());
+    let mut ui = FullscreenUi::new(&app);
+    app.handle_fullscreen_command(&mut ui, SlashCommand::Btw(None))
+        .await
+        .expect("btw");
+    let side = app
+        .side_conversation
+        .as_ref()
+        .expect("side state")
+        .side_thread_id
+        .clone();
+    let release = install_pending_turn_admission(&app, &mut ui, "old side prompt");
+    ui.set_composer_text("newer parent composer draft");
+
+    app.handle_fullscreen_key(
+        &mut ui,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    )
+    .await
+    .expect("ctrl-c");
+
+    assert!(release.send(()).is_ok(), "cleanup did not retain admission");
+    assert!(ui.starting_turn.is_none());
+    assert_eq!(ui.starting_turn_cleanups.len(), 1);
+    assert!(ui.running.is_none());
+    assert!(app.side_conversation.is_none());
+    assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
+    assert_eq!(textarea_text(&ui.textarea), "newer parent composer draft");
+    drain_side_delete_tasks(&mut app, &mut ui).await;
+    assert!(
+        app.runtime
+            .client()
+            .thread_summary(&side)
+            .await
+            .expect("summary")
+            .is_none()
+    );
+
+    drain_starting_turn_cleanups(&mut app, &mut ui).await;
+    assert!(ui.starting_turn_cleanups.is_empty());
+    assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
+    assert_eq!(textarea_text(&ui.textarea), "newer parent composer draft");
+    assert!(
+        ui.transcript
+            .iter()
+            .all(|row| !row.text.contains("old side prompt"))
+    );
+}
+
+#[tokio::test]
 pub(crate) async fn fullscreen_btw_detaches_running_parent() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .await
-        .expect("parent");
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
-    attach_pending_agent_running(&mut ui);
+    attach_no_steer_running(&app, &mut ui);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Btw(None))
         .await
@@ -134,22 +205,29 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
 pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let parent = store
-        .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+    let parent = start_thread_fixture(&app, &app.cwd, "tui", "mock-model", "mock", None).await;
+    let side = app
+        .runtime
+        .client()
+        .resume_thread(&parent)
         .await
-        .expect("parent");
-    let side = store
-        .create_child_session_with_metadata(
-            &parent,
-            &app.cwd,
-            TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-            "mock-model",
-            "mock",
-            Some(serde_json::json!({SIDE_CONVERSATION_METADATA_KEY: {"ephemeral": true}})),
-        )
+        .expect("parent Thread")
+        .start_side_conversation(StartSideConversationRequest {
+            surface: SideConversationSurface::Tui,
+            model: ThreadModelSelection {
+                provider: "mock".to_string(),
+                model: "mock-model".to_string(),
+                reasoning_effort: None,
+            },
+            mode: RunMode::Default,
+            permission_mode: PermissionMode::Default,
+            selected_agent: None,
+            agent_binding: None,
+        })
         .await
-        .expect("side");
+        .expect("side Thread")
+        .id()
+        .to_string();
     app.current_session = Some(parent);
     let mut ui = FullscreenUi::new(&app);
 
@@ -164,10 +242,9 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     }
 
     assert!(
-        StateRuntime::open(&app.db_path)
-            .await
-            .expect("store")
-            .session_summary(&side)
+        app.runtime
+            .client()
+            .thread_summary(&side)
             .await
             .expect("summary")
             .is_none()

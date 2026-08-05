@@ -1,5 +1,6 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    Block, Borders, Clear, DiffOverlay, Frame, Line, Paragraph, Rect, Span, Text, Wrap, tui_theme,
+};
 
 pub(crate) fn render_diff_overlay(
     frame: &mut Frame<'_>,

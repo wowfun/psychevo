@@ -1,283 +1,386 @@
-use psychevo::__agent_core::{Message, UserContentBlock, now_ms};
-use psychevo::__product::persistence::{ConversationDraftPart, StateRuntime};
+use std::path::PathBuf;
+
 use psychevo::{
-    __product::runtime::StoredEditableInputEnvelope, __product::runtime::StoredEditableInputPart,
+    ForkThreadRequest, ImageInput, ThreadConversationEditConflict,
+    ThreadConversationEditRestoreOutcome, ThreadConversationEditStageOutcome,
+    ThreadConversationEditUnavailable, ThreadEditableDraft, ThreadEditableDraftFidelity,
+    ThreadEditableDraftPart, ThreadEditableDraftRead, ThreadEditableDraftReadOutcome,
+    ThreadEditableDraftUnavailable, ThreadHistoryEditingEligibility, ThreadHistoryEditingStaged,
+    ThreadHistoryEditingState, ThreadHistoryEditingUnavailable,
 };
 use psychevo_gateway_protocol as wire;
 
-use crate::Gateway;
+use crate::gateway::Gateway;
 
-pub async fn native_history_action_unavailable_reason(
-    state: &StateRuntime,
-    thread_id: &str,
-    surface_kind: &str,
-) -> psychevo::Result<Option<String>> {
-    if !matches!(surface_kind, "web" | "tui") {
-        return Ok(Some(
-            "History editing is available only in Workbench and TUI.".to_string(),
-        ));
-    }
-    let Some(summary) = state.session_summary(thread_id).await? else {
-        return Ok(Some("The durable Thread is unavailable.".to_string()));
-    };
-    if summary.parent_session_id.is_some() || state.find_agent_edge(thread_id).await?.is_some() {
-        return Ok(Some(
-            "Subagent and side Threads cannot edit or fork conversation history.".to_string(),
-        ));
-    }
-    if !matches!(summary.source.as_str(), "web" | "tui") {
-        return Ok(Some(
-            "Dedicated channel and automation Threads cannot edit or fork conversation history."
-                .to_string(),
-        ));
-    }
-    let native_binding = state
-        .gateway_runtime_binding(thread_id)
-        .await?
-        .is_some_and(|binding| {
-            binding.status
-                == psychevo::__product::persistence::GatewayRuntimeBindingStatus::Resolved
-                && binding.backend_kind.as_deref() == Some("native")
-        });
-    if !native_binding {
-        return Ok(Some(
-            "History editing requires a resolved Native Thread binding.".to_string(),
-        ));
-    }
-    let side = state
-        .session_metadata(thread_id)
-        .await?
-        .as_ref()
-        .and_then(|metadata| {
-            metadata.get(psychevo::__product::sessions::SIDE_CONVERSATION_METADATA_KEY)
-        })
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if side {
-        return Ok(Some(
-            "Side Threads cannot edit or fork conversation history.".to_string(),
-        ));
-    }
-    if state
-        .active_gateway_activity_for_thread(thread_id)
-        .await?
-        .is_some_and(|activity| activity.lease_expires_at_ms >= now_ms())
-    {
-        return Ok(Some(
-            "Finish the running turn before editing or forking conversation history.".to_string(),
-        ));
-    }
-    Ok(None)
+const RUNNING_HISTORY_REASON: &str =
+    "Finish the running turn before editing or forking conversation history.";
+const RUNNING_RESTORE_REASON: &str =
+    "Finish the running turn before restoring conversation history.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryEditingSurface {
+    Workbench,
+    Tui,
 }
 
-pub async fn read_native_editable_draft(
-    state: &StateRuntime,
-    gateway: &Gateway,
+#[derive(Clone, Debug)]
+pub struct NativeHistoryActions {
+    pub unavailable_reason: Option<String>,
+    pub staged: Option<wire::events_transcript::ThreadHistoryEditingView>,
+}
+
+impl Gateway {
+    pub async fn native_history_actions(
+        &self,
+        thread_id: &str,
+        _surface: HistoryEditingSurface,
+    ) -> psychevo::Result<NativeHistoryActions> {
+        let state = self
+            .framework_thread(thread_id)
+            .await?
+            .history_editing_state()
+            .await?;
+        Ok(self.project_native_history_actions(thread_id, state))
+    }
+
+    pub async fn history_editing_state(
+        &self,
+        thread_id: &str,
+    ) -> psychevo::Result<Option<wire::events_transcript::ThreadHistoryEditingView>> {
+        Ok(self
+            .framework_thread(thread_id)
+            .await?
+            .history_editing_state()
+            .await?
+            .staged
+            .map(history_staged_to_wire))
+    }
+
+    pub async fn read_native_editable_draft(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        _surface: HistoryEditingSurface,
+    ) -> psychevo::Result<wire::thread_command_turn::ThreadHistoryDraftReadResult> {
+        let thread = self.framework_thread(thread_id).await?;
+        let state = thread.history_editing_state().await?;
+        if let Some(reason) = self
+            .project_native_history_actions(thread_id, state)
+            .unavailable_reason
+        {
+            return Ok(unavailable_draft(thread_id, message_id, None, &reason));
+        }
+        let Some(message_seq) = parse_message_seq(message_id) else {
+            return Ok(unavailable_draft(
+                thread_id,
+                message_id,
+                None,
+                "Only visible, finalized user messages with durable history can be edited.",
+            ));
+        };
+        let outcome = thread.editable_draft(message_seq).await?;
+        Ok(match outcome {
+            ThreadEditableDraftReadOutcome::Available(read) => {
+                editable_draft_read_to_wire(thread_id, message_id, read)
+            }
+            ThreadEditableDraftReadOutcome::Unavailable(reason) => unavailable_draft(
+                thread_id,
+                message_id,
+                Some(message_seq),
+                editable_draft_unavailable_reason(reason),
+            ),
+        })
+    }
+
+    pub async fn stage_native_conversation_edit(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        draft: &wire::thread_command_turn::ThreadEditableDraft,
+        _surface: HistoryEditingSurface,
+    ) -> psychevo::Result<bool> {
+        let message_seq = parse_message_seq(message_id).ok_or_else(|| {
+            psychevo::Error::Message(
+                "Only visible, finalized user messages with durable history can be edited."
+                    .to_string(),
+            )
+        })?;
+        let thread = self.framework_thread(thread_id).await?;
+        let _reservation = self.reserve_history_mutation(thread_id, RUNNING_HISTORY_REASON)?;
+        match thread
+            .stage_conversation_edit(message_seq, draft_from_wire(draft))
+            .await
+            .map_err(|error| remap_thread_busy(error, thread_id, RUNNING_HISTORY_REASON))?
+        {
+            ThreadConversationEditStageOutcome::Staged
+            | ThreadConversationEditStageOutcome::AlreadyStaged => Ok(true),
+            ThreadConversationEditStageOutcome::Unchanged => Ok(false),
+            ThreadConversationEditStageOutcome::Unavailable(reason) => Err(
+                psychevo::Error::Message(conversation_edit_unavailable_reason(reason).to_string()),
+            ),
+            ThreadConversationEditStageOutcome::Conflict(reason) => Err(psychevo::Error::Message(
+                conversation_edit_conflict_reason(reason).to_string(),
+            )),
+        }
+    }
+
+    pub async fn restore_native_conversation_edit(
+        &self,
+        thread_id: &str,
+        _surface: HistoryEditingSurface,
+    ) -> psychevo::Result<wire::thread_command_turn::ThreadEditableDraft> {
+        let thread = self.framework_thread(thread_id).await?;
+        let _reservation = self.reserve_history_mutation(thread_id, RUNNING_RESTORE_REASON)?;
+        match thread
+            .restore_conversation_edit()
+            .await
+            .map_err(|error| remap_thread_busy(error, thread_id, RUNNING_RESTORE_REASON))?
+        {
+            ThreadConversationEditRestoreOutcome::Restored(draft) => Ok(draft_to_wire(draft)),
+            ThreadConversationEditRestoreOutcome::ThreadNotFound => Err(psychevo::Error::Message(
+                "The durable Thread is unavailable.".to_string(),
+            )),
+            ThreadConversationEditRestoreOutcome::NotStaged => Err(psychevo::Error::Message(
+                "No conversation edit is staged.".to_string(),
+            )),
+            ThreadConversationEditRestoreOutcome::Conflict(reason) => Err(
+                psychevo::Error::Message(restore_conflict_reason(reason).to_string()),
+            ),
+        }
+    }
+
+    pub async fn fork_native_history(
+        &self,
+        thread_id: &str,
+        before_session_seq: Option<i64>,
+        _surface: HistoryEditingSurface,
+    ) -> psychevo::Result<String> {
+        let thread = self.framework_thread(thread_id).await?;
+        let state = thread.history_editing_state().await?;
+        let staged = state.staged.map(history_staged_to_wire);
+        if let Some(reason) = history_eligibility_reason(state.eligibility)
+            .or_else(|| staged.as_ref().map(staged_reason))
+        {
+            return Err(psychevo::Error::Message(reason));
+        }
+        let _reservation = self.reserve_history_mutation(thread_id, RUNNING_HISTORY_REASON)?;
+        Ok(thread
+            .fork(ForkThreadRequest { before_session_seq })
+            .await
+            .map_err(|error| remap_thread_busy(error, thread_id, RUNNING_HISTORY_REASON))?
+            .id()
+            .to_string())
+    }
+
+    fn project_native_history_actions(
+        &self,
+        thread_id: &str,
+        state: ThreadHistoryEditingState,
+    ) -> NativeHistoryActions {
+        let staged = state.staged.map(history_staged_to_wire);
+        let unavailable_reason = history_eligibility_reason(state.eligibility)
+            .or_else(|| self.local_history_editing_unavailable_reason(thread_id))
+            .or_else(|| staged.as_ref().map(staged_reason));
+        NativeHistoryActions {
+            unavailable_reason,
+            staged,
+        }
+    }
+}
+
+fn parse_message_seq(message_id: &str) -> Option<i64> {
+    message_id
+        .strip_prefix("message:")?
+        .parse::<i64>()
+        .ok()
+        .filter(|seq| *seq > 0)
+}
+
+fn history_staged_to_wire(
+    staged: ThreadHistoryEditingStaged,
+) -> wire::events_transcript::ThreadHistoryEditingView {
+    match staged {
+        ThreadHistoryEditingStaged::WorkspaceUndo {
+            boundary_message_seq,
+            hidden_entry_count,
+        } => wire::events_transcript::ThreadHistoryEditingView {
+            kind: wire::events_transcript::ThreadHistoryEditingKind::WorkspaceUndo,
+            boundary_message_id: Some(format!("message:{boundary_message_seq}")),
+            hidden_entry_count,
+            replacement_draft: None,
+            available_actions: vec![
+                wire::events_transcript::ThreadHistoryRecoveryActionKind::RedoWorkspace,
+            ],
+        },
+        ThreadHistoryEditingStaged::ConversationEdit {
+            boundary_message_seq,
+            hidden_entry_count,
+            draft,
+        } => wire::events_transcript::ThreadHistoryEditingView {
+            kind: wire::events_transcript::ThreadHistoryEditingKind::ConversationEdit,
+            boundary_message_id: Some(format!("message:{boundary_message_seq}")),
+            hidden_entry_count,
+            replacement_draft: Some(draft_to_wire(draft)),
+            available_actions: vec![
+                wire::events_transcript::ThreadHistoryRecoveryActionKind::RestoreHistory,
+            ],
+        },
+    }
+}
+
+fn history_eligibility_reason(eligibility: ThreadHistoryEditingEligibility) -> Option<String> {
+    match eligibility {
+        ThreadHistoryEditingEligibility::Eligible => None,
+        ThreadHistoryEditingEligibility::Unavailable(reason) => {
+            Some(history_unavailable_reason(reason).to_string())
+        }
+    }
+}
+
+fn history_unavailable_reason(reason: ThreadHistoryEditingUnavailable) -> &'static str {
+    match reason {
+        ThreadHistoryEditingUnavailable::ThreadNotFound
+        | ThreadHistoryEditingUnavailable::CorruptThreadMetadata => {
+            "The durable Thread is unavailable."
+        }
+        ThreadHistoryEditingUnavailable::UnsupportedSource => {
+            "Dedicated channel and automation Threads cannot edit or fork conversation history."
+        }
+        ThreadHistoryEditingUnavailable::ChildThread
+        | ThreadHistoryEditingUnavailable::AgentChildThread => {
+            "Subagent and side Threads cannot edit or fork conversation history."
+        }
+        ThreadHistoryEditingUnavailable::SideConversation => {
+            "Side Threads cannot edit or fork conversation history."
+        }
+        ThreadHistoryEditingUnavailable::RuntimeBindingMissing
+        | ThreadHistoryEditingUnavailable::RuntimeBindingUnresolved
+        | ThreadHistoryEditingUnavailable::RuntimeBindingNotNative
+        | ThreadHistoryEditingUnavailable::RuntimeBindingReadOnly => {
+            "History editing requires a resolved Native Thread binding."
+        }
+        ThreadHistoryEditingUnavailable::ThreadBusy => RUNNING_HISTORY_REASON,
+    }
+}
+
+fn editable_draft_read_to_wire(
     thread_id: &str,
     message_id: &str,
-    surface_kind: &str,
-) -> psychevo::Result<wire::ThreadHistoryDraftReadResult> {
-    if let Some(reason) =
-        native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
-    {
-        return Ok(unavailable_draft(thread_id, message_id, None, &reason));
-    }
-    let entry = gateway
-        .thread_transcript(thread_id)
-        .await?
-        .into_iter()
-        .find(|entry| entry.id == message_id)
-        .filter(|entry| {
-            entry.role == wire::TranscriptEntryRole::User
-                && entry.status == wire::TranscriptBlockStatus::Completed
-                && entry.message_seq.is_some()
-        });
-    let Some(entry) = entry else {
-        return Ok(unavailable_draft(
-            thread_id,
-            message_id,
-            None,
-            "Only visible, finalized user messages with durable history can be edited.",
-        ));
-    };
-    let message_seq = entry.message_seq.expect("filtered durable entry");
-    let Some(summary) = state
-        .load_export_message_summaries(thread_id)
-        .await?
-        .into_iter()
-        .find(|summary| summary.session_seq == message_seq)
-    else {
-        return Ok(unavailable_draft(
-            thread_id,
-            message_id,
-            Some(message_seq),
-            "The durable user message is no longer available in this Thread.",
-        ));
-    };
-    let Message::User { content, .. } = summary.message else {
-        return Ok(unavailable_draft(
-            thread_id,
-            message_id,
-            Some(message_seq),
-            "The durable history entry no longer resolves to a user message.",
-        ));
-    };
-    let envelope = summary
-        .metadata
-        .as_ref()
-        .and_then(|metadata| {
-            metadata.get(psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY)
-        })
-        .cloned()
-        .map(serde_json::from_value::<StoredEditableInputEnvelope>)
-        .transpose()?;
-    let (parts, fidelity, warning, unavailable_reason) = match envelope {
-        Some(envelope) if envelope.version == 1 => match parts_from_envelope(&envelope, &content) {
-            Some(parts) if !parts.is_empty() => (
-                parts,
-                wire::ThreadEditableDraftFidelity::Exact,
-                None,
-                None,
-            ),
-            Some(_) => (
-                Vec::new(),
-                wire::ThreadEditableDraftFidelity::Exact,
-                None,
-                Some("This message has no editable text or image input.".to_string()),
-            ),
-            None => (
-                Vec::new(),
-                wire::ThreadEditableDraftFidelity::Exact,
-                None,
-                Some(
-                    "The editable input envelope no longer matches the durable message."
-                        .to_string(),
-                ),
-            ),
-        },
-        _ => (
-            parts_from_legacy_message(&content),
-            wire::ThreadEditableDraftFidelity::BestEffort,
+    read: ThreadEditableDraftRead,
+) -> wire::thread_command_turn::ThreadHistoryDraftReadResult {
+    let (fidelity, warning) = match read.fidelity {
+        ThreadEditableDraftFidelity::Exact => (wire::thread_command_turn::ThreadEditableDraftFidelity::Exact, None),
+        ThreadEditableDraftFidelity::BestEffort => (
+            wire::thread_command_turn::ThreadEditableDraftFidelity::BestEffort,
             Some(
                 "This older message was reconstructed from durable history; hidden context or synthetic input may not be recoverable."
                     .to_string(),
             ),
-            None,
         ),
     };
-    Ok(wire::ThreadHistoryDraftReadResult {
+    wire::thread_command_turn::ThreadHistoryDraftReadResult {
         thread_id: thread_id.to_string(),
         message_id: message_id.to_string(),
-        message_seq: Some(message_seq),
-        parts,
+        message_seq: Some(read.message_seq),
+        parts: draft_parts_to_wire(read.draft.parts),
         fidelity,
         warning,
-        unavailable_reason,
-    })
+        unavailable_reason: None,
+    }
 }
 
-pub async fn stage_native_conversation_edit(
-    state: &StateRuntime,
-    gateway: &Gateway,
-    thread_id: &str,
-    message_id: &str,
-    draft: &wire::ThreadEditableDraft,
-    surface_kind: &str,
-) -> psychevo::Result<bool> {
-    if let Some(reason) =
-        native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
-    {
-        return Err(psychevo::Error::Message(reason));
+fn editable_draft_unavailable_reason(reason: ThreadEditableDraftUnavailable) -> &'static str {
+    match reason {
+        ThreadEditableDraftUnavailable::ThreadNotFound => "The durable Thread is unavailable.",
+        ThreadEditableDraftUnavailable::MessageNotFound
+        | ThreadEditableDraftUnavailable::CorruptMessage
+        | ThreadEditableDraftUnavailable::CorruptMetadata => {
+            "The durable user message is no longer available in this Thread."
+        }
+        ThreadEditableDraftUnavailable::NotUserMessage => {
+            "The durable history entry no longer resolves to a user message."
+        }
+        ThreadEditableDraftUnavailable::CorruptEditableInput
+        | ThreadEditableDraftUnavailable::EditableInputMismatch => {
+            "The editable input envelope no longer matches the durable message."
+        }
+        ThreadEditableDraftUnavailable::NoEditableInput
+        | ThreadEditableDraftUnavailable::EmptyReplacement => {
+            "This message has no editable text or image input."
+        }
     }
-    let requested_parts = draft_parts_from_wire(&draft.parts);
-    if let Some(existing) = state.session_revert_state(thread_id).await? {
-        return match existing.kind {
-            psychevo::__product::persistence::SessionRevertKind::ConversationEdit {
-                boundary_message_id,
-                draft: existing_parts,
-            } if boundary_message_id == message_id && existing_parts == requested_parts => Ok(true),
-            psychevo::__product::persistence::SessionRevertKind::WorkspaceUndo { .. } => {
-                Err(psychevo::Error::Message(
-                    "Redo workspace files before editing conversation history.".to_string(),
-                ))
-            }
-            psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. } => {
-                Err(psychevo::Error::Message(
-                    "Restore or run the staged conversation edit before starting another edit."
-                        .to_string(),
-                ))
-            }
-        };
-    }
-    let current =
-        read_native_editable_draft(state, gateway, thread_id, message_id, surface_kind).await?;
-    if let Some(reason) = current.unavailable_reason {
-        return Err(psychevo::Error::Message(reason));
-    }
-    let message_seq = current.message_seq.ok_or_else(|| {
-        psychevo::Error::Message(
-            "The selected message does not have a durable sequence.".to_string(),
-        )
-    })?;
-    if current.parts == draft.parts {
-        return Ok(false);
-    }
-    state
-        .set_session_revert_state(
-            thread_id,
-            psychevo::__product::persistence::SessionRevertState::conversation_edit(
-                message_seq,
-                message_id.to_string(),
-                requested_parts,
-            ),
-        )
-        .await?;
-    Ok(true)
 }
 
-pub async fn restore_native_conversation_edit(
-    state: &StateRuntime,
-    thread_id: &str,
-) -> psychevo::Result<wire::ThreadEditableDraft> {
-    let revert = state
-        .session_revert_state(thread_id)
-        .await?
-        .ok_or_else(|| psychevo::Error::Message("No conversation edit is staged.".to_string()))?;
-    let psychevo::__product::persistence::SessionRevertKind::ConversationEdit { draft, .. } =
-        revert.kind
-    else {
-        return Err(psychevo::Error::Message(
-            "The staged state belongs to workspace undo; use /redo instead.".to_string(),
-        ));
+fn conversation_edit_unavailable_reason(reason: ThreadConversationEditUnavailable) -> &'static str {
+    match reason {
+        ThreadConversationEditUnavailable::HistoryEditing(reason) => {
+            history_unavailable_reason(reason)
+        }
+        ThreadConversationEditUnavailable::Draft(reason) => {
+            editable_draft_unavailable_reason(reason)
+        }
+    }
+}
+
+fn conversation_edit_conflict_reason(reason: ThreadConversationEditConflict) -> &'static str {
+    match reason {
+        ThreadConversationEditConflict::WorkspaceUndoStaged => {
+            "Redo workspace files before editing conversation history."
+        }
+        ThreadConversationEditConflict::ConversationEditStaged => {
+            "Restore or run the staged conversation edit before starting another edit."
+        }
+        ThreadConversationEditConflict::ConcurrentMetadataChange => {
+            "Restore or redo the staged history state before editing conversation history."
+        }
+    }
+}
+
+fn restore_conflict_reason(reason: ThreadConversationEditConflict) -> &'static str {
+    match reason {
+        ThreadConversationEditConflict::WorkspaceUndoStaged => {
+            "The staged state belongs to workspace undo; use /redo instead."
+        }
+        ThreadConversationEditConflict::ConversationEditStaged => {
+            "Restore or run the staged conversation edit before starting another edit."
+        }
+        ThreadConversationEditConflict::ConcurrentMetadataChange => {
+            "The staged history state changed while it was being restored."
+        }
+    }
+}
+
+fn remap_thread_busy(error: psychevo::Error, thread_id: &str, message: &str) -> psychevo::Error {
+    let Some(data) = error.structured_data() else {
+        return error;
     };
-    state.clear_session_revert_state(thread_id).await?;
-    Ok(wire::ThreadEditableDraft {
-        parts: draft_parts_to_wire(draft),
-    })
+    if data.get("kind").and_then(serde_json::Value::as_str) != Some("thread_busy") {
+        return error;
+    }
+    let blocking_operation = data
+        .get("blockingOperation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("turn");
+    psychevo::Error::structured(
+        message,
+        serde_json::json!({
+            "kind": "thread_busy",
+            "threadId": thread_id,
+            "blockingOperation": blocking_operation,
+            "retryable": true,
+        }),
+    )
 }
 
-pub async fn fork_native_history(
-    state: &StateRuntime,
-    thread_id: &str,
-    before_session_seq: Option<i64>,
-    surface_kind: &str,
-) -> psychevo::Result<String> {
-    if let Some(reason) =
-        native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
-    {
-        return Err(psychevo::Error::Message(reason));
+fn staged_reason(staged: &wire::events_transcript::ThreadHistoryEditingView) -> String {
+    match staged.kind {
+        wire::events_transcript::ThreadHistoryEditingKind::WorkspaceUndo => {
+            "Redo workspace files before editing or forking conversation history.".to_string()
+        }
+        wire::events_transcript::ThreadHistoryEditingKind::ConversationEdit => {
+            "Restore or run the staged conversation edit before another edit or fork.".to_string()
+        }
     }
-    if state.session_revert_state(thread_id).await?.is_some() {
-        return Err(psychevo::Error::Message(
-            "Run, restore, or redo the staged history state before forking.".to_string(),
-        ));
-    }
-    state
-        .fork_native_session_history(psychevo::__product::persistence::NativeSessionForkInput {
-            source_session_id: thread_id,
-            before_session_seq,
-        })
-        .await
 }
 
 fn unavailable_draft(
@@ -285,95 +388,68 @@ fn unavailable_draft(
     message_id: &str,
     message_seq: Option<i64>,
     reason: &str,
-) -> wire::ThreadHistoryDraftReadResult {
-    wire::ThreadHistoryDraftReadResult {
+) -> wire::thread_command_turn::ThreadHistoryDraftReadResult {
+    wire::thread_command_turn::ThreadHistoryDraftReadResult {
         thread_id: thread_id.to_string(),
         message_id: message_id.to_string(),
         message_seq,
         parts: Vec::new(),
-        fidelity: wire::ThreadEditableDraftFidelity::BestEffort,
+        fidelity: wire::thread_command_turn::ThreadEditableDraftFidelity::BestEffort,
         warning: None,
         unavailable_reason: Some(reason.to_string()),
     }
 }
 
-fn parts_from_envelope(
-    envelope: &StoredEditableInputEnvelope,
-    content: &[UserContentBlock],
-) -> Option<Vec<wire::ThreadEditableInputPart>> {
-    let images = content
-        .iter()
-        .filter(|block| !matches!(block, UserContentBlock::Text(_)))
-        .collect::<Vec<_>>();
-    envelope
-        .parts
-        .iter()
-        .map(|part| match part {
-            StoredEditableInputPart::Text { text } => {
-                Some(wire::ThreadEditableInputPart::Text { text: text.clone() })
-            }
-            StoredEditableInputPart::Image { image_block_index } => images
-                .get(*image_block_index)
-                .and_then(|block| image_part(block)),
-        })
-        .collect()
-}
-
-fn parts_from_legacy_message(content: &[UserContentBlock]) -> Vec<wire::ThreadEditableInputPart> {
-    content
-        .iter()
-        .filter_map(|block| match block {
-            UserContentBlock::Text(block) => Some(wire::ThreadEditableInputPart::Text {
-                text: block.text.clone(),
-            }),
-            block => image_part(block),
-        })
-        .collect()
-}
-
-fn image_part(block: &UserContentBlock) -> Option<wire::ThreadEditableInputPart> {
-    match block {
-        UserContentBlock::LocalImage(block) => Some(wire::ThreadEditableInputPart::Image {
-            input: wire::GatewayImageInput::LocalPath {
-                path: block.path.display().to_string(),
-            },
-        }),
-        UserContentBlock::ImageUrl(block) => Some(wire::ThreadEditableInputPart::Image {
-            input: wire::GatewayImageInput::Url {
-                url: block.url.clone(),
-            },
-        }),
-        UserContentBlock::Text(_) => None,
+fn draft_from_wire(draft: &wire::thread_command_turn::ThreadEditableDraft) -> ThreadEditableDraft {
+    ThreadEditableDraft {
+        parts: draft
+            .parts
+            .iter()
+            .map(|part| match part {
+                wire::thread_command_turn::ThreadEditableInputPart::Text { text } => {
+                    ThreadEditableDraftPart::Text { text: text.clone() }
+                }
+                wire::thread_command_turn::ThreadEditableInputPart::Image {
+                    input: wire::source::GatewayImageInput::LocalPath { path },
+                } => ThreadEditableDraftPart::Image {
+                    input: ImageInput::LocalPath(PathBuf::from(path)),
+                },
+                wire::thread_command_turn::ThreadEditableInputPart::Image {
+                    input: wire::source::GatewayImageInput::Url { url },
+                } => ThreadEditableDraftPart::Image {
+                    input: ImageInput::ImageUrl(url.clone()),
+                },
+            })
+            .collect(),
     }
 }
 
-fn draft_parts_from_wire(parts: &[wire::ThreadEditableInputPart]) -> Vec<ConversationDraftPart> {
-    parts
-        .iter()
-        .map(|part| match part {
-            wire::ThreadEditableInputPart::Text { text } => {
-                ConversationDraftPart::Text { text: text.clone() }
-            }
-            wire::ThreadEditableInputPart::Image {
-                input: wire::GatewayImageInput::LocalPath { path },
-            } => ConversationDraftPart::LocalImage { path: path.clone() },
-            wire::ThreadEditableInputPart::Image {
-                input: wire::GatewayImageInput::Url { url },
-            } => ConversationDraftPart::ImageUrl { url: url.clone() },
-        })
-        .collect()
+fn draft_to_wire(draft: ThreadEditableDraft) -> wire::thread_command_turn::ThreadEditableDraft {
+    wire::thread_command_turn::ThreadEditableDraft {
+        parts: draft_parts_to_wire(draft.parts),
+    }
 }
 
-fn draft_parts_to_wire(parts: Vec<ConversationDraftPart>) -> Vec<wire::ThreadEditableInputPart> {
+fn draft_parts_to_wire(
+    parts: Vec<ThreadEditableDraftPart>,
+) -> Vec<wire::thread_command_turn::ThreadEditableInputPart> {
     parts
         .into_iter()
         .map(|part| match part {
-            ConversationDraftPart::Text { text } => wire::ThreadEditableInputPart::Text { text },
-            ConversationDraftPart::LocalImage { path } => wire::ThreadEditableInputPart::Image {
-                input: wire::GatewayImageInput::LocalPath { path },
+            ThreadEditableDraftPart::Text { text } => {
+                wire::thread_command_turn::ThreadEditableInputPart::Text { text }
+            }
+            ThreadEditableDraftPart::Image {
+                input: ImageInput::LocalPath(path),
+            } => wire::thread_command_turn::ThreadEditableInputPart::Image {
+                input: wire::source::GatewayImageInput::LocalPath {
+                    path: path.display().to_string(),
+                },
             },
-            ConversationDraftPart::ImageUrl { url } => wire::ThreadEditableInputPart::Image {
-                input: wire::GatewayImageInput::Url { url },
+            ThreadEditableDraftPart::Image {
+                input: ImageInput::ImageUrl(url),
+            } => wire::thread_command_turn::ThreadEditableInputPart::Image {
+                input: wire::source::GatewayImageInput::Url { url },
             },
         })
         .collect()

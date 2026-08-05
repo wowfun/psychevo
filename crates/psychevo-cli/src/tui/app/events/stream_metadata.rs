@@ -1,3 +1,26 @@
+use super::gateway_helpers::{
+    gateway_block_row_index, record_gateway_block_row, remove_visible_write_stdin_row,
+    tag_gateway_transcript_row,
+};
+use super::gateway_transcript::gateway_write_argument_preview;
+use super::helpers::{
+    agent_child_event_ends_live_backlog, buffer_session_live_event,
+    session_live_event_ends_backlog, turn_ended_error_text, turn_event_is_clarify_request,
+};
+use super::types::GatewayTranscriptEntryMeta;
+use crate::tui::support_evidence::agent_child_latest_tokens;
+use crate::tui::ui_fullscreen::exec_session_id_from_args;
+use crate::tui::{
+    AuxiliaryAgentTask, FullscreenUi, Outcome, RunningTask, RunningTurn, TranscriptBlock,
+    TranscriptBlockStatus, TranscriptRow, TuiApp, TurnEvent, Value, active_tool_row,
+    active_tool_title, agent_child_status_text, agent_target_from_tool_event,
+    background_running_agent_result, clarify_no_answer_result, completed_live_tool_elapsed,
+    evidence_kind_for_value, exec_result_completed, exec_result_running,
+    exec_session_id_from_result, format_tool_summary, short_session, tool_event_interrupted,
+    tool_id_key, tool_output_text, tool_result_output, tool_started_instant, tool_title,
+    tool_title_for_update,
+};
+
 impl TuiApp {
     pub(crate) fn apply_gateway_tool_block(
         &mut self,
@@ -377,10 +400,7 @@ impl TuiApp {
         }
         if tool == "write" {
             if let Some((preview, phase)) = gateway_write_argument_preview(block) {
-                let terminal_detail = row
-                    .full_text
-                    .clone()
-                    .unwrap_or_else(|| row.text.clone());
+                let terminal_detail = row.full_text.clone().unwrap_or_else(|| row.text.clone());
                 row.set_write_argument_preview(preview, &phase, Some(&terminal_detail));
             } else if block.status == TranscriptBlockStatus::Completed {
                 row.clear_write_argument_preview_after_success();
@@ -398,15 +418,15 @@ impl TuiApp {
         false
     }
 
-    pub(crate) fn apply_scoped_fullscreen_stream_event(
+    pub(crate) fn apply_scoped_fullscreen_turn_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
-        event: RunStreamEvent,
+        event: TurnEvent,
     ) -> bool {
         if self.current_session.as_deref() == Some(session_id) {
             buffer_session_live_event(ui, session_id, event.clone());
-            return ui.apply_stream_event_for_session(
+            return ui.apply_turn_event_for_session(
                 event,
                 self.thinking_visible,
                 self.debug,
@@ -416,7 +436,7 @@ impl TuiApp {
         if session_live_event_ends_backlog(&event) {
             ui.session_live_event_backlog.remove(session_id);
         } else {
-            if stream_event_is_clarify_request(&event) {
+            if turn_event_is_clarify_request(&event) {
                 ui.push_status(format!(
                     "clarify pending in session {}",
                     short_session(session_id)
@@ -473,7 +493,7 @@ impl TuiApp {
         true
     }
 
-    pub(crate) fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
+    pub(crate) async fn finish_streamed_agent_turn(&mut self, ui: &mut FullscreenUi<'_>) {
         let outcome = ui.turn_outcome.unwrap_or(Outcome::Normal);
         let terminal_message = ui.turn_terminal_message.take();
         if let Some(running) = ui.running.take() {
@@ -491,9 +511,11 @@ impl TuiApp {
                 RunningTask::Agent(task) => {
                     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {
                         session_id: owner_session,
+                        turn_id,
                         child_session_id: None,
                         visible_live: false,
                         pending_unowned_live_events: Vec::new(),
+                        approval_rx: ui.approval_rx.take(),
                         control,
                         events,
                         task,
@@ -524,13 +546,11 @@ impl TuiApp {
         ui.refresh_sidebar(self);
         if interrupted {
             ui.restore_queued_inputs_to_composer();
-        } else if let Err(err) = self.maybe_start_auto_compaction(ui).and_then(|started| {
-            if started {
-                Ok(())
-            } else {
-                self.start_next_queued_input(ui)
-            }
-        }) {
+        } else if let Err(err) = match self.maybe_start_auto_compaction(ui).await {
+            Ok(true) => Ok(()),
+            Ok(false) => self.start_next_queued_input(ui).await,
+            Err(error) => Err(error),
+        } {
             self.had_error = true;
             ui.push_error(format!("error: {err:#}"));
         }

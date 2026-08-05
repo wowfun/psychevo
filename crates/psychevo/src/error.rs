@@ -49,4 +49,20 @@ impl Error {
             _ => None,
         }
     }
+
+    pub fn is_retryable_state_write(&self) -> bool {
+        let Self::Sqlx(error) = self else {
+            return false;
+        };
+        if matches!(error, sqlx::Error::PoolTimedOut) {
+            return true;
+        }
+        let Some(database) = error.as_database_error() else {
+            return false;
+        };
+        database
+            .code()
+            .as_deref()
+            .is_some_and(|code| code == "5" || code == "6" || code == "261" || code == "262")
+    }
 }

@@ -24,8 +24,8 @@ pub(crate) struct PluginMaterializedSource {
     pub(crate) source_kind: PluginSourceKind,
     pub(crate) npm_registry: Option<String>,
     pub(crate) resolved_revision: Option<String>,
-    #[allow(dead_code)]
-    pub(crate) temp_dir: Option<TempDir>,
+    // Owns temporary materializations for as long as their paths are borrowed.
+    pub(crate) _temp_dir: Option<TempDir>,
 }
 
 pub fn plugin_import_inspect_value(
@@ -167,13 +167,12 @@ fn materialize_local(
     request: &SourceRequest,
     temp_dir: Option<TempDir>,
 ) -> Result<PluginMaterializedSource> {
-    let source_path = resolve_local_source(cwd, &request.source)
-        .ok_or_else(|| {
-            Error::Config(format!(
-                "plugin source not found: {}",
-                redact_source(&request.source)
-            ))
-        })?;
+    let source_path = resolve_local_source(cwd, &request.source).ok_or_else(|| {
+        Error::Config(format!(
+            "plugin source not found: {}",
+            redact_source(&request.source)
+        ))
+    })?;
     if !source_path.exists() {
         return Err(Error::Config(format!(
             "plugin source not found: {}",
@@ -188,7 +187,7 @@ fn materialize_local(
         source_kind: PluginSourceKind::Local,
         npm_registry: None,
         resolved_revision: None,
-        temp_dir,
+        _temp_dir: temp_dir,
     })
 }
 
@@ -230,10 +229,11 @@ fn materialize_git(
             false,
         )?;
         run_materialization_command(
-            Command::new("git")
-            .arg("-C")
-            .arg(&incoming)
-                .args(["checkout", "--detach", "FETCH_HEAD"]),
+            Command::new("git").arg("-C").arg(&incoming).args([
+                "checkout",
+                "--detach",
+                "FETCH_HEAD",
+            ]),
             "git checkout",
             &request.source,
             false,
@@ -250,10 +250,11 @@ fn materialize_git(
         )?;
     }
     let revision_output = run_materialization_command(
-        Command::new("git")
-            .arg("-C")
-            .arg(&incoming)
-            .args(["rev-parse", "--verify", "HEAD^{commit}"]),
+        Command::new("git").arg("-C").arg(&incoming).args([
+            "rev-parse",
+            "--verify",
+            "HEAD^{commit}",
+        ]),
         "git rev-parse",
         &request.source,
         true,
@@ -263,7 +264,9 @@ fn materialize_git(
         .trim()
         .to_string();
     if !matches!(resolved_revision.len(), 40 | 64)
-        || !resolved_revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !resolved_revision
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
     {
         return Err(Error::Config(
             "git rev-parse returned an invalid commit id".to_string(),
@@ -285,7 +288,7 @@ fn materialize_git(
         source_kind: PluginSourceKind::Git,
         npm_registry: None,
         resolved_revision: Some(resolved_revision),
-        temp_dir,
+        _temp_dir: temp_dir,
     })
 }
 
@@ -312,12 +315,7 @@ fn materialize_npm(
     {
         command.arg("--registry").arg(registry);
     }
-    let output = run_materialization_command(
-        &mut command,
-        "npm pack",
-        &request.source,
-        true,
-    )?;
+    let output = run_materialization_command(&mut command, "npm pack", &request.source, true)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let pack = serde_json::from_str::<Value>(&stdout)
         .map_err(|err| Error::Config(format!("npm pack returned invalid JSON: {err}")))?;
@@ -331,7 +329,10 @@ fn materialize_npm(
         .ok_or_else(|| Error::Config("npm pack result missing filename".to_string()))?;
     let filename_path = Path::new(filename);
     if filename_path.components().count() != 1
-        || !matches!(filename_path.components().next(), Some(std::path::Component::Normal(_)))
+        || !matches!(
+            filename_path.components().next(),
+            Some(std::path::Component::Normal(_))
+        )
     {
         return Err(Error::Config(
             "npm pack result contains an invalid archive filename".to_string(),
@@ -386,7 +387,7 @@ fn materialize_npm(
             .map(redact_source)
             .filter(|registry| !registry.is_empty()),
         resolved_revision: None,
-        temp_dir,
+        _temp_dir: temp_dir,
     })
 }
 

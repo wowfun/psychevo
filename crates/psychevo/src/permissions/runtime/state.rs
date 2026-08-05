@@ -1,22 +1,36 @@
+use std::{
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+use psychevo_ai::AbortSignal;
+use serde_json::Value;
+
+use crate::types::{
+    ExecPolicyDecision, FilesystemApprovalRequest, PermissionAccess, PermissionApprovalOutcome,
+    PermissionConfig, PermissionMode,
+};
+
 #[derive(Clone)]
 pub(crate) struct PermissionRuntime {
-    pub(crate) inner: Arc<PermissionRuntimeInner>,
+    pub(super) inner: Arc<PermissionRuntimeInner>,
 }
 
-pub(crate) struct PermissionRuntimeInner {
-    pub(crate) cwd: PathBuf,
-    pub(crate) project_config_dir: PathBuf,
-    pub(crate) protected_config_paths: Vec<PathBuf>,
-    pub(crate) mode: PermissionMode,
-    pub(crate) config: PermissionConfig,
-    pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
-    pub(crate) sandbox_grants: crate::sandbox::SandboxWriteGrants,
-    pub(crate) session_grants: Mutex<HashSet<String>>,
-    pub(crate) pending_approvals: Mutex<VecDeque<String>>,
-    pub(crate) approval_events: Mutex<Vec<ApprovalLifecycleEvent>>,
-    pub(crate) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
-    pub(crate) smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
-    pub(crate) hook_runtime: Option<crate::hooks::HookRuntime>,
+pub(super) struct PermissionRuntimeInner {
+    pub(super) cwd: PathBuf,
+    pub(super) project_config_dir: PathBuf,
+    pub(super) protected_config_paths: Vec<PathBuf>,
+    pub(super) mode: PermissionMode,
+    pub(super) config: PermissionConfig,
+    pub(super) sandbox_policy: crate::sandbox::SandboxPolicy,
+    pub(super) sandbox_grants: crate::sandbox::SandboxWriteGrants,
+    pub(super) session_grants: Mutex<HashSet<String>>,
+    pub(super) pending_approvals: Mutex<VecDeque<String>>,
+    pub(super) approval_events: Mutex<Vec<ApprovalLifecycleEvent>>,
+    pub(super) approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+    pub(super) smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
+    pub(super) hook_runtime: Option<crate::hooks::HookRuntime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,16 +48,8 @@ pub(crate) enum ApprovalLifecycleEvent {
     },
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PermissionRule {
-    pub(crate) raw: String,
-    pub(crate) tool: String,
-    pub(crate) pattern: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PermissionDecision {
+pub(super) enum PermissionDecision {
     Allow,
     Ask {
         reason: String,
@@ -59,8 +65,27 @@ pub(crate) enum PermissionDecision {
     },
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PersistentPermissionGrant {
+pub(crate) enum PermissionDecisionView {
+    Allow,
+    Ask { reason: String },
+    Deny { reason: String },
+}
+
+#[cfg(test)]
+impl From<PermissionDecision> for PermissionDecisionView {
+    fn from(decision: PermissionDecision) -> Self {
+        match decision {
+            PermissionDecision::Allow => Self::Allow,
+            PermissionDecision::Ask { reason, .. } => Self::Ask { reason },
+            PermissionDecision::Deny { reason, .. } => Self::Deny { reason },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PersistentPermissionGrant {
     Filesystem {
         path: String,
         access: PermissionAccess,
@@ -84,32 +109,32 @@ pub(crate) enum PersistentPermissionGrant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SandboxWriteGrantRequest {
-    paths: Vec<PathBuf>,
-    reason: String,
+pub(super) struct SandboxWriteGrantRequest {
+    pub(super) paths: Vec<PathBuf>,
+    pub(super) reason: String,
 }
 
-struct ApprovalDecisionRequest<'a> {
-    tool_call_id: &'a str,
-    tool_name: &'a str,
-    args: &'a Value,
-    reason: &'a str,
-    matched_rule: Option<&'a str>,
-    suggested_rule: Option<String>,
-    allow_always: bool,
-    filesystem: Option<FilesystemApprovalRequest>,
-    mcp_startup: Option<crate::types::McpStartupApprovalRequest>,
-    abort: Option<AbortSignal>,
+pub(super) struct ApprovalDecisionRequest<'a> {
+    pub(super) tool_call_id: &'a str,
+    pub(super) tool_name: &'a str,
+    pub(super) args: &'a Value,
+    pub(super) reason: &'a str,
+    pub(super) matched_rule: Option<&'a str>,
+    pub(super) suggested_rule: Option<String>,
+    pub(super) allow_always: bool,
+    pub(super) filesystem: Option<FilesystemApprovalRequest>,
+    pub(super) mcp_startup: Option<crate::types::McpStartupApprovalRequest>,
+    pub(super) abort: Option<AbortSignal>,
 }
 
-pub(crate) struct PendingApprovalGuard {
-    runtime: PermissionRuntime,
-    tool_call_id: String,
-    finished: bool,
+pub(super) struct PendingApprovalGuard {
+    pub(super) runtime: PermissionRuntime,
+    pub(super) tool_call_id: String,
+    pub(super) finished: bool,
 }
 
 impl PendingApprovalGuard {
-    pub(crate) fn finish(&mut self, outcome: PermissionApprovalOutcome) {
+    pub(super) fn finish(&mut self, outcome: PermissionApprovalOutcome) {
         if self.finished {
             return;
         }

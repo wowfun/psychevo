@@ -1,8 +1,28 @@
-use super::*;
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+
+use super::runtime::{ApplicationRuntime, TurnPhase};
+use super::{
+    AgentSessionAdapter, Application, ApplicationBuilder, ApplicationInner, ApplicationLimits,
+    ApplicationOperationalSnapshot, ApplicationStorageSnapshot, Client, DEFAULT_EVENT_CAPACITY,
+    FORCE_ADAPTER_BUDGET, FORCE_COOPERATIVE_JOIN_BUDGET, FORCE_SHUTDOWN_TOTAL,
+    FORCE_STATE_CLOSE_BUDGET, NativeAgentSessionAdapter, NativeTurnBackend, PendingTerminal,
+    PendingTerminalFailure, ShutdownAdapterStatus, ShutdownReport, ShutdownStateCloseStatus,
+    TurnEvent,
+};
+use crate::config::{McpOAuthCredentialStore, SystemMcpOAuthCredentialStore};
+use crate::state::StateRuntime;
+use crate::{Error, Result};
 
 impl ShutdownReport {
     pub fn is_clean(&self) -> bool {
         matches!(self.adapter, ShutdownAdapterStatus::Completed)
+            && self.state_close == ShutdownStateCloseStatus::Closed
             && self.task_panics == 0
             && self.aborted_tasks == 0
             && self.pending_terminal_failures.is_empty()
@@ -40,6 +60,23 @@ impl Application {
         }
     }
 
+    pub fn operational_snapshot(&self) -> ApplicationOperationalSnapshot {
+        let storage = self.inner.state.diagnostics();
+        self.inner
+            .runtime
+            .operational_snapshot(ApplicationStorageSnapshot {
+                connection_limit: storage.connection_limit,
+                pool_size: storage.pool_size,
+                pool_idle: storage.pool_idle,
+                in_flight_operations: storage.in_flight_operations,
+                completed_operations: storage.completed_operations,
+                failed_operations: storage.failed_operations,
+                busy_operations: storage.busy_operations,
+                acquire_latency_micros: storage.acquire_latency_micros,
+                execute_latency_micros: storage.execute_latency_micros,
+            })
+    }
+
     pub fn agent_control(&self) -> crate::agents::AgentControl {
         crate::agents::AgentControl::new(
             self.inner.runtime.agent_supervisor.clone(),
@@ -53,30 +90,6 @@ impl Application {
 
     pub async fn shutdown_force(&self) -> Result<ShutdownReport> {
         self.shutdown_inner(true).await
-    }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __from_open_state(
-        home: PathBuf,
-        config_path: Option<PathBuf>,
-        state: StateRuntime,
-        agent_sessions: Arc<dyn AgentSessionAdapter>,
-    ) -> Self {
-        Self {
-            inner: Arc::new(ApplicationInner {
-                state,
-                agent_sessions,
-                home,
-                config_path,
-                event_capacity: DEFAULT_EVENT_CAPACITY,
-                force_shutdown_requested: AtomicBool::new(false),
-                force_shutdown_notify: Notify::new(),
-                shutdown_complete: Mutex::new(None),
-                shutdown_finalizer: AsyncMutex::new(()),
-                runtime: Arc::new(ApplicationRuntime::new()),
-            }),
-        }
     }
 
     async fn shutdown_inner(&self, force: bool) -> Result<ShutdownReport> {
@@ -110,9 +123,14 @@ impl Application {
             .inner
             .force_shutdown_requested
             .load(AtomicOrdering::Acquire);
+        #[cfg(test)]
+        if !force {
+            self.inner.graceful_shutdown_owner_entered.notify_one();
+        }
         let mut report = ShutdownReport {
             forced: force,
             adapter: ShutdownAdapterStatus::Completed,
+            state_close: ShutdownStateCloseStatus::Closed,
             task_panics: 0,
             aborted_tasks: 0,
             pending_terminal_failures: Vec::new(),
@@ -156,7 +174,7 @@ impl Application {
             .runtime
             .agent_supervisor
             .stage_remaining_interrupted("application shutdown");
-        self.flush_agent_terminals(report).await;
+        self.flush_agent_terminals(report, None).await;
         if let Err(error) = self.inner.agent_sessions.shutdown(false).await {
             report.adapter = ShutdownAdapterStatus::Failed {
                 message: error.to_string(),
@@ -168,13 +186,16 @@ impl Application {
 
     async fn shutdown_force_owned(&self, report: &mut ShutdownReport) {
         let deadline = tokio::time::Instant::now() + FORCE_SHUTDOWN_TOTAL;
+        let pre_close_deadline = deadline - FORCE_STATE_CLOSE_BUDGET;
         for control in self.inner.runtime.active_controls() {
             control.abort();
         }
         self.inner.runtime.agent_supervisor.close_and_cancel();
 
-        let adapter_deadline =
-            std::cmp::min(deadline, tokio::time::Instant::now() + FORCE_ADAPTER_BUDGET);
+        let adapter_deadline = std::cmp::min(
+            pre_close_deadline,
+            tokio::time::Instant::now() + FORCE_ADAPTER_BUDGET,
+        );
         report.adapter = match tokio::time::timeout_at(
             adapter_deadline,
             self.inner.agent_sessions.shutdown(true),
@@ -189,7 +210,7 @@ impl Application {
         };
 
         let join_deadline = std::cmp::min(
-            deadline,
+            pre_close_deadline,
             tokio::time::Instant::now() + FORCE_COOPERATIVE_JOIN_BUDGET,
         );
         let wait_for_owned_tasks = async {
@@ -210,7 +231,7 @@ impl Application {
                     self.inner.runtime.agent_supervisor.wait_background()
                 );
             };
-            if tokio::time::timeout_at(deadline, wait_for_aborted_tasks)
+            if tokio::time::timeout_at(pre_close_deadline, wait_for_aborted_tasks)
                 .await
                 .is_err()
             {
@@ -224,32 +245,55 @@ impl Application {
             .runtime
             .agent_supervisor
             .stage_remaining_interrupted("application force shutdown");
-        self.flush_agent_terminals(report).await;
-        self.retry_and_settle_terminal_slots(report, Some(deadline))
+        self.flush_agent_terminals(report, Some(pre_close_deadline))
+            .await;
+        self.retry_and_settle_terminal_slots(report, Some(pre_close_deadline))
             .await;
         if tokio::time::timeout_at(deadline, self.inner.state.close())
             .await
             .is_err()
         {
-            report.adapter = ShutdownAdapterStatus::ContractViolation {
-                message: "State close exceeded the force-shutdown deadline".to_string(),
-            };
+            report.state_close = ShutdownStateCloseStatus::TimedOut;
         }
     }
 
-    async fn flush_agent_terminals(&self, report: &mut ShutdownReport) {
-        report.pending_terminal_failures.extend(
-            self.inner
-                .runtime
-                .agent_supervisor
-                .flush_pending_terminals(&self.inner.state)
-                .await
-                .into_iter()
-                .map(|(id, message)| PendingTerminalFailure {
-                    turn_id: format!("agent:{id}"),
-                    message,
-                }),
-        );
+    async fn flush_agent_terminals(
+        &self,
+        report: &mut ShutdownReport,
+        deadline: Option<tokio::time::Instant>,
+    ) {
+        let flush = self
+            .inner
+            .runtime
+            .agent_supervisor
+            .flush_pending_terminals(&self.inner.state);
+        let failures = match deadline {
+            Some(deadline) => match tokio::time::timeout_at(deadline, flush).await {
+                Ok(failures) => failures,
+                Err(_) => {
+                    report
+                        .pending_terminal_failures
+                        .push(PendingTerminalFailure {
+                            turn_id: "agent:shutdown".to_string(),
+                            message:
+                                "force-shutdown deadline elapsed while flushing Agent terminals"
+                                    .to_string(),
+                        });
+                    return;
+                }
+            },
+            None => flush.await,
+        };
+        report
+            .pending_terminal_failures
+            .extend(
+                failures
+                    .into_iter()
+                    .map(|(id, message)| PendingTerminalFailure {
+                        turn_id: format!("agent:{id}"),
+                        message,
+                    }),
+            );
     }
 
     async fn retry_and_settle_terminal_slots(
@@ -266,7 +310,7 @@ impl Application {
                 slot.handle.events.close();
                 continue;
             }
-            let terminal = slot
+            let mut terminal = slot
                 .pending_terminal
                 .unwrap_or_else(|| PendingTerminal::interrupted(slot.handle.receipt.clone()));
             let result = match deadline {
@@ -316,12 +360,6 @@ impl Application {
             slot.handle.events.close();
         }
     }
-
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __state_runtime(&self) -> StateRuntime {
-        self.inner.state.clone()
-    }
 }
 
 impl fmt::Debug for ApplicationBuilder {
@@ -330,11 +368,17 @@ impl fmt::Debug for ApplicationBuilder {
             .debug_struct("ApplicationBuilder")
             .field("home", &self.home)
             .field("database_path", &self.database_path)
-            .field("has_state_runtime", &self.state.is_some())
+            .field("database_connection_limit", &self.database_connection_limit)
             .field("config_path", &self.config_path)
+            .field("has_inherited_environment", &self.inherited_env.is_some())
             .field("event_capacity", &self.event_capacity)
+            .field("limits", &self.limits)
             .field("has_agent_session_adapter", &self.agent_sessions.is_some())
             .field("has_provider", &self.provider.is_some())
+            .field(
+                "has_mcp_oauth_credential_store",
+                &self.mcp_oauth_credentials.is_some(),
+            )
             .finish()
     }
 }
@@ -350,10 +394,8 @@ impl ApplicationBuilder {
         self
     }
 
-    #[doc(hidden)]
-    #[cfg(feature = "product")]
-    pub fn __state_runtime(mut self, state: StateRuntime) -> Self {
-        self.state = Some(state);
+    pub fn database_connection_limit(mut self, limit: u32) -> Self {
+        self.database_connection_limit = Some(limit);
         self
     }
 
@@ -362,8 +404,18 @@ impl ApplicationBuilder {
         self
     }
 
+    pub fn inherited_environment(mut self, environment: BTreeMap<String, String>) -> Self {
+        self.inherited_env = Some(environment);
+        self
+    }
+
     pub fn event_capacity(mut self, capacity: usize) -> Self {
         self.event_capacity = Some(capacity);
+        self
+    }
+
+    pub fn limits(mut self, limits: ApplicationLimits) -> Self {
+        self.limits = Some(limits);
         self
     }
 
@@ -377,48 +429,87 @@ impl ApplicationBuilder {
         self
     }
 
+    /// Replaces the instance-owned MCP OAuth credential store.
+    ///
+    /// The same store is used by configuration views, Agent handoffs, MCP
+    /// diagnostics, and Native MCP launches owned by this Application.
+    pub fn mcp_oauth_credential_store(
+        mut self,
+        credential_store: Arc<dyn McpOAuthCredentialStore>,
+    ) -> Self {
+        self.mcp_oauth_credentials = Some(credential_store);
+        self
+    }
+
     pub async fn build(self) -> Result<Application> {
         let home = self.home.ok_or_else(|| {
             Error::Message(
                 "ApplicationBuilder requires an explicit Psychevo home directory".to_string(),
             )
         })?;
-        if self.state.is_some() && self.database_path.is_some() {
+        let inherited_env = self
+            .inherited_env
+            .unwrap_or_else(|| std::env::vars().collect());
+        let database_path = self.database_path.unwrap_or_else(|| home.join("state.db"));
+        let database_connection_limit = self
+            .database_connection_limit
+            .unwrap_or(crate::state::DEFAULT_STATE_CONNECTION_LIMIT);
+        if database_connection_limit == 0 {
             return Err(Error::Message(
-                "ApplicationBuilder accepts either database_path or an existing state runtime, not both"
-                    .to_string(),
+                "Application database connection limit must be greater than zero".to_string(),
             ));
         }
-        let database_path = self.database_path.unwrap_or_else(|| home.join("state.db"));
         let event_capacity = self.event_capacity.unwrap_or(DEFAULT_EVENT_CAPACITY);
         if event_capacity == 0 {
             return Err(Error::Message(
                 "Application event capacity must be greater than zero".to_string(),
             ));
         }
-        let state = match self.state {
-            Some(state) => state,
-            None => StateRuntime::open(database_path).await?,
+        let limits = self.limits.unwrap_or_default();
+        if limits.max_operations == 0 || limits.max_thread_operations == 0 {
+            return Err(Error::Message(
+                "Application operation limits must be greater than zero".to_string(),
+            ));
+        }
+        if limits.max_thread_operations > limits.max_operations {
+            return Err(Error::Message(
+                "Application per-Thread operation limit cannot exceed the total limit".to_string(),
+            ));
+        }
+        let state =
+            StateRuntime::open_with_connection_limit(database_path, database_connection_limit)
+                .await?;
+        let mcp_oauth_credentials = self
+            .mcp_oauth_credentials
+            .unwrap_or_else(|| Arc::new(SystemMcpOAuthCredentialStore));
+        let native_backend = NativeTurnBackend {
+            state: state.clone(),
+            provider: self.provider.clone(),
         };
-        let agent_sessions = self.agent_sessions.unwrap_or_else(|| {
-            Arc::new(NativeAgentSessionAdapter {
-                state: state.clone(),
-                config_path: self.config_path.clone(),
-                provider: self.provider,
-            })
-        });
+        let agent_sessions = self
+            .agent_sessions
+            .unwrap_or_else(|| Arc::new(NativeAgentSessionAdapter));
         Ok(Application {
             inner: Arc::new(ApplicationInner {
                 state,
                 agent_sessions,
-                home,
+                native_backend,
+                mcp_oauth_credentials: Arc::clone(&mcp_oauth_credentials),
+                home: home.clone(),
                 config_path: self.config_path,
+                inherited_env,
                 event_capacity,
                 force_shutdown_requested: AtomicBool::new(false),
                 force_shutdown_notify: Notify::new(),
                 shutdown_complete: Mutex::new(None),
                 shutdown_finalizer: AsyncMutex::new(()),
-                runtime: Arc::new(ApplicationRuntime::new()),
+                #[cfg(test)]
+                graceful_shutdown_owner_entered: Notify::new(),
+                runtime: Arc::new(ApplicationRuntime::new_with_mcp_oauth_credentials(
+                    limits,
+                    home.clone(),
+                    mcp_oauth_credentials,
+                )),
             }),
         })
     }
@@ -442,7 +533,7 @@ impl Client {
         &self,
         inherited: Option<BTreeMap<String, String>>,
     ) -> BTreeMap<String, String> {
-        let mut environment = inherited.unwrap_or_else(|| std::env::vars().collect());
+        let mut environment = inherited.unwrap_or_else(|| self.inner.inherited_env.clone());
         environment.insert(
             "PSYCHEVO_HOME".to_string(),
             self.inner.home.to_string_lossy().into_owned(),

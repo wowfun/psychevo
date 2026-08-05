@@ -1,15 +1,23 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::tests::fixtures::test_app;
+use crate::tui::{
+    FullscreenUi, KeyCode, KeyEvent, KeyModifiers, RunningTask, SlashCommand, StartThreadRequest,
+    TranscriptKind, textarea_with_text,
+};
+use tempfile::tempdir;
 
 #[tokio::test]
 pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
-    let store = StateRuntime::open(&app.db_path).await.expect("store");
-    let session_id = store
-        .create_session_with_metadata(&app.cwd, "tui", "model", "provider", None)
+    let mut request = StartThreadRequest::new(&app.cwd);
+    request.source = "tui".to_string();
+    let thread = app
+        .runtime
+        .client()
+        .start_thread(request)
         .await
-        .expect("session");
+        .expect("Thread");
+    let session_id = thread.id().to_string();
     app.current_session = Some(session_id.clone());
     app.current_session_title = None;
     let mut ui = FullscreenUi::new(&app);
@@ -31,11 +39,7 @@ pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
             && row.title == "/rename Better Session Title"
             && row.text == "session renamed: Better Session Title"
     }));
-    let summary = store
-        .session_summary(&session_id)
-        .await
-        .expect("summary")
-        .expect("session");
+    let summary = thread.summary().await.expect("Thread summary");
     assert_eq!(summary.title.as_deref(), Some("Better Session Title"));
 }
 

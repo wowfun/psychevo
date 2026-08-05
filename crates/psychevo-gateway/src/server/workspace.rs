@@ -4,21 +4,20 @@ use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use psychevo::application::WorkspaceMutation;
 use psychevo::{
-    __product::configuration::resolve_workspace_root,
-    __product::platform::canonicalize_cwd,
-    __product::platform::normalized_native_path,
-    __product::runtime::WorkspaceMutation,
-    __product::sessions::WorkspaceDiffFileStatus,
-    __product::sessions::{collect_workspace_diff, is_inside_git_work_tree},
-    Error,
+    ConfigurationQuery, Error,
+    host_paths::normalized_native_path,
+    paths::canonicalize_cwd,
+    workspace_diff::{WorkspaceDiffFileStatus, collect_workspace_diff, is_inside_git_work_tree},
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
-use super::{
-    AuthContext, ResolvedScope, WebState, cwd_source, grant_browser_session_scope, now_ms,
-};
+use super::auth_input::now_ms;
+use super::binding::{AuthContext, WebState};
+use super::rpc_json::cwd_source;
+use super::scope_session::{ResolvedScope, grant_browser_session_scope};
 
 const MAX_WORKSPACE_FILE_DEPTH: usize = 8;
 const MAX_WORKSPACE_FILE_ITEMS: usize = 1_500;
@@ -68,10 +67,10 @@ struct WorkspaceReviewInvalidation {
 #[derive(Clone)]
 struct WorkspaceReviewFile {
     path: String,
-    status: wire::WorkspaceDiffFileStatusView,
+    status: wire::settings_workspace_context::WorkspaceDiffFileStatusView,
     binary: bool,
     unreadable: bool,
-    review_status: wire::WorkspaceChangeReviewStatusView,
+    review_status: wire::settings_workspace_context::WorkspaceChangeReviewStatusView,
     baseline: ReviewBaseline,
     post_revision: String,
     message: Option<String>,
@@ -112,12 +111,14 @@ impl WorkspaceReviewState {
             });
     }
 
-    pub(super) fn observe_event(&self, event: &wire::GatewayEvent, cwd: &Path) {
+    pub(super) fn observe_event(&self, event: &wire::events_transcript::GatewayEvent, cwd: &Path) {
         match event {
-            wire::GatewayEvent::TurnStarted {
+            wire::events_transcript::GatewayEvent::TurnStarted {
                 thread_id, turn_id, ..
             } => self.begin_turn(turn_id, thread_id.clone(), cwd),
-            wire::GatewayEvent::TurnCompleted { turn_id, .. } => self.complete_turn(turn_id),
+            wire::events_transcript::GatewayEvent::TurnCompleted { turn_id, .. } => {
+                self.complete_turn(turn_id)
+            }
             _ => {}
         }
     }
@@ -186,9 +187,12 @@ impl WorkspaceReviewState {
         inner.groups.truncate(40);
     }
 
-    pub(super) fn changes_for_scope(&self, scope: &ResolvedScope) -> wire::WorkspaceChangesResult {
+    pub(super) fn changes_for_scope(
+        &self,
+        scope: &ResolvedScope,
+    ) -> wire::settings_workspace_context::WorkspaceChangesResult {
         let inner = self.inner.lock().expect("workspace review state poisoned");
-        wire::WorkspaceChangesResult {
+        wire::settings_workspace_context::WorkspaceChangesResult {
             groups: inner
                 .groups
                 .iter()
@@ -203,7 +207,7 @@ impl WorkspaceReviewState {
         scope: &ResolvedScope,
         turn_id: &str,
         path: &str,
-    ) -> psychevo::Result<wire::WorkspaceChangeMutationResult> {
+    ) -> psychevo::Result<wire::settings_workspace_context::WorkspaceChangeMutationResult> {
         let path = normalize_workspace_path(path);
         let mut accepted = false;
         {
@@ -214,15 +218,18 @@ impl WorkspaceReviewState {
                 .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
                 .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
             {
-                file.review_status = wire::WorkspaceChangeReviewStatusView::Accepted;
+                file.review_status =
+                    wire::settings_workspace_context::WorkspaceChangeReviewStatusView::Accepted;
                 file.message = None;
                 accepted = true;
             }
         }
-        Ok(wire::WorkspaceChangeMutationResult {
-            accepted,
-            changes: self.changes_for_scope(scope),
-        })
+        Ok(
+            wire::settings_workspace_context::WorkspaceChangeMutationResult {
+                accepted,
+                changes: self.changes_for_scope(scope),
+            },
+        )
     }
 
     pub(super) fn reject(
@@ -230,7 +237,7 @@ impl WorkspaceReviewState {
         scope: &ResolvedScope,
         turn_id: &str,
         path: &str,
-    ) -> psychevo::Result<wire::WorkspaceChangeMutationResult> {
+    ) -> psychevo::Result<wire::settings_workspace_context::WorkspaceChangeMutationResult> {
         let path = normalize_workspace_path(path);
         let file = {
             let inner = self.inner.lock().expect("workspace review state poisoned");
@@ -242,24 +249,30 @@ impl WorkspaceReviewState {
                 .cloned()
         };
         let Some(file) = file else {
-            return Ok(wire::WorkspaceChangeMutationResult {
-                accepted: false,
-                changes: self.changes_for_scope(scope),
-            });
+            return Ok(
+                wire::settings_workspace_context::WorkspaceChangeMutationResult {
+                    accepted: false,
+                    changes: self.changes_for_scope(scope),
+                },
+            );
         };
         if !file.baseline.can_reject() {
-            return Ok(wire::WorkspaceChangeMutationResult {
-                accepted: false,
-                changes: self.changes_for_scope(scope),
-            });
+            return Ok(
+                wire::settings_workspace_context::WorkspaceChangeMutationResult {
+                    accepted: false,
+                    changes: self.changes_for_scope(scope),
+                },
+            );
         }
         let current_revision = workspace_path_revision(&scope.cwd, &path)?;
         if current_revision != file.post_revision {
             self.mark_conflict(scope, turn_id, &path, "File changed after this turn.");
-            return Ok(wire::WorkspaceChangeMutationResult {
-                accepted: false,
-                changes: self.changes_for_scope(scope),
-            });
+            return Ok(
+                wire::settings_workspace_context::WorkspaceChangeMutationResult {
+                    accepted: false,
+                    changes: self.changes_for_scope(scope),
+                },
+            );
         }
         restore_review_baseline(&scope.cwd, &path, &file.baseline)?;
         {
@@ -270,14 +283,17 @@ impl WorkspaceReviewState {
                 .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
                 .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
             {
-                file.review_status = wire::WorkspaceChangeReviewStatusView::Rejected;
+                file.review_status =
+                    wire::settings_workspace_context::WorkspaceChangeReviewStatusView::Rejected;
                 file.message = None;
             }
         }
-        Ok(wire::WorkspaceChangeMutationResult {
-            accepted: true,
-            changes: self.changes_for_scope(scope),
-        })
+        Ok(
+            wire::settings_workspace_context::WorkspaceChangeMutationResult {
+                accepted: true,
+                changes: self.changes_for_scope(scope),
+            },
+        )
     }
 
     fn mark_conflict(&self, scope: &ResolvedScope, turn_id: &str, path: &str, message: &str) {
@@ -288,7 +304,8 @@ impl WorkspaceReviewState {
             .find(|group| group.cwd == scope.cwd && group.turn_id == turn_id)
             .and_then(|group| group.files.iter_mut().find(|file| file.path == path))
         {
-            file.review_status = wire::WorkspaceChangeReviewStatusView::Conflict;
+            file.review_status =
+                wire::settings_workspace_context::WorkspaceChangeReviewStatusView::Conflict;
             file.message = Some(message.to_string());
         }
     }
@@ -298,11 +315,13 @@ pub(super) fn workspace_files_value(scope: &ResolvedScope) -> psychevo::Result<V
     let mut entries = Vec::new();
     let mut truncated = false;
     collect_workspace_file_entries(&scope.cwd, &scope.cwd, 0, &mut entries, &mut truncated);
-    Ok(serde_json::to_value(wire::WorkspaceFilesResult {
-        root: scope.cwd.display().to_string(),
-        entries,
-        truncated,
-    })?)
+    Ok(serde_json::to_value(
+        wire::settings_workspace_context::WorkspaceFilesResult {
+            root: scope.cwd.display().to_string(),
+            entries,
+            truncated,
+        },
+    )?)
 }
 
 pub(super) fn workspace_folder_list_value(
@@ -328,7 +347,7 @@ pub(super) fn workspace_folder_list_value(
                 return None;
             }
             let path = canonicalize_cwd(&entry.path()).ok()?;
-            Some(wire::WorkspaceFolderEntry {
+            Some(wire::settings_workspace_context::WorkspaceFolderEntry {
                 name,
                 path: path.display().to_string(),
             })
@@ -344,28 +363,32 @@ pub(super) fn workspace_folder_list_value(
         .then(|| current.parent())
         .flatten()
         .map(|parent| parent.display().to_string());
-    Ok(serde_json::to_value(wire::WorkspaceFolderListResult {
-        root: root.display().to_string(),
-        roots,
-        current: current.display().to_string(),
-        parent,
-        folders,
-    })?)
+    Ok(serde_json::to_value(
+        wire::settings_workspace_context::WorkspaceFolderListResult {
+            root: root.display().to_string(),
+            roots,
+            current: current.display().to_string(),
+            parent,
+            folders,
+        },
+    )?)
 }
 
-fn host_filesystem_roots(current_root: &Path) -> Vec<wire::WorkspaceFolderEntry> {
+fn host_filesystem_roots(
+    current_root: &Path,
+) -> Vec<wire::settings_workspace_context::WorkspaceFolderEntry> {
     #[cfg(windows)]
     let mut roots = windows_drive_roots_from_mask(unsafe {
         windows_sys::Win32::Storage::FileSystem::GetLogicalDrives()
     });
     #[cfg(not(windows))]
-    let mut roots: Vec<wire::WorkspaceFolderEntry> = Vec::new();
+    let mut roots: Vec<wire::settings_workspace_context::WorkspaceFolderEntry> = Vec::new();
 
     if !roots
         .iter()
         .any(|candidate| filesystem_roots_match(&candidate.path, current_root))
     {
-        roots.push(wire::WorkspaceFolderEntry {
+        roots.push(wire::settings_workspace_context::WorkspaceFolderEntry {
             name: current_root.display().to_string(),
             path: current_root.display().to_string(),
         });
@@ -374,12 +397,14 @@ fn host_filesystem_roots(current_root: &Path) -> Vec<wire::WorkspaceFolderEntry>
 }
 
 #[cfg(any(windows, test))]
-pub(super) fn windows_drive_roots_from_mask(mask: u32) -> Vec<wire::WorkspaceFolderEntry> {
+pub(super) fn windows_drive_roots_from_mask(
+    mask: u32,
+) -> Vec<wire::settings_workspace_context::WorkspaceFolderEntry> {
     (0..26)
         .filter(|index| mask & (1 << index) != 0)
         .map(|index| {
             let name = format!("{}:", char::from(b'A' + index as u8));
-            wire::WorkspaceFolderEntry {
+            wire::settings_workspace_context::WorkspaceFolderEntry {
                 path: format!("{name}\\"),
                 name,
             }
@@ -404,7 +429,7 @@ pub(super) fn workspace_git_branches_value(scope: &ResolvedScope) -> psychevo::R
 
 pub(super) fn workspace_git_checkout_value(
     scope: &ResolvedScope,
-    params: wire::WorkspaceGitCheckoutParams,
+    params: wire::settings_workspace_context::WorkspaceGitCheckoutParams,
 ) -> psychevo::Result<Value> {
     let branch = params.branch.trim();
     if branch.is_empty() {
@@ -438,13 +463,15 @@ pub(super) fn workspace_git_checkout_value(
 
 fn workspace_git_branches(
     scope: &ResolvedScope,
-) -> psychevo::Result<wire::WorkspaceGitBranchesResult> {
+) -> psychevo::Result<wire::settings_workspace_context::WorkspaceGitBranchesResult> {
     if !is_inside_git_work_tree(&scope.cwd)? {
-        return Ok(wire::WorkspaceGitBranchesResult {
-            is_git_repo: false,
-            current: None,
-            branches: Vec::new(),
-        });
+        return Ok(
+            wire::settings_workspace_context::WorkspaceGitBranchesResult {
+                is_git_repo: false,
+                current: None,
+                branches: Vec::new(),
+            },
+        );
     }
     let branches = run_git(
         &scope.cwd,
@@ -465,11 +492,13 @@ fn workspace_git_branches(
             .trim()
             .to_string()
     });
-    Ok(wire::WorkspaceGitBranchesResult {
-        is_git_repo: true,
-        current,
-        branches,
-    })
+    Ok(
+        wire::settings_workspace_context::WorkspaceGitBranchesResult {
+            is_git_repo: true,
+            current,
+            branches,
+        },
+    )
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> psychevo::Result<String> {
@@ -494,14 +523,21 @@ fn run_git(cwd: &Path, args: &[&str]) -> psychevo::Result<String> {
 pub(super) fn workspace_create_value(
     state: &WebState,
     auth: &AuthContext,
-    params: wire::WorkspaceCreateParams,
+    params: wire::settings_workspace_context::WorkspaceCreateParams,
 ) -> psychevo::Result<Value> {
     let dir_name = workspace_dir_name(&params.name)?;
     let parent = if let Some(parent) = params.parent.as_deref() {
         canonical_existing_directory(Path::new(parent))?
     } else {
-        let options = state.run_options(state.inner.cwd.clone(), None);
-        canonicalize_cwd(&resolve_workspace_root(&options, &state.inner.cwd)?)?
+        let mut query = ConfigurationQuery::new(&state.inner.cwd);
+        query.inherited_env = Some(state.inner.inherited_env.clone());
+        canonicalize_cwd(
+            &state
+                .inner
+                .framework
+                .configuration(query)?
+                .workspace_root()?,
+        )?
     };
     let cwd = canonicalize_cwd(&parent.join(&dir_name))?;
     let scope = ResolvedScope {
@@ -509,10 +545,12 @@ pub(super) fn workspace_create_value(
         cwd,
     };
     grant_browser_session_scope(state, auth, &scope);
-    Ok(serde_json::to_value(wire::WorkspaceCreateResult {
-        cwd: scope.cwd.display().to_string(),
-        scope: scope.to_wire_scope(),
-    })?)
+    Ok(serde_json::to_value(
+        wire::settings_workspace_context::WorkspaceCreateResult {
+            cwd: scope.cwd.display().to_string(),
+            scope: scope.to_wire_scope(),
+        },
+    )?)
 }
 
 fn canonical_existing_directory(path: &Path) -> psychevo::Result<PathBuf> {
@@ -551,7 +589,7 @@ fn collect_workspace_file_entries(
     root: &Path,
     dir: &Path,
     depth: usize,
-    entries: &mut Vec<wire::WorkspaceFileEntry>,
+    entries: &mut Vec<wire::settings_workspace_context::WorkspaceFileEntry>,
     truncated: &mut bool,
 ) {
     if depth > MAX_WORKSPACE_FILE_DEPTH || entries.len() >= MAX_WORKSPACE_FILE_ITEMS {
@@ -594,13 +632,13 @@ fn collect_workspace_file_entries(
         if !is_dir && !file_type.is_file() {
             continue;
         }
-        entries.push(wire::WorkspaceFileEntry {
+        entries.push(wire::settings_workspace_context::WorkspaceFileEntry {
             path: relative,
             name,
             kind: if is_dir {
-                wire::WorkspaceFileKind::Directory
+                wire::settings_workspace_context::WorkspaceFileKind::Directory
             } else {
-                wire::WorkspaceFileKind::File
+                wire::settings_workspace_context::WorkspaceFileKind::File
             },
             depth,
         });
@@ -626,7 +664,7 @@ pub(super) fn workspace_file_read_value(
 
 pub(super) fn workspace_file_write_value(
     scope: &ResolvedScope,
-    params: wire::WorkspaceFileWriteParams,
+    params: wire::settings_workspace_context::WorkspaceFileWriteParams,
 ) -> psychevo::Result<Value> {
     if params.content.len() > MAX_WORKSPACE_TEXT_FILE_BYTES {
         return Err(Error::Message(
@@ -650,12 +688,14 @@ pub(super) fn workspace_file_write_value(
     }
     std::fs::write(&resolved, params.content.as_bytes())?;
     let revision = workspace_path_revision(&scope.cwd, &path)?;
-    Ok(serde_json::to_value(wire::WorkspaceFileWriteResult {
-        path,
-        revision,
-        size_bytes: params.content.len(),
-        line_ending: detect_line_ending(&params.content),
-    })?)
+    Ok(serde_json::to_value(
+        wire::settings_workspace_context::WorkspaceFileWriteResult {
+            path,
+            revision,
+            size_bytes: params.content.len(),
+            line_ending: detect_line_ending(&params.content),
+        },
+    )?)
 }
 
 pub(super) fn resolve_workspace_relative_path(
@@ -789,11 +829,11 @@ fn read_workspace_text_snapshot_from_file(
 pub(super) fn workspace_file_read_result_from_file(
     file: &mut std::fs::File,
     display_path: String,
-) -> wire::WorkspaceFileReadResult {
+) -> wire::settings_workspace_context::WorkspaceFileReadResult {
     match read_workspace_text_snapshot_from_file(file) {
         Ok(snapshot) => {
             let editable_reason = workspace_editable_reason(&snapshot);
-            wire::WorkspaceFileReadResult {
+            wire::settings_workspace_context::WorkspaceFileReadResult {
                 path: display_path,
                 content: snapshot.content,
                 truncated: snapshot.truncated,
@@ -813,8 +853,8 @@ pub(super) fn workspace_file_read_result_from_file(
 fn unreadable_workspace_file_read_result(
     display_path: String,
     message: String,
-) -> wire::WorkspaceFileReadResult {
-    wire::WorkspaceFileReadResult {
+) -> wire::settings_workspace_context::WorkspaceFileReadResult {
+    wire::settings_workspace_context::WorkspaceFileReadResult {
         path: display_path,
         content: None,
         truncated: false,
@@ -883,7 +923,7 @@ pub(super) fn workspace_diff_value(
 pub(super) fn workspace_diff_result(
     scope: &ResolvedScope,
     path: Option<&str>,
-) -> psychevo::Result<wire::WorkspaceDiffResult> {
+) -> psychevo::Result<wire::settings_workspace_context::WorkspaceDiffResult> {
     let diff = collect_workspace_diff(&scope.cwd)?;
     let selected = path
         .map(|path| {
@@ -905,13 +945,15 @@ pub(super) fn workspace_diff_result(
                 .as_deref()
                 .is_none_or(|selected| file.path == selected)
         })
-        .map(|file| wire::WorkspaceDiffFileView {
-            path: file.path.clone(),
-            status: workspace_diff_status(file.status),
-            binary: file.binary,
-            unreadable: file.unreadable,
-            placeholder: file.placeholder.clone(),
-        })
+        .map(
+            |file| wire::settings_workspace_context::WorkspaceDiffFileView {
+                path: file.path.clone(),
+                status: workspace_diff_status(file.status),
+                binary: file.binary,
+                unreadable: file.unreadable,
+                placeholder: file.placeholder.clone(),
+            },
+        )
         .collect::<Vec<_>>();
     let unified_diff = if let Some(selected) = selected.as_deref() {
         extract_unified_diff_for_path(&diff.unified_diff, selected).unwrap_or_else(|| {
@@ -924,11 +966,11 @@ pub(super) fn workspace_diff_result(
     } else {
         diff.unified_diff
     };
-    Ok(wire::WorkspaceDiffResult {
+    Ok(wire::settings_workspace_context::WorkspaceDiffResult {
         is_git_repo: diff.is_git_repo,
         files,
         unified_diff,
-        truncation: wire::WorkspaceDiffTruncationView {
+        truncation: wire::settings_workspace_context::WorkspaceDiffTruncationView {
             truncated: diff.truncation.truncated,
             max_bytes: diff.truncation.max_bytes,
             max_lines: diff.truncation.max_lines,
@@ -939,14 +981,28 @@ pub(super) fn workspace_diff_result(
     })
 }
 
-fn workspace_diff_status(status: WorkspaceDiffFileStatus) -> wire::WorkspaceDiffFileStatusView {
+fn workspace_diff_status(
+    status: WorkspaceDiffFileStatus,
+) -> wire::settings_workspace_context::WorkspaceDiffFileStatusView {
     match status {
-        WorkspaceDiffFileStatus::Modified => wire::WorkspaceDiffFileStatusView::Modified,
-        WorkspaceDiffFileStatus::Added => wire::WorkspaceDiffFileStatusView::Added,
-        WorkspaceDiffFileStatus::Deleted => wire::WorkspaceDiffFileStatusView::Deleted,
-        WorkspaceDiffFileStatus::Untracked => wire::WorkspaceDiffFileStatusView::Untracked,
-        WorkspaceDiffFileStatus::Binary => wire::WorkspaceDiffFileStatusView::Binary,
-        WorkspaceDiffFileStatus::Unreadable => wire::WorkspaceDiffFileStatusView::Unreadable,
+        WorkspaceDiffFileStatus::Modified => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Modified
+        }
+        WorkspaceDiffFileStatus::Added => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Added
+        }
+        WorkspaceDiffFileStatus::Deleted => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Deleted
+        }
+        WorkspaceDiffFileStatus::Untracked => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Untracked
+        }
+        WorkspaceDiffFileStatus::Binary => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Binary
+        }
+        WorkspaceDiffFileStatus::Unreadable => {
+            wire::settings_workspace_context::WorkspaceDiffFileStatusView::Unreadable
+        }
     }
 }
 
@@ -965,7 +1021,7 @@ fn build_observed_review_files(
         };
         let (status, binary, unreadable, post_revision, post_message) = if !resolved.exists() {
             (
-                wire::WorkspaceDiffFileStatusView::Deleted,
+                wire::settings_workspace_context::WorkspaceDiffFileStatusView::Deleted,
                 false,
                 false,
                 "missing".to_string(),
@@ -975,11 +1031,11 @@ fn build_observed_review_files(
             match read_workspace_text_snapshot(&resolved) {
                 Ok(snapshot) => (
                     if snapshot.binary {
-                        wire::WorkspaceDiffFileStatusView::Binary
+                        wire::settings_workspace_context::WorkspaceDiffFileStatusView::Binary
                     } else if matches!(pre, ReviewBaseline::Absent) {
-                        wire::WorkspaceDiffFileStatusView::Added
+                        wire::settings_workspace_context::WorkspaceDiffFileStatusView::Added
                     } else {
-                        wire::WorkspaceDiffFileStatusView::Modified
+                        wire::settings_workspace_context::WorkspaceDiffFileStatusView::Modified
                     },
                     snapshot.binary,
                     false,
@@ -990,7 +1046,7 @@ fn build_observed_review_files(
                     }),
                 ),
                 Err(error) => (
-                    wire::WorkspaceDiffFileStatusView::Unreadable,
+                    wire::settings_workspace_context::WorkspaceDiffFileStatusView::Unreadable,
                     false,
                     true,
                     "unreadable".to_string(),
@@ -1003,7 +1059,8 @@ fn build_observed_review_files(
             status,
             binary,
             unreadable,
-            review_status: wire::WorkspaceChangeReviewStatusView::Pending,
+            review_status:
+                wire::settings_workspace_context::WorkspaceChangeReviewStatusView::Pending,
             baseline: pre.clone(),
             post_revision,
             message: post_message.or_else(|| pre.message()),
@@ -1052,8 +1109,10 @@ fn restore_review_baseline(
     }
 }
 
-fn review_group_to_wire(group: &WorkspaceReviewGroup) -> wire::WorkspaceChangeGroupView {
-    wire::WorkspaceChangeGroupView {
+fn review_group_to_wire(
+    group: &WorkspaceReviewGroup,
+) -> wire::settings_workspace_context::WorkspaceChangeGroupView {
+    wire::settings_workspace_context::WorkspaceChangeGroupView {
         turn_id: group.turn_id.clone(),
         thread_id: group.thread_id.clone(),
         created_at_ms: group.created_at_ms,
@@ -1062,7 +1121,7 @@ fn review_group_to_wire(group: &WorkspaceReviewGroup) -> wire::WorkspaceChangeGr
         invalidations: group
             .invalidations
             .iter()
-            .map(|invalidation| wire::WorkspaceChangeInvalidationView {
+            .map(|invalidation| wire::settings_workspace_context::WorkspaceChangeInvalidationView {
                 source: invalidation.source.clone(),
                 message: format!(
                     "Workspace may have changed via {}; inspect the diff. Exact Reject is unavailable.",
@@ -1073,8 +1132,10 @@ fn review_group_to_wire(group: &WorkspaceReviewGroup) -> wire::WorkspaceChangeGr
     }
 }
 
-fn review_file_to_wire(file: &WorkspaceReviewFile) -> wire::WorkspaceChangeFileView {
-    wire::WorkspaceChangeFileView {
+fn review_file_to_wire(
+    file: &WorkspaceReviewFile,
+) -> wire::settings_workspace_context::WorkspaceChangeFileView {
+    wire::settings_workspace_context::WorkspaceChangeFileView {
         path: file.path.clone(),
         status: file.status,
         binary: file.binary,

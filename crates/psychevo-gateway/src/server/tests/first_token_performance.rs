@@ -1,11 +1,21 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use uuid::Uuid;
+
+use crate::composition::GatewayApplication;
+use crate::server::GatewayWebServerConfig;
+use crate::server::binding::WebState;
+use crate::server::tests::automations::helpers::AutomationTurnProbe;
+use psychevo_gateway_protocol::source::GatewayInputPart;
+
 async fn run_profiled_framework_turn(
     state: &WebState,
-    caller: crate::ThreadCallerContext,
-    mut intent: crate::ThreadTurnIntent,
+    caller: crate::gateway::activity::ThreadCallerContext,
+    mut intent: crate::gateway::activity::ThreadTurnIntent,
 ) {
     let mut start = psychevo::StartThreadRequest::new(&caller.cwd);
     start.source = caller.runtime_source.clone();
-    start.metadata = intent.lineage.clone();
     let thread = state
         .inner
         .framework
@@ -30,6 +40,15 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
+    let budgets: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../non-functional-budgets.json"
+    )))
+    .expect("non-functional budgets");
+    let max_overhead_ms = budgets
+        .pointer("/gateway/maximum/initializedGuiOverheadMs")
+        .and_then(serde_json::Value::as_u64)
+        .expect("initialized GUI overhead budget");
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
@@ -68,7 +87,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     )
     .expect("config");
 
-    let backend = Arc::new(AutomationFakeBackend::default());
+    let backend = Arc::new(AutomationTurnProbe::default());
     let env = BTreeMap::from([
         (
             "HOME".to_string(),
@@ -87,14 +106,18 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
             std::env::var("PATH").unwrap_or_default(),
         ),
     ]);
-    let runtime = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
-    let gateway = Gateway::with_backend(runtime, backend.clone());
-    let state = WebState::new(GatewayWebServerConfig::new(
-        gateway,
+    let runtime = GatewayApplication::open_with_native_test_executor(
         home,
-        cwd.clone(),
+        temp.path().join("state.db"),
         None,
         env,
+        backend.executor(),
+    )
+    .await
+    .expect("test composition");
+    let state = WebState::new(GatewayWebServerConfig::with_static(
+        runtime,
+        cwd.clone(),
         temp.path().join("static"),
     ));
     state
@@ -215,19 +238,46 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     let direct_median = direct_samples[direct_samples.len() / 2];
     let gui_median = gui_samples[gui_samples.len() / 2];
     let extra = gui_median.saturating_sub(direct_median);
-    assert!(
-        extra <= Duration::from_millis(150),
-        "initialized GUI pre-provider overhead {extra:?} exceeded 150ms; direct median {direct_median:?}, GUI median {gui_median:?}"
-    );
     let direct_create_to_result_median =
         direct_create_to_result_samples[direct_create_to_result_samples.len() / 2];
     let gui_create_to_result_median =
         gui_create_to_result_samples[gui_create_to_result_samples.len() / 2];
     let create_to_result_extra =
         gui_create_to_result_median.saturating_sub(direct_create_to_result_median);
+    if let Some(root) = std::env::var_os("PSYCHEVO_CI_ARTIFACT_ROOT") {
+        let output = std::path::PathBuf::from(root).join("non-functional");
+        std::fs::create_dir_all(&output).expect("non-functional evidence directory");
+        let micros = |duration: Duration| u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
+        let report = serde_json::json!({
+            "schemaVersion": 1,
+            "scope": "gateway-first-result",
+            "maximumOverheadMs": max_overhead_ms,
+            "directDispatchMicros": direct_samples.iter().copied().map(micros).collect::<Vec<_>>(),
+            "guiDispatchMicros": gui_samples.iter().copied().map(micros).collect::<Vec<_>>(),
+            "directCreateToResultMicros": direct_create_to_result_samples.iter().copied().map(micros).collect::<Vec<_>>(),
+            "guiCreateToResultMicros": gui_create_to_result_samples.iter().copied().map(micros).collect::<Vec<_>>(),
+            "median": {
+                "directDispatchMicros": micros(direct_median),
+                "guiDispatchMicros": micros(gui_median),
+                "dispatchOverheadMicros": micros(extra),
+                "directCreateToResultMicros": micros(direct_create_to_result_median),
+                "guiCreateToResultMicros": micros(gui_create_to_result_median),
+                "createToResultOverheadMicros": micros(create_to_result_extra),
+            }
+        });
+        std::fs::write(
+            output.join("gateway-first-result.json"),
+            serde_json::to_vec_pretty(&report).expect("serialize first-result evidence"),
+        )
+        .expect("write first-result evidence");
+    }
     assert!(
-        create_to_result_extra <= Duration::from_millis(150),
-        "GUI create-to-first-result overhead {create_to_result_extra:?} exceeded 150ms; direct median {direct_create_to_result_median:?}, GUI median {gui_create_to_result_median:?}"
+        extra <= Duration::from_millis(max_overhead_ms),
+        "initialized GUI pre-provider overhead {extra:?} exceeded {max_overhead_ms}ms; direct median {direct_median:?}, GUI median {gui_median:?}"
+    );
+    assert!(
+        create_to_result_extra <= Duration::from_millis(max_overhead_ms),
+        "GUI create-to-first-result overhead {create_to_result_extra:?} exceeded {max_overhead_ms}ms; direct median {direct_create_to_result_median:?}, GUI median {gui_create_to_result_median:?}"
     );
     let broker_log = std::fs::read_to_string(&log).expect("broker log");
     assert_eq!(broker_log.matches("plugin-installed\n").count(), 1);

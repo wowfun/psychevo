@@ -1,3 +1,16 @@
+use psychevo::application::RunStreamEvent;
+use serde_json::json;
+
+use crate::projection::GatewayLiveProjector;
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayEvent, TranscriptBlockKind, TranscriptBlockStatus,
+};
+
+use super::hidden_helpers::{
+    agent_block, assert_agent_block_child, assert_agent_block_has_no_child,
+    assert_agent_block_task, gateway_entry,
+};
+
 #[test]
 fn live_projector_streams_reasoning_before_completion() {
     let mut projector = GatewayLiveProjector::default();
@@ -517,7 +530,10 @@ fn live_projector_upgrades_spawn_agent_position_id_without_metadata_mix() {
         .expect("resolved start");
     let entry = gateway_entry(&start);
     assert_eq!(entry.blocks.len(), 1, "{entry:#?}");
-    assert!(agent_block(entry, "spawn_agent@0:0:0").is_none(), "{entry:#?}");
+    assert!(
+        agent_block(entry, "spawn_agent@0:0:0").is_none(),
+        "{entry:#?}"
+    );
     assert_agent_block_task(entry, "call-cn", "cn_to_en");
 
     let handoff = projector

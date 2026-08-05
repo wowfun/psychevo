@@ -1,3 +1,10 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::safe_integer::{JsonSafeI64, JsonSafeU64, json_safe_usize, option_json_safe_i64};
+
 pub const JSONRPC_VERSION: &str = "2.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -186,7 +193,10 @@ pub struct GatewayTurn {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub started_at_ms: Option<i64>,
@@ -196,7 +206,10 @@ pub struct GatewayTurn {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(optional)]
-    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[serde(
+        serialize_with = "option_json_safe_i64::serialize",
+        deserialize_with = "option_json_safe_i64::deserialize"
+    )]
     #[schemars(with = "Option<JsonSafeI64>")]
     #[ts(type = "number | null")]
     pub completed_at_ms: Option<i64>,
@@ -294,7 +307,10 @@ pub enum GatewayInputPart {
         #[serde(default, rename = "mimeType")]
         mime_type: Option<String>,
         #[serde(default)]
-        #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+        #[serde(
+            serialize_with = "option_json_safe_i64::serialize",
+            deserialize_with = "option_json_safe_i64::deserialize"
+        )]
         #[schemars(with = "Option<JsonSafeI64>")]
         #[ts(type = "number | null")]
         size: Option<i64>,
@@ -305,11 +321,17 @@ pub enum GatewayInputPart {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct GatewayMentionRange {
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub start: usize,
-    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[serde(
+        serialize_with = "json_safe_usize::serialize",
+        deserialize_with = "json_safe_usize::deserialize"
+    )]
     #[schemars(with = "JsonSafeU64")]
     #[ts(type = "number")]
     pub end: usize,

@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use crate::tui::{
+    BottomPanel, ConfigScope, ConfigurationQuery, ConfigureProviderRequest,
+    CreateCustomProviderRequest, FullscreenUi, ModelPanel, ProviderSetupPresetId,
+    ProviderWizardField, ProviderWizardPanel, Result, TuiApp, anyhow,
+    default_provider_setup_api_key_env, is_loopback_base_url, looks_like_api_key,
+    provider_setup_preset, strip_dotenv_quotes, validate_api_key_env, validate_base_url,
+};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::{collections::BTreeMap, fs};
 
 impl TuiApp {
     pub(crate) fn handle_provider_wizard_key(
@@ -178,31 +185,41 @@ impl TuiApp {
             return Err(anyhow!("provider requires API key for {api_key_env}"));
         }
 
+        let mut query = ConfigurationQuery::new(&self.cwd);
+        query.inherited_env = Some(self.env_map.clone());
+        let configuration = self.runtime.client().configuration(query)?;
+
         if panel.is_custom() {
-            let result = create_scoped_custom_provider(ScopedCustomProviderInput {
-                config_dir: self.home.clone(),
-                provider_id: panel.provider_id.clone(),
-                label: panel.label.clone(),
-                base_url,
-                api_key_env: Some(api_key_env),
-                api_key,
-                require_api_key: !is_loopback_base_url(&panel.base_url),
-                no_auth: false,
-            })?;
+            let result = configuration.create_custom_provider(
+                ConfigScope::Global,
+                CreateCustomProviderRequest {
+                    provider_id: panel.provider_id.clone(),
+                    label: panel.label.clone(),
+                    base_url: base_url.clone(),
+                    api_key_env: Some(api_key_env),
+                    api_key,
+                    require_api_key: !is_loopback_base_url(&base_url),
+                    no_auth: false,
+                },
+            )?;
             return Ok(result.provider_id);
         }
 
-        upsert_provider_options(
-            &self.home,
-            &panel.provider_id,
-            &panel.label,
-            &base_url,
-            &api_key_env,
+        configuration.configure_provider(
+            ConfigScope::Global,
+            ConfigureProviderRequest {
+                provider_id: panel.provider_id.clone(),
+                label: panel.label.clone(),
+                base_url,
+                api_key_env,
+            },
         )?;
         if let Some(api_key) = api_key {
-            let options = self.run_options(String::new());
-            let _ =
-                set_provider_api_key(&options, self.home.clone(), &panel.provider_id, &api_key)?;
+            let _ = configuration.set_provider_api_key(
+                ConfigScope::Global,
+                &panel.provider_id,
+                &api_key,
+            )?;
         }
         Ok(panel.provider_id.clone())
     }

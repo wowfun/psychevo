@@ -12,6 +12,7 @@ export const strictlyCompiledGatewaySchemaNames = [
   "AppThreadIdParams",
   "AppThreadForkParams",
   "AppThreadCompactParams",
+  "AppThreadCompactResult",
   "AppThreadListParams",
   "AppTurnStartParams",
   "AppTurnIdParams",

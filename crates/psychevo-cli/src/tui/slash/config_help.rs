@@ -1,5 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::{
+    canonical_command_token, normalize_key_code, normalized_modifiers, split_command_token,
+};
+use anyhow::{Result, anyhow};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use psychevo::command_registry::{
+    CUSTOM_SKILL_COMMAND, CommandGroup, CommandStatus, CommandSurface, SLASH_COMMANDS,
+    SlashCommandSpec, slash_command_spec,
+};
+use psychevo::session_export::{SessionExportFormat, SessionExportIncludeSet};
+use serde_json::Value;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 pub(crate) const VARIANTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 pub(crate) const GENERAL_COMMANDS: &[&str] = &[
@@ -64,7 +77,8 @@ pub(crate) enum SlashCommand {
 }
 
 impl SlashCommand {
-    #[allow(dead_code, non_upper_case_globals)]
+    #[cfg(test)]
+    #[allow(non_upper_case_globals)]
     pub(crate) const ModelShow: Self = Self::ModelShowScoped { global: false };
 }
 
@@ -476,7 +490,7 @@ pub(crate) fn configured_custom_command_row(target: &str, config: &EffectiveSlas
 }
 
 pub(crate) fn parse_effective_slash_config(root: &Value) -> Result<EffectiveSlashConfig> {
-    let shared = psychevo::__product::commands::parse_shared_slash_config(root)?;
+    let shared = psychevo::command_registry::parse_shared_slash_config(root)?;
     let aliases = shared.alias_map();
     let leader_key = parse_key_chord(&shared.leader_key, "tui.leader_key")?;
     let leader_timeout = Duration::from_millis(shared.leader_timeout_ms);

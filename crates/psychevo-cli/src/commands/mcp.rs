@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    __product::runtime::PermissionMode, __product::runtime::ProjectContextInstructionMode,
-    __product::runtime::RunMode, Application, StartThreadRequest, TurnOutcome, TurnRequest,
+    Application, PermissionMode, ProjectContextInstructionMode, RunMode, StartThreadRequest,
+    TurnOutcome, TurnRequest,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

@@ -1,43 +1,64 @@
-async fn wait_for_automation_status(
+use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::Response;
+use axum::response::Json;
+use axum::routing::post;
+use psychevo::ConfigurationQuery;
+use psychevo::application::{AutomationRunStatus, AutomationTaskRecord};
+use psychevo::{Error, PermissionMode, RunMode, RunSandboxOverride};
+use serde_json::{Value, json};
+use tokio::net::TcpListener;
+
+use crate::composition::GatewayApplication;
+use crate::server::GatewayWebServerConfig;
+use crate::server::automations;
+use crate::server::binding::WebState;
+
+pub(in crate::server::tests) async fn wait_for_automation_status(
     state: &WebState,
     automation_id: &str,
-    status: &str,
+    status: AutomationRunStatus,
 ) -> AutomationTaskRecord {
     for _ in 0..50 {
         let task = state
             .inner
-            .state
-
+            .durability
             .automation_task(automation_id)
-            .await.expect("automation task")
+            .await
+            .expect("automation task")
             .expect("task");
-        if task.last_status.as_deref() == Some(status) {
+        if task.last_status == Some(status) {
             return task;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("automation did not reach {status}");
+    panic!("automation did not reach {}", status.as_str());
 }
 
-async fn wait_for_automation_status_with_timeout(
+pub(in crate::server::tests) async fn wait_for_automation_status_with_timeout(
     state: &WebState,
     automation_id: &str,
-    status: &str,
+    status: AutomationRunStatus,
     timeout: Duration,
 ) -> AutomationTaskRecord {
     let started = std::time::Instant::now();
     while started.elapsed() < timeout {
         let task = state
             .inner
-            .state
-
+            .durability
             .automation_task(automation_id)
-            .await.expect("automation task")
+            .await
+            .expect("automation task")
             .expect("task");
-        if task.last_status.as_deref() == Some(status) {
+        if task.last_status == Some(status) {
             return task;
         }
-        if task.last_status.as_deref() == Some("failed") {
+        if task.last_status == Some(AutomationRunStatus::Failed) {
             panic!(
                 "automation failed: {}",
                 task.last_error
@@ -46,10 +67,14 @@ async fn wait_for_automation_status_with_timeout(
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    panic!("automation did not reach {status} within {timeout:?}");
+    panic!(
+        "automation did not reach {} within {timeout:?}",
+        status.as_str()
+    );
 }
 
-async fn live_xiaomi_token_plan_web_state() -> (tempfile::TempDir, WebState) {
+pub(in crate::server::tests) async fn live_xiaomi_token_plan_web_state()
+-> (tempfile::TempDir, WebState) {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
@@ -90,16 +115,10 @@ api = "{base_url}"
         ),
     )
     .expect("live automation config");
-    let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
-    let gateway = Gateway::new(state);
-    let config = GatewayWebServerConfig::new(
-        gateway,
-        home,
-        cwd,
-        None,
-        env,
-        temp.path().join("static"),
-    );
+    let runtime = GatewayApplication::open(home, temp.path().join("state.db"), None, env)
+        .await
+        .expect("test composition");
+    let config = GatewayWebServerConfig::with_static(runtime, cwd, temp.path().join("static"));
     (temp, WebState::new(config))
 }
 
@@ -149,9 +168,14 @@ fn import_xiaomi_live_env(env: &mut BTreeMap<String, String>) {
     }
 }
 
-fn live_xiaomi_token_plan_unavailable(state: &WebState) -> bool {
-    let options = state.run_options(state.inner.cwd.clone(), None);
-    match model_catalog_provider(&options, "xiaomi-token-plan") {
+pub(in crate::server::tests) fn live_xiaomi_token_plan_unavailable(state: &WebState) -> bool {
+    let configuration = state
+        .inner
+        .framework
+        .configuration(ConfigurationQuery::new(&state.inner.cwd));
+    match configuration
+        .and_then(|configuration| configuration.model_catalog_provider("xiaomi-token-plan"))
+    {
         Ok(Some(provider)) if provider.fetchable() => false,
         Ok(Some(provider)) => {
             eprintln!(
@@ -175,152 +199,143 @@ fn live_xiaomi_token_plan_unavailable(state: &WebState) -> bool {
 }
 
 #[derive(Debug, Clone)]
-struct AutomationFakeRun {
-    runtime_source: String,
-    prompt: String,
-    session: Option<String>,
-    runtime_tools: Vec<String>,
-    mode: RunMode,
-    permission_mode: Option<PermissionMode>,
-    sandbox_override: Option<RunSandboxOverride>,
+pub(in crate::server::tests) struct AutomationTurnObservation {
+    pub(in crate::server::tests) prompt: String,
+    pub(in crate::server::tests) session: Option<String>,
+    pub(in crate::server::tests) runtime_tools: Vec<String>,
+    pub(in crate::server::tests) mode: RunMode,
+    pub(in crate::server::tests) permission_mode: Option<PermissionMode>,
+    pub(in crate::server::tests) sandbox_override: Option<RunSandboxOverride>,
 }
+
+const AUTOMATION_DRAFT_JSON: &str = r#"{
+  "target": {"kind": "project"},
+  "title": "Morning project check",
+  "prompt": "Review the current repository state before standup and summarize risks that need attention.",
+  "schedule": {"kind": "daily", "time": "09:00"},
+  "execution": {"policy": "autoSandbox"},
+  "model": null,
+  "reasoningEffort": null
+}"#;
 
 #[derive(Default)]
-struct AutomationFakeBackend {
-    runs: Mutex<Vec<AutomationFakeRun>>,
-    dispatch_times: Mutex<Vec<std::time::Instant>>,
-    model_tool_args: Mutex<Option<Value>>,
-    model_tool_results: Arc<Mutex<Vec<Value>>>,
-    model_tool_errors: Arc<Mutex<Vec<String>>>,
+pub(in crate::server::tests) struct AutomationTurnProbe {
+    pub(in crate::server::tests) runs: Mutex<Vec<AutomationTurnObservation>>,
+    pub(in crate::server::tests) dispatch_times: Mutex<Vec<std::time::Instant>>,
+    pub(in crate::server::tests) model_tool_args: Mutex<Option<Value>>,
+    pub(in crate::server::tests) model_tool_results: Arc<Mutex<Vec<Value>>>,
+    pub(in crate::server::tests) model_tool_errors: Arc<Mutex<Vec<String>>>,
+    pub(in crate::server::tests) outcomes: Mutex<VecDeque<psychevo::TurnOutcome>>,
     web_state: Mutex<Option<WebState>>,
-    notify: tokio::sync::Notify,
+    pub(in crate::server::tests) notify: tokio::sync::Notify,
 }
 
-impl std::fmt::Debug for AutomationFakeBackend {
+impl std::fmt::Debug for AutomationTurnProbe {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("AutomationFakeBackend")
+        formatter.write_str("AutomationTurnProbe")
     }
 }
 
-impl crate::GatewayBackend for AutomationFakeBackend {
-    fn kind(&self) -> BackendKind {
-        BackendKind::Native
+impl AutomationTurnProbe {
+    pub(in crate::server::tests) fn executor(
+        self: &Arc<Self>,
+    ) -> crate::FrameworkNativeTestExecutor {
+        let backend = Arc::clone(self);
+        Arc::new(move |invocation| {
+            let backend = Arc::clone(&backend);
+            Box::pin(async move { backend.execute(invocation).await })
+        })
     }
 
-    fn run_turn(
+    async fn execute(
         &self,
-        request: crate::BackendTurnRequest,
-    ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::__product::runtime::RunResult>>
-    {
+        invocation: psychevo::AgentTurnInvocation,
+    ) -> psychevo::Result<psychevo::TurnResult> {
+        invocation.persistence.confirm_delivery().await?;
         self.dispatch_times
             .lock()
             .expect("dispatch times")
             .push(std::time::Instant::now());
-        let runtime_tools = request
-            .options
-            .runtime_tools
+        let runtime_tools = invocation
+            .capabilities
+            .tools
             .iter()
             .map(|tool| tool.name().to_string())
             .collect();
-        let session = request.options.session.clone();
+        let session = Some(invocation.receipt.thread_id.clone());
+        let cwd = PathBuf::from(&invocation.thread.cwd);
         let model_tool_args = self.model_tool_args.lock().expect("tool args").clone();
         let model_tool_state = self.web_state.lock().expect("web state").clone();
-        let model_tool_results = Arc::clone(&self.model_tool_results);
-        let model_tool_errors = Arc::clone(&self.model_tool_errors);
-        self.runs.lock().expect("runs").push(AutomationFakeRun {
-            runtime_source: request.runtime_source.clone(),
-            prompt: request.options.prompt.clone(),
-            session: session.clone(),
-            runtime_tools,
-            mode: request.options.mode,
-            permission_mode: request.options.permission_mode,
-            sandbox_override: request.options.sandbox_override.clone(),
-        });
+        self.runs
+            .lock()
+            .expect("runs")
+            .push(AutomationTurnObservation {
+                prompt: invocation.input.prompt.clone(),
+                session: session.clone(),
+                runtime_tools,
+                mode: invocation.execution.mode,
+                permission_mode: invocation.execution.permission_mode,
+                sandbox_override: invocation.execution.sandbox.clone(),
+            });
         self.notify.notify_one();
-        Box::pin(async move {
-            if let Some(args) = model_tool_args {
-                let result = match model_tool_state {
-                    Some(state) => {
-                        automations::automation_tool_execute_for_test(
-                            state,
-                            request.options.cwd.clone(),
-                            session,
-                            args,
-                        )
-                        .await
-                    }
-                    None => Err(Error::Message(
-                        "test web state was not installed".to_string(),
-                    )),
-                };
-                match result {
-                    Ok(value) => model_tool_results
-                        .lock()
-                        .expect("tool results")
-                        .push(value),
-                    Err(err) => model_tool_errors
-                        .lock()
-                        .expect("tool errors")
-                        .push(err.to_string()),
+        if let Some(args) = model_tool_args {
+            let result = match model_tool_state {
+                Some(state) => {
+                    automations::automation_tool_execute_for_test(state, cwd, session, args).await
                 }
+                None => Err(Error::Message(
+                    "test web state was not installed".to_string(),
+                )),
+            };
+            match result {
+                Ok(value) => self
+                    .model_tool_results
+                    .lock()
+                    .expect("tool results")
+                    .push(value),
+                Err(err) => self
+                    .model_tool_errors
+                    .lock()
+                    .expect("tool errors")
+                    .push(err.to_string()),
             }
-            let session_id = if let Some(session_id) = request.options.session.clone() {
-                request.options.state.resume_session(&session_id).await?;
-                session_id
-            } else {
-                request
-                    .options
-                    .state
-                    .create_session_with_metadata(
-                        &request.options.cwd,
-                        &request.runtime_source,
-                        "fake-model",
-                        "fake-provider",
-                        None,
-                    )
-                    .await?
-            };
-            let final_answer = if request.runtime_source == "automation-draft" {
-                r#"{
-                  "target": {"kind": "project"},
-                  "title": "Morning project check",
-                  "prompt": "Review the current repository state before standup and summarize risks that need attention.",
-                  "schedule": {"kind": "daily", "time": "09:00"},
-                  "execution": {"policy": "autoSandbox"},
-                  "model": null,
-                  "reasoningEffort": null
-                }"#
-                .to_string()
-            } else {
-                "automation done".to_string()
-            };
-            Ok(psychevo::__product::runtime::RunResult {
-                session_id,
-                outcome: psychevo::__ai::Outcome::Normal,
-                terminal_reason: None,
-                final_answer,
-                db_path: request.options.state.db_path().to_path_buf(),
-                cwd: request.options.cwd,
-                provider: "fake-provider".to_string(),
-                model: "fake-model".to_string(),
-                base_url: String::new(),
-                api_key_env: None,
-                reasoning_effort: None,
-                context_limit: None,
-                tool_failures: 0,
-                selected_agent: None,
-                selected_skills: Vec::new(),
-                context_snapshot: None,
-                terminal_error: None,
-                events: Vec::new(),
-                warnings: Vec::new(),
-            })
+        }
+        let outcome = self
+            .outcomes
+            .lock()
+            .expect("automation outcomes")
+            .pop_front()
+            .unwrap_or(psychevo::TurnOutcome::Completed);
+        let terminal_error = (outcome == psychevo::TurnOutcome::Failed).then(|| {
+            psychevo::application::RunTerminalError {
+                code: "fake_automation_failure".to_string(),
+                stage: "turn".to_string(),
+                retry_class: "never".to_string(),
+                message: "fake automation terminal failure".to_string(),
+                diagnostic_ref: "diag-fake-automation".to_string(),
+            }
+        });
+        Ok(psychevo::TurnResult {
+            thread_id: invocation.receipt.thread_id,
+            outcome,
+            terminal_reason: None,
+            final_answer: "automation done".to_string(),
+            provider: "fake-provider".to_string(),
+            model: "fake-model".to_string(),
+            reasoning_effort: None,
+            context_limit: None,
+            tool_failures: 0,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+            context_snapshot: None,
+            terminal_error,
+            warnings: Vec::new(),
         })
     }
 }
 
-async fn web_state_with_automation_backend(
-    backend: Arc<AutomationFakeBackend>,
+pub(in crate::server::tests) async fn web_state_with_automation_turn_probe(
+    backend: Arc<AutomationTurnProbe>,
 ) -> (tempfile::TempDir, WebState) {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
@@ -336,17 +351,110 @@ async fn web_state_with_automation_backend(
             home.to_string_lossy().to_string(),
         ),
     ]);
-    let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
-    let gateway = Gateway::with_backend(state, backend.clone());
-    let config = GatewayWebServerConfig::new(
-        gateway,
+    std::fs::create_dir_all(&home).expect("home");
+    let runtime = GatewayApplication::open_with_native_test_executor(
         home,
-        cwd,
+        temp.path().join("state.db"),
         None,
         env,
-        temp.path().join("static"),
-    );
+        backend.executor(),
+    )
+    .await
+    .expect("test composition");
+    let config = GatewayWebServerConfig::with_static(runtime, cwd, temp.path().join("static"));
     let web_state = WebState::new(config);
     *backend.web_state.lock().expect("web state") = Some(web_state.clone());
     (temp, web_state)
+}
+
+pub(in crate::server::tests) async fn web_state_with_automation_framework_provider(
+    backend: Arc<AutomationTurnProbe>,
+) -> (tempfile::TempDir, WebState, Arc<Mutex<Vec<Value>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind automation provider");
+    let provider_addr = listener.local_addr().expect("automation provider addr");
+    let provider_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_requests = Arc::clone(&provider_requests);
+    let responses = Arc::new([
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":\"draft-write\",\"function\":{{\"name\":\"write\",\"arguments\":{}}}}}]}},\"finish_reason\":\"tool_calls\"}}]}}\n\ndata: [DONE]\n\n",
+            serde_json::to_string(
+                &json!({"path": "draft-write.txt", "content": "must not exist"}).to_string()
+            )
+            .expect("tool arguments")
+        ),
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":{}}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n",
+            serde_json::to_string(AUTOMATION_DRAFT_JSON).expect("draft response")
+        ),
+    ]);
+    let provider = Router::new().route(
+        "/v1/chat/completions",
+        post(move |Json(request): Json<Value>| {
+            let requests = Arc::clone(&captured_requests);
+            let responses = Arc::clone(&responses);
+            async move {
+                let index = {
+                    let mut requests = requests.lock().expect("provider requests");
+                    let index = requests.len();
+                    requests.push(request);
+                    index
+                };
+                Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(
+                        responses
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(|| "data: [DONE]\n\n".to_string()),
+                    ))
+                    .expect("provider response")
+            }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, provider)
+            .await
+            .expect("automation provider");
+    });
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cwd = temp.path().join("work");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&home).expect("home");
+    let config_path = home.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"model = "mock/mock-model"
+
+[provider.mock]
+api = "http://{provider_addr}/v1"
+no_auth = true
+
+[provider.mock.models."mock-model"]
+"#
+        ),
+    )
+    .expect("automation provider config");
+    let env = BTreeMap::from([
+        (
+            "HOME".to_string(),
+            temp.path().to_string_lossy().to_string(),
+        ),
+        (
+            "PSYCHEVO_HOME".to_string(),
+            home.to_string_lossy().to_string(),
+        ),
+    ]);
+    let runtime =
+        GatewayApplication::open(home, temp.path().join("state.db"), Some(config_path), env)
+            .await
+            .expect("test composition");
+    let config = GatewayWebServerConfig::with_static(runtime, cwd, temp.path().join("static"));
+    let web_state = WebState::new(config);
+    *backend.web_state.lock().expect("web state") = Some(web_state.clone());
+    (temp, web_state, provider_requests)
 }

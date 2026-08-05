@@ -13,11 +13,12 @@ keywords = ["ai", "agent", "coding", "llm"]
 categories = ["development-tools"]
 autotests = false
 
+[package.metadata.psychevo]
+architecture-layer = 2
+
 [features]
 default = []
-# Private bridge used by Psychevo's first-party product crates while the
-# published default surface remains the Framework API.
-product = []
+native-keyring = ["dep:keyring"]
 
 [dependencies]
 base64.workspace = true
@@ -30,11 +31,10 @@ futures.workspace = true
 html2text.workspace = true
 http.workspace = true
 image.workspace = true
-keyring.workspace = true
 libc.workspace = true
 portable-pty.workspace = true
 psychevo-agent-core = { version = "0.1.0", path = "../psychevo-agent-core" }
-psychevo-ai = { version = "0.1.0", path = "../psychevo-ai" }
+psychevo-ai = { version = "0.1.0", path = "../psychevo-ai", default-features = false, features = ["openai", "anthropic", "xiaomi"] }
 quick_html2md.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
@@ -56,13 +56,18 @@ tree-sitter-bash.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-pretty_assertions.workspace = true
 rusqlite.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+keyring = { workspace = true, features = ["sync-secret-service", "crypto-rust"], optional = true }
 landlock.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"], optional = true }
+
 [target.'cfg(windows)'.dependencies]
+keyring = { workspace = true, features = ["windows-native"], optional = true }
 windows-sys.workspace = true
 
 [[test]]
@@ -70,16 +75,9 @@ name = "public_framework"
 path = "tests/public_framework.rs"
 
 [[test]]
-name = "product_api"
-path = "tests/product_api.rs"
-required-features = ["product"]
-
-[[test]]
 name = "host_process"
 path = "tests/host_process.rs"
-required-features = ["product"]
 
 [[test]]
 name = "live_providers"
 path = "tests/live_providers.rs"
-required-features = ["product"]

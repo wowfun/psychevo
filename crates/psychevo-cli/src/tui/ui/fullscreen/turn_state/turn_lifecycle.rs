@@ -1,5 +1,11 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::agent_exec_helpers::{completed_agent_invocation_row, exec_session_id_from_args};
+use crate::tui::{
+    FocusMode, FullscreenUi, StreamingToolCall, TranscriptKind, TranscriptRow, TurnMetaProjection,
+    Value, active_tool_row, active_tool_title, agent_target_from_tool_event,
+    completed_tool_title_from_active, evidence_kind_for_value, running_agent_tool_full_text,
+    tool_id_key, turn_meta_text, write_argument_preview_from_args,
+};
+use std::time::Instant;
 
 pub(crate) const TUI_LOCAL_TRANSCRIPT_SOURCE: &str = "tui.local";
 pub(crate) const TUI_TURN_START_TRANSCRIPT_SOURCE: &str = "tui.turn_start";
@@ -28,6 +34,19 @@ impl<'a> FullscreenUi<'a> {
                 && row.transcript_turn_id.is_none()
             {
                 row.transcript_turn_id = Some(turn_id.to_string());
+            }
+        }
+    }
+
+    pub(crate) fn discard_unbound_optimistic_rows(&mut self) {
+        for index in (0..self.transcript.len()).rev() {
+            let Some(row) = self.transcript.get(index) else {
+                continue;
+            };
+            if row.transcript_source.as_deref() == Some("tui.optimistic")
+                && row.transcript_turn_id.is_none()
+            {
+                self.remove_transcript_row(index);
             }
         }
     }
@@ -181,9 +200,7 @@ impl<'a> FullscreenUi<'a> {
             .as_deref()
             .map(str::trim)
             .is_none_or(str::is_empty)
-            .then(|| {
-                self.durable_position_owner_index(&call.tool_name, &call.position_key)
-            })
+            .then(|| self.durable_position_owner_index(&call.tool_name, &call.position_key))
             .flatten();
         let idx = self
             .matching_live_tool_row_index(call.id.as_deref(), Some(&call.position_key))
@@ -372,9 +389,7 @@ impl<'a> FullscreenUi<'a> {
             row.title = completed_tool_title_from_active(row.kind, &row.title);
             row.failed = false;
             row.interrupted = true;
-            if row.tool_name.as_deref() == Some("write")
-                && row.write_argument_preview.is_some()
-            {
+            if row.tool_name.as_deref() == Some("write") && row.write_argument_preview.is_some() {
                 row.refresh_write_argument_preview("cancelled", Some("interrupted"));
             } else {
                 row.text = "interrupted".to_string();

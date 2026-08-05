@@ -1,5 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::path::PathBuf;
+
+use crate::tui::{
+    BottomPanel, BottomRowStyle, BottomSelectionPanel, BottomSelectionRow, BottomSelectionValue,
+    FocusMode, FullscreenUi, GatewayImageInput, HistoryEditingSurface, HistoryMessageAction,
+    HistoryMessageEdit, ImageInput, PendingImageAttachment, Result, ThreadEditableDraft,
+    ThreadEditableDraftFidelity, ThreadEditableInputPart, ThreadHistoryEditingKind,
+    TranscriptHitTarget, TranscriptKind, TuiApp, anyhow, next_image_placeholder, short_session,
+    textarea_text,
+};
 
 impl TuiApp {
     pub(crate) async fn open_history_message_actions(
@@ -26,24 +34,13 @@ impl TuiApp {
             ui.push_status("finish the running turn before editing history");
             return Ok(true);
         }
-        if let Some(reason) =
-            psychevo_gateway::history_editing::native_history_action_unavailable_reason(
-                &self.state_runtime,
-                &thread_id,
-                "tui",
-            )
-            .await?
-        {
+        let actions = self
+            .runtime
+            .gateway()
+            .native_history_actions(&thread_id, HistoryEditingSurface::Tui)
+            .await?;
+        if let Some(reason) = actions.unavailable_reason {
             ui.push_status(reason);
-            return Ok(true);
-        }
-        if self
-            .state_runtime
-            .session_revert_state(&thread_id)
-            .await?
-            .is_some()
-        {
-            ui.push_status("restore history or redo workspace files before another edit or fork");
             return Ok(true);
         }
         let rows = [
@@ -97,14 +94,11 @@ impl TuiApp {
             .current_session
             .clone()
             .ok_or_else(|| anyhow!("history editing requires an active session"))?;
-        let draft = psychevo_gateway::history_editing::read_native_editable_draft(
-            &self.state_runtime,
-            &self.gateway,
-            &thread_id,
-            &message_id,
-            "tui",
-        )
-        .await?;
+        let draft = self
+            .runtime
+            .gateway()
+            .read_native_editable_draft(&thread_id, &message_id, HistoryEditingSurface::Tui)
+            .await?;
         if let Some(reason) = draft.unavailable_reason {
             ui.set_ephemeral_error(reason);
             ui.bottom_panel = None;
@@ -143,18 +137,18 @@ impl TuiApp {
         let Some(edit) = ui.history_message_edit.take() else {
             return Ok(false);
         };
-        if matches!(
-            self.state_runtime
-                .session_revert_state(&edit.thread_id)
-                .await?
-                .map(|revert| revert.kind),
-            Some(psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. })
-        ) {
-            let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
-                &self.state_runtime,
-                &edit.thread_id,
-            )
-            .await?;
+        if self
+            .runtime
+            .gateway()
+            .history_editing_state(&edit.thread_id)
+            .await?
+            .is_some_and(|staged| staged.kind == ThreadHistoryEditingKind::ConversationEdit)
+        {
+            let draft = self
+                .runtime
+                .gateway()
+                .restore_native_conversation_edit(&edit.thread_id, HistoryEditingSurface::Tui)
+                .await?;
             ui.clear_transcript();
             self.load_current_session_history(ui).await?;
             set_history_draft_in_composer(ui, &draft.parts);
@@ -174,28 +168,20 @@ impl TuiApp {
         let Some(thread_id) = self.current_session.clone() else {
             return Ok(false);
         };
-        if self
-            .state_runtime
-            .session_summary(&thread_id)
+        if !self
+            .runtime
+            .gateway()
+            .history_editing_state(&thread_id)
             .await?
-            .is_none()
+            .is_some_and(|staged| staged.kind == ThreadHistoryEditingKind::ConversationEdit)
         {
             return Ok(false);
         }
-        if !matches!(
-            self.state_runtime
-                .session_revert_state(&thread_id)
-                .await?
-                .map(|revert| revert.kind),
-            Some(psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. })
-        ) {
-            return Ok(false);
-        }
-        let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
-            &self.state_runtime,
-            &thread_id,
-        )
-        .await?;
+        let draft = self
+            .runtime
+            .gateway()
+            .restore_native_conversation_edit(&thread_id, HistoryEditingSurface::Tui)
+            .await?;
         ui.history_message_edit = None;
         ui.clear_transcript();
         self.load_current_session_history(ui).await?;
@@ -209,19 +195,18 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         thread_id: &str,
     ) -> Result<()> {
-        let Some(revert) = self.state_runtime.session_revert_state(thread_id).await? else {
+        let Some(staged) = self
+            .runtime
+            .gateway()
+            .history_editing_state(thread_id)
+            .await?
+        else {
             return Ok(());
         };
-        if matches!(
-            revert.kind,
-            psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. }
-        ) {
-            let hidden = self
-                .state_runtime
-                .messages_from_count(thread_id, revert.start_seq)
-                .await?;
+        if staged.kind == ThreadHistoryEditingKind::ConversationEdit {
             ui.push_status(format!(
-                "history edit staged · {hidden} entries hidden · Esc restore history"
+                "history edit staged · {} entries hidden · Esc restore history",
+                staged.hidden_entry_count
             ));
         }
         Ok(())
@@ -252,15 +237,16 @@ impl TuiApp {
         }
         match edit.action {
             HistoryMessageAction::UpdateAndRun => {
-                let staged = psychevo_gateway::history_editing::stage_native_conversation_edit(
-                    &self.state_runtime,
-                    &self.gateway,
-                    &edit.thread_id,
-                    &edit.message_id,
-                    &draft,
-                    "tui",
-                )
-                .await?;
+                let staged = self
+                    .runtime
+                    .gateway()
+                    .stage_native_conversation_edit(
+                        &edit.thread_id,
+                        &edit.message_id,
+                        &draft,
+                        HistoryEditingSurface::Tui,
+                    )
+                    .await?;
                 if !staged {
                     ui.history_message_edit = None;
                     ui.clear_composer();
@@ -283,24 +269,15 @@ impl TuiApp {
                 submit?;
             }
             HistoryMessageAction::Fork => {
-                if self
-                    .state_runtime
-                    .session_revert_state(&edit.thread_id)
-                    .await?
-                    .is_some()
-                {
-                    ui.set_ephemeral_error(
-                        "restore history or redo workspace files before forking",
-                    );
-                    return Ok(true);
-                }
-                let child_id = psychevo_gateway::history_editing::fork_native_history(
-                    &self.state_runtime,
-                    &edit.thread_id,
-                    Some(edit.message_seq),
-                    "tui",
-                )
-                .await?;
+                let child_id = self
+                    .runtime
+                    .gateway()
+                    .fork_native_history(
+                        &edit.thread_id,
+                        Some(edit.message_seq),
+                        HistoryEditingSurface::Tui,
+                    )
+                    .await?;
                 let parts = draft.parts;
                 self.open_session_direct(ui, &child_id).await?;
                 set_history_draft_in_composer(ui, &parts);
@@ -320,33 +297,20 @@ impl TuiApp {
             ui.set_bottom_panel_notice("cannot fork the current session while a turn is running");
             return Ok(());
         }
-        if let Some(reason) =
-            psychevo_gateway::history_editing::native_history_action_unavailable_reason(
-                &self.state_runtime,
-                &session_id,
-                "tui",
-            )
-            .await?
-        {
+        let actions = self
+            .runtime
+            .gateway()
+            .native_history_actions(&session_id, HistoryEditingSurface::Tui)
+            .await?;
+        if let Some(reason) = actions.unavailable_reason {
             ui.set_bottom_panel_notice(reason);
             return Ok(());
         }
-        if self
-            .state_runtime
-            .session_revert_state(&session_id)
-            .await?
-            .is_some()
-        {
-            ui.set_bottom_panel_notice("restore history or redo workspace files before forking");
-            return Ok(());
-        }
-        let child_id = psychevo_gateway::history_editing::fork_native_history(
-            &self.state_runtime,
-            &session_id,
-            None,
-            "tui",
-        )
-        .await?;
+        let child_id = self
+            .runtime
+            .gateway()
+            .fork_native_history(&session_id, None, HistoryEditingSurface::Tui)
+            .await?;
         self.open_session_direct(ui, &child_id).await?;
         ui.push_status(format!("forked from {}", short_session(&session_id)));
         Ok(())

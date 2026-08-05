@@ -1,3 +1,19 @@
+use axum::Router;
+use axum::response::Json;
+use axum::routing::{get, post};
+use psychevo::application::GatewaySourceLaneInput;
+use psychevo_gateway_protocol as wire;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+
+use crate::server::binding::AuthContext;
+use crate::server::rpc_dispatch::handle_rpc;
+use crate::server::rpc_json::RpcRequest;
+use crate::server::scope_session::default_resolved_scope;
+use crate::server::tests::helpers::web_state;
+
 #[tokio::test]
 async fn settings_read_and_channel_rpc_expose_secret_free_channels() {
     let (_temp, state) = web_state().await;
@@ -27,7 +43,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "settings/read".to_string(),
             params: None,
@@ -55,7 +71,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "channel/enable".to_string(),
             params: Some(json!({
@@ -79,7 +95,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "channel/doctor".to_string(),
             params: Some(json!({
@@ -126,17 +142,20 @@ allow_users = ["12345"]
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "channel".to_string();
     let bound_thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .await.expect("bound thread");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("bound thread")
+        .id()
+        .to_string();
     state
         .inner
-        .state
-
-        .upsert_gateway_source_binding(psychevo::__product::persistence::GatewaySourceBindingInput {
+        .durability
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: "im.telegram:release-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -144,19 +163,21 @@ allow_users = ["12345"]
                 "chatId": "release-lane",
             }),
             visible_name: Some("Release lane"),
-            thread_id: &bound_thread,
-            backend_kind: "psychevo",
-            backend_native_id: Some(&bound_thread),
+            thread_id: Some(&bound_thread),
+            draft_agent_ref: None,
+            draft_profile_ref: None,
+            draft_control_values: &BTreeMap::new(),
             lineage: None,
         })
-        .await.expect("source binding");
+        .await
+        .expect("source binding");
 
     let updated = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "channel/update".to_string(),
             params: Some(json!({
@@ -196,36 +217,42 @@ allow_users = ["12345"]
     assert!(
         state
             .inner
-            .state
-
-            .gateway_source_binding("im.telegram:release-lane")
-            .await.expect("rotated binding lookup")
+            .durability
+            .gateway_source_lane("im.telegram:release-lane")
+            .await
+            .expect("rotated binding lookup")
             .is_none()
     );
     let bound_summary = state
         .inner
-        .state
-
-        .session_summary(&bound_thread)
-        .await.expect("bound summary")
-        .expect("bound session");
+        .framework
+        .resume_thread(&bound_thread)
+        .await
+        .expect("bound thread")
+        .snapshot()
+        .await
+        .expect("bound snapshot")
+        .summary;
     assert_eq!(
         bound_summary.end_reason.as_deref(),
         Some("channel_workspace_changed")
     );
     assert!(bound_summary.archived_at_ms.is_some());
 
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "channel".to_string();
     let same_cwd_thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .await.expect("same cwd thread");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("same cwd thread")
+        .id()
+        .to_string();
     state
         .inner
-        .state
-
-        .upsert_gateway_source_binding(psychevo::__product::persistence::GatewaySourceBindingInput {
+        .durability
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: "im.telegram:same-cwd-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -233,18 +260,20 @@ allow_users = ["12345"]
                 "chatId": "same-cwd-lane",
             }),
             visible_name: Some("Same cwd lane"),
-            thread_id: &same_cwd_thread,
-            backend_kind: "psychevo",
-            backend_native_id: Some(&same_cwd_thread),
+            thread_id: Some(&same_cwd_thread),
+            draft_agent_ref: None,
+            draft_profile_ref: None,
+            draft_control_values: &BTreeMap::new(),
             lineage: None,
         })
-        .await.expect("same cwd binding");
+        .await
+        .expect("same cwd binding");
     handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("same-cwd")),
             method: "channel/update".to_string(),
             params: Some(json!({
@@ -259,13 +288,13 @@ allow_users = ["12345"]
     assert_eq!(
         state
             .inner
-            .state
-
-            .gateway_source_binding("im.telegram:same-cwd-lane")
-            .await.expect("same cwd binding lookup")
+            .durability
+            .gateway_source_lane("im.telegram:same-cwd-lane")
+            .await
+            .expect("same cwd binding lookup")
             .expect("same cwd binding")
             .thread_id,
-        same_cwd_thread
+        Some(same_cwd_thread)
     );
 
     let settings = handle_rpc(
@@ -273,7 +302,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "settings/read".to_string(),
             params: None,
@@ -288,17 +317,20 @@ allow_users = ["12345"]
     );
     assert!(!settings.to_string().contains("telegram-secret"));
 
+    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    start.source = "channel".to_string();
     let source_list_thread = state
         .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .await.expect("source list thread");
+        .framework
+        .start_thread(start)
+        .await
+        .expect("source list thread")
+        .id()
+        .to_string();
     state
         .inner
-        .state
-
-        .upsert_gateway_source_binding(psychevo::__product::persistence::GatewaySourceBindingInput {
+        .durability
+        .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: "im.telegram:source-hash",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -310,18 +342,20 @@ allow_users = ["12345"]
                 "userId": "raw-user-654321"
             }),
             visible_name: Some("raw-chat-123456/raw-user-654321"),
-            thread_id: &source_list_thread,
-            backend_kind: "psychevo",
-            backend_native_id: Some(&source_list_thread),
+            thread_id: Some(&source_list_thread),
+            draft_agent_ref: None,
+            draft_profile_ref: None,
+            draft_control_values: &BTreeMap::new(),
             lineage: None,
         })
-        .await.expect("source list binding");
+        .await
+        .expect("source list binding");
     let sources = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("sources")),
             method: "channel/source/list".to_string(),
             params: Some(json!({
@@ -359,7 +393,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("3")),
             method: "channel/delete".to_string(),
             params: Some(json!({
@@ -378,7 +412,7 @@ allow_users = ["12345"]
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("4")),
             method: "settings/read".to_string(),
             params: None,
@@ -442,7 +476,7 @@ async fn channel_wechat_qr_rpc_connects_and_writes_secret_free_config() {
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "channel/wechat-qr/start".to_string(),
             params: Some(json!({
@@ -468,7 +502,7 @@ async fn channel_wechat_qr_rpc_connects_and_writes_secret_free_config() {
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "channel/wechat-qr/poll".to_string(),
             params: Some(json!({
@@ -566,7 +600,7 @@ allow_users = ["existing-user"]
         AuthContext::Bearer,
         tx.clone(),
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("1")),
             method: "channel/wechat-qr/start".to_string(),
             params: Some(json!({
@@ -589,7 +623,7 @@ allow_users = ["existing-user"]
         AuthContext::Bearer,
         tx,
         RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!("2")),
             method: "channel/wechat-qr/poll".to_string(),
             params: Some(json!({

@@ -1,65 +1,26 @@
-pub fn gateway_event_from_run_stream(
-    turn_id: &str,
-    event: &RunStreamEvent,
-) -> Option<GatewayEvent> {
-    Some(match event {
-        RunStreamEvent::AssistantTextDelta { text } => GatewayEvent::EntryUpdated {
-            turn_id: turn_id.to_string(),
-            entry: live_entry(
-                turn_id,
-                "assistant",
-                TranscriptEntryRole::Assistant,
-                TranscriptBlockKind::Text,
-                TranscriptBlockStatus::Running,
-                None,
-                Some(text.clone()),
-                Some(json!({
-                    "projection": "assistant_text_delta",
-                    "origin": "run_stream",
-                })),
-            ),
-        },
-        RunStreamEvent::ReasoningDelta { text } => GatewayEvent::EntryUpdated {
-            turn_id: turn_id.to_string(),
-            entry: live_entry(
-                turn_id,
-                "assistant:reasoning",
-                TranscriptEntryRole::Assistant,
-                TranscriptBlockKind::Reasoning,
-                TranscriptBlockStatus::Running,
-                Some("Thinking".to_string()),
-                Some(text.clone()),
-                Some(json!({
-                    "projection": "reasoning",
-                    "origin": "run_stream_reasoning",
-                })),
-            ),
-        },
-        RunStreamEvent::ClarifyRequest(request) => GatewayEvent::ActionRequested {
-            action: clarify_action(
-                request.call_id.clone(),
-                serde_json::to_value(request).unwrap_or(Value::Null),
-                None,
-                Some(turn_id.to_string()),
-            ),
-        },
-        RunStreamEvent::ClarifyResolved(resolved) => GatewayEvent::ActionResolved {
-            action_id: resolved.call_id.clone(),
-            kind: GatewayActionKind::Clarify,
-            outcome: clarify_resolution_outcome(&resolved.reason),
-            payload: json!({
-                "reason": format!("{:?}", resolved.reason),
-            }),
-        },
-        RunStreamEvent::Scoped { event, .. } => {
-            return gateway_event_from_run_stream(turn_id, event);
-        }
-        RunStreamEvent::Event(value) => return gateway_event_from_runtime_value(turn_id, value),
-        RunStreamEvent::ReasoningEnd => return None,
-    })
-}
+use psychevo::RunWarning;
+use psychevo::application::ClarifyResolvedReason;
+use serde_json::{Value, json};
 
-fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<GatewayEvent> {
+use psychevo_gateway_protocol::events_transcript::{
+    GatewayActionKind, GatewayActionOutcome, GatewayEvent, PendingActionView, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptEntryRole,
+};
+use psychevo_gateway_protocol::source::{
+    AgentDeliveryStatusView, AgentErrorView, GatewayTurn, GatewayTurnError, GatewayTurnStatus,
+};
+
+use super::live_helpers::runtime_message_role;
+use super::tool_helpers::{
+    LiveEntryBuild, assistant_message_is_tool_call_turn, assistant_message_metadata,
+    assistant_phase_metadata, json_preview, live_entry, live_tool_entry, message_text,
+    runtime_value_metadata, selected_skills_from_value, tool_event_failed, tool_name_from_value,
+};
+
+pub(super) fn gateway_event_from_runtime_value(
+    turn_id: &str,
+    value: &Value,
+) -> Option<GatewayEvent> {
     Some(match value.get("type").and_then(Value::as_str) {
         Some("run_start") | Some("agent_start") | Some("task_started") | Some("turn_started") => {
             GatewayEvent::TurnStarted {
@@ -113,7 +74,7 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                 display_title: title,
             }
         }
-        Some("message_update") => {
+        Some(event_type @ ("message_start" | "message_update")) => {
             let message = value.get("message");
             if runtime_message_role(message) == Some("assistant") {
                 let is_preamble = assistant_message_is_tool_call_turn(message);
@@ -121,22 +82,30 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                 if is_preamble && text.is_none() {
                     return None;
                 }
-                GatewayEvent::EntryUpdated {
-                    turn_id: turn_id.to_string(),
-                    entry: live_entry(
-                        turn_id,
-                        "assistant",
-                        TranscriptEntryRole::Assistant,
-                        TranscriptBlockKind::Text,
-                        TranscriptBlockStatus::Running,
-                        None,
-                        text,
-                        Some(if is_preamble {
-                            assistant_phase_metadata(value)
-                        } else {
-                            assistant_message_metadata(value)
-                        }),
-                    ),
+                let entry = live_entry(LiveEntryBuild {
+                    turn_id,
+                    id_suffix: "assistant",
+                    role: TranscriptEntryRole::Assistant,
+                    kind: TranscriptBlockKind::Text,
+                    status: TranscriptBlockStatus::Running,
+                    title: None,
+                    body: text,
+                    metadata: Some(if is_preamble {
+                        assistant_phase_metadata(value)
+                    } else {
+                        assistant_message_metadata(value)
+                    }),
+                });
+                if event_type == "message_start" {
+                    GatewayEvent::EntryStarted {
+                        turn_id: turn_id.to_string(),
+                        entry,
+                    }
+                } else {
+                    GatewayEvent::EntryUpdated {
+                        turn_id: turn_id.to_string(),
+                        entry,
+                    }
                 }
             } else {
                 return None;
@@ -152,77 +121,77 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
                     } else {
                         GatewayEvent::EntryCompleted {
                             turn_id: turn_id.to_string(),
-                            entry: live_entry(
+                            entry: live_entry(LiveEntryBuild {
                                 turn_id,
-                                "assistant",
-                                TranscriptEntryRole::Assistant,
-                                TranscriptBlockKind::Text,
-                                TranscriptBlockStatus::Completed,
-                                None,
-                                message_text(value.get("message")),
-                                Some(if is_preamble {
+                                id_suffix: "assistant",
+                                role: TranscriptEntryRole::Assistant,
+                                kind: TranscriptBlockKind::Text,
+                                status: TranscriptBlockStatus::Completed,
+                                title: None,
+                                body: message_text(value.get("message")),
+                                metadata: Some(if is_preamble {
                                     assistant_phase_metadata(value)
                                 } else {
                                     assistant_message_metadata(value)
                                 }),
-                            ),
+                            }),
                         }
                     }
                 }
                 Some("user") => GatewayEvent::EntryCompleted {
                     turn_id: turn_id.to_string(),
-                    entry: live_entry(
+                    entry: live_entry(LiveEntryBuild {
                         turn_id,
-                        "prompt",
-                        TranscriptEntryRole::User,
-                        TranscriptBlockKind::Text,
-                        TranscriptBlockStatus::Completed,
-                        None,
-                        message_text(value.get("message")),
-                        None,
-                    ),
+                        id_suffix: "prompt",
+                        role: TranscriptEntryRole::User,
+                        kind: TranscriptBlockKind::Text,
+                        status: TranscriptBlockStatus::Completed,
+                        title: None,
+                        body: message_text(value.get("message")),
+                        metadata: None,
+                    }),
                 },
                 _ => return None,
             }
         }
         Some("agent_message") => GatewayEvent::EntryCompleted {
             turn_id: turn_id.to_string(),
-            entry: live_entry(
+            entry: live_entry(LiveEntryBuild {
                 turn_id,
-                "assistant",
-                TranscriptEntryRole::Assistant,
-                TranscriptBlockKind::Text,
-                TranscriptBlockStatus::Completed,
-                None,
-                value
+                id_suffix: "assistant",
+                role: TranscriptEntryRole::Assistant,
+                kind: TranscriptBlockKind::Text,
+                status: TranscriptBlockStatus::Completed,
+                title: None,
+                body: value
                     .get("message")
                     .and_then(Value::as_str)
                     .map(ToString::to_string),
-                None,
-            ),
+                metadata: None,
+            }),
         },
         Some("agent_session_start") => GatewayEvent::EntryUpdated {
             turn_id: turn_id.to_string(),
-            entry: live_entry(
+            entry: live_entry(LiveEntryBuild {
                 turn_id,
-                value
+                id_suffix: value
                     .get("tool_call_id")
                     .and_then(Value::as_str)
                     .unwrap_or("agent"),
-                TranscriptEntryRole::Assistant,
-                TranscriptBlockKind::Agent,
-                TranscriptBlockStatus::Running,
-                value
+                role: TranscriptEntryRole::Assistant,
+                kind: TranscriptBlockKind::Agent,
+                status: TranscriptBlockStatus::Running,
+                title: value
                     .get("agent_name")
                     .and_then(Value::as_str)
                     .map(ToString::to_string),
-                value
+                body: value
                     .get("agent_description")
                     .or_else(|| value.get("task_name"))
                     .and_then(Value::as_str)
                     .map(ToString::to_string),
-                Some(runtime_value_metadata(value)),
-            ),
+                metadata: Some(runtime_value_metadata(value)),
+            }),
         },
         Some("tool_call_pending" | "tool_execution_start" | "tool_execution_update")
             if tool_name_from_value(value) == "write_stdin" =>
@@ -283,19 +252,19 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
         },
         Some("user_message") => GatewayEvent::EntryCompleted {
             turn_id: turn_id.to_string(),
-            entry: live_entry(
+            entry: live_entry(LiveEntryBuild {
                 turn_id,
-                "prompt",
-                TranscriptEntryRole::User,
-                TranscriptBlockKind::Text,
-                TranscriptBlockStatus::Completed,
-                None,
-                value
+                id_suffix: "prompt",
+                role: TranscriptEntryRole::User,
+                kind: TranscriptBlockKind::Text,
+                status: TranscriptBlockStatus::Completed,
+                title: None,
+                body: value
                     .get("message")
                     .and_then(Value::as_str)
                     .map(ToString::to_string),
-                None,
-            ),
+                metadata: None,
+            }),
         },
         Some("warning") => serde_json::from_value::<RunWarning>(value.clone())
             .map(|warning| GatewayEvent::Warning {
@@ -333,47 +302,7 @@ fn gateway_event_from_runtime_value(turn_id: &str, value: &Value) -> Option<Gate
         },
         Some("exec_approval_request") | Some("apply_patch_approval_request") => {
             GatewayEvent::ActionRequested {
-                action: permission_action(
-                    value
-                        .get("call_id")
-                        .or_else(|| value.get("id"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    value
-                        .get("tool_name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool")
-                        .to_string(),
-                    value
-                        .get("summary")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    value
-                        .get("reason")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    value
-                        .get("matched_rule")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string),
-                    value
-                        .get("suggested_rule")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string),
-                    value
-                        .get("allow_always")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                    value
-                        .get("timeout_secs")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
-                    None,
-                    Some(turn_id.to_string()),
-                ),
+                action: permission_action(value, turn_id),
             }
         }
         _ => return None,
@@ -492,19 +421,44 @@ fn action_resolution_payload(value: &Value) -> Value {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn permission_action(
-    action_id: String,
-    tool_name: String,
-    summary: String,
-    reason: String,
-    matched_rule: Option<String>,
-    suggested_rule: Option<String>,
-    allow_always: bool,
-    timeout_secs: u64,
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-) -> PendingActionView {
+fn permission_action(value: &Value, turn_id: &str) -> PendingActionView {
+    let action_id = value
+        .get("call_id")
+        .or_else(|| value.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let tool_name = value
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string();
+    let summary = value
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let reason = value
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let matched_rule = value
+        .get("matched_rule")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let suggested_rule = value
+        .get("suggested_rule")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let allow_always = value
+        .get("allow_always")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let timeout_secs = value
+        .get("timeout_secs")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     PendingActionView {
         action_id,
         kind: GatewayActionKind::Permission,
@@ -526,8 +480,8 @@ fn permission_action(
             "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
             "timeoutSecs": timeout_secs,
         }),
-        thread_id,
-        turn_id,
+        thread_id: None,
+        turn_id: Some(turn_id.to_string()),
         activity_id: None,
         source_key: None,
         owner_id: None,
@@ -535,7 +489,7 @@ fn permission_action(
     }
 }
 
-fn clarify_action(
+pub(super) fn clarify_action(
     action_id: String,
     raw: Value,
     thread_id: Option<String>,
@@ -567,14 +521,12 @@ fn clarify_summary(raw: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn clarify_resolution_outcome(
-    reason: &psychevo::__product::runtime::ClarifyResolvedReason,
-) -> GatewayActionOutcome {
+pub(super) fn clarify_resolution_outcome(reason: &ClarifyResolvedReason) -> GatewayActionOutcome {
     match reason {
-        psychevo::__product::runtime::ClarifyResolvedReason::Answered => GatewayActionOutcome::Accepted,
-        psychevo::__product::runtime::ClarifyResolvedReason::Cancelled => GatewayActionOutcome::Cancelled,
-        psychevo::__product::runtime::ClarifyResolvedReason::TimedOut => GatewayActionOutcome::TimedOut,
-        psychevo::__product::runtime::ClarifyResolvedReason::TurnFinished => GatewayActionOutcome::Completed,
+        ClarifyResolvedReason::Answered => GatewayActionOutcome::Accepted,
+        ClarifyResolvedReason::Cancelled => GatewayActionOutcome::Cancelled,
+        ClarifyResolvedReason::TimedOut => GatewayActionOutcome::TimedOut,
+        ClarifyResolvedReason::TurnFinished => GatewayActionOutcome::Completed,
     }
 }
 

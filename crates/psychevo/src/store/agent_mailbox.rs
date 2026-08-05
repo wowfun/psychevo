@@ -219,11 +219,11 @@ impl StateRuntime {
                 ORDER BY created_at_ms ASC, id ASC
                 "#,
             )
-                .bind(parent_session_id)
-                .bind(tool_call_id)
-                .bind(delivered_after_session_seq)
-                .fetch_all(&mut *tx)
-                .await?;
+            .bind(parent_session_id)
+            .bind(tool_call_id)
+            .bind(delivered_after_session_seq)
+            .fetch_all(&mut *tx)
+            .await?;
             tx.commit().await?;
             rows.into_iter()
                 .map(|row| agent_mailbox_event_from_row(&row))

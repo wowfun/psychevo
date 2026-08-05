@@ -1,12 +1,18 @@
-use super::*;
-use crate::store::{AutomationRunFinishInput, GatewayActivityClaimInput};
+use crate::paths::canonical_cwd;
+use crate::state::StateRuntime;
+use crate::store::{
+    AutomationRunFinishInput, AutomationRunStatus, AutomationRunTerminalStatus,
+    AutomationTaskInput, AutomationTaskKind, GatewayActivityClaimInput, GatewayActivityKind,
+};
 use psychevo_agent_core::now_ms;
+use serde_json::json;
+use tempfile::tempdir;
 
 fn automation_input(cwd: &str) -> AutomationTaskInput {
     AutomationTaskInput {
         id: Some("automation-1".to_string()),
         cwd: cwd.to_string(),
-        kind: "project".to_string(),
+        kind: AutomationTaskKind::Project,
         target_thread_id: None,
         title: "Morning check".to_string(),
         prompt: "Summarize repo status".to_string(),
@@ -30,7 +36,7 @@ fn automation_activity_claim<'a>(
         thread_id: None,
         source_key: Some(source_key),
         turn_id: Some(activity_id),
-        kind: "turn",
+        kind: GatewayActivityKind::Turn,
         owner_id: "automation-owner",
         owner_surface: Some("automation"),
         lease_expires_at_ms,
@@ -118,6 +124,53 @@ async fn automation_task_upsert_lists_due_and_deletes() {
 }
 
 #[tokio::test]
+async fn automation_target_kinds_roundtrip_through_storage_tokens() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("state.db");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let cwd_str = cwd.to_string_lossy().to_string();
+    let thread_id = store
+        .create_session_with_metadata(&cwd, "automation", "model", "provider", None)
+        .await
+        .expect("target Thread");
+
+    let project = store
+        .upsert_automation_task(automation_input(&cwd_str))
+        .await
+        .expect("project automation");
+    assert_eq!(project.kind, AutomationTaskKind::Project);
+
+    let mut heartbeat = automation_input(&cwd_str);
+    heartbeat.id = Some("heartbeat-1".to_string());
+    heartbeat.kind = AutomationTaskKind::ThreadHeartbeat;
+    heartbeat.target_thread_id = Some(thread_id);
+    let heartbeat = store
+        .upsert_automation_task(heartbeat)
+        .await
+        .expect("heartbeat automation");
+    assert_eq!(heartbeat.kind, AutomationTaskKind::ThreadHeartbeat);
+
+    let raw = rusqlite::Connection::open(db_path).expect("raw connection");
+    let kinds = raw
+        .prepare("SELECT id, kind FROM automations ORDER BY id ASC")
+        .expect("kind query")
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("kind rows")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("kind values");
+    assert_eq!(
+        kinds,
+        vec![
+            ("automation-1".to_string(), "project".to_string()),
+            ("heartbeat-1".to_string(), "thread_heartbeat".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn automation_run_claim_is_single_running_and_finish_updates_task() {
     let temp = tempdir().expect("tempdir");
     let store = StateRuntime::open(temp.path().join("state.db"))
@@ -139,7 +192,7 @@ async fn automation_run_claim_is_single_running_and_finish_updates_task() {
         .await
         .expect("first claim")
         .expect("running record");
-    assert_eq!(first.status, "running");
+    assert_eq!(first.status, AutomationRunStatus::Running);
     assert_eq!(first.trigger, "scheduler");
     assert!(
         store
@@ -153,13 +206,13 @@ async fn automation_run_claim_is_single_running_and_finish_updates_task() {
         .await
         .expect("task")
         .expect("task record");
-    assert_eq!(task.last_status.as_deref(), Some("running"));
+    assert_eq!(task.last_status, Some(AutomationRunStatus::Running));
     assert!(task.last_run_at_ms.unwrap_or_default() <= now_ms());
 
     let finished = store
         .finish_automation_run(AutomationRunFinishInput {
             run_id: &first.id,
-            status: "completed",
+            status: AutomationRunTerminalStatus::Completed,
             thread_id: Some(&thread_id),
             source_key: Some("automation:automation-1"),
             error: None,
@@ -169,7 +222,7 @@ async fn automation_run_claim_is_single_running_and_finish_updates_task() {
         .await
         .expect("finish")
         .expect("finished run");
-    assert_eq!(finished.status, "completed");
+    assert_eq!(finished.status, AutomationRunStatus::Completed);
     assert_eq!(finished.thread_id.as_deref(), Some(thread_id.as_str()));
     assert_eq!(
         finished
@@ -184,7 +237,7 @@ async fn automation_run_claim_is_single_running_and_finish_updates_task() {
         .await
         .expect("task")
         .expect("task record");
-    assert_eq!(task.last_status.as_deref(), Some("completed"));
+    assert_eq!(task.last_status, Some(AutomationRunStatus::Completed));
     assert_eq!(task.last_error, None);
     assert_eq!(task.source_key.as_deref(), Some("automation:automation-1"));
     assert_eq!(task.next_run_at_ms, Some(99_000));
@@ -256,16 +309,16 @@ async fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity
             .expect("active protected candidates")
             .is_empty()
     );
-    assert!(
+    assert_eq!(
         store
-            .heartbeat_gateway_activity(
-                &activity.activity_id,
+            .heartbeat_gateway_activities(
                 &activity.owner_id,
-                activity.generation,
+                &[(activity.activity_id.clone(), activity.generation)],
                 now_ms() - 1,
             )
             .await
-            .expect("expire activity")
+            .expect("expire activity"),
+        vec![activity.activity_id.clone()]
     );
     let stale_after_expiry = store
         .stale_automation_runs_for_recovery(now_ms(), 5 * 60 * 1000, 10)
@@ -307,7 +360,7 @@ async fn recovered_stale_automation_run_allows_new_claim() {
     store
         .finish_automation_run(AutomationRunFinishInput {
             run_id: &candidate.run.id,
-            status: "failed",
+            status: AutomationRunTerminalStatus::Failed,
             thread_id: candidate.run.thread_id.as_deref(),
             source_key: candidate.run.source_key.as_deref(),
             error: Some("automation run recovery: stale running claim expired"),
@@ -322,4 +375,88 @@ async fn recovered_stale_automation_run_allows_new_claim() {
         .expect("new claim")
         .expect("new run");
     assert_ne!(next.id, run.id);
+}
+
+#[tokio::test]
+async fn closed_automation_domains_reject_corruption_while_triggers_remain_open() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("state.db");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let cwd_str = cwd.to_string_lossy().to_string();
+    store
+        .upsert_automation_task(automation_input(&cwd_str))
+        .await
+        .expect("automation");
+    let run = store
+        .claim_automation_run("automation-1", "plugin/future-source")
+        .await
+        .expect("claim")
+        .expect("run");
+    assert_eq!(run.trigger, "plugin/future-source");
+
+    let raw = rusqlite::Connection::open(&db_path).expect("raw connection");
+    raw.execute(
+        "UPDATE automations SET kind = 'future' WHERE id = 'automation-1'",
+        [],
+    )
+    .expect("corrupt automation kind");
+    let error = store
+        .automation_task("automation-1")
+        .await
+        .expect_err("unknown automation kind");
+    assert_eq!(
+        error.structured_data().expect("structured kind error"),
+        &json!({
+            "kind": "invalid_persisted_domain_value",
+            "table": "automations",
+            "field": "kind",
+            "value": "future",
+        })
+    );
+
+    raw.execute(
+        "UPDATE automations SET kind = 'project', last_status = 'future' WHERE id = 'automation-1'",
+        [],
+    )
+    .expect("corrupt automation last status");
+    let error = store
+        .automation_task("automation-1")
+        .await
+        .expect_err("unknown automation last status");
+    assert_eq!(
+        error
+            .structured_data()
+            .expect("structured last-status error"),
+        &json!({
+            "kind": "invalid_persisted_domain_value",
+            "table": "automations",
+            "field": "last_status",
+            "value": "future",
+        })
+    );
+
+    raw.execute(
+        "UPDATE automations SET last_status = 'running' WHERE id = 'automation-1'",
+        [],
+    )
+    .expect("restore automation status");
+    raw.execute(
+        "UPDATE automation_runs SET status = 'future' WHERE id = ?1",
+        rusqlite::params![run.id],
+    )
+    .expect("corrupt run status");
+    let error = store
+        .automation_run(&run.id)
+        .await
+        .expect_err("unknown run status");
+    assert_eq!(
+        error.structured_data().expect("structured run error"),
+        &json!({
+            "kind": "invalid_persisted_domain_value",
+            "table": "automation_runs",
+            "field": "status",
+            "value": "future",
+        })
+    );
 }

@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(test)]
+use std::path::Path;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+use crate::tui::transcript_lines;
+use crate::tui::{
+    Line, Outcome, Paragraph, PromptAttachmentDisplay, Text, ThreadItem, TranscriptKind,
+    TranscriptRow, Value, Wrap, active_tool_title, format_duration_compact, model_meta_label,
+    tool_title,
+};
 pub(crate) fn default_title(kind: TranscriptKind) -> &'static str {
     match kind {
         TranscriptKind::Prompt => "",
@@ -22,32 +31,25 @@ pub(crate) struct UserPromptDisplay {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct UserShellDisplay {
-    pub(crate) command: String,
-    pub(crate) result: Value,
-    pub(crate) outcome: String,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct AgentNotificationProjection {
     pub(crate) text: String,
     pub(crate) target: Option<String>,
 }
 
-pub(crate) fn user_display_from_message(
+pub(crate) fn user_display_from_item(
     message: &Value,
-    metadata: Option<&Value>,
+    item: &ThreadItem,
 ) -> Option<UserPromptDisplay> {
-    if side_inherited_message(metadata) {
+    if item.is_side_inherited() {
         return None;
     }
-    if agent_notification_present(metadata) {
+    if agent_notification_present(item.metadata.as_ref()) {
         return None;
     }
-    if user_shell_display_from_message(message, metadata).is_some() {
+    if item.user_shell_display().is_some() {
         return None;
     }
-    if let Some(display) = tui_display_metadata(metadata) {
+    if let Some(display) = item.prompt_display() {
         return Some(UserPromptDisplay {
             text: display.content_text,
             attachment_meta: attachment_meta_from_display(&display.attachments),
@@ -144,18 +146,14 @@ pub(crate) fn agent_notification_projection(
     Some(AgentNotificationProjection { text, target })
 }
 
-pub(crate) fn user_text_from_message(message: &Value, metadata: Option<&Value>) -> Option<String> {
-    if side_inherited_message(metadata) {
+pub(crate) fn user_text_from_item(message: &Value, item: &ThreadItem) -> Option<String> {
+    if item.is_side_inherited() {
         return None;
     }
-    if let Some(display) = user_shell_display_from_message(message, metadata) {
+    if let Some(display) = item.user_shell_display() {
         return Some(format!("!{}", display.command));
     }
-    user_display_from_message(message, metadata).map(|display| display.text)
-}
-
-pub(crate) fn side_inherited_message(metadata: Option<&Value>) -> bool {
-    side_inherited_metadata_hidden(metadata)
+    user_display_from_item(message, item).map(|display| display.text)
 }
 
 pub(crate) fn legacy_user_text_from_message(message: &Value) -> Option<String> {
@@ -172,105 +170,6 @@ pub(crate) fn legacy_user_text_from_message(message: &Value) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
     (!text.is_empty()).then_some(text)
-}
-
-pub(crate) fn visible_tui_message_count(messages: &[TuiMessageSummary]) -> Result<usize> {
-    messages.iter().try_fold(0, |count, summary| {
-        let message = serde_json::to_value(&summary.message)?;
-        Ok(count
-            + match message
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-            {
-                "user" => usize::from(
-                    user_shell_display_from_message(&message, summary.metadata.as_ref()).is_some()
-                        || user_display_from_message(&message, summary.metadata.as_ref()).is_some(),
-                ),
-                "assistant" => usize::from(
-                    !side_inherited_message(summary.metadata.as_ref())
-                        && assistant_text_from_message(&message).is_some(),
-                ),
-                _ => 0,
-            })
-    })
-}
-
-pub(crate) fn user_shell_display_from_message(
-    message: &Value,
-    metadata: Option<&Value>,
-) -> Option<UserShellDisplay> {
-    if let Some(display) = metadata
-        .and_then(|metadata| metadata.get(USER_SHELL_METADATA_KEY))
-        .and_then(user_shell_display_from_metadata)
-    {
-        return Some(display);
-    }
-    let text = legacy_user_text_from_message(message)?;
-    user_shell_display_from_xml(&text)
-}
-
-pub(crate) fn user_shell_display_from_metadata(metadata: &Value) -> Option<UserShellDisplay> {
-    let command = metadata.get("command")?.as_str()?.to_string();
-    let result = metadata
-        .get("result")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({"output": "(no output)", "truncated": false}));
-    let outcome = metadata
-        .get("outcome")
-        .and_then(Value::as_str)
-        .unwrap_or("normal")
-        .to_string();
-    Some(UserShellDisplay {
-        command,
-        result,
-        outcome,
-    })
-}
-
-pub(crate) fn user_shell_display_from_xml(text: &str) -> Option<UserShellDisplay> {
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with("<user_shell_command>") {
-        return None;
-    }
-    let command = unescape_xml_text(extract_xml_tag(trimmed, "command")?);
-    let result_text = unescape_xml_text(extract_xml_tag(trimmed, "result").unwrap_or_default());
-    let outcome = if result_text.contains("Exit code: 0") {
-        "normal"
-    } else {
-        "failed"
-    }
-    .to_string();
-    Some(UserShellDisplay {
-        command,
-        result: serde_json::json!({
-            "output": result_text,
-            "truncated": false,
-        }),
-        outcome,
-    })
-}
-
-pub(crate) fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
-    let start_tag = format!("<{tag}>");
-    let end_tag = format!("</{tag}>");
-    let start = text.find(&start_tag)? + start_tag.len();
-    let end = text[start..].find(&end_tag)? + start;
-    Some(&text[start..end])
-}
-
-pub(crate) fn unescape_xml_text(value: &str) -> String {
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-}
-
-pub(crate) fn tui_display_metadata(metadata: Option<&Value>) -> Option<PromptDisplayMetadata> {
-    metadata
-        .and_then(|metadata| metadata.get(TUI_DISPLAY_METADATA_KEY))
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
 }
 
 pub(crate) fn attachment_meta_from_display(

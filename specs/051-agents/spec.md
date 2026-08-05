@@ -199,6 +199,12 @@ native child loop that the parent is awaiting. Runtime must mark the child run
 as interrupted/aborted and close its persisted parent-child agent edge when
 the child exits. Completed, failed, or interrupted foreground and background
 child invocations must not leave durable `agent_edges` rows in an open state.
+First-party relationship reads use Framework's typed Agent relationship model.
+It normalizes parent/child identity, open/closed status, Agent/task identity,
+and team/runtime provenance at the persistence boundary; transport and TUI
+code do not decode `agent_edges.metadata_json` or import its field names.
+Lookup by child Thread, Agent id, or task name is performed in SQLite with one
+bounded result rather than loading every Agent edge into memory.
 
 When a child invocation targets an agent definition with `backend.ref` and a
 `subagent` entrypoint, runtime treats the `spawn_agent` tool call as an
@@ -213,6 +219,11 @@ root Turn; Gateway does not register or execute a shadow Turn. If the Adapter is
 not available, the `spawn_agent` tool must return a structured
 unavailable result rather than falling back to a native child thread that only
 has the peer's name.
+Each delegated child owns its own Framework interaction broker. The caller's
+raw approval handler may be delegated into that child exactly once; a parent's
+Framework interaction wrapper is never captured and wrapped again. An approval
+therefore creates one child-scoped interaction and never a duplicate parent
+interaction.
 The Psychevo child thread created before delegation is the canonical live scope
 for the whole peer run. ACP native session ids remain backend metadata; message,
 thought, tool, plan, and turn observations must not be scoped to the parent
@@ -232,6 +243,10 @@ loops. `PendingTerminal` does not consume an active-concurrency permit, but it
 retains the Agent id until the terminal transaction commits. Historical status
 after commit is reconstructed from durable edges and the child Thread rather
 than a completed in-memory cache.
+Durable Agent edge, team-run, and mission-run states are closed Rust enums at
+the StateRuntime boundary. SQLite stores their canonical strings, but an
+unknown persisted value is structured corruption and fails the read; it never
+defaults to an active/open/running state.
 The supervisor also owns every detached child task handle. Owner shutdown
 closes child-task admission, signals all active child controls, and awaits
 their finalizers before StateRuntime closes; forced shutdown aborts and reaps
@@ -246,6 +261,10 @@ same-process retry owner instead of fabricating completion or silently dropping
 the run. Normal completion, failure, panic, an external terminal edge, and
 forced abort first stage one semantic terminal draft and then call that same
 finalizer. Panic stages a failed terminal; forced abort stages interrupted.
+The Agent panic boundary preserves a bounded string payload summary and a
+bounded captured backtrace in that failed terminal instead of replacing the
+failure with a generic label. Non-string payloads retain their kind without
+debug-formatting arbitrary values.
 Terminal transaction attempts serialize per Agent id. A later retry rechecks
 both the retained phase and the exact slot generation after acquiring that
 Agent's commit lock, so an old waiter cannot commit a newly registered

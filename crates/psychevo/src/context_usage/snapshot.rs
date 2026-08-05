@@ -1,19 +1,21 @@
+use super::counting::{OpenAiChatTokenCount, count_openai_language_request};
 use super::presentation::{
     context_advice, context_bar, format_compact_count, format_token_count, percent, scope_label,
 };
 use super::{
     AdapterCall, AdapterFuture, AdapterStream, Arc, BTreeMap, Deserialize, EffectiveUsageTotal,
-    Error, LanguageAdapter, LanguageAdapterEvent, LanguageRequest, Message, ModelDescriptor,
-    Mutex, OpenAiChatTokenCount, PathBuf, PromptInstruction, Result,
-    RunMode, RunOptions, Serialize,
-    SkillDiscoveryOptions, SkillRuntime, StateRuntime, Value, canonical_cwd,
-    coding_core_tools_for_mode, count_openai_language_request, discover_skills,
-    effective_usage_total, format_skills_for_prompt, json,
-    load_project_context_instruction_mode, load_project_instructions, load_projected_messages,
-    mode_instruction, resolve_skills_home, runtime_environment_prompt, selected_configured_model,
-    skill_tools_for_mode_with_runtime, skills_visible_for_prompt_with_tools, tool_declarations,
+    Error, LanguageAdapter, LanguageAdapterEvent, LanguageRequest, ModelDescriptor, Mutex, PathBuf,
+    PromptInstruction, Result, RunMode, RunOptions, Serialize, SkillDiscoveryOptions, SkillRuntime,
+    StateRuntime, Value, canonical_cwd, coding_core_tools_for_mode, discover_skills,
+    effective_usage_total, format_skills_for_prompt, json, load_project_context_instruction_mode,
+    load_project_instructions, load_projected_messages, mode_instruction, resolve_skills_home,
+    runtime_environment_prompt, selected_configured_model, skill_tools_for_mode_with_runtime,
+    skills_visible_for_prompt_with_tools, tool_declarations,
 };
 use crate::prompt_templates;
+
+#[cfg(test)]
+use psychevo_agent_core::Message;
 
 pub(crate) const CONTEXT_SNAPSHOT_TYPE: &str = "context_snapshot";
 pub(crate) const TOTAL_WARNING_PERCENT: f64 = 70.0;
@@ -150,12 +152,11 @@ impl LanguageAdapter for ContextRecordingAdapter {
         &self,
         call: AdapterCall<LanguageRequest>,
     ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
-        self.recorder
-            .record_live_request(
-                call.request.clone(),
-                call.context.model.clone(),
-                self.profile.clone(),
-            );
+        self.recorder.record_live_request(
+            call.request.clone(),
+            call.context.model.clone(),
+            self.profile.clone(),
+        );
         self.inner.stream(call)
     }
 }
@@ -175,8 +176,7 @@ impl ContextRecorder {
         };
         let recorder = self.clone();
         tokio::task::spawn_blocking(move || {
-            let count = count_openai_language_request(&model, &request)
-                .unwrap_or_default();
+            let count = count_openai_language_request(&model, &request).unwrap_or_default();
             let snapshot = snapshot_from_count(
                 ContextScope::LastProviderRequest,
                 Some(profile.session_id),
@@ -297,16 +297,17 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
         .get("context_limit")
         .and_then(Value::as_u64)
         .or_else(|| configured_context_limit(&options, &summary.provider, &summary.model, &cwd));
-    let message_summaries = store
-        .load_tui_message_summaries(&summary.id)
-        .await?
-        .into_iter()
-        .collect::<Vec<_>>();
     let latest_compaction = store.latest_valid_session_compaction(&summary.id).await?;
     let after_session_seq = latest_compaction
         .as_ref()
         .map(|compaction| compaction.created_after_session_seq);
-    let latest_provider_total = latest_assistant_usage_total(&message_summaries, after_session_seq);
+    let latest_provider_total = store
+        .latest_assistant_effective_usage_after(&summary.id, after_session_seq)
+        .await?
+        .and_then(|(session_seq, usage)| {
+            let total = effective_usage_total(Some(&usage));
+            total.tokens.map(|_| (session_seq, total))
+        });
     let persisted_request_count = persisted_provider_request_count(&store, &summary).await?;
     let messages = load_projected_messages(&store, &summary.id, None).await?;
     let env = options
@@ -434,8 +435,7 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
         model_id: summary.model.clone(),
         protocol_id: "openai_chat".to_string(),
     };
-    let fallback_count =
-        count_openai_language_request(&descriptor, &request).unwrap_or_default();
+    let fallback_count = count_openai_language_request(&descriptor, &request).unwrap_or_default();
     let (count, reconstructed_session_seq, reconstructed_partial) = persisted_request_count
         .map(|value| {
             (
@@ -809,6 +809,7 @@ pub(crate) fn configured_context_limit(
         .and_then(|model| model.context_limit)
 }
 
+#[cfg(test)]
 pub(crate) fn latest_assistant_usage_total(
     messages: &[crate::types::TuiMessageSummary],
     after_session_seq: Option<i64>,

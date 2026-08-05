@@ -1,5 +1,15 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+#[cfg(test)]
+use std::collections::BTreeMap;
+
+#[cfg(test)]
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::sdk_types::{LanguageSettings, ResponseFormat, ToolChoice};
+use crate::types::{GenerationRequest, GenerationTool, ModelTarget};
+
+use local_images::local_image_data_url;
+use messages::{assistant_messages, merge_adjacent_user_messages, tool_result_messages};
 
 pub(crate) const MAX_LOCAL_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub(crate) const MAX_IMAGE_BASE64_BYTES: usize = 4_718_592;
@@ -776,7 +786,5 @@ pub(crate) fn user_content_parts(blocks: &[Value]) -> Vec<Value> {
     parts
 }
 
-#[path = "request/local_images.rs"]
-pub(crate) mod local_images;
-#[allow(unused_imports)]
-pub use local_images::*;
+mod local_images;
+mod messages;

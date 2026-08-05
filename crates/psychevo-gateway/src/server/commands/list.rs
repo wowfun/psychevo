@@ -1,4 +1,23 @@
-pub(super) fn command_list_value(
+use std::collections::BTreeSet;
+
+use psychevo::command_registry::{
+    AvailableSlashCommand, CommandCapability, SlashCommandParse,
+    available_slash_commands_for_surface, parse_slash_command_line, supported_by_capabilities,
+};
+use psychevo_gateway_protocol as wire;
+use serde_json::Value;
+
+use super::super::binding::WebState;
+use super::super::scope_session::ResolvedScope;
+use super::super::settings_observability::dynamic_slash_commands;
+use super::presentation::{
+    command_alternate_action, command_argument_kind, gateway_command_capabilities,
+    web_desktop_action_visible, web_desktop_command_visible,
+};
+use super::settings::effective_slash_config;
+use super::{GatewaySlashAlias, GatewaySlashConfig};
+
+pub(in super::super) fn command_list_value(
     state: &WebState,
     scope: &ResolvedScope,
     active_turn: bool,
@@ -13,18 +32,18 @@ pub(super) fn command_list_value(
     )?)?)
 }
 
-pub(super) fn command_list_result(
+pub(in super::super) fn command_list_result(
     state: &WebState,
     scope: &ResolvedScope,
     active_turn: bool,
     has_session: bool,
     cap: usize,
-) -> psychevo::Result<wire::CommandListResult> {
+) -> psychevo::Result<wire::thread_command_turn::CommandListResult> {
     let dynamic = dynamic_slash_commands(state, scope)?;
     let dynamic_names = dynamic
         .iter()
         .map(|command| command.name.trim_start_matches('/').to_string())
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
     let slash_config = effective_slash_config(state, scope)?;
     let available = available_slash_commands_for_surface(
         &gateway_command_capabilities(has_session),
@@ -43,7 +62,7 @@ pub(super) fn command_list_result(
         &gateway_command_capabilities(has_session),
         active_turn,
     ));
-    Ok(wire::CommandListResult {
+    Ok(wire::thread_command_turn::CommandListResult {
         commands,
         hidden_dynamic: available.hidden_dynamic,
     })
@@ -51,10 +70,10 @@ pub(super) fn command_list_result(
 
 fn command_value(
     command: &AvailableSlashCommand,
-    dynamic_names: &std::collections::BTreeSet<String>,
-) -> wire::CommandListItem {
+    dynamic_names: &BTreeSet<String>,
+) -> wire::thread_command_turn::CommandListItem {
     let presentation = command.presentation;
-    wire::CommandListItem {
+    wire::thread_command_turn::CommandListItem {
         name: command.name.clone(),
         slash: format!("/{}", command.name),
         usage: command.usage.clone(),
@@ -82,7 +101,7 @@ fn custom_alias_command_values(
     slash_config: &GatewaySlashConfig,
     capabilities: &[CommandCapability],
     active_turn: bool,
-) -> Vec<wire::CommandListItem> {
+) -> Vec<wire::thread_command_turn::CommandListItem> {
     slash_config
         .aliases
         .iter()
@@ -94,20 +113,20 @@ fn custom_alias_command_value(
     alias: &GatewaySlashAlias,
     capabilities: &[CommandCapability],
     active_turn: bool,
-) -> Option<wire::CommandListItem> {
+) -> Option<wire::thread_command_turn::CommandListItem> {
     let invocation = match parse_slash_command_line(&alias.target) {
         SlashCommandParse::Known(invocation) => invocation,
         _ => return None,
     };
     let spec = invocation.spec;
     if !web_desktop_action_visible(spec.action)
-        || !psychevo::__product::commands::supported_by_capabilities(spec, capabilities)
+        || !supported_by_capabilities(spec, capabilities)
         || (active_turn && !spec.available_during_active_turn())
     {
         return None;
     }
     let presentation = spec.presentation();
-    Some(wire::CommandListItem {
+    Some(wire::thread_command_turn::CommandListItem {
         name: alias.alias.trim_start_matches('/').to_string(),
         slash: alias.alias.clone(),
         usage: format!("{} [args]", alias.alias),

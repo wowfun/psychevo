@@ -1,9 +1,26 @@
+use super::gateway_helpers::gateway_event_session_id;
+use super::helpers::{
+    buffer_session_live_event, flush_pending_unowned_agent_events,
+    push_pending_unowned_agent_event, turn_ended_error_message, turn_event_is_clarify_request,
+    turn_event_session_id,
+};
+use crate::tui::support_turn_event::{turn_event_is_run_start, turn_event_presentation_value};
+use crate::tui::{
+    AuxiliaryAgentTask, ContextSnapshot, ForeignGatewayLiveEvent, FullscreenUi, GatewayEvent,
+    GatewayLiveSnapshotObservation, PresentedShellEvent, RunningCompletion, RunningTask,
+    RunningTurn, RunningTurnEvents, ShellCommandOutcome, TuiApp, TuiLiveEvent, TurnEvent,
+    TurnOutcome, Value, VecDeque, rebind_queued_input_session, short_session,
+};
+use anyhow::Result;
+
 impl TuiApp {
     pub(crate) async fn drain_fullscreen_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
-        let mut changed = false;
+        let mut changed = self.drain_starting_turn(ui).await?;
+        changed |= self.drain_finished_starting_turn_cleanups(ui).await;
+        changed |= self.drain_side_delete_tasks(ui).await;
         let (agent_changed, active_tool_frame_requested) =
             self.drain_finished_auxiliary_agent_tasks(ui).await?;
         changed |= agent_changed;
@@ -34,6 +51,7 @@ impl TuiApp {
             ui.follow_transcript_if_needed();
             ui.refresh_sidebar(self);
         }
+        changed |= self.reload_invalidated_turn_projection(ui).await?;
         if active_tool_frame_requested {
             return Ok(true);
         }
@@ -50,6 +68,7 @@ impl TuiApp {
                 ui.follow_transcript_if_needed();
                 ui.refresh_sidebar(self);
             }
+            changed |= self.reload_invalidated_turn_projection(ui).await?;
             if active_tool_frame_requested {
                 return Ok(true);
             }
@@ -72,7 +91,7 @@ impl TuiApp {
                 RunningTask::UserShell(task) => RunningCompletion::UserShell(task.await),
             };
             let mut pending = VecDeque::new();
-            while let Ok(event) = running.events.try_recv() {
+            while let Some(event) = running.events.try_recv() {
                 pending.push_back(event);
             }
             let had_pending = self.apply_pending_owned_fullscreen_live_events(
@@ -84,24 +103,25 @@ impl TuiApp {
             if had_pending {
                 ui.follow_transcript_if_needed();
             }
+            changed |= self.reload_invalidated_turn_projection(ui).await?;
             let mut restore_queued_after_interrupt = false;
             match completed {
                 RunningCompletion::Agent(result) => match *result {
                     Ok(Ok(result)) => {
                         let interrupted =
-                            ui.interrupt_requested && result.outcome == Outcome::Aborted;
+                            ui.interrupt_requested && result.outcome == TurnOutcome::Interrupted;
                         if interrupted {
                             ui.turn_interrupted = true;
                         }
                         restore_queued_after_interrupt |= interrupted;
                         self.last_context_snapshot = result.context_snapshot.clone();
                         ui.last_context_snapshot = result.context_snapshot.clone();
-                        ui.session_live_event_backlog.remove(&result.session_id);
-                        if self.current_session.as_deref() == Some(result.session_id.as_str()) {
+                        ui.session_live_event_backlog.remove(&result.thread_id);
+                        if self.current_session.as_deref() == Some(result.thread_id.as_str()) {
                             self.refresh_current_session_title().await?;
                             self.clear_new_session_draft();
                         }
-                        if result.outcome != Outcome::Normal && !interrupted {
+                        if result.outcome != TurnOutcome::Completed && !interrupted {
                             self.had_error = true;
                             ui.push_error(turn_ended_error_message(
                                 result.outcome,
@@ -120,20 +140,21 @@ impl TuiApp {
                 },
                 RunningCompletion::UserShell(result) => match result {
                     Ok(Ok(result)) => {
-                        let interrupted =
-                            ui.interrupt_requested && result.outcome == Outcome::Aborted;
+                        let interrupted = ui.interrupt_requested
+                            && result.outcome == ShellCommandOutcome::Interrupted;
                         if interrupted {
                             ui.turn_interrupted = true;
                         }
                         restore_queued_after_interrupt |= interrupted;
-                        if let Some(session_id) = result.session_id {
+                        if let Some(session_id) = result.thread_id {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
                                 self.refresh_current_session_title().await?;
                                 self.clear_new_session_draft();
                             }
                         }
-                        if (result.outcome != Outcome::Normal || result.tool_failures > 0)
+                        if (result.outcome != ShellCommandOutcome::Completed
+                            || result.tool_failures > 0)
                             && !interrupted
                         {
                             self.had_error = true;
@@ -157,14 +178,89 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             if restore_queued_after_interrupt {
                 ui.restore_queued_inputs_to_composer();
-            } else if !self.maybe_start_auto_compaction(ui)? {
-                self.start_next_queued_input(ui)?;
+            } else if !self.maybe_start_auto_compaction(ui).await? {
+                self.start_next_queued_input(ui).await?;
             }
         } else if ui.turn_outcome.is_some() && ui.deferred_stream_events.is_empty() {
-            self.finish_streamed_agent_turn(ui);
+            self.finish_streamed_agent_turn(ui).await;
             changed = true;
         }
         Ok(changed)
+    }
+
+    async fn drain_finished_starting_turn_cleanups(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
+        let mut changed = false;
+        while let Some(index) = ui
+            .starting_turn_cleanups
+            .iter()
+            .position(|cleanup| cleanup.is_finished())
+        {
+            ui.starting_turn_cleanups.remove(index).join().await;
+            changed = true;
+        }
+        changed
+    }
+
+    async fn drain_starting_turn(&mut self, ui: &mut FullscreenUi<'_>) -> Result<bool> {
+        if !ui
+            .starting_turn
+            .as_ref()
+            .is_some_and(|starting| starting.task.is_finished())
+        {
+            return Ok(false);
+        }
+        let starting = ui.starting_turn.take().expect("checked starting Turn");
+        let queue_owner_id = starting.queue_owner_id.clone();
+        match starting.task.await {
+            Ok(Ok(started)) => {
+                let session_id = started.handle.receipt().thread_id.clone();
+                let turn_id = started.handle.receipt().turn_id.clone();
+                for input in &mut ui.queued_inputs {
+                    rebind_queued_input_session(input, &queue_owner_id, &session_id);
+                }
+                self.current_session = Some(session_id.clone());
+                self.reset_live_agent_reload_poll();
+                self.clear_new_session_draft();
+                ui.bind_unbound_optimistic_rows_to_turn(&turn_id);
+                ui.approval_rx = Some(started.approval_rx);
+                let events = started.handle.events();
+                let control = started.handle.clone();
+                let task = tokio::spawn(async move { started.handle.wait().await });
+                ui.running = Some(RunningTurn {
+                    session_id: Some(session_id),
+                    control: control.into(),
+                    selector: None,
+                    turn_id: Some(turn_id),
+                    events: RunningTurnEvents::Turn(events),
+                    task: RunningTask::Agent(task),
+                });
+            }
+            Ok(Err(err)) => {
+                self.had_error = true;
+                ui.discard_unbound_optimistic_rows();
+                ui.finish_turn();
+                ui.restore_failed_turn_start_to_composer(
+                    &queue_owner_id,
+                    starting.display_prompt,
+                    starting.images,
+                );
+                ui.push_error(format!("error: {err:#}"));
+            }
+            Err(err) => {
+                self.had_error = true;
+                ui.discard_unbound_optimistic_rows();
+                ui.finish_turn();
+                ui.restore_failed_turn_start_to_composer(
+                    &queue_owner_id,
+                    starting.display_prompt,
+                    starting.images,
+                );
+                ui.push_error(format!("turn admission task failed: {err}"));
+            }
+        }
+        ui.follow_transcript_if_needed();
+        ui.refresh_sidebar(self);
+        Ok(true)
     }
 
     pub(crate) async fn replay_foreign_gateway_live_events_for_session(
@@ -175,21 +271,19 @@ impl TuiApp {
         let mut changed = false;
         let mut after_seq = 0;
         loop {
-            let records = self
-                .state_runtime
-
-                .list_gateway_live_events_after(after_seq, 500)
+            let page = self
+                .runtime
+                .gateway()
+                .poll_foreign_live_events(after_seq, Some(session_id), 500)
                 .await?;
-            if records.is_empty() {
-                break;
-            }
-            for record in &records {
-                after_seq = after_seq.max(record.seq);
-            }
-            for record in records {
+            after_seq = page.next_seq;
+            for observation in page.events {
                 changed |= self
-                    .apply_foreign_gateway_live_event_record(ui, record, Some(session_id))
+                    .apply_foreign_gateway_live_event_observation(ui, observation, Some(session_id))
                     .await?;
+            }
+            if page.scanned_records == 0 {
+                break;
             }
         }
         changed |= self
@@ -202,16 +296,16 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
-        let records = self
-            .state_runtime
-
-            .list_gateway_live_events_after(self.last_gateway_live_event_seq, 100)
+        let page = self
+            .runtime
+            .gateway()
+            .poll_foreign_live_events(self.last_gateway_live_event_seq, None, 100)
             .await?;
+        self.last_gateway_live_event_seq = page.next_seq;
         let mut changed = false;
-        for record in records {
-            self.last_gateway_live_event_seq = self.last_gateway_live_event_seq.max(record.seq);
+        for observation in page.events {
             changed |= self
-                .apply_foreign_gateway_live_event_record(ui, record, None)
+                .apply_foreign_gateway_live_event_observation(ui, observation, None)
                 .await?;
         }
         changed |= self.drain_foreign_gateway_live_snapshots(ui).await?;
@@ -224,14 +318,14 @@ impl TuiApp {
         session_id: &str,
     ) -> Result<bool> {
         let snapshots = self
-            .state_runtime
-
-            .list_gateway_live_snapshots_for_thread(session_id, None, 1000)
+            .runtime
+            .gateway()
+            .foreign_live_snapshots(Some(session_id), 1000)
             .await?;
         let mut changed = false;
         for snapshot in snapshots {
             changed |= self
-                .apply_foreign_gateway_live_snapshot_record(ui, snapshot, Some(session_id))
+                .apply_foreign_gateway_live_snapshot(ui, snapshot, Some(session_id))
                 .await?;
         }
         Ok(changed)
@@ -242,28 +336,25 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         let snapshots = self
-            .state_runtime
-
-            .list_gateway_live_snapshots(1000)
+            .runtime
+            .gateway()
+            .foreign_live_snapshots(None, 1000)
             .await?;
         let mut changed = false;
         for snapshot in snapshots {
             changed |= self
-                .apply_foreign_gateway_live_snapshot_record(ui, snapshot, None)
+                .apply_foreign_gateway_live_snapshot(ui, snapshot, None)
                 .await?;
         }
         Ok(changed)
     }
 
-    async fn apply_foreign_gateway_live_snapshot_record(
+    async fn apply_foreign_gateway_live_snapshot(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        snapshot: GatewayLiveSnapshotRecord,
+        snapshot: GatewayLiveSnapshotObservation,
         expected_session: Option<&str>,
     ) -> Result<bool> {
-        if snapshot.owner_id.as_deref() == Some(self.gateway.owner_id()) {
-            return Ok(false);
-        }
         if self
             .gateway_live_snapshot_revisions
             .get(&snapshot.snapshot_key)
@@ -271,114 +362,45 @@ impl TuiApp {
         {
             return Ok(false);
         }
-        if let Some(activity_id) = snapshot.activity_id.as_deref() {
-            let Some(activity) = self.state_runtime.gateway_activity(activity_id).await? else {
-                return Ok(false);
-            };
-            if !matches!(activity.status.as_str(), "running" | "queued")
-                || activity.lease_expires_at_ms < wall_now_ms()
-            {
-                return Ok(false);
-            }
-        }
-        let event = match serde_json::from_value::<GatewayEvent>(snapshot.event.clone()) {
-            Ok(event) => event,
-            Err(_) => return Ok(false),
-        };
-        let Some(session_id) = self
-            .gateway_live_snapshot_session_id(&snapshot, &event)
-            .await?
-        else {
+        let Some(session_id) = snapshot.context.thread_id else {
             return Ok(false);
         };
         if expected_session.is_some_and(|expected| expected != session_id) {
             return Ok(false);
         }
-        if expected_session.is_none() && self.current_session.as_deref() != Some(session_id.as_str())
+        if expected_session.is_none()
+            && self.current_session.as_deref() != Some(session_id.as_str())
         {
             return Ok(false);
         }
         self.gateway_live_snapshot_revisions
             .insert(snapshot.snapshot_key, snapshot.revision);
-        self.apply_foreign_gateway_live_event(ui, &session_id, event)
+        self.apply_foreign_gateway_live_event(ui, &session_id, snapshot.event)
             .await
     }
 
-    async fn apply_foreign_gateway_live_event_record(
+    async fn apply_foreign_gateway_live_event_observation(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        record: GatewayLiveEventRecord,
+        observation: ForeignGatewayLiveEvent,
         expected_session: Option<&str>,
     ) -> Result<bool> {
-        if record.owner_id.as_deref() == Some(self.gateway.owner_id()) {
-            return Ok(false);
-        }
-        let event = match serde_json::from_value::<GatewayEvent>(record.event.clone()) {
-            Ok(event) => event,
-            Err(_) => return Ok(false),
-        };
-        let Some(session_id) = self
-            .gateway_live_event_session_id(&record, &event)
-            .await?
-        else {
+        let Some(session_id) = observation.context.thread_id else {
             return Ok(false);
         };
         if expected_session.is_some_and(|expected| expected != session_id) {
             return Ok(false);
         }
-        if expected_session.is_none() && self.current_session.as_deref() != Some(session_id.as_str())
+        if expected_session.is_none()
+            && self.current_session.as_deref() != Some(session_id.as_str())
         {
             return Ok(false);
         }
-        if !ui.mark_gateway_live_event_applied(record.seq) {
+        if !ui.mark_gateway_live_event_applied(observation.seq) {
             return Ok(false);
         }
-        self.apply_foreign_gateway_live_event(ui, &session_id, event)
+        self.apply_foreign_gateway_live_event(ui, &session_id, observation.event)
             .await
-    }
-
-    async fn gateway_live_event_session_id(
-        &self,
-        record: &GatewayLiveEventRecord,
-        event: &GatewayEvent,
-    ) -> Result<Option<String>> {
-        if let Some(thread_id) = record.thread_id.as_ref().filter(|value| !value.is_empty()) {
-            return Ok(Some(thread_id.clone()));
-        }
-        if let Some(thread_id) = gateway_event_session_id(event) {
-            return Ok(Some(thread_id.to_string()));
-        }
-        let Some(activity_id) = record.activity_id.as_deref() else {
-            return Ok(None);
-        };
-        Ok(self
-            .state_runtime
-
-            .gateway_activity(activity_id)
-            .await?
-            .and_then(|activity| activity.thread_id))
-    }
-
-    async fn gateway_live_snapshot_session_id(
-        &self,
-        record: &GatewayLiveSnapshotRecord,
-        event: &GatewayEvent,
-    ) -> Result<Option<String>> {
-        if let Some(thread_id) = record.thread_id.as_ref().filter(|value| !value.is_empty()) {
-            return Ok(Some(thread_id.clone()));
-        }
-        if let Some(thread_id) = gateway_event_session_id(event) {
-            return Ok(Some(thread_id.to_string()));
-        }
-        let Some(activity_id) = record.activity_id.as_deref() else {
-            return Ok(None);
-        };
-        Ok(self
-            .state_runtime
-
-            .gateway_activity(activity_id)
-            .await?
-            .and_then(|activity| activity.thread_id))
     }
 
     async fn apply_foreign_gateway_live_event(
@@ -389,7 +411,8 @@ impl TuiApp {
     ) -> Result<bool> {
         match event {
             GatewayEvent::ActivityChanged { activity, .. } => {
-                if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id())
+                if activity.running
+                    && activity.owner_id.as_deref() != Some(self.runtime.gateway().owner_id())
                 {
                     ui.observe_foreign_gateway_activity_values(
                         session_id,
@@ -437,7 +460,7 @@ impl TuiApp {
             .as_ref()
             .and_then(|running| running.session_id.clone());
         if let Some(running) = &mut ui.running {
-            while let Ok(event) = running.events.try_recv() {
+            while let Some(event) = running.events.try_recv() {
                 pending.push_back(event);
             }
         }
@@ -469,15 +492,15 @@ impl TuiApp {
         (had_pending, false)
     }
 
-    pub(crate) fn apply_pending_fullscreen_stream_events_without_frames(
+    pub(crate) fn apply_pending_fullscreen_turn_events_without_frames(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        mut pending: VecDeque<RunStreamEvent>,
+        mut pending: VecDeque<TurnEvent>,
     ) -> bool {
         let mut had_pending = false;
         while let Some(event) = pending.pop_front() {
             had_pending = true;
-            self.apply_fullscreen_stream_event(ui, event);
+            self.apply_fullscreen_turn_event(ui, event);
         }
         had_pending
     }
@@ -492,8 +515,9 @@ impl TuiApp {
         while let Some(event) = pending.pop_front() {
             had_pending = true;
             match event {
-                TuiLiveEvent::Runtime(event) => {
-                    let event_session = stream_event_session_id(&event).map(str::to_string);
+                TuiLiveEvent::Turn(event) => {
+                    let run_started = turn_event_is_run_start(&event);
+                    let event_session = turn_event_session_id(&event).map(str::to_string);
                     if agent.session_id.is_none() {
                         if let Some(session_id) = event_session.clone() {
                             agent.session_id = Some(session_id);
@@ -502,6 +526,12 @@ impl TuiApp {
                             push_pending_unowned_agent_event(agent, event);
                             continue;
                         }
+                    }
+                    if run_started
+                        && let Err(err) = self.start_pending_auxiliary_shells_for_agent(ui, agent)
+                    {
+                        self.had_error = true;
+                        ui.push_error(format!("error: {err:#}"));
                     }
                     let owner_session = event_session.as_deref().or(agent.session_id.as_deref());
                     if !agent.visible_live
@@ -513,7 +543,7 @@ impl TuiApp {
                         }
                         continue;
                     }
-                    self.apply_auxiliary_agent_stream_event(ui, owner_session, event);
+                    self.apply_auxiliary_agent_turn_event(ui, owner_session, event);
                 }
                 TuiLiveEvent::Gateway(event) => {
                     if agent.session_id.is_none()
@@ -524,6 +554,9 @@ impl TuiApp {
                     }
                     self.apply_gateway_event(ui, agent.session_id.as_deref(), *event);
                 }
+                TuiLiveEvent::Shell(_) => {
+                    unreachable!("an auxiliary Agent task does not own typed Shell events")
+                }
             }
         }
         had_pending
@@ -533,16 +566,16 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
-        mut pending: VecDeque<RunStreamEvent>,
+        mut pending: VecDeque<PresentedShellEvent>,
     ) -> (bool, bool) {
         let mut had_pending = false;
         while let Some(event) = pending.pop_front() {
             had_pending = true;
             let active_tool_frame_requested =
-                self.apply_auxiliary_shell_stream_event(ui, owner_session, event);
+                self.apply_owned_fullscreen_shell_event(ui, owner_session, event);
             if active_tool_frame_requested {
                 ui.deferred_stream_events
-                    .extend(pending.into_iter().map(TuiLiveEvent::Runtime));
+                    .extend(pending.into_iter().map(TuiLiveEvent::Shell));
                 return (true, true);
             }
         }
@@ -582,37 +615,25 @@ impl TuiApp {
         (had_pending, false)
     }
 
-    pub(crate) fn apply_auxiliary_agent_stream_event(
+    pub(crate) fn apply_auxiliary_agent_turn_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
-        event: RunStreamEvent,
+        event: TurnEvent,
     ) {
         match event {
-            RunStreamEvent::Scoped {
-                session_id, event, ..
+            TurnEvent::Scoped {
+                thread_id, event, ..
             } => {
-                self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+                self.apply_scoped_fullscreen_turn_event(ui, &thread_id, *event);
             }
             other => {
-                if owner_session.is_none() && stream_event_session_id(&other).is_none() {
+                if owner_session.is_none() && turn_event_session_id(&other).is_none() {
                     return;
                 }
-                self.apply_owned_fullscreen_stream_event(ui, owner_session, other);
+                self.apply_owned_fullscreen_turn_event(ui, owner_session, other);
             }
         }
-    }
-
-    pub(crate) fn apply_auxiliary_shell_stream_event(
-        &mut self,
-        ui: &mut FullscreenUi<'_>,
-        owner_session: Option<&str>,
-        event: RunStreamEvent,
-    ) -> bool {
-        if owner_session.is_none() && stream_event_session_id(&event).is_none() {
-            return false;
-        }
-        self.apply_owned_fullscreen_stream_event(ui, owner_session, event)
     }
 
     pub(crate) fn apply_fullscreen_live_event(
@@ -622,7 +643,8 @@ impl TuiApp {
         event: TuiLiveEvent,
     ) -> bool {
         match event {
-            TuiLiveEvent::Runtime(event) => self.apply_fullscreen_stream_event(ui, event),
+            TuiLiveEvent::Turn(event) => self.apply_fullscreen_turn_event(ui, event),
+            TuiLiveEvent::Shell(event) => self.apply_fullscreen_shell_event(ui, event),
             TuiLiveEvent::Gateway(event) => self.apply_gateway_event(ui, owner_session, *event),
         }
     }
@@ -634,33 +656,108 @@ impl TuiApp {
         event: TuiLiveEvent,
     ) -> bool {
         match event {
-            TuiLiveEvent::Runtime(event) => {
-                self.apply_owned_fullscreen_stream_event(ui, owner_session, event)
+            TuiLiveEvent::Turn(event) => {
+                self.apply_owned_fullscreen_turn_event(ui, owner_session, event)
+            }
+            TuiLiveEvent::Shell(event) => {
+                self.apply_owned_fullscreen_shell_event(ui, owner_session, event)
             }
             TuiLiveEvent::Gateway(event) => self.apply_gateway_event(ui, owner_session, *event),
         }
     }
 
-    pub(crate) fn apply_owned_fullscreen_stream_event(
+    pub(crate) fn apply_fullscreen_shell_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        event: PresentedShellEvent,
+    ) -> bool {
+        let event_session = event.thread_id().map(str::to_string);
+        if let Some(session_id) = event_session.as_deref() {
+            let running_owner_missing = ui
+                .running
+                .as_ref()
+                .is_some_and(|running| running.session_id.is_none());
+            if let Some(running) = ui.running.as_mut()
+                && running.session_id.is_none()
+            {
+                running.session_id = Some(session_id.to_string());
+            }
+            if running_owner_missing && self.current_session.is_none() {
+                self.current_session = Some(session_id.to_string());
+                self.reset_live_agent_reload_poll();
+                self.current_session_title = None;
+            }
+            if self
+                .current_session
+                .as_deref()
+                .is_some_and(|current| current != session_id)
+                && !running_owner_missing
+            {
+                buffer_session_live_event(ui, session_id, event);
+                return false;
+            }
+            if self.current_session.as_deref() == Some(session_id) {
+                buffer_session_live_event(ui, session_id, event.clone());
+            }
+        }
+        let previous = ui.active_event_session_id.clone();
+        if let Some(session_id) = event_session {
+            ui.active_event_session_id = Some(session_id);
+        }
+        let active_tool_frame_requested = ui.apply_shell_event(event);
+        ui.active_event_session_id = previous;
+        active_tool_frame_requested
+    }
+
+    pub(crate) fn apply_owned_fullscreen_shell_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         owner_session: Option<&str>,
-        event: RunStreamEvent,
+        event: PresentedShellEvent,
     ) -> bool {
-        if let RunStreamEvent::Scoped {
-            session_id, event, ..
-        } = event
-        {
-            return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
-        }
-        let event_has_session = stream_event_session_id(&event).is_some();
-        let event_session = stream_event_session_id(&event)
+        let event_has_session = event.thread_id().is_some();
+        let event_session = event
+            .thread_id()
             .map(str::to_string)
             .or_else(|| owner_session.map(str::to_string));
         if let Some(session_id) = event_session.as_deref()
             && self.current_session.as_deref() != Some(session_id)
         {
-            if stream_event_is_clarify_request(&event) {
+            buffer_session_live_event(ui, session_id, event);
+            return false;
+        }
+        if !event_has_session && let Some(session_id) = event_session.as_deref() {
+            buffer_session_live_event(ui, session_id, event.clone());
+        }
+        let previous = ui.active_event_session_id.clone();
+        if let Some(session_id) = event_session {
+            ui.active_event_session_id = Some(session_id);
+        }
+        let active_tool_frame_requested = ui.apply_shell_event(event);
+        ui.active_event_session_id = previous;
+        active_tool_frame_requested
+    }
+
+    pub(crate) fn apply_owned_fullscreen_turn_event(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        event: TurnEvent,
+    ) -> bool {
+        if let TurnEvent::Scoped {
+            thread_id, event, ..
+        } = event
+        {
+            return self.apply_scoped_fullscreen_turn_event(ui, &thread_id, *event);
+        }
+        let event_has_session = turn_event_session_id(&event).is_some();
+        let event_session = turn_event_session_id(&event)
+            .map(str::to_string)
+            .or_else(|| owner_session.map(str::to_string));
+        if let Some(session_id) = event_session.as_deref()
+            && self.current_session.as_deref() != Some(session_id)
+        {
+            if turn_event_is_clarify_request(&event) {
                 ui.push_status(format!(
                     "clarify pending in session {}",
                     short_session(session_id)
@@ -676,23 +773,23 @@ impl TuiApp {
         if let Some(session_id) = event_session.as_deref() {
             ui.active_event_session_id = Some(session_id.to_string());
         }
-        let active_tool_frame_requested = self.apply_fullscreen_stream_event(ui, event);
+        let active_tool_frame_requested = self.apply_fullscreen_turn_event(ui, event);
         ui.active_event_session_id = previous;
         active_tool_frame_requested
     }
 
-    pub(crate) fn apply_fullscreen_stream_event(
+    pub(crate) fn apply_fullscreen_turn_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
-        event: RunStreamEvent,
+        event: TurnEvent,
     ) -> bool {
-        if let RunStreamEvent::Scoped {
-            session_id, event, ..
+        if let TurnEvent::Scoped {
+            thread_id, event, ..
         } = event
         {
-            return self.apply_scoped_fullscreen_stream_event(ui, &session_id, *event);
+            return self.apply_scoped_fullscreen_turn_event(ui, &thread_id, *event);
         }
-        let event_session_id = stream_event_session_id(&event).map(str::to_string);
+        let event_session_id = turn_event_session_id(&event).map(str::to_string);
         if let Some(session_id) = event_session_id.as_deref() {
             let running_owner_missing = ui
                 .running
@@ -722,37 +819,29 @@ impl TuiApp {
             }
         }
         let event_session = event_session_id.as_deref();
-        let profile_event = self
-            .journey_profile
-            .observe_runtime_event_received(&event);
-        if let RunStreamEvent::Event(value) = &event {
+        let profile_event = self.journey_profile.observe_turn_event_received(&event);
+        let run_started = turn_event_presentation_value(&event).is_some_and(|value| {
+            let value = value.as_ref();
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
-                && let Ok(snapshot) =
-                    serde_json::from_value::<ContextSnapshot>(value.as_value().clone())
+                && let Ok(snapshot) = serde_json::from_value::<ContextSnapshot>(value.clone())
             {
                 self.last_context_snapshot = Some(snapshot.clone());
                 ui.last_context_snapshot = Some(snapshot);
             }
-            let run_started = self.observe_fullscreen_value_event(ui, value);
-            let active_tool_frame_requested = ui.apply_stream_event_for_session(
-                event,
-                self.thinking_visible,
-                self.debug,
-                event_session,
-            );
-            self.journey_profile
-                .observe_runtime_event_applied(profile_event);
-            if run_started && let Err(err) = self.start_pending_auxiliary_shells(ui) {
-                self.had_error = true;
-                ui.push_error(format!("error: {err:#}"));
-            }
-            return active_tool_frame_requested;
-        }
-        let active_tool_frame_requested =
-            ui.apply_stream_event_for_session(event, self.thinking_visible, self.debug, event_session);
+            self.observe_fullscreen_value_event(ui, value)
+        });
+        let active_tool_frame_requested = ui.apply_turn_event_for_session(
+            event,
+            self.thinking_visible,
+            self.debug,
+            event_session,
+        );
         self.journey_profile
-            .observe_runtime_event_applied(profile_event);
+            .observe_turn_event_applied(profile_event);
+        if run_started && let Err(err) = self.start_pending_auxiliary_shells(ui) {
+            self.had_error = true;
+            ui.push_error(format!("error: {err:#}"));
+        }
         active_tool_frame_requested
     }
-
 }

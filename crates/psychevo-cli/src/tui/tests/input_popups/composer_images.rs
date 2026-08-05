@@ -1,7 +1,17 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::completion_popups::tiny_png_bytes;
+use crate::tui::tests::fixtures::{
+    draw_fullscreen_for_test, draw_fullscreen_with_cursor_for_test, test_app,
+};
+use crate::tui::tests::test_app_with_models;
+use crate::tui::tests::transcript_files::ledger_rows::mouse_event;
+use crate::tui::{
+    BottomPanel, CrosstermEvent, FullscreenUi, ImageInput, KeyCode, KeyEvent, KeyModifiers,
+    Modifier, MouseButton, MouseEventKind, PendingImageAttachment, SelectionState,
+    TUI_ROLE_SELECTION_BG, TranscriptKind, textarea_text, textarea_with_text,
+};
+use std::fs;
+use std::sync::{Arc, Mutex};
+use tempfile::tempdir;
 
 pub(crate) fn composer_ctrl_a_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
@@ -798,7 +808,7 @@ pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_comm
 
     assert!(!should_quit);
     assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -809,12 +819,7 @@ pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_comm
             .iter()
             .all(|row| !row.text.contains("unknown slash command"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -833,7 +838,7 @@ pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_c
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -844,12 +849,7 @@ pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_c
             .iter()
             .all(|row| !row.text.contains("unknown slash command"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -864,7 +864,7 @@ pub(crate) async fn unknown_slash_input_submits_as_prompt() {
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -875,12 +875,7 @@ pub(crate) async fn unknown_slash_input_submits_as_prompt() {
             .iter()
             .all(|row| !row.text.contains("unknown slash command"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -895,7 +890,7 @@ pub(crate) async fn uninstalled_dynamic_slash_input_submits_as_prompt() {
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -906,12 +901,7 @@ pub(crate) async fn uninstalled_dynamic_slash_input_submits_as_prompt() {
             .iter()
             .all(|row| !row.text.contains("unknown skill or bundle"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -944,7 +934,7 @@ pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
         .expect("submit");
 
     assert_eq!(ui.history.last().map(String::as_str), Some(prompt.as_str()));
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -960,12 +950,7 @@ pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
             .iter()
             .all(|row| !row.text.contains("image path does not exist"))
     );
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }
 
 #[tokio::test]
@@ -984,7 +969,7 @@ pub(crate) async fn image_only_submit_uses_pending_attachment_and_clears_compose
 
     assert!(ui.pending_images.is_empty());
     assert_eq!(textarea_text(&ui.textarea), "");
-    assert!(ui.running.is_some());
+    assert!(ui.starting_turn.is_some());
     assert!(
         ui.transcript
             .iter()
@@ -995,10 +980,5 @@ pub(crate) async fn image_only_submit_uses_pending_attachment_and_clears_compose
             && row.text.contains("attachments")
             && row.text.contains("image 1: image.png")
     }));
-    if let Some(running) = ui.running.take() {
-        running.control.abort();
-        if let RunningTask::Agent(task) = running.task {
-            let _ = task.await;
-        }
-    }
+    app.settle_fullscreen_task_owners(&mut ui).await;
 }

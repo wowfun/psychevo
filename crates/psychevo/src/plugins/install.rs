@@ -97,7 +97,7 @@ pub fn install_plugin(
         source_kind: materialized.source_kind,
         npm_registry: materialized.npm_registry.clone(),
         resolved_revision: materialized.resolved_revision.clone(),
-        temp_dir: None,
+        _temp_dir: None,
     };
     let installed_inspection = inspect_materialized_source(&installed)?;
     let installed_manifest = super::manifest::load_plugin_manifest(&package_root, true).ok();

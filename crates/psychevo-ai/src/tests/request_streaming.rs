@@ -1,5 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::thread;
+
+use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
+use serde_json::json;
+
+use super::provider_http::{
+    assistant_reasoning_text_message, interleaved_reasoning_metadata,
+    reasoning_capability_metadata, reasoning_capability_with_interleaved,
+};
+use crate::metadata::{allowlisted_provider_metadata, normalize_usage};
+use crate::openai::request::{count_openai_chat_request, count_text, openai_chat_request_body};
+use crate::stream::chat_chunks::{ChatChunkNormalizer, ChatCompletionChunk};
+use crate::stream::sse::SseParser;
+use crate::types::{GenerationRequest, ModelTarget, Outcome, StreamEvent, ToolDeclaration};
 
 #[test]
 pub(crate) fn chat_request_maps_local_image_blocks_to_content_parts() {
@@ -944,6 +957,122 @@ pub(crate) fn chat_chunk_normalizer_streams_tool_calls() {
             finish_reason: Some("tool_calls".to_string())
         })
     );
+}
+
+#[test]
+fn chat_stream_fragmentation_preserves_tool_arguments_and_terminal_event() {
+    let first = json!({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "function": {"name": "read", "arguments": "{\"pa"}
+            }]},
+            "finish_reason": null
+        }]
+    });
+    let second = json!({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0,
+                "function": {"arguments": "th\":\"中"}
+            }]},
+            "finish_reason": null
+        }]
+    });
+    let third = json!({
+        "choices": [{
+            "delta": {"tool_calls": [{
+                "index": 0,
+                "function": {"arguments": ".txt\"}"}
+            }]},
+            "finish_reason": "tool_calls"
+        }]
+    });
+    let payload = format!("data: {first}\n\ndata: {second}\n\ndata: {third}\n\ndata: [DONE]\n\n");
+    let payload = payload.as_bytes();
+    let expected = normalize_fragmented_chat_stream(payload, &[payload.len()]);
+
+    let mut partitions = Vec::new();
+    for split in 1..payload.len() {
+        partitions.push(vec![split, payload.len() - split]);
+    }
+    for width in 1..=64 {
+        partitions.push(vec![width; payload.len().div_ceil(width)]);
+    }
+
+    for sizes in partitions {
+        assert_eq!(normalize_fragmented_chat_stream(payload, &sizes), expected);
+    }
+
+    let arguments = expected
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ToolCallDelta {
+                arguments_delta, ..
+            } => Some(arguments_delta.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(arguments, r#"{"path":"中.txt"}"#);
+    assert_eq!(
+        expected
+            .iter()
+            .filter(|event| matches!(event, StreamEvent::ToolCallStart { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        expected
+            .iter()
+            .filter(|event| matches!(event, StreamEvent::ToolCallEnd { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        expected
+            .iter()
+            .filter(|event| matches!(event, StreamEvent::Done { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        expected.last(),
+        Some(&StreamEvent::Done {
+            outcome: Outcome::Normal,
+            finish_reason: Some("tool_calls".to_string()),
+        })
+    );
+}
+
+fn normalize_fragmented_chat_stream(payload: &[u8], sizes: &[usize]) -> Vec<StreamEvent> {
+    let mut parser = SseParser::new();
+    let mut normalizer = ChatChunkNormalizer::new("gpt-test".to_string());
+    let mut events = Vec::new();
+    let mut offset = 0;
+    for &size in sizes {
+        if offset == payload.len() {
+            break;
+        }
+        let end = offset.saturating_add(size).min(payload.len());
+        for chunk in parser
+            .push(&payload[offset..end])
+            .expect("valid SSE fragment")
+        {
+            events.extend(normalizer.ingest(chunk).expect("valid chat chunk"));
+        }
+        offset = end;
+    }
+    assert_eq!(offset, payload.len(), "partition must consume the payload");
+    for chunk in parser.finish().expect("valid SSE tail") {
+        events.extend(normalizer.ingest(chunk).expect("valid chat tail"));
+    }
+    assert!(
+        parser.done_seen(),
+        "valid stream must retain its terminal marker"
+    );
+    events.extend(normalizer.finish());
+    events
 }
 
 #[test]

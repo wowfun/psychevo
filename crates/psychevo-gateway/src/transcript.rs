@@ -1,23 +1,25 @@
-use std::collections::BTreeMap;
-
-use psychevo::__agent_core::{AssistantBlock, Message, UserContentBlock};
-use psychevo::__product::persistence::{
-    AgentEdgeRecord, GatewayTurnTerminalRecord, SessionCompactionRecord,
-};
 use psychevo::{
-    __product::presentation::decode_persisted_tool_result_for_display,
-    __product::presentation::write_argument_preview_from_args,
-    __product::presentation::write_argument_preview_from_json,
-    __product::runtime::TUI_DISPLAY_METADATA_KEY, __product::runtime::TuiMessageSummary,
-    __product::runtime::USER_SHELL_METADATA_KEY,
-    __product::sessions::side_inherited_metadata_hidden,
+    ThreadCompaction, ThreadItem, ThreadTurnTerminal, ThreadTurnTerminalStatus,
+    thread_lineage::side_inherited_metadata_hidden,
+    tool_argument_display::write_argument_preview_from_args,
+    tool_argument_display::write_argument_preview_from_json,
 };
 use serde_json::{Value, json};
 
-use crate::protocol::{
+use psychevo_gateway_protocol::events_transcript::{
     TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
-    TranscriptEntryRole, TranscriptToolResult,
+    TranscriptEntryRole,
 };
+
+mod agent_edges;
+mod message_projection;
+mod tool_results;
+
+pub(crate) use agent_edges::{
+    agent_relationship_lookup_candidates, enrich_agent_blocks_from_relationships,
+};
+use message_projection::{block, project_message_entry};
+use tool_results::{attach_tool_results, entry_status_for_tool_result, merge_write_stdin_blocks};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct TurnProjectionWindow<'a> {
@@ -27,7 +29,7 @@ pub(crate) struct TurnProjectionWindow<'a> {
 
 pub(crate) fn project_transcript_entries(
     thread_id: &str,
-    summaries: &[TuiMessageSummary],
+    summaries: &[ThreadItem],
 ) -> Vec<TranscriptEntry> {
     let mut entries = summaries
         .iter()
@@ -41,7 +43,7 @@ pub(crate) fn project_transcript_entries(
 
 pub(crate) fn project_committed_turn_entries(
     thread_id: &str,
-    summaries: &[TuiMessageSummary],
+    summaries: &[ThreadItem],
     first_seq: i64,
 ) -> Vec<TranscriptEntry> {
     project_transcript_entries(thread_id, summaries)
@@ -52,7 +54,7 @@ pub(crate) fn project_committed_turn_entries(
 
 pub(crate) fn project_committed_turn_window_entries(
     thread_id: &str,
-    summaries: &[TuiMessageSummary],
+    summaries: &[ThreadItem],
     window: TurnProjectionWindow<'_>,
 ) -> Vec<TranscriptEntry> {
     let mut entries =
@@ -92,32 +94,33 @@ fn metadata_with_live_order(metadata: Option<Value>, live_order: i64) -> Value {
 
 #[cfg(test)]
 pub(crate) fn project_turn_terminal_entries(
-    terminals: &[GatewayTurnTerminalRecord],
+    thread_id: &str,
+    terminals: &[ThreadTurnTerminal],
 ) -> Vec<TranscriptEntry> {
     terminals
         .iter()
-        .filter_map(project_turn_terminal_entry)
+        .map(|terminal| project_turn_terminal_entry(thread_id, terminal))
         .collect()
 }
 
 pub(crate) fn reconcile_terminal_bounded_running_blocks(
     entries: &mut [TranscriptEntry],
-    terminals: &[GatewayTurnTerminalRecord],
+    thread_id: &str,
+    terminals: &[ThreadTurnTerminal],
 ) {
     for terminal in terminals {
-        let Some(first_committed_seq) = terminal_first_committed_seq(terminal) else {
+        let Some(first_committed_seq) = terminal.first_committed_session_seq else {
             continue;
         };
-        let replacement = match terminal.status.as_str() {
-            "failed" => TranscriptBlockStatus::Failed,
-            "interrupted" => TranscriptBlockStatus::Cancelled,
-            _ => continue,
+        let replacement = match terminal.status {
+            ThreadTurnTerminalStatus::Failed => TranscriptBlockStatus::Failed,
+            ThreadTurnTerminalStatus::Interrupted => TranscriptBlockStatus::Cancelled,
         };
         for entry in entries.iter_mut() {
             let Some(message_seq) = entry.message_seq else {
                 continue;
             };
-            if entry.thread_id != terminal.thread_id
+            if entry.thread_id != thread_id
                 || message_seq < first_committed_seq
                 || entry.created_at_ms > terminal.completed_at_ms
             {
@@ -174,7 +177,7 @@ fn retain_terminal_write_preview(block: &mut TranscriptBlock, phase: &str) {
 
 pub(crate) fn project_compaction_entries(
     thread_id: &str,
-    compactions: &[SessionCompactionRecord],
+    compactions: &[ThreadCompaction],
 ) -> Vec<TranscriptEntry> {
     compactions
         .iter()
@@ -221,10 +224,10 @@ pub(crate) fn merge_entries_at_session_boundaries(
     merged
 }
 
-fn project_compaction_entry(thread_id: &str, record: &SessionCompactionRecord) -> TranscriptEntry {
+fn project_compaction_entry(thread_id: &str, record: &ThreadCompaction) -> TranscriptEntry {
     let mut metadata = serde_json::Map::new();
     metadata.insert("projection".to_string(), json!("compaction"));
-    metadata.insert("checkpoint_id".to_string(), json!(record.id));
+    metadata.insert("checkpoint_id".to_string(), json!(record.checkpoint_id));
     metadata.insert("reason".to_string(), json!(record.reason));
     metadata.insert("trigger".to_string(), json!(record.reason));
     metadata.insert(
@@ -233,7 +236,7 @@ fn project_compaction_entry(thread_id: &str, record: &SessionCompactionRecord) -
     );
     metadata.insert(
         "created_after_session_seq".to_string(),
-        json!(record.created_after_session_seq),
+        json!(record.boundary_session_seq),
     );
     metadata.insert("created_at_ms".to_string(), json!(record.created_at_ms));
     metadata.insert("tokens_before".to_string(), json!(record.tokens_before));
@@ -252,22 +255,22 @@ fn project_compaction_entry(thread_id: &str, record: &SessionCompactionRecord) -
     let preview = compaction_preview(record);
     let metadata = Value::Object(metadata);
     let mut block = block(
-        format!("compaction:{}:block", record.id),
+        format!("compaction:{}:block", record.checkpoint_id),
         TranscriptBlockKind::Compaction,
         TranscriptBlockStatus::Completed,
         0,
         "runtime.compaction",
         Some("Session compacted".to_string()),
         None,
-        Some(record.summary_text.clone()),
+        Some(record.summary.clone()),
         Some(metadata.clone()),
         record.created_at_ms,
     );
     block.preview = Some(preview);
     TranscriptEntry {
-        id: format!("compaction:{}", record.id),
+        id: format!("compaction:{}", record.checkpoint_id),
         thread_id: thread_id.to_string(),
-        turn_id: Some(format!("compaction:{}", record.id)),
+        turn_id: Some(format!("compaction:{}", record.checkpoint_id)),
         message_seq: None,
         role: TranscriptEntryRole::Diagnostic,
         status: TranscriptBlockStatus::Completed,
@@ -281,7 +284,7 @@ fn project_compaction_entry(thread_id: &str, record: &SessionCompactionRecord) -
     }
 }
 
-fn compaction_preview(record: &SessionCompactionRecord) -> String {
+fn compaction_preview(record: &ThreadCompaction) -> String {
     let mut parts = vec![record.reason.clone()];
     match (record.tokens_before, record.tokens_after) {
         (Some(before), Some(after)) => parts.push(format!("{before} -> {after} tokens")),
@@ -294,20 +297,20 @@ fn compaction_preview(record: &SessionCompactionRecord) -> String {
 }
 
 pub(crate) fn project_turn_terminal_entry(
-    terminal: &GatewayTurnTerminalRecord,
-) -> Option<TranscriptEntry> {
-    let (status, title, fallback_body) = match terminal.status.as_str() {
-        "failed" => (
+    thread_id: &str,
+    terminal: &ThreadTurnTerminal,
+) -> TranscriptEntry {
+    let (status, title, fallback_body) = match terminal.status {
+        ThreadTurnTerminalStatus::Failed => (
             TranscriptBlockStatus::Failed,
             "Turn failed",
             "The turn failed before producing a final response.",
         ),
-        "interrupted" => (
+        ThreadTurnTerminalStatus::Interrupted => (
             TranscriptBlockStatus::Cancelled,
             "Turn interrupted",
             "The turn was interrupted.",
         ),
-        _ => return None,
     };
     let body = terminal
         .error_message
@@ -317,7 +320,7 @@ pub(crate) fn project_turn_terminal_entry(
     let mut metadata = serde_json::Map::new();
     metadata.insert("projection".to_string(), json!("turn_terminal"));
     metadata.insert("turn_id".to_string(), json!(terminal.turn_id));
-    metadata.insert("status".to_string(), json!(terminal.status));
+    metadata.insert("status".to_string(), json!(terminal.status.as_str()));
     if let Some(outcome) = &terminal.outcome {
         metadata.insert("outcome".to_string(), json!(outcome));
     }
@@ -327,9 +330,9 @@ pub(crate) fn project_turn_terminal_entry(
     if let Some(extra) = &terminal.metadata {
         metadata.insert("terminal".to_string(), extra.clone());
     }
-    Some(TranscriptEntry {
+    TranscriptEntry {
         id: format!("turn:{}:terminal", terminal.turn_id),
-        thread_id: terminal.thread_id.clone(),
+        thread_id: thread_id.to_string(),
         turn_id: Some(terminal.turn_id.clone()),
         message_seq: None,
         role: TranscriptEntryRole::Diagnostic,
@@ -352,36 +355,7 @@ pub(crate) fn project_turn_terminal_entry(
         accounting: None,
         created_at_ms: terminal.completed_at_ms,
         updated_at_ms: terminal.completed_at_ms,
-    })
-}
-
-pub(crate) fn terminal_structural_boundary(terminal: &GatewayTurnTerminalRecord) -> i64 {
-    terminal
-        .metadata
-        .as_ref()
-        .and_then(|metadata| {
-            metadata
-                .get("lastCommittedSeq")
-                .or_else(|| metadata.get("last_committed_seq"))
-        })
-        .and_then(Value::as_i64)
-        .or_else(|| {
-            terminal_first_committed_seq(terminal)
-                .map(|first_committed_seq| first_committed_seq.saturating_sub(1))
-        })
-        .unwrap_or(i64::MAX)
-}
-
-fn terminal_first_committed_seq(terminal: &GatewayTurnTerminalRecord) -> Option<i64> {
-    terminal
-        .metadata
-        .as_ref()
-        .and_then(|metadata| {
-            metadata
-                .get("firstCommittedSeq")
-                .or_else(|| metadata.get("first_committed_seq"))
-        })
-        .and_then(Value::as_i64)
+    }
 }
 
 fn metadata_object(metadata: Option<Value>) -> serde_json::Map<String, Value> {
@@ -421,13 +395,5 @@ fn compact_text(text: &str, max_chars: usize) -> String {
     output
 }
 
-include!("transcript/agent_edges.rs");
-include!("transcript/message_projection.rs");
-include!("transcript/tool_results.rs");
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    include!("transcript/tests.rs");
-}
+mod tests;

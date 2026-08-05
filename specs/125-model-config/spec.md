@@ -56,7 +56,10 @@ Composer model selection is shared UX state, not default configuration. GUI and
 TUI composer pickers write `$PSYCHEVO_HOME/model-state.json` for the canonical
 cwd and never write TOML defaults. If a user wants a saved default, they must
 use Settings > Models, `pevo model set`, or another explicit default-saving
-command.
+command. A persisted Thread created by a user shell context action records its
+resolved provider-qualified model and optional reasoning effort in the same
+session composer projection, so reopening that Thread cannot fall back to a
+different cwd or global selection.
 
 Every GUI and TUI model-selection surface uses the model `name` as its primary
 visible label when that non-empty display name is available. An explicit

@@ -1,3 +1,15 @@
+use crate::tui::app_panels::agent_definition_editable;
+use crate::tui::ui_types::AgentEditorPanel;
+use crate::tui::{
+    AgentAction, AgentEditorField, AgentEntrypoint, AgentRunPromptPanel, AgentSource, AgentTab,
+    BottomPanel, BottomSelectionValue, FullscreenUi, KeyCode, KeyEvent, KeyModifiers,
+    SetThreadMainAgentSelection, ThreadMainAgentSelection, TuiApp,
+};
+use anyhow::Result;
+use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
+
 impl TuiApp {
     pub(crate) async fn handle_agent_panel_key(
         &mut self,
@@ -189,7 +201,7 @@ impl TuiApp {
                     })
                     .unwrap_or(false);
                 if save {
-                self.save_agent_editor(ui).await?;
+                    self.save_agent_editor(ui).await?;
                 } else if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
                     panel.move_field(1);
                 }
@@ -293,37 +305,33 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) async fn use_default_main_agent(
-        &mut self,
-        ui: &mut FullscreenUi<'_>,
-    ) -> Result<()> {
-        if ui.running.is_some() {
+    pub(crate) async fn use_default_main_agent(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+        if ui.foreground_turn_active() {
             ui.set_bottom_panel_notice("finish the current turn before switching main agent");
             return Ok(());
         }
         let next_agent = if let Some(session_id) = self.current_session.as_deref() {
-            let store = &self.state_runtime;
-            let metadata = match store.session_metadata(session_id).await {
-                Ok(metadata) => metadata,
+            let selection = match async {
+                self.runtime
+                    .client()
+                    .resume_thread(session_id.to_string())
+                    .await?
+                    .set_main_agent_selection(SetThreadMainAgentSelection::Default)
+                    .await
+            }
+            .await
+            {
+                Ok(selection) => selection,
                 Err(err) => {
                     ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
                     return Ok(());
                 }
             };
-            if let Err(err) = store
-                .set_session_metadata_field(
-                    session_id,
-                    SESSION_MAIN_AGENT_METADATA_KEY,
-                    Some(main_agent_default_metadata()),
-                )
-                .await
-            {
-                ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
-                return Ok(());
+            match selection {
+                ThreadMainAgentSelection::Default { base_agent } => base_agent,
+                ThreadMainAgentSelection::Missing { .. }
+                | ThreadMainAgentSelection::Agent { .. } => None,
             }
-            metadata
-                .as_ref()
-                .and_then(|metadata| session_base_agent_name_from_metadata(Some(metadata)))
         } else {
             None
         };
@@ -351,7 +359,7 @@ impl TuiApp {
         path: Option<PathBuf>,
         shadowed: bool,
     ) -> Result<()> {
-        if ui.running.is_some() {
+        if ui.foreground_turn_active() {
             ui.set_bottom_panel_notice("finish the current turn before switching main agent");
             return Ok(());
         }
@@ -366,19 +374,25 @@ impl TuiApp {
         } else {
             name.clone()
         };
-        let metadata = main_agent_metadata(&input, &name, source, path.as_ref());
-        if let Some(session_id) = self.current_session.as_deref()
-            && let Err(err) = self
-                .state_runtime
-                .set_session_metadata_field(
-                    session_id,
-                    SESSION_MAIN_AGENT_METADATA_KEY,
-                    Some(metadata.clone()),
-                )
-                .await
-        {
-            ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
-            return Ok(());
+        if let Some(session_id) = self.current_session.as_deref() {
+            let result = async {
+                self.runtime
+                    .client()
+                    .resume_thread(session_id.to_string())
+                    .await?
+                    .set_main_agent_selection(SetThreadMainAgentSelection::Agent {
+                        input: input.clone(),
+                        name,
+                        source,
+                        path,
+                    })
+                    .await
+            }
+            .await;
+            if let Err(err) = result {
+                ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
+                return Ok(());
+            }
         }
         self.current_agent = Some(input);
         self.current_agent_explicit_default = false;
@@ -400,19 +414,14 @@ impl TuiApp {
         &self,
         session_id: &str,
     ) -> Result<()> {
-        reload_session_context(ReloadContextOptions {
-            state: self.state_runtime.clone(),
-            session: session_id.to_string(),
-            config_path: self.config_path.clone(),
-            mode: Some(self.current_mode),
-            inherited_env: Some(self.env_map.clone()),
-            agent: self.current_agent.clone(),
-            no_agents: self.no_agents,
-            no_skills: self.no_skills,
-            invalidation_reason: "main_agent_changed".to_string(),
-            notice: Some("The selected main agent changed; the session prompt prefix was rebuilt before this turn.".to_string()),
-        })
-        .await?;
+        self.runtime.client()
+            .resume_thread(session_id.to_string())
+            .await?
+            .refresh_context(self.refresh_thread_context_request(
+                "main_agent_changed",
+                Some("The selected main agent changed; the session prompt prefix was rebuilt before this turn.".to_string()),
+            ))
+            .await?;
         Ok(())
     }
 
@@ -421,7 +430,7 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         id: &str,
     ) -> Result<()> {
-        let control = self.application.agent_control();
+        let control = self.runtime.application().agent_control();
         let _ = control
             .stop_with_grace(id, Duration::from_millis(1200))
             .await?;
@@ -436,7 +445,7 @@ impl TuiApp {
         let Some(parent) = self.current_session.as_deref() else {
             return;
         };
-        let control = self.application.agent_control();
+        let control = self.runtime.application().agent_control();
         let paused = !control.spawning_paused(parent);
         control.set_spawning_paused(parent, paused);
         let mut panel = self.agent_panel().await;

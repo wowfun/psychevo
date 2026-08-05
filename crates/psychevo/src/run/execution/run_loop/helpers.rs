@@ -1,3 +1,15 @@
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+
+use super::super::titles::visible_session_source_allows_auto_title;
+use crate::agents::{AgentDefinition, session_agent_input_from_metadata};
+use crate::compaction::{CompactSessionOptions, CompactionReason, compact_session};
+use crate::error::Result;
+use crate::skills::{SelectedSkill, select_explicit_skills, select_skills_for_prompt};
+use crate::store::StateRuntime;
+use crate::types::{ModelMetadata, RunOptions, SelectedAgent};
+
 pub(crate) async fn first_use_empty_visible_session(
     store: &StateRuntime,
     session_id: &str,
@@ -22,7 +34,9 @@ pub(crate) async fn materialize_first_use_empty_session(
         return Ok(false);
     }
     store.set_session_model(session_id, provider, model).await?;
-    store.set_session_metadata(session_id, Some(metadata)).await?;
+    store
+        .set_session_metadata(session_id, Some(metadata))
+        .await?;
     Ok(true)
 }
 

@@ -1,19 +1,39 @@
+use std::collections::BTreeSet;
+
+#[cfg(test)]
+use serde_json::Value;
+
+use super::super::rules::{
+    InlineInterpreterReview, dangerous_bash_reason, inline_interpreter_review,
+    is_known_safe_command,
+};
+use super::actions::{PermissionAction, file_target};
+use super::exec_matching::{command_tokens, exec_prefix_label, exec_prefix_matches};
+use super::profiles::{builtin_profile_decision, explicit_profile_decision, hardline_deny};
+use super::protected_paths::{protected_permission_config_reason, protected_read_reason};
+#[cfg(test)]
+use super::state::PermissionDecisionView;
+use super::state::{PermissionDecision, PermissionRuntime};
+use super::tool::ActionPolicyEvaluation;
+use crate::types::{ApprovalPolicy, ExecPolicyDecision, PermissionMode};
+
 impl PermissionRuntime {
-    #[allow(dead_code)]
-    pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecision {
+    #[cfg(test)]
+    pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecisionView {
         let action = match PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args) {
             Ok(action) => action,
             Err(err) => {
                 return PermissionDecision::Deny {
                     reason: format!("filesystem identity resolution failed: {err}"),
                     matched_rule: None,
-                };
+                }
+                .into();
             }
         };
-        self.evaluate_resolved_action(action.as_ref())
+        self.evaluate_resolved_action(action.as_ref()).into()
     }
 
-    pub(crate) fn evaluate_resolved_action(
+    pub(super) fn evaluate_resolved_action(
         &self,
         action: Option<&PermissionAction>,
     ) -> PermissionDecision {
@@ -21,11 +41,9 @@ impl PermissionRuntime {
             return PermissionDecision::Allow;
         };
 
-        if let Some(reason) = protected_permission_config_reason(
-            action,
-            &self.inner.protected_config_paths,
-        )
-        .or_else(|| hardline_deny(action))
+        if let Some(reason) =
+            protected_permission_config_reason(action, &self.inner.protected_config_paths)
+                .or_else(|| hardline_deny(action))
         {
             return PermissionDecision::Deny {
                 reason,
@@ -56,16 +74,7 @@ impl PermissionRuntime {
         self.evaluation_to_permission_decision(action, session_key, evaluation)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn matching_rule<'a>(
-        &'a self,
-        rules: &'a [PermissionRule],
-        action: &PermissionAction,
-    ) -> Option<&'a PermissionRule> {
-        rules.iter().find(|rule| action.matches_rule(rule))
-    }
-
-    pub(crate) fn evaluation_to_permission_decision(
+    fn evaluation_to_permission_decision(
         &self,
         action: &PermissionAction,
         session_key: String,
@@ -115,7 +124,7 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn evaluate_action_policy(
+    pub(super) fn evaluate_action_policy(
         &self,
         action: &PermissionAction,
     ) -> ActionPolicyEvaluation {
@@ -130,10 +139,7 @@ impl PermissionRuntime {
             .unwrap_or_else(|| builtin_profile_decision(":workspace", action))
     }
 
-    pub(crate) fn exec_safety_decision(
-        &self,
-        action: &PermissionAction,
-    ) -> Option<ActionPolicyEvaluation> {
+    fn exec_safety_decision(&self, action: &PermissionAction) -> Option<ActionPolicyEvaluation> {
         let PermissionAction::ExecCommand {
             command,
             normalized,
@@ -142,10 +148,7 @@ impl PermissionRuntime {
         else {
             return None;
         };
-        if cwd
-            .as_ref()
-            .is_some_and(|target| !target.within_cwd)
-        {
+        if cwd.as_ref().is_some_and(|target| !target.within_cwd) {
             return Some(ActionPolicyEvaluation::Ask {
                 reason: "command cwd outside accepted cwd requires approval".to_string(),
                 matched_rule: None,
@@ -210,7 +213,7 @@ impl PermissionRuntime {
         Some(ActionPolicyEvaluation::Allow)
     }
 
-    pub(crate) fn file_reads_allowed_by_active_profile(&self, paths: &[String]) -> bool {
+    fn file_reads_allowed_by_active_profile(&self, paths: &[String]) -> bool {
         if paths.is_empty() {
             return false;
         }
@@ -242,16 +245,16 @@ impl PermissionRuntime {
         )
     }
 
-    pub(crate) fn active_profile_is_read_only(&self) -> bool {
+    fn active_profile_is_read_only(&self) -> bool {
         self.profile_extends_builtin(self.inner.config.default_permissions.as_str(), ":read-only")
     }
 
-    pub(crate) fn active_profile_is_configured(&self) -> bool {
+    fn active_profile_is_configured(&self) -> bool {
         let profile = self.inner.config.default_permissions.as_str();
         profile.starts_with(':') || self.inner.config.profiles.contains_key(profile)
     }
 
-    pub(crate) fn profile_extends_builtin(&self, profile_name: &str, builtin: &str) -> bool {
+    fn profile_extends_builtin(&self, profile_name: &str, builtin: &str) -> bool {
         if profile_name == builtin {
             return true;
         }
@@ -278,10 +281,7 @@ impl PermissionRuntime {
         false
     }
 
-    pub(crate) fn exec_policy_decision(
-        &self,
-        action: &PermissionAction,
-    ) -> Option<ActionPolicyEvaluation> {
+    fn exec_policy_decision(&self, action: &PermissionAction) -> Option<ActionPolicyEvaluation> {
         let PermissionAction::ExecCommand { command, .. } = action else {
             return None;
         };
@@ -329,7 +329,7 @@ impl PermissionRuntime {
         allow.map(|_| ActionPolicyEvaluation::Allow)
     }
 
-    pub(crate) fn profile_decision(
+    fn profile_decision(
         &self,
         profile_name: &str,
         action: &PermissionAction,
@@ -359,7 +359,7 @@ impl PermissionRuntime {
         }
     }
 
-    pub(crate) fn granular_allows_prompt(&self, action: &PermissionAction) -> bool {
+    pub(super) fn granular_allows_prompt(&self, action: &PermissionAction) -> bool {
         let Some(granular) = &self.inner.config.granular else {
             return false;
         };

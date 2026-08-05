@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::line_text;
+use crate::tui::{
+    Color, TUI_ROLE_ACCENT, TUI_ROLE_SELECTION_BG, TUI_ROLE_SURFACE_BG, TerminalColorLevel,
+    TerminalProfile, TranscriptKind, TranscriptRow, TuiTheme, UnicodeWidthStr,
+    activity_spinner_frame, answer_lines, parse_terminal_default_colors, render_markdown_lines,
+    tui_theme,
+};
+use std::time::Duration;
+use tempfile::tempdir;
 #[tokio::test]
 pub(crate) async fn adaptive_theme_falls_back_without_terminal_profile() {
     let theme = TuiTheme::from_profile(TerminalProfile::unknown());

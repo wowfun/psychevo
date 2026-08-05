@@ -1,3 +1,7 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
 pub const JSON_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
 pub const JSON_SAFE_INTEGER_MIN: i64 = -9_007_199_254_740_991;
 
@@ -106,29 +110,30 @@ fn safe_integer_schema(minimum: f64, maximum: f64) -> schemars::schema::Schema {
 
 macro_rules! safe_integer_serde {
     ($module:ident, $option_module:ident, $primitive:ty, $safe:ty) => {
-        mod $module {
-            use super::*;
-
-            pub fn serialize<S>(value: &$primitive, serializer: S) -> std::result::Result<S::Ok, S::Error>
+        pub(super) mod $module {
+            pub fn serialize<S>(
+                value: &$primitive,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
             {
                 let value = <$safe>::try_from(*value).map_err(serde::ser::Error::custom)?;
-                value.serialize(serializer)
+                serde::Serialize::serialize(&value, serializer)
             }
 
             pub fn deserialize<'de, D>(deserializer: D) -> std::result::Result<$primitive, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
-                <$primitive>::try_from(<$safe>::deserialize(deserializer)?.get())
-                    .map_err(serde::de::Error::custom)
+                <$primitive>::try_from(
+                    <$safe as serde::Deserialize>::deserialize(deserializer)?.get(),
+                )
+                .map_err(serde::de::Error::custom)
             }
         }
 
-        mod $option_module {
-            use super::*;
-
+        pub(super) mod $option_module {
             pub fn serialize<S>(
                 value: &Option<$primitive>,
                 serializer: S,
@@ -136,11 +141,11 @@ macro_rules! safe_integer_serde {
             where
                 S: serde::Serializer,
             {
-                value
+                let value = value
                     .map(<$safe>::try_from)
                     .transpose()
-                    .map_err(serde::ser::Error::custom)?
-                    .serialize(serializer)
+                    .map_err(serde::ser::Error::custom)?;
+                serde::Serialize::serialize(&value, serializer)
             }
 
             pub fn deserialize<'de, D>(
@@ -149,7 +154,7 @@ macro_rules! safe_integer_serde {
             where
                 D: serde::Deserializer<'de>,
             {
-                Option::<$safe>::deserialize(deserializer)?
+                <Option<$safe> as serde::Deserialize>::deserialize(deserializer)?
                     .map(|value| {
                         <$primitive>::try_from(value.get()).map_err(serde::de::Error::custom)
                     })
@@ -159,18 +164,25 @@ macro_rules! safe_integer_serde {
     };
 }
 
-safe_integer_serde!(json_safe_i64, option_json_safe_i64, i64, JsonSafeI64);
-safe_integer_serde!(json_safe_u64, option_json_safe_u64, u64, JsonSafeU64);
+safe_integer_serde!(json_safe_i64, option_json_safe_i64, i64, super::JsonSafeI64);
+safe_integer_serde!(json_safe_u64, option_json_safe_u64, u64, super::JsonSafeU64);
 safe_integer_serde!(
     json_safe_usize,
     option_json_safe_usize,
     usize,
-    JsonSafeU64
+    super::JsonSafeU64
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents_backend_rpc::ManagedServerState;
+    use crate::capability_results::{
+        McpPolicyView, PluginAuthorityRuntimeView, PluginConnectStartResult, PluginInstallResult,
+        PluginTrustView,
+    };
+    use crate::events_transcript::GatewayActivityView;
+    use crate::settings_workspace_context::SessionUsageSummaryView;
 
     #[derive(Debug, Serialize, Deserialize)]
     struct SignedBoundary {
@@ -206,7 +218,7 @@ mod tests {
         json_safe_u32_for_test,
         option_json_safe_u32_for_test,
         u32,
-        NarrowSafeU64
+        super::NarrowSafeU64
     );
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -234,18 +246,14 @@ mod tests {
 
     #[test]
     fn out_of_range_input_and_output_are_rejected() {
-        assert!(
-            serde_json::from_str::<SignedBoundary>(r#"{"value":9007199254740992}"#).is_err()
-        );
+        assert!(serde_json::from_str::<SignedBoundary>(r#"{"value":9007199254740992}"#).is_err());
         assert!(
             serde_json::to_string(&SignedBoundary {
                 value: JSON_SAFE_INTEGER_MIN - 1,
             })
             .is_err()
         );
-        assert!(
-            serde_json::from_str::<UnsignedBoundary>(r#"{"value":9007199254740992}"#).is_err()
-        );
+        assert!(serde_json::from_str::<UnsignedBoundary>(r#"{"value":9007199254740992}"#).is_err());
         assert!(
             serde_json::to_string(&UnsignedBoundary {
                 value: JSON_SAFE_INTEGER_MAX + 1,
@@ -257,16 +265,11 @@ mod tests {
     #[test]
     fn target_width_overflow_is_rejected_for_values_that_are_json_safe() {
         assert!(
-            serde_json::from_str::<NarrowBoundary>(
-                r#"{"value":4294967296,"optional":null}"#
-            )
-            .is_err()
+            serde_json::from_str::<NarrowBoundary>(r#"{"value":4294967296,"optional":null}"#)
+                .is_err()
         );
         assert!(
-            serde_json::from_str::<NarrowBoundary>(
-                r#"{"value":0,"optional":4294967296}"#
-            )
-            .is_err()
+            serde_json::from_str::<NarrowBoundary>(r#"{"value":0,"optional":4294967296}"#).is_err()
         );
     }
 

@@ -106,7 +106,33 @@ impl StateRuntime {
     }
 
     pub async fn close(&self) {
+        #[cfg(test)]
+        {
+            let barrier = self
+                .inner
+                .state_close_barrier
+                .lock()
+                .expect("State close barrier poisoned")
+                .take();
+            if let Some((entered, release)) = barrier {
+                entered.notify_one();
+                release.notified().await;
+            }
+        }
         self.inner.pool.close().await;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_close_barrier_for_test(
+        &self,
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    ) {
+        *self
+            .inner
+            .state_close_barrier
+            .lock()
+            .expect("State close barrier poisoned") = Some((entered, release));
     }
 }
 

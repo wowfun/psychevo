@@ -6,17 +6,14 @@ as a local path dependency and supports custom providers without requiring
 
 ```toml
 [dependencies]
-psychevo-ai = { path = "../psychevo/crates/psychevo-ai" }
+psychevo-ai = { path = "../psychevo/crates/psychevo-ai", features = ["openai"] }
 ```
 
-For only the provider-neutral core and custom/fake Adapters:
+The default build is the provider-neutral core with custom/fake Adapters:
 
 ```toml
 [dependencies]
-psychevo-ai = {
-    path = "../psychevo/crates/psychevo-ai",
-    default-features = false,
-}
+psychevo-ai = { path = "../psychevo/crates/psychevo-ai" }
 ```
 
 Bind an explicit deployment before invoking a model:
@@ -78,6 +75,6 @@ generation indefinitely without polling can grow memory without bound.
 `deployment/model` identifiers. The SDK does not discover environment
 variables, model catalogs, aliases, fallbacks, or product configuration.
 
-Default features enable the `openai`, `anthropic`, and `xiaomi` built-ins.
-Provider-neutral types, custom Adapter traits, Registry, and deterministic fake
-Adapters remain available with `default-features = false`.
+The independent `openai`, `anthropic`, and `xiaomi` features enable built-in
+provider families. Provider-neutral types, custom Adapter traits, Registry,
+and deterministic fake Adapters remain available with no feature enabled.

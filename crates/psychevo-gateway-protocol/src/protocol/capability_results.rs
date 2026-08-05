@@ -1,3 +1,14 @@
+use std::collections::BTreeMap;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use ts_rs::TS;
+
+use crate::safe_integer::{
+    JsonSafeI64, JsonSafeU64, json_safe_u64, option_json_safe_i64, option_json_safe_u64,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(tag = "kind", rename_all = "snake_case")]
@@ -510,9 +521,7 @@ impl JsonSchema for JsonNullableString {
         "JsonNullableString".to_string()
     }
 
-    fn json_schema(
-        _generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
+    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             instance_type: Some(
                 vec![
