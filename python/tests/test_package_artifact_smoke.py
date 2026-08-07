@@ -38,6 +38,13 @@ class PackageArtifactSmokeTests(unittest.TestCase):
                 / "Psychevo.AppImage",
                 package / "python" / "wheels" / "psychevo.whl",
                 package / "python" / "sdists" / "psychevo.tar.gz",
+                package
+                / "extensions"
+                / "psychevo.channel.wechat-0.1.0-test.tar.gz",
+                package
+                / "extensions"
+                / "fragments"
+                / "psychevo.channel.wechat.test.json",
             ]
             for path in paths:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +60,8 @@ class PackageArtifactSmokeTests(unittest.TestCase):
             manifest = (package / "checksums.sha256").read_text(encoding="utf-8")
             self.assertIn(f"desktop-target/release/psychevo-desktop{suffix}", manifest)
             self.assertIn("desktop-target/release/bundle/appimage/Psychevo.AppImage", manifest)
+            self.assertIn("psychevo.channel.wechat-0.1.0-test.tar.gz", manifest)
+            self.assertIn("psychevo.channel.wechat.test.json", manifest)
 
     def test_failure_report_retains_completed_artifact_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

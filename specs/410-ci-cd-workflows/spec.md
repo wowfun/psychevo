@@ -21,14 +21,15 @@ This topic owns:
 - local artifact root conventions for workflow runs
 - live opt-in enforcement for workflow profiles
 - lower-level helper scripts used by profile steps
-- the required GitHub Actions workflows for pull requests, `main` pushes, and
-  explicit or scheduled hosted package validation
+- the required GitHub Actions workflows for pull requests, `main` pushes,
+  explicit or scheduled hosted package validation, and bounded published-
+  release Extension asset promotion
 
 Out of scope:
 
-- hosted release, deployment, or registry workflows
-- public release publishing, hosted draft releases, deployments, update
-  channels, or package registry upload
+- hosted release creation, deployment, update-channel, or registry workflows
+- hosted draft releases, deployments, package publication, or package registry
+  upload
 - user-customizable workflow manifests
 - replacing topic-specific testing specs or acceptance matrices
 
@@ -393,13 +394,13 @@ toolchain matches `workspace.package.rust-version`. They must not pass an
 unsupported `toolchain` action input that leaves the revision's older baked-in
 toolchain active.
 
-The separate artifact-only workflow runs on Linux, macOS, and Windows through
+The separate package workflow runs on Linux, macOS, and Windows through
 explicit manual dispatch, a weekly Monday 02:00 UTC schedule, version-tag
 pushes, and published-release events. Every triggering run builds, tests, and
 smokes the directly executable artifacts it uploads, while recording
 non-installable installer/container formats as `build-only`; it does not copy
-artifacts from another workflow or
-publish them to a registry or hosted release. YAML prepares host dependencies,
+artifacts from another workflow or publish them to a registry or create a
+hosted release. YAML prepares host dependencies,
 invokes exactly `cargo xtask ci run --profile package --package --artifact-root
 <root>`, and uploads its plan, results, logs, checksums, Python packages,
 release CLI, host Desktop bundle, and signed provenance bundle. Build intermediates under the
@@ -416,8 +417,14 @@ absent. A platform is
 release-eligible only after its own runner succeeds;
 the existence or local validation of the workflow does not claim that another
 operating system passed. This workflow never publishes packages, creates a
-hosted release, or uses provider credentials. Its artifact upload explicitly
-includes hidden paths because package staging lives under `.local`.
+hosted release, or uses provider credentials. On a `release.published` event
+only, its final Extension promotion job may upload the merged Extension
+descriptors, archives, and checksum evidence to that triggering release. The
+job must require successful completion of the independent supply-chain job and
+all native host artifact jobs; no failed, skipped, or cancelled prerequisite
+may publish an asset. Other trigger classes remain artifact-only. Its ordinary
+artifact upload explicitly includes hidden paths because package staging lives
+under `.local`.
 
 The Linux artifact runner executes AppImage build tools in extraction mode so
 local, container, WSL, and hosted runners do not require a mounted FUSE device

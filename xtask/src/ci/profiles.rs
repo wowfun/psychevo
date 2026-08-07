@@ -690,7 +690,7 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
     },
     WorkflowStep {
         id: "verify-rust-sdk-packages",
-        description: "Package and compile the three publishable Rust SDK crates",
+        description: "Package and compile the four publishable Rust crates",
         action: WorkflowStepAction::Command(&["sh", "scripts/verify-sdk-packages.sh"]),
         live: false,
     },
@@ -718,6 +718,44 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
         id: "build-workbench",
         description: "Build Workbench artifact",
         action: WorkflowStepAction::Command(&["pnpm", "--filter", "@psychevo/workbench", "build"]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "test-channel-extension-packaging",
+        description: "Test deterministic Channel Extension archives and merge policy",
+        action: WorkflowStepAction::Command(&[
+            "python",
+            "-m",
+            "unittest",
+            "scripts.tests.test_package_extension_channels",
+            "-v",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "build-channel-extension-releases",
+        description: "Build precompiled first-party Channel Extension sidecars",
+        action: WorkflowStepAction::ArtifactCommand {
+            command: &[
+                "cargo",
+                "build",
+                "--locked",
+                "--release",
+                "-p",
+                "psychevo-extension-channel-wechat",
+                "-p",
+                "psychevo-extension-channel-telegram",
+                "-p",
+                "psychevo-extension-channel-feishu-lark",
+            ],
+            target_dir: "extension-target",
+        },
+        live: false,
+    },
+    WorkflowStep {
+        id: "package-channel-extension-releases",
+        description: "Package target sidecars with verified release descriptor fragments",
+        action: WorkflowStepAction::Command(&["python", "scripts/package_extension_channels.py"]),
         live: false,
     },
     WorkflowStep {
@@ -1518,6 +1556,15 @@ mod tests {
             .position(|step| std::ptr::eq(step, run))
             .expect("supply-chain position");
         assert!(install_index < run_index);
+
+        let extension_release = yaml_field(jobs, "extension-release");
+        let release_needs = yaml_field(extension_release, "needs")
+            .as_sequence()
+            .expect("Extension release prerequisites")
+            .iter()
+            .filter_map(YamlValue::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(release_needs, ["supply-chain", "host-artifacts"]);
     }
 
     #[test]
@@ -1806,6 +1853,9 @@ mod tests {
                 "verify-python-package-contracts",
                 "build-cli-release",
                 "build-workbench",
+                "test-channel-extension-packaging",
+                "build-channel-extension-releases",
+                "package-channel-extension-releases",
                 "build-desktop-bundle",
                 "smoke-native-release-artifacts",
                 "smoke-installed-python-artifacts",
@@ -1830,6 +1880,8 @@ mod tests {
         );
         for id in [
             "verify-python-package-contracts",
+            "test-channel-extension-packaging",
+            "package-channel-extension-releases",
             "smoke-native-release-artifacts",
             "smoke-installed-python-artifacts",
             "checksum-local-artifacts",

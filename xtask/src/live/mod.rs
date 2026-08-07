@@ -610,18 +610,21 @@ fn run_check(
             log,
             resolve_live_command_path,
         ),
-        LiveCheckAction::DeterministicPlaywright { spec, grep } => {
-            run_deterministic_playwright_check(
-                root,
-                artifact_root,
-                check_dir,
-                check,
-                env_mode,
-                spec,
-                grep,
-                log,
-            )
-        }
+        LiveCheckAction::DeterministicPlaywright {
+            spec,
+            grep,
+            channels,
+        } => run_deterministic_playwright_check(
+            root,
+            artifact_root,
+            check_dir,
+            check,
+            env_mode,
+            spec,
+            grep,
+            channels,
+            log,
+        ),
         LiveCheckAction::Playwright {
             spec,
             grep,
@@ -652,6 +655,7 @@ fn run_deterministic_playwright_check(
     _env_mode: LiveEnvMode,
     spec: &'static str,
     grep: &'static str,
+    channels: &'static [&'static str],
     log: Arc<Mutex<fs::File>>,
 ) -> Result<CheckResult> {
     if !command_exists("pnpm") {
@@ -676,8 +680,8 @@ fn run_deterministic_playwright_check(
     let cwd = check_dir.join("cwd");
     let config_path = home.join("config.toml");
     let db_path = check_dir.join("state.db");
-    fs::create_dir_all(&home).with_context(|| format!("create {}", home.display()))?;
-    fs::create_dir_all(&cwd).with_context(|| format!("create {}", cwd.display()))?;
+    reset_test_owned_directory(&home)?;
+    reset_test_owned_directory(&cwd)?;
     fs::write(&config_path, "model = \"lmstudio/noop\"\n")
         .with_context(|| format!("write {}", config_path.display()))?;
     if db_path.is_file() {
@@ -697,6 +701,21 @@ fn run_deterministic_playwright_check(
             return Ok(result);
         }
     };
+    match prepare_deterministic_channel_extensions(
+        root,
+        check_dir,
+        &home,
+        &cwd,
+        &pevo_bin,
+        channels,
+        Arc::clone(&log),
+    )? {
+        Ok(suppressed) => had_suppressed_output |= suppressed,
+        Err(mut result) => {
+            result.environment = Some(environment);
+            return Ok(result.include_suppressed_output(had_suppressed_output));
+        }
+    }
     let context_path = check_dir.join("xtask-live-context.json");
     let context = PlaywrightLiveContext {
         check_id: check.id,
@@ -1414,6 +1433,157 @@ fn ensure_pevo_built(
     Ok(Ok((pevo_bin, outcome.had_suppressed_output)))
 }
 
+fn prepare_deterministic_channel_extensions(
+    root: &Path,
+    check_dir: &Path,
+    home: &Path,
+    cwd: &Path,
+    pevo_bin: &Path,
+    channels: &[&str],
+    log: Arc<Mutex<fs::File>>,
+) -> Result<Result<bool, CheckResult>> {
+    let mut had_suppressed_output = false;
+    for channel in channels {
+        let (package, binary) = channel_extension_source(channel)?;
+        let mut build = ProcessCommand::new("cargo");
+        build
+            .args([
+                "build",
+                "--quiet",
+                "--release",
+                "-p",
+                package,
+                "--bin",
+                binary,
+            ])
+            .current_dir(root);
+        let outcome = run_logged_process(
+            &format!("build deterministic {channel} Channel Extension"),
+            &mut build,
+            Arc::clone(&log),
+        )?;
+        had_suppressed_output |= outcome.had_suppressed_output;
+        if !outcome.passed {
+            return Ok(Err(CheckResult {
+                status: LiveStatus::Failed,
+                detail: Some(format!(
+                    "failed to build deterministic {channel} Channel Extension"
+                )),
+                environment: None,
+                had_suppressed_output,
+            }));
+        }
+
+        let manifest = root
+            .join("crates")
+            .join(package)
+            .join("psychevo.extension.json");
+        let executable = root
+            .join("target")
+            .join("release")
+            .join(binary_name(binary));
+        let package_root = check_dir.join("extensions").join(package);
+        if let Err(error) = materialize_local_channel_extension(
+            &manifest,
+            &executable,
+            &package_root,
+            &binary_name(binary),
+        ) {
+            return Ok(Err(failed_result(
+                Arc::clone(&log),
+                format!(
+                    "failed to materialize deterministic {channel} Channel Extension: {error:#}"
+                ),
+                None,
+            )?));
+        }
+
+        let mut install = ProcessCommand::new(pevo_bin);
+        install
+            .arg("install")
+            .arg(&package_root)
+            .arg("--json")
+            .current_dir(cwd)
+            .env("PSYCHEVO_HOME", home)
+            .env("PSYCHEVO_CONFIG", home.join("config.toml"));
+        let outcome = run_logged_process(
+            &format!("install deterministic {channel} Channel Extension"),
+            &mut install,
+            Arc::clone(&log),
+        )?;
+        had_suppressed_output |= outcome.had_suppressed_output;
+        if !outcome.passed {
+            return Ok(Err(CheckResult {
+                status: LiveStatus::Failed,
+                detail: Some(format!(
+                    "failed to install deterministic {channel} Channel Extension"
+                )),
+                environment: None,
+                had_suppressed_output,
+            }));
+        }
+    }
+    Ok(Ok(had_suppressed_output))
+}
+
+fn channel_extension_source(channel: &str) -> Result<(&'static str, &'static str)> {
+    match channel {
+        "wechat" => Ok((
+            "psychevo-extension-channel-wechat",
+            "psychevo-channel-wechat",
+        )),
+        "telegram" => Ok((
+            "psychevo-extension-channel-telegram",
+            "psychevo-channel-telegram",
+        )),
+        "feishu" | "lark" => Ok((
+            "psychevo-extension-channel-feishu-lark",
+            "psychevo-channel-feishu-lark",
+        )),
+        _ => bail!("unsupported deterministic Channel Extension `{channel}`"),
+    }
+}
+
+fn materialize_local_channel_extension(
+    source_manifest: &Path,
+    source_executable: &Path,
+    package_root: &Path,
+    executable_name: &str,
+) -> Result<()> {
+    let mut manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(source_manifest)
+            .with_context(|| format!("read {}", source_manifest.display()))?,
+    )
+    .with_context(|| format!("parse {}", source_manifest.display()))?;
+    manifest["version"] = serde_json::Value::String("local".to_string());
+    manifest["runtime"]["executable"] = serde_json::Value::String(format!("./{executable_name}"));
+    fs::create_dir_all(package_root)
+        .with_context(|| format!("create {}", package_root.display()))?;
+    let mut manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+    manifest_bytes.push(b'\n');
+    fs::write(package_root.join("psychevo.extension.json"), manifest_bytes).with_context(|| {
+        format!(
+            "write local Extension manifest in {}",
+            package_root.display()
+        )
+    })?;
+    fs::copy(source_executable, package_root.join(executable_name)).with_context(|| {
+        format!(
+            "copy Channel Extension executable {} into {}",
+            source_executable.display(),
+            package_root.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn reset_test_owned_directory(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_dir_all(path).with_context(|| format!("reset {}", path.display()))?;
+    }
+    fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))
+}
+
 fn prepare_automation_cwd(check_dir: &Path) -> Result<PathBuf> {
     let cwd = check_dir.join("cwd");
     fs::create_dir_all(&cwd).with_context(|| format!("create {}", cwd.display()))?;
@@ -1852,6 +2022,77 @@ mod tests {
             resolve_live_artifact_root(&repo_root, &invocation_cwd, Some(explicit.clone())),
             explicit
         );
+    }
+
+    #[test]
+    fn deterministic_channel_package_uses_local_manifest_and_built_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-channel-live-package-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let source_manifest = root.join("source/psychevo.extension.json");
+        let source_executable = root.join("source/telegram-fixture");
+        let package_root = root.join("materialized");
+        fs::create_dir_all(source_manifest.parent().expect("source parent")).expect("source");
+        fs::write(
+            &source_manifest,
+            br#"{
+  "schemaVersion": 1,
+  "id": "psychevo.channel.telegram",
+  "version": "0.1.0",
+  "runtime": {
+    "protocol": "psychevo-extension/1",
+    "executable": "./release-name"
+  }
+}"#,
+        )
+        .expect("manifest");
+        fs::write(&source_executable, b"sidecar fixture").expect("executable");
+
+        materialize_local_channel_extension(
+            &source_manifest,
+            &source_executable,
+            &package_root,
+            "telegram-fixture",
+        )
+        .expect("materialize local Channel Extension");
+
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(package_root.join("psychevo.extension.json")).expect("read manifest"),
+        )
+        .expect("parse manifest");
+        assert_eq!(manifest["id"], "psychevo.channel.telegram");
+        assert_eq!(manifest["version"], "local");
+        assert_eq!(manifest["runtime"]["executable"], "./telegram-fixture");
+        assert_eq!(
+            fs::read(package_root.join("telegram-fixture")).expect("read executable"),
+            b"sidecar fixture"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn deterministic_check_directory_reset_removes_prior_runtime_state() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-live-state-reset-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("runtime-adapters/codex-acp")).expect("old state");
+        fs::write(root.join("runtime-adapters/codex-acp/seal.json"), b"stale").expect("old seal");
+
+        reset_test_owned_directory(&root).expect("reset test directory");
+
+        assert!(root.is_dir());
+        assert_eq!(fs::read_dir(&root).expect("read reset root").count(), 0);
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

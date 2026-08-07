@@ -118,6 +118,7 @@ PageUp 8
 Sleep 100 ms
 PageDown 80
 Wait+Screen /REASONING_ONLY_BOTTOM_MARKER/
+Wait+Screen /transcript · Esc +420\/64\.0k/
 Sleep 300 ms
 Screenshot "07-reasoning-only-bottom-scroll.png"
 Escape

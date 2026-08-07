@@ -10,10 +10,12 @@ topic testing specs, local developer runs, coding-agent repair loops, and future
 hosted CI adapters.
 
 CI/CD remains local-first in this slice. Hosted providers such as GitHub
-Actions are adapters over these rules, not the source of truth. Continuous
-delivery is artifact-only for v1: workflows may build, package, checksum, and
-collect reviewable artifacts, but they must not publish public releases,
-create hosted draft releases, deploy services, or mutate external channels.
+Actions are adapters over these rules, not the source of truth. Local delivery
+profiles are artifact-only: they may build, package, checksum, and collect
+reviewable artifacts, but they do not publish, deploy, or mutate external
+channels. A hosted adapter may promote checksum-owned, precompiled Extension
+assets to an already-published version release only under the narrow gate
+below; it never creates the release or weakens local profile isolation.
 
 ## Scope
 
@@ -29,8 +31,8 @@ Out of scope:
 
 - product workflow automations that schedule Psychevo turns
 - hosted CI provider workflow files
-- public release publishing, package registry upload, update channels, or
-  deployment targets
+- package registry upload, release creation, update channels, or deployment
+  targets beyond the bounded Extension-asset promotion defined here
 - provider-specific live checks beyond the shared opt-in contract
 - topic-specific acceptance matrices and concrete scenario coverage
 
@@ -40,9 +42,12 @@ CI workflow is an automated confidence check for repository state. A CI
 workflow may run locally or in a hosted adapter, and should be deterministic by
 default.
 
-CD workflow is a delivery preparation workflow. In v1, CD is artifact-only:
-it may produce build outputs, checksums, logs, and package inspection evidence,
-but it must not publish, deploy, or create hosted release objects.
+CD workflow is a delivery preparation workflow. A local CD profile is artifact-
+only: it may produce build outputs, checksums, logs, and package inspection
+evidence, but it must not publish, deploy, or create hosted release objects.
+The hosted Extension promotion adapter may upload only those verified assets
+to the release that triggered it after all native builders and the independent
+supply-chain job have succeeded.
 
 Profile is the named interface a caller selects, such as `changed`,
 `rust-broad`, `web`, `visual`, `live`, or `package`. Profiles hide concrete
@@ -166,9 +171,12 @@ objects, upload assets to release services, deploy Web assets, modify update
 channels, or contact package registries except for ordinary dependency
 resolution needed by the local build.
 
-Hosted CI/CD adapters may be added later. They should call the same workflow
-profiles where practical and preserve the local runner's evidence model instead
-of inventing a second source of truth in provider-specific YAML.
+Hosted CI/CD adapters call the same workflow profiles where practical and
+preserve the local runner's evidence model instead of inventing a second source
+of truth in provider-specific YAML. The published-release Extension promotion
+is the narrow exception described above; it consumes the native jobs' verified
+artifacts and does not move publication behavior into the local `package`
+profile.
 
 ## Related Topics
 

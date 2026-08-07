@@ -42,6 +42,8 @@ def main() -> None:
             ).rglob("*")
             if path.is_file()
         ],
+        "Extension archives": list((package_root / "extensions").glob("psychevo.channel.*.tar.gz")),
+        "Extension descriptors": list((package_root / "extensions" / "fragments").glob("*.json")),
     }
     missing = [name for name, paths in groups.items() if not any(path.is_file() for path in paths)]
     if missing:

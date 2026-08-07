@@ -60,12 +60,27 @@ cargo test \
   --doc \
   --config "patch.crates-io.psychevo-ai.path='$SDK_PACKAGE_EXTRACT/psychevo-ai-$SDK_PACKAGE_VERSION'"
 
+cargo package -p psychevo-extension-protocol \
+  --allow-dirty \
+  --target-dir "$SDK_PACKAGE_REPO/target"
+tar -xzf "$SDK_PACKAGE_REPO/target/package/psychevo-extension-protocol-$SDK_PACKAGE_VERSION.crate" \
+  -C "$SDK_PACKAGE_EXTRACT"
+cargo check \
+  --manifest-path "$SDK_PACKAGE_EXTRACT/psychevo-extension-protocol-$SDK_PACKAGE_VERSION/Cargo.toml" \
+  --target-dir "$SDK_PACKAGE_CHECK_TARGET" \
+  --all-targets
+cargo test \
+  --manifest-path "$SDK_PACKAGE_EXTRACT/psychevo-extension-protocol-$SDK_PACKAGE_VERSION/Cargo.toml" \
+  --target-dir "$SDK_PACKAGE_CHECK_TARGET" \
+  --doc
+
 cargo package -p psychevo \
   --allow-dirty \
   --no-verify \
   --target-dir "$SDK_PACKAGE_REPO/target" \
   --config "patch.crates-io.psychevo-ai.path='$SDK_PACKAGE_EXTRACT/psychevo-ai-$SDK_PACKAGE_VERSION'" \
-  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'"
+  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'" \
+  --config "patch.crates-io.psychevo-extension-protocol.path='$SDK_PACKAGE_EXTRACT/psychevo-extension-protocol-$SDK_PACKAGE_VERSION'"
 tar -xzf "$SDK_PACKAGE_REPO/target/package/psychevo-$SDK_PACKAGE_VERSION.crate" \
   -C "$SDK_PACKAGE_EXTRACT"
 cargo check \
@@ -74,11 +89,13 @@ cargo check \
   --all-targets \
   --no-default-features \
   --config "patch.crates-io.psychevo-ai.path='$SDK_PACKAGE_EXTRACT/psychevo-ai-$SDK_PACKAGE_VERSION'" \
-  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'"
+  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'" \
+  --config "patch.crates-io.psychevo-extension-protocol.path='$SDK_PACKAGE_EXTRACT/psychevo-extension-protocol-$SDK_PACKAGE_VERSION'"
 cargo test \
   --manifest-path "$SDK_PACKAGE_EXTRACT/psychevo-$SDK_PACKAGE_VERSION/Cargo.toml" \
   --target-dir "$SDK_PACKAGE_CHECK_TARGET" \
   --doc \
   --no-default-features \
   --config "patch.crates-io.psychevo-ai.path='$SDK_PACKAGE_EXTRACT/psychevo-ai-$SDK_PACKAGE_VERSION'" \
-  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'"
+  --config "patch.crates-io.psychevo-agent-core.path='$SDK_PACKAGE_EXTRACT/psychevo-agent-core-$SDK_PACKAGE_VERSION'" \
+  --config "patch.crates-io.psychevo-extension-protocol.path='$SDK_PACKAGE_EXTRACT/psychevo-extension-protocol-$SDK_PACKAGE_VERSION'"

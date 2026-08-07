@@ -29,6 +29,7 @@ pub(crate) enum LiveCheckAction {
     DeterministicPlaywright {
         spec: &'static str,
         grep: &'static str,
+        channels: &'static [&'static str],
     },
     Playwright {
         spec: &'static str,
@@ -158,6 +159,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "keeps first send live across a pending atomic draft open on the real Gateway",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -211,6 +213,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/pevo-acp-server-live.spec.ts",
             grep: "streams standard ACP updates, accepts model config, and reports usage @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -253,6 +256,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "runs Codex ACP and OpenCode ACP through one GUI control path @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -262,6 +266,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/agent-application-visual.spec.ts",
             grep: "imports Agent-owned sessions and renders negotiated lifecycle actions",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -271,6 +276,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "proves Native GUI and Channel equivalent binding intent and history semantics @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -280,6 +286,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "disables an incompatible reviewed ACP capability pack with an explicit diagnostic @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -289,6 +296,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "reuses one ACP process and restores agent-owned history without duplicate turns @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -298,6 +306,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "keeps process-ephemeral ACP history partial after restart and refuses fake recovery @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -307,6 +316,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "applies Channel controls through the same ACP preference and delivery path @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -316,6 +326,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "routes ACP filesystem permissions once through Channel and keeps terminal explicitly unsupported @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -325,6 +336,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "proves GUI and Channel equivalent binding control delivery and history semantics @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -334,6 +346,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "consumes Channel approve and answer tokens exactly once for ACP interactions @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -343,6 +356,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "queues an active-turn ACP model change for the next turn without mutating the current turn @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -352,6 +366,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "runs the granted ACP terminal lifecycle through Channel approval and typed callbacks @live",
+            channels: &["telegram"],
         },
     },
     LiveCheck {
@@ -361,6 +376,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "does not retry an ACP prompt after unknown delivery and reconciles from load @live",
+            channels: &[],
         },
     },
     LiveCheck {
@@ -370,6 +386,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::DeterministicPlaywright {
             spec: "apps/workbench/e2e/runtime-live.spec.ts",
             grep: "launches the pinned managed Codex ACP adapter from an offline absolute path @live",
+            channels: &[],
         },
     },
 ];
@@ -542,7 +559,7 @@ pub(crate) fn command_for_plan(check: &LiveCheck) -> Vec<String> {
             ]);
             command
         }
-        LiveCheckAction::DeterministicPlaywright { spec, grep } => vec![
+        LiveCheckAction::DeterministicPlaywright { spec, grep, .. } => vec![
             "xtask-internal".to_string(),
             "playwright-deterministic".to_string(),
             spec.to_string(),
@@ -690,7 +707,7 @@ mod tests {
         for check in LIVE_CHECKS {
             let pair = match check.action {
                 LiveCheckAction::Playwright { spec, grep, .. }
-                | LiveCheckAction::DeterministicPlaywright { spec, grep } => (spec, grep),
+                | LiveCheckAction::DeterministicPlaywright { spec, grep, .. } => (spec, grep),
                 _ => continue,
             };
             assert!(
