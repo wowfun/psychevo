@@ -424,6 +424,9 @@ and the validation harness has no private in-process transport fallback.
 - Web/Desktop rich UI is sandboxed; CLI/TUI use declared fallback
 - Gateway and minimal CLI builds contain no first-party platform SDK
   dependencies
+- the feature-free Channel adapter test target compiles without provider test
+  fixtures or Rust warnings; each single-provider feature compiles only its own
+  adapter tests and the shared fixtures that those tests actually consume
 - tests use fake sidecars, fake HTTPS release endpoints, fake Channel services,
   and deterministic clocks by default; live validation is explicit
 - the deterministic Workbench visual inventory installs a fake display-only
