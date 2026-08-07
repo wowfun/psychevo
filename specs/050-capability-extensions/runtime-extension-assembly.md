@@ -60,7 +60,9 @@ agent, and plugin evidence remain in their owning contracts.
 The value is immutable for one invocation. Executable resources referenced by
 the value use their actual owners:
 
-- plugin worker and skill runtime: invocation;
+- skill runtime: invocation;
+- Extension sidecars: the fingerprint-keyed host lifecycle defined by
+  [058 Extensions](../058-extensions/spec.md);
 - MCP runtime: materialized Thread;
 - Codex authority: Application/Gateway process with per-Turn generation lease.
 

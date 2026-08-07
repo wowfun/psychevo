@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,6 +32,48 @@ pub(in crate::server::tests) async fn web_state_with_native_test_executor(
     executor: crate::FrameworkNativeTestExecutor,
 ) -> (tempfile::TempDir, WebState) {
     web_state_with_composition(BTreeMap::new(), Some(executor)).await
+}
+
+pub(in crate::server::tests) fn install_wechat_test_extension(state: &WebState) {
+    let root = state.inner.home.join("test-extensions").join("wechat");
+    std::fs::create_dir_all(&root).expect("WeChat Extension root");
+    std::fs::write(
+        root.join("psychevo.extension.json"),
+        r#"{
+          "schemaVersion": 1,
+          "id": "psychevo.channel.wechat",
+          "version": "local",
+          "runtime": {
+            "protocol": "psychevo-extension/1",
+            "executable": "./sidecar.py"
+          },
+          "contributions": {
+            "channels": [{
+              "channel": "wechat",
+              "deliveryCapabilities": ["poll", "text", "qr_setup"]
+            }]
+          }
+        }"#,
+    )
+    .expect("WeChat Extension manifest");
+    let sidecar = root.join("sidecar.py");
+    std::fs::write(
+        &sidecar,
+        include_str!("../../../tests/fixtures/channel_wechat_test_sidecar.py"),
+    )
+    .expect("WeChat Extension sidecar");
+    #[cfg(unix)]
+    {
+        let mut permissions = std::fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&sidecar, permissions).expect("chmod sidecar");
+    }
+    let store = psychevo::extensions::ExtensionStore::new(&state.inner.home, &state.inner.cwd);
+    store
+        .install_local(&root, psychevo::extensions::ExtensionScope::Profile)
+        .expect("install WeChat test Extension");
 }
 
 pub(in crate::server::tests) fn framework_message_fixture_executor(

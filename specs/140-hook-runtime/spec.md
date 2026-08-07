@@ -13,12 +13,13 @@ Define runtime-owned hook execution for the target hook system.
 - canonical hook declaration normalization
 - trust-aware matching and execution
 - structured run summaries and bounded diagnostics
-- command, worker, prompt, and agent handler execution through one hook module
+- command, prompt, and agent handler execution through one hook module, plus
+  diagnostics for legacy worker declarations
 
 Out of scope:
 - hosted hook catalogs, graphical hook editing, hot reload, remote hook services, or stable SDKs
 - provider payload mutation or general session mutation
-- whole-process sandboxing for command hooks or plugin worker hooks
+- whole-process sandboxing for command hooks
 - persistent full hook audit logs
 
 ## Runtime Contract
@@ -82,28 +83,28 @@ session-end outcomes.
 
 ## Handler Execution
 
-Runtime recognizes these handler types:
+Runtime recognizes these executable handler types:
 
 - `command`
-- `worker`
 - `prompt`
 - `agent`
 
-The current implementation slice executes command, worker, and prompt handlers
+The current implementation slice executes command and prompt handlers
 through adapters hidden behind the hook module interface. Agent handlers
 normalize, list, match, and skip with structured adapter-unavailable
-diagnostics until an agent hook adapter is defined.
+diagnostics until an agent hook adapter is defined. Legacy `worker` handlers
+also normalize for compatibility evidence but always skip as unsupported;
+Plugin packages have no executable worker runtime.
 
 Command handlers receive a JSON payload on stdin, run in the canonical cwd
 unless overridden by a safe handler field, and have bounded timeout plus bounded
-stdout/stderr capture. Worker handlers receive the same semantic payload through
-the plugin worker protocol. Prompt handlers return typed context candidates for
-the current turn only. Agent handlers are declared but not executable in this
+stdout/stderr capture. Prompt handlers return typed context candidates for the
+current turn only. Agent handlers are declared but not executable in this
 slice.
 
 Command execution uses `tokio::process`. One `HookRuntime` admits at most eight
 active handlers across all concurrently running event occurrences; the permit
-pool is owned by the runtime, not by one `run_event` call. Command and worker
+pool is owned by the runtime, not by one `run_event` call. Command
 stdout/stderr each retain at most the first
 4,096 bytes while continuing to drain the child pipes, then mark the retained
 value truncated. Bounded output must remain valid UTF-8 after truncation. If
@@ -239,7 +240,7 @@ ordinary transcript facts. Runtime may surface them through TUI, Workbench,
 CLI doctor, run warnings, and plugin diagnostics without adding a full durable
 hook audit table.
 
-Runtime command hooks and plugin worker hooks are best-effort and are not
+Runtime command hooks are best-effort and are not
 whole-process sandboxed in the current sandbox model. Diagnostics must say so
 when a user asks for plugin or hook doctor output.
 
@@ -249,7 +250,7 @@ Deterministic local validation must cover normalization, stable keys and
 hashes, trust/modified/untrusted states, current-invocation bypass, matcher
 behavior, eight-way concurrent launch, declaration-order summaries and input
 rewrites, block/deny precedence, timeout and output bounding, permission
-ordering, one-shot permission decisions, plugin hook gating, worker adapter
+ordering, one-shot permission decisions, plugin hook gating, legacy worker
 diagnostics, prompt/agent effect scoping, session/user-prompt context
 injection, compact interruption, stop-hook continuation and reentrancy,
 provider-output preservation, and notification redaction.

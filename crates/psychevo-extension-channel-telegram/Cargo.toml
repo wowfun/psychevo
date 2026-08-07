@@ -1,0 +1,23 @@
+[package]
+name = "psychevo-extension-channel-telegram"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[package.metadata.psychevo]
+architecture-layer = 4
+
+[[bin]]
+name = "psychevo-channel-telegram"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+psychevo-channel-adapters = { path = "../psychevo-channel-adapters", features = ["telegram"] }
+psychevo-channel-sidecar = { path = "../psychevo-channel-sidecar" }
+psychevo-extension-protocol = { path = "../psychevo-extension-protocol" }
+serde_json.workspace = true
+tokio.workspace = true

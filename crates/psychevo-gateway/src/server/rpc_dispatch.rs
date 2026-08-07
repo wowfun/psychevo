@@ -77,6 +77,10 @@ use super::commands::{
 };
 use super::completion::completion_list_value;
 use super::event_delivery::ConnectionSender;
+use super::extension_management::{
+    extension_app_close_result, extension_app_open_result, extension_list_result,
+    extension_read_result, extension_remove_result, extension_set_enabled_result,
+};
 use super::mcp_oauth_store::{McpOAuthSessionStatus, McpOAuthSessionStore};
 use super::rpc_json::{RpcRequest, cwd_source, rpc_notification};
 use super::runtime_profiles::{
@@ -1023,6 +1027,106 @@ where
                     ),
                 };
                 state.invalidate_runnable_target_catalog_after(result)
+            }
+            "extension/list" => {
+                let params = request.params::<wire::agents_backend_rpc::ExtensionListParams>()?;
+                let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                let mut result = extension_list_result(&state.inner.home, &scope.cwd)?;
+                for extension in &mut result.extensions {
+                    if let Some(reason) = state
+                        .inner
+                        .extension_app_leases
+                        .reason_for(&extension.selector)
+                    {
+                        extension.sidecar_state = "active".to_string();
+                        extension.lease_reason = Some(reason);
+                    }
+                }
+                Ok(serde_json::to_value(result)?)
+            }
+            "extension/read" => {
+                let params =
+                    request.required_params::<wire::agents_backend_rpc::ExtensionReadParams>()?;
+                let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                let mut result = extension_read_result(
+                    &state.inner.home,
+                    &scope.cwd,
+                    &params.selector,
+                    params.scope_name.as_deref(),
+                )?;
+                if let Some(reason) = state
+                    .inner
+                    .extension_app_leases
+                    .reason_for(&result.extension.selector)
+                {
+                    result.extension.sidecar_state = "active".to_string();
+                    result.extension.lease_reason = Some(reason);
+                }
+                Ok(serde_json::to_value(result)?)
+            }
+            "extension/remove" => {
+                let params =
+                    request.required_params::<wire::agents_backend_rpc::ExtensionRemoveParams>()?;
+                let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                state.invalidate_runnable_target_catalog_after(
+                    extension_remove_result(
+                        &state.inner.extension_app_leases,
+                        &state.inner.home,
+                        &scope.cwd,
+                        &params.selector,
+                        params.scope_name.as_deref(),
+                    )
+                    .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+                )
+            }
+            "extension/setEnabled" => {
+                let params = request
+                    .required_params::<wire::agents_backend_rpc::ExtensionSetEnabledParams>()?;
+                let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                state.invalidate_runnable_target_catalog_after(
+                    extension_set_enabled_result(
+                        &state.inner.extension_app_leases,
+                        &state.inner.home,
+                        &scope.cwd,
+                        &params.selector,
+                        params.scope_name.as_deref(),
+                        params.enabled,
+                    )
+                    .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+                )
+            }
+            "extension/app/open" => {
+                let params = request
+                    .required_params::<wire::agents_backend_rpc::ExtensionAppOpenParams>()?;
+                let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                Ok(serde_json::to_value(
+                    extension_app_open_result(
+                        &state.inner.extension_app_leases,
+                        super::extension_management::ExtensionAppOpenRequest {
+                            owner: out_tx.id(),
+                            home: &state.inner.home,
+                            cwd: &scope.cwd,
+                            inherited_env: &state.inner.inherited_env,
+                            selector: &params.selector,
+                            scope_name: params.scope_name.as_deref(),
+                            app_id: &params.app_id,
+                        },
+                    )
+                    .await?,
+                )?)
+            }
+            "extension/app/close" => {
+                let params = request
+                    .required_params::<wire::agents_backend_rpc::ExtensionAppCloseParams>()?;
+                let _scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+                Ok(serde_json::to_value(
+                    extension_app_close_result(
+                        &state.inner.extension_app_leases,
+                        out_tx.id(),
+                        &params.lease_id,
+                    )
+                    .await?,
+                )?)
             }
             "plugin/authority/write" => {
                 let params = request

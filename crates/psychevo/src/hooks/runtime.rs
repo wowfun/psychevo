@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use serde_json::{Value, json};
@@ -11,11 +10,10 @@ use super::command::{HookCommandExecution, run_hook_command};
 use super::declarations::{matcher_matches, normalize_hook_declarations};
 use super::identity::{hook_definition_hash, hook_key};
 use super::output::{
-    block_reason, bounded_output, parse_hook_output, parse_output_entries,
-    parse_permission_decision, parse_updated_input,
+    block_reason, parse_hook_output, parse_output_entries, parse_permission_decision,
+    parse_updated_input,
 };
 use super::types::*;
-use super::worker::call_worker_hook;
 
 #[derive(Debug, Clone)]
 pub struct HookRuntime {
@@ -30,7 +28,6 @@ struct ConfiguredHook {
     event: HookEventName,
     matcher: Option<String>,
     handler: HookHandler,
-    worker: Option<HookWorkerAdapter>,
 }
 
 impl HookRuntime {
@@ -80,7 +77,6 @@ impl HookRuntime {
                             trust_status,
                             config.bypass_trust,
                             &handler,
-                            source.worker.as_ref(),
                         );
                         handlers.push(ConfiguredHook {
                             metadata: HookMetadata {
@@ -107,7 +103,6 @@ impl HookRuntime {
                             event,
                             matcher: group.matcher.clone(),
                             handler,
-                            worker: source.worker.clone(),
                         });
                         display_order += 1;
                     }
@@ -278,17 +273,7 @@ async fn run_configured_hook(
                 run_hook_command(&command, &cwd, &payload, hook.handler.timeout_secs).await;
             summary_from_command_execution(event, hook.metadata, execution)
         }
-        HookHandlerType::Worker => {
-            let started = Instant::now();
-            match hook.worker.as_ref() {
-                Some(worker) => {
-                    let payload = runtime_payload(event, &hook.metadata, &cwd, &payload);
-                    let result = call_worker_hook(worker, &hook.metadata, payload).await;
-                    summary_from_worker_result(&hook, started, result)
-                }
-                None => skipped_summary(&hook, "worker adapter unavailable"),
-            }
-        }
+        HookHandlerType::Worker => skipped_summary(&hook, "worker hook handlers are unsupported"),
         HookHandlerType::Prompt => {
             let mut summary = completed_summary(&hook, 0);
             if let Some(prompt) = &hook.handler.prompt {
@@ -335,7 +320,6 @@ fn skipped_reason(
     trust_status: HookTrustStatus,
     bypass_trust: bool,
     handler: &HookHandler,
-    worker: Option<&HookWorkerAdapter>,
 ) -> Option<String> {
     if !enabled {
         return Some("disabled".to_string());
@@ -351,9 +335,7 @@ fn skipped_reason(
         HookHandlerType::Command if handler.command.as_deref().unwrap_or("").trim().is_empty() => {
             Some("command handler missing command".to_string())
         }
-        HookHandlerType::Worker if worker.is_none() => {
-            Some("worker adapter unavailable".to_string())
-        }
+        HookHandlerType::Worker => Some("worker hook handlers are unsupported".to_string()),
         HookHandlerType::Unsupported => Some("unsupported hook handler type".to_string()),
         _ => None,
     }
@@ -453,76 +435,6 @@ fn summary_from_command_execution(
         elapsed_ms: execution.elapsed_ms,
         diagnostics,
         entries,
-    }
-}
-
-fn summary_from_worker_result(
-    hook: &ConfiguredHook,
-    started: Instant,
-    result: std::result::Result<Value, String>,
-) -> HookRunSummary {
-    match result {
-        Ok(value) => {
-            let stdout = bounded_output(value.to_string().as_bytes());
-            let mut diagnostics = Vec::new();
-            let entries = parse_output_entries(hook.event, &stdout, &mut diagnostics);
-            let parsed = parse_hook_output(&stdout);
-            if !hook.event.supports_block()
-                && parsed
-                    .as_ref()
-                    .and_then(|value| value.get("continue"))
-                    .and_then(Value::as_bool)
-                    == Some(false)
-            {
-                diagnostics.push(format!(
-                    "{} is observation-only; its block request was ignored",
-                    hook.event.as_str()
-                ));
-            }
-            let status = if hook.event.supports_block()
-                && parsed
-                    .as_ref()
-                    .and_then(|value| value.get("continue"))
-                    .and_then(Value::as_bool)
-                    == Some(false)
-            {
-                HookRunStatus::Blocked
-            } else {
-                HookRunStatus::Completed
-            };
-            HookRunSummary {
-                run_id: format!("hook-run-{}", hook.metadata.display_order),
-                event: hook.event.as_str().to_string(),
-                handler_type: hook.handler.handler_type,
-                source_kind: hook.metadata.source_kind.clone(),
-                source_id: hook.metadata.source_id.clone(),
-                display_order: hook.metadata.display_order,
-                status,
-                trust_status: hook.metadata.trust_status,
-                exit_code: None,
-                stdout: stdout.clone(),
-                stderr: String::new(),
-                elapsed_ms: started.elapsed().as_millis(),
-                diagnostics,
-                entries,
-            }
-        }
-        Err(err) => HookRunSummary {
-            run_id: format!("hook-run-{}", hook.metadata.display_order),
-            event: hook.event.as_str().to_string(),
-            handler_type: hook.handler.handler_type,
-            source_kind: hook.metadata.source_kind.clone(),
-            source_id: hook.metadata.source_id.clone(),
-            display_order: hook.metadata.display_order,
-            status: HookRunStatus::Failed,
-            trust_status: hook.metadata.trust_status,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: err.clone(),
-            elapsed_ms: started.elapsed().as_millis(),
-            diagnostics: vec![err],
-            entries: Vec::new(),
-        },
     }
 }
 

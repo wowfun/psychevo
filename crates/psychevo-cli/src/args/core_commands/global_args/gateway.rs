@@ -23,7 +23,6 @@ pub(crate) enum GatewayCommand {
     Open(GatewayOpenArgs),
     #[command(about = "Start the managed Gateway server without opening a browser")]
     Start(GatewayStartArgs),
-    #[cfg(feature = "native-channels")]
     #[command(about = "Configure Gateway messaging channels")]
     Setup(GatewaySetupArgs),
     #[command(about = "Print managed Gateway server status")]
@@ -34,17 +33,6 @@ pub(crate) enum GatewayCommand {
     Restart(GatewayStartArgs),
 }
 
-#[derive(Debug, Subcommand)]
-pub(crate) enum WebCommand {
-    #[command(about = "Start the managed Web server without opening a browser")]
-    Start(GatewayStartArgs),
-    #[command(about = "Stop the managed Web server")]
-    Stop,
-    #[command(about = "Restart the managed Web server")]
-    Restart(GatewayStartArgs),
-}
-
-#[cfg(feature = "native-channels")]
 #[derive(Debug, Parser, Clone)]
 pub(crate) struct GatewaySetupArgs {
     #[arg(
@@ -75,7 +63,7 @@ pub(crate) struct GatewaySetupArgs {
     #[arg(
         long = "qr",
         conflicts_with = "credential_stdin",
-        help = "For WeChat, scan an iLink QR code and write bot credentials to profile .env"
+        help = "For WeChat, scan an iLink QR code through the installed Channel Extension"
     )]
     pub(crate) qr: bool,
     #[arg(
@@ -134,6 +122,16 @@ pub(crate) struct GatewaySetupArgs {
     pub(crate) restart: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum WebCommand {
+    #[command(about = "Start the managed Web server without opening a browser")]
+    Start(GatewayStartArgs),
+    #[command(about = "Stop the managed Web server")]
+    Stop,
+    #[command(about = "Restart the managed Web server")]
+    Restart(GatewayStartArgs),
 }
 
 #[derive(Debug, Parser, Clone)]

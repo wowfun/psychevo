@@ -9,13 +9,21 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::gateway_now_ms;
-use crate::im::adapters::wechat_ilink_error_code_from_message;
 use psychevo_gateway_protocol::source::SourceKey;
 
 use super::WECHAT_LOGIN_GRACE_MS;
 use super::paths::redact_channel_error;
 
 const CHANNEL_INTERACTION_TOKEN_TTL_MS: i64 = 10 * 60 * 1_000;
+const WECHAT_SESSION_EXPIRED_ERRCODE: i64 = -14;
+
+fn wechat_ilink_error_code_from_message(message: &str) -> Option<i64> {
+    if message.contains("errcode=-14") || message.contains("ret=-14") {
+        Some(WECHAT_SESSION_EXPIRED_ERRCODE)
+    } else {
+        None
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChannelInteractionKind {

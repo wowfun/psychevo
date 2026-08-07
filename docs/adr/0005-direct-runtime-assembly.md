@@ -32,9 +32,10 @@ abstraction at this boundary requires at least two real consumers with different
 implementations or lifetimes; possible future variation is not sufficient.
 
 Tool declarations from every accepted source are compiled once through the
-tool-surface owner. Plugin workers, skill scanners, and MCP connections are
-runtime resources with explicit invocation or Thread lifetimes, not registry
-entries.
+tool-surface owner. Extension sidecars, skill scanners, and MCP connections are
+runtime resources with explicit invocation, lease, or Thread lifetimes, not
+registry entries. The Extension host defined by ADR 0006 owns processes and
+protocol; it does not reintroduce a mutable contribution registry.
 
 ## Consequences
 
@@ -44,5 +45,5 @@ wrappers that were immediately unwrapped. Adding a new declaration family
 requires choosing its owning module instead of adding a generic slot.
 
 This decision deliberately gives up a speculative in-process extension SDK.
-Psychevo remains extensible through manifest declarations, external workers,
-MCP, hooks, skills, agents, providers, and typed product interfaces.
+Psychevo remains extensible through Plugin declarations, Extension sidecars,
+MCP, hooks, skills, Agents, providers, and typed product interfaces.

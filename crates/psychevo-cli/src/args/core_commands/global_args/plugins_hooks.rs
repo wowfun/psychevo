@@ -48,18 +48,14 @@ pub(crate) enum PluginCommand {
     Doctor(PluginDoctorArgs),
     #[command(about = "Inspect a plugin package without installing it")]
     Inspect(PluginInspectArgs),
-    #[command(
-        about = "Install a plugin package from a local directory, Git source, or npm package"
-    )]
-    Install(PluginInstallArgs),
-    #[command(about = "Uninstall a plugin from the selected scope")]
-    Uninstall(PluginNameScopeArgs),
+    #[command(about = "Add a marketplace-qualified plugin package in disabled state")]
+    Add(PluginAddArgs),
+    #[command(about = "Remove a plugin from the selected scope")]
+    Remove(PluginNameScopeArgs),
     #[command(about = "Enable a plugin in the selected scope")]
     Enable(PluginNameScopeArgs),
     #[command(about = "Disable a plugin in the selected scope")]
     Disable(PluginNameScopeArgs),
-    #[command(about = "Manage local plugin catalog source entries")]
-    Catalog(PluginMarketplaceArgs),
     #[command(about = "Manage local plugin marketplace source catalogs")]
     Marketplace(PluginMarketplaceArgs),
 }
@@ -117,46 +113,25 @@ pub(crate) struct PluginInspectArgs {
 }
 
 #[derive(Debug, Parser)]
-pub(crate) struct PluginInstallArgs {
+pub(crate) struct PluginAddArgs {
     #[arg(
-        value_name = "SOURCE",
-        help = "Local plugin directory, Git source, or npm package"
+        value_name = "PLUGIN@MARKETPLACE",
+        help = "Marketplace-qualified plugin selector"
     )]
-    pub(crate) source: String,
-    #[arg(long, value_name = "local|git|npm", help = "Source kind")]
-    pub(crate) kind: Option<String>,
-    #[arg(
-        long = "ref",
-        value_name = "REF",
-        help = "Git ref to checkout for Git sources"
-    )]
-    pub(crate) git_ref: Option<String>,
-    #[arg(
-        long = "npm-version",
-        value_name = "VERSION",
-        help = "Npm package version"
-    )]
-    pub(crate) npm_version: Option<String>,
-    #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
-    pub(crate) npm_registry: Option<String>,
+    pub(crate) selector: String,
     #[arg(
         short = 'g',
         long = "global",
         conflicts_with = "local",
-        help = "Install under the active profile home"
+        help = "Add under the active profile home"
     )]
     pub(crate) global: bool,
     #[arg(
         long = "local",
         conflicts_with = "global",
-        help = "Install under the current cwd .psychevo scope"
+        help = "Add under the current cwd .psychevo scope"
     )]
     pub(crate) local: bool,
-    #[arg(
-        long,
-        help = "Replace an existing installed package from the same source"
-    )]
-    pub(crate) force: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
 }
@@ -197,6 +172,8 @@ pub(crate) enum PluginMarketplaceCommand {
     List(PluginMarketplaceListArgs),
     #[command(about = "Add a local, Git, or npm marketplace source catalog entry")]
     Add(PluginMarketplaceAddArgs),
+    #[command(about = "Refresh one or every configured marketplace")]
+    Upgrade(PluginMarketplaceUpgradeArgs),
     #[command(about = "Remove a marketplace source catalog entry")]
     Remove(PluginMarketplaceRemoveArgs),
 }
@@ -213,17 +190,19 @@ pub(crate) struct PluginMarketplaceListArgs {
 
 #[derive(Debug, Parser)]
 pub(crate) struct PluginMarketplaceAddArgs {
-    #[arg(value_name = "NAME", help = "Catalog entry name")]
-    pub(crate) name: String,
-    #[arg(value_name = "SOURCE", help = "Local directory or Git source")]
+    #[arg(
+        value_name = "SOURCE",
+        help = "Local directory, owner/repo[@ref], Git URL, or npm catalog"
+    )]
     pub(crate) source: String,
+    #[arg(long, value_name = "NAME", help = "Explicit marketplace name")]
+    pub(crate) name: Option<String>,
     #[arg(
         long,
         value_name = "local|git|npm",
-        default_value = "local",
-        help = "Source kind"
+        help = "Source kind override; inferred from SOURCE when omitted"
     )]
-    pub(crate) kind: String,
+    pub(crate) kind: Option<String>,
     #[arg(long = "ref", value_name = "REF", help = "Optional Git ref")]
     pub(crate) git_ref: Option<String>,
     #[arg(
@@ -234,6 +213,18 @@ pub(crate) struct PluginMarketplaceAddArgs {
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
+    #[arg(short = 'g', long = "global", conflicts_with = "local")]
+    pub(crate) global: bool,
+    #[arg(long = "local", conflicts_with = "global")]
+    pub(crate) local: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct PluginMarketplaceUpgradeArgs {
+    #[arg(value_name = "MARKETPLACE", help = "Marketplace name; omit for all")]
+    pub(crate) name: Option<String>,
     #[arg(short = 'g', long = "global", conflicts_with = "local")]
     pub(crate) global: bool,
     #[arg(long = "local", conflicts_with = "global")]

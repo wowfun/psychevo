@@ -1,16 +1,13 @@
 use std::path::Path;
 
+use psychevo::extensions::protocol::WechatQrPollResult;
 use psychevo::{Configuration, ConfigurationQuery, Error, config::set_channel_enabled};
 use psychevo_gateway_protocol as wire;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::gateway_now_ms;
-use crate::im::adapters::{
-    WECHAT_ILINK_BASE_URL, WechatQrPoll, check_wechat_ilink_health, fetch_wechat_qr_code,
-    poll_wechat_qr_code,
-};
 use psychevo_gateway_protocol::source::GatewayThreadSelector;
 
 use super::agents::active_profile_config_dir;
@@ -367,7 +364,7 @@ pub(super) async fn channel_doctor_result_live(
     let value = configuration.diagnose_channels(params.id.as_deref(), live)?;
     let mut result = channel_doctor_result_from_value(state, value)?;
     if live {
-        enrich_wechat_live_doctor(&configuration, params.id.as_deref(), &mut result).await?;
+        enrich_wechat_live_doctor(state, &configuration, params.id.as_deref(), &mut result).await?;
     }
     Ok(result)
 }
@@ -389,13 +386,21 @@ pub(super) async fn channel_wechat_qr_start_result(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(WECHAT_ILINK_BASE_URL)
-        .to_string();
-    let client = reqwest::Client::new();
-    let qr = fetch_wechat_qr_code(&client, &base_url).await?;
+        .map(str::to_string);
+    let qr = channel_runtime::channel_control(
+        state,
+        "wechat",
+        "channel/wechat/qr/start",
+        json!({ "baseUrl": base_url }),
+    )
+    .await?;
+    let qrcode = required_control_string(&qr, "qrcode")?;
+    let qr_url = required_control_string(&qr, "qrUrl")?;
+    let qr_image = optional_control_string(&qr, "qrImage");
+    let qr_svg = optional_control_string(&qr, "qrSvg");
+    let qr_base_url = required_control_string(&qr, "baseUrl")?;
     let session_id = Uuid::now_v7().to_string();
     let expires_at_ms = gateway_now_ms().saturating_add(WECHAT_QR_EXPIRES_MS);
-    let qr_base_url = qr.base_url.clone();
     state
         .inner
         .wechat_qr_sessions
@@ -406,8 +411,8 @@ pub(super) async fn channel_wechat_qr_start_result(
             WechatQrSetupSession {
                 id,
                 label: params.label,
-                qrcode: qr.qrcode,
-                base_url: qr.base_url,
+                qrcode,
+                base_url: qr_base_url.clone(),
                 expires_at_ms,
             },
         );
@@ -417,9 +422,9 @@ pub(super) async fn channel_wechat_qr_start_result(
     );
     Ok(wire::channels::ChannelWechatQrStartResult {
         session_id,
-        qr_url: qr.qr_url,
-        qr_image: qr.qr_image,
-        qr_svg: qr.qr_svg,
+        qr_url,
+        qr_image,
+        qr_svg,
         status: "wait".to_string(),
         message: "Scan with WeChat to connect this channel.".to_string(),
         interval_ms: WECHAT_QR_INTERVAL_MS,
@@ -465,13 +470,30 @@ pub(super) async fn channel_wechat_qr_poll_result(
             expires_at_ms: Some(session.expires_at_ms),
         });
     }
-    let client = reqwest::Client::new();
-    match poll_wechat_qr_code(&client, &session.base_url, &session.qrcode).await? {
-        WechatQrPoll::Waiting {
-            status,
-            message,
-            base_url,
-        } => {
+    let poll = channel_runtime::channel_control(
+        state,
+        "wechat",
+        "channel/wechat/qr/poll",
+        json!({ "baseUrl": session.base_url, "qrcode": session.qrcode }),
+    )
+    .await?;
+    let poll: WechatQrPollResult = serde_json::from_value(poll).map_err(|err| {
+        Error::Message(format!(
+            "WeChat Channel Extension returned invalid QR status: {err}"
+        ))
+    })?;
+    let status = match &poll {
+        WechatQrPollResult::Waiting { .. } => "wait",
+        WechatQrPollResult::Scanned { .. } => "scaned",
+        WechatQrPollResult::ScannedRedirect { .. } => "scaned_but_redirect",
+        WechatQrPollResult::Expired { .. } => "expired",
+        WechatQrPollResult::Confirmed { .. } => "confirmed",
+    }
+    .to_string();
+    match poll {
+        WechatQrPollResult::Waiting { message, base_url }
+        | WechatQrPollResult::Scanned { message, base_url }
+        | WechatQrPollResult::ScannedRedirect { message, base_url } => {
             if base_url != session.base_url {
                 eprintln!(
                     "wechat qr setup redirect followed: id={} base_url={}",
@@ -493,7 +515,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
                 expires_at_ms: Some(session.expires_at_ms),
             })
         }
-        WechatQrPoll::Expired { message } => {
+        WechatQrPollResult::Expired { message } => {
             state
                 .inner
                 .wechat_qr_sessions
@@ -508,7 +530,7 @@ pub(super) async fn channel_wechat_qr_poll_result(
                 expires_at_ms: Some(session.expires_at_ms),
             })
         }
-        WechatQrPoll::Confirmed {
+        WechatQrPollResult::Confirmed {
             account_id,
             token,
             base_url,
@@ -622,12 +644,12 @@ fn channel_doctor_result_from_value(
 }
 
 async fn enrich_wechat_live_doctor(
+    state: &WebState,
     configuration: &Configuration,
     id: Option<&str>,
     result: &mut wire::channels::ChannelDoctorResult,
 ) -> psychevo::Result<()> {
     let connections = configuration.channel_runtime_connections()?;
-    let client = reqwest::Client::new();
     for connection in connections
         .into_iter()
         .filter(|connection| connection.channel == "wechat")
@@ -648,26 +670,38 @@ async fn enrich_wechat_live_doctor(
                 message: "WeChat token env is missing; run QR setup".to_string(),
             },
             Some(token) => {
-                let base_url = connection
-                    .base_url
-                    .as_deref()
-                    .unwrap_or(WECHAT_ILINK_BASE_URL);
-                match check_wechat_ilink_health(&client, base_url, token, 3).await {
-                    Ok(health) if health.ok => wire::channels::ChannelDoctorCheck {
-                        name: "live".to_string(),
-                        status: "ok".to_string(),
-                        message: "iLink getupdates accepted the current token".to_string(),
-                    },
+                let health = channel_runtime::channel_control(
+                    state,
+                    "wechat",
+                    "channel/wechat/health",
+                    json!({
+                        "baseUrl": connection.base_url,
+                        "credential": token,
+                    }),
+                )
+                .await;
+                match health {
+                    Ok(health) if health.get("ok").and_then(Value::as_bool) == Some(true) => {
+                        wire::channels::ChannelDoctorCheck {
+                            name: "live".to_string(),
+                            status: "ok".to_string(),
+                            message: "iLink getupdates accepted the current token".to_string(),
+                        }
+                    }
                     Ok(health) => wire::channels::ChannelDoctorCheck {
                         name: "live".to_string(),
                         status: "fail".to_string(),
-                        message: if health.reason.as_deref() == Some("needs_qr_login") {
+                        message: if optional_control_string(&health, "reason").as_deref()
+                            == Some("needs_qr_login")
+                        {
                             "iLink reports this WeChat login is expired; reconnect with QR"
                                 .to_string()
                         } else {
                             format!(
                                 "iLink getupdates failed: {}",
-                                health.message.as_deref().unwrap_or("unknown error")
+                                optional_control_string(&health, "message")
+                                    .as_deref()
+                                    .unwrap_or("unknown error")
                             )
                         },
                     },
@@ -685,6 +719,23 @@ async fn enrich_wechat_live_doctor(
         row.checks.push(check);
     }
     Ok(())
+}
+
+fn required_control_string(value: &Value, key: &str) -> psychevo::Result<String> {
+    optional_control_string(value, key).ok_or_else(|| {
+        Error::Message(format!(
+            "Channel Extension control response requires non-empty `{key}`"
+        ))
+    })
+}
+
+fn optional_control_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn channel_config_view_from_runtime(

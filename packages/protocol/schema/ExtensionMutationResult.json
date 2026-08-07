@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "enabled": {
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "id": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "success": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "scope",
+    "success"
+  ],
+  "title": "ExtensionMutationResult",
+  "type": "object"
+}

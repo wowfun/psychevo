@@ -19,8 +19,6 @@ use super::super::process::{
     reserve_exec_session_id, resolve_exec_cwd, shell_args,
 };
 use super::completion::{await_session_result, spawn_pty_waiter_thread};
-#[cfg(windows)]
-use super::windows_restricted;
 #[cfg(test)]
 use crate::config::LspConfig;
 use crate::error::{Error, Result};
@@ -36,6 +34,10 @@ use crate::tools::{
     WRITE_STDIN_DEFAULT_YIELD_TIME_MS,
 };
 use crate::types::{RunStreamEvent, RunStreamSink, WorkspaceMutation};
+
+#[cfg(windows)]
+#[path = "windows_restricted.rs"]
+mod windows_restricted;
 
 pub(crate) struct ExecCommandTool(CwdTool);
 

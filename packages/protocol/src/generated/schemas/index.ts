@@ -22,6 +22,7 @@ import { gatewayChannelRequestSchemas } from './gateway/channels/requests';
 import { gatewayChannelResultSchemas } from './gateway/channels/results';
 import { gatewayCoreSchemas } from './gateway/core';
 import { gatewayEventSchemas } from './gateway/events';
+import { gatewayExtensionRequestSchemas } from './gateway/extensions/requests';
 import { gatewayMcpRequestSchemas } from './gateway/mcp/requests';
 import { gatewayPluginRequestSchemas } from './gateway/plugins/requests';
 import { gatewaySkillRequestSchemas } from './gateway/skills/requests';
@@ -254,6 +255,12 @@ export const gatewaySchemas = {
   PluginCatalogUpgradeParams: gatewayPluginRequestSchemas.PluginCatalogUpgradeParams,
   PluginConnectStartParams: gatewayPluginRequestSchemas.PluginConnectStartParams,
   PluginConnectStatusParams: gatewayPluginRequestSchemas.PluginConnectStatusParams,
+  ExtensionListParams: gatewayExtensionRequestSchemas.ExtensionListParams,
+  ExtensionReadParams: gatewayExtensionRequestSchemas.ExtensionReadParams,
+  ExtensionRemoveParams: gatewayExtensionRequestSchemas.ExtensionRemoveParams,
+  ExtensionSetEnabledParams: gatewayExtensionRequestSchemas.ExtensionSetEnabledParams,
+  ExtensionAppOpenParams: gatewayExtensionRequestSchemas.ExtensionAppOpenParams,
+  ExtensionAppCloseParams: gatewayExtensionRequestSchemas.ExtensionAppCloseParams,
   PluginAuthorityIdentityView: gatewayPluginRequestSchemas.PluginAuthorityIdentityView,
   PluginComponentStatusView: gatewayPluginRequestSchemas.PluginComponentStatusView,
   PluginDiagnosticView: gatewayPluginRequestSchemas.PluginDiagnosticView,
@@ -267,6 +274,12 @@ export const gatewaySchemas = {
   PluginReadResult: gatewayPluginRequestSchemas.PluginReadResult,
   PluginDoctorEntryView: gatewayPluginRequestSchemas.PluginDoctorEntryView,
   PluginDoctorResult: gatewayPluginRequestSchemas.PluginDoctorResult,
+  ExtensionView: gatewayExtensionRequestSchemas.ExtensionView,
+  ExtensionListResult: gatewayExtensionRequestSchemas.ExtensionListResult,
+  ExtensionReadResult: gatewayExtensionRequestSchemas.ExtensionReadResult,
+  ExtensionMutationResult: gatewayExtensionRequestSchemas.ExtensionMutationResult,
+  ExtensionAppOpenResult: gatewayExtensionRequestSchemas.ExtensionAppOpenResult,
+  ExtensionAppCloseResult: gatewayExtensionRequestSchemas.ExtensionAppCloseResult,
   PluginStageDiagnosticView: gatewayPluginRequestSchemas.PluginStageDiagnosticView,
   PluginInterfaceView: gatewayPluginRequestSchemas.PluginInterfaceView,
   PluginInspectionView: gatewayPluginRequestSchemas.PluginInspectionView,

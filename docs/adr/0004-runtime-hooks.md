@@ -28,7 +28,7 @@ Psychevo will own hooks through a runtime hook module.
 Sources may contribute hook declarations, but the hook module owns
 normalization, source provenance, trust review, matching, execution,
 event-scoped effects, diagnostics, and hook run summaries. Callers do not run
-hook commands, workers, prompt handlers, or agent handlers directly.
+hook commands, prompt handlers, or agent handlers directly.
 
 Hook declarations are candidates until accepted by source policy and hook
 trust. Accepted hooks can affect only the current event occurrence. They do not
@@ -72,9 +72,12 @@ contains one or more handlers.
 The first-class handler families are:
 
 - `command`: runs a local command adapter with a typed JSON payload.
-- `worker`: calls a plugin worker hook adapter.
 - `prompt`: contributes typed context or instruction candidates.
 - `agent`: delegates the event to an agent or subagent interface.
+
+Legacy `worker` declarations remain parseable only so diagnostics can explain
+why they are unsupported. Plugins are declarative; executable package workers
+are retired in favor of the Extension sidecar boundary.
 
 Handler families are adapters hidden behind the hook module interface. A source
 may declare a handler, but the runtime decides whether the handler is enabled,
@@ -125,7 +128,7 @@ even if completion order differs.
 
 Hook failures degrade the handler or source unless the event contract defines a
 blocking result. Timeouts, invalid output, unsupported handler types,
-unavailable workers, and unavailable agents become bounded diagnostics rather
+unavailable adapters, and unavailable agents become bounded diagnostics rather
 than agent-loop crashes.
 
 Hook run summaries are structured diagnostic records. A summary identifies the
@@ -150,12 +153,12 @@ Notification effects are redacted before reaching user-facing surfaces.
 ## Non-Goals
 
 This ADR does not define exact JSON schemas, CLI commands, review UI, timeout
-defaults, stdout and stderr limits, worker wire messages, durable storage
-tables, or hosted hook catalogs.
+defaults, stdout and stderr limits, Extension sidecar wire messages, durable
+storage tables, or hosted hook catalogs.
 
-It also does not require whole-process sandboxing for command hooks or worker
-hooks. If sandboxing becomes available, hook diagnostics must describe what is
-actually confined.
+It also does not require whole-process sandboxing for command hooks. If
+sandboxing becomes available, hook diagnostics must describe what is actually
+confined.
 
 ## Consequences
 

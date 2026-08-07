@@ -790,7 +790,6 @@ pub(crate) async fn spawn_child_agent_background(
     {
         return Err(Error::Config("agent spawning is paused".to_string()));
     }
-    let worker_lease = context.extension_inputs.acquire_worker_lease();
     let id = Uuid::now_v7().to_string();
     let task_name = default_task_name(&agent.name, &id);
     let role = AgentInvocationRole::Subagent;
@@ -919,9 +918,6 @@ pub(crate) async fn spawn_child_agent_background(
     let supervisor = child.context.supervisor.clone();
     if let Err(finalizer) = supervisor.spawn_background(Box::pin(async move {
         let _ = run_child_agent(child).await;
-        if let Some(lease) = worker_lease {
-            lease.shutdown().await;
-        }
     })) {
         finalizer.await;
         return Err(Error::Message(

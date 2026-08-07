@@ -10,7 +10,6 @@ mod records;
 mod store;
 mod types;
 mod util;
-mod worker;
 
 pub use api::{
     codex_plugin_policy_value, codex_plugin_set_enabled_value, plugin_doctor_value,
@@ -23,30 +22,25 @@ pub use compatibility::{
 };
 pub(crate) use contributions::{
     load_enabled_plugin_contributions, load_enabled_plugin_hook_sources,
-    materialize_plugin_worker_tools,
 };
 pub use inspect::plugin_import_inspect_value;
 pub use install::{install_plugin, plugin_install_value};
 pub use manifest::load_plugin_manifest;
 pub use marketplace::{
-    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
+    plugin_marketplace_add_value, plugin_marketplace_install_value, plugin_marketplace_list_value,
+    plugin_marketplace_remove_value, plugin_marketplace_upgrade_value,
 };
 pub use types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInspectOptions, PluginInstallOptions,
     PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry,
-    PluginScope, PluginSourceKind, PluginWorkerSpec,
+    PluginScope, PluginSourceKind,
 };
 pub use util::external_plugin_fingerprint;
 
-pub(crate) use worker::PluginWorkerRuntime;
+pub(crate) use materialization::extract_tar_gz_bounded;
 
 #[cfg(test)]
 pub(crate) use store::PluginStore;
-#[cfg(test)]
-pub(crate) use worker::{
-    PluginWorkerSession, PluginWorkerTool, WorkerToolDescriptor, call_worker_tool, worker_tools,
-    worker_tools_in_session,
-};
 
 #[cfg(test)]
 mod tests;

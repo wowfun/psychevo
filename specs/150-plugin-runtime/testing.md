@@ -19,10 +19,8 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 - Plugin hook declarations load only when the plugin package is enabled, then
   remain subject to the hook system's normalized-hash trust review before
   execution.
-- Worker contribution discovery and tool execution receive the same effective
-  environment and bounded startup context.
-- Worker startup, response, timeout, and tool errors degrade only the affected
-  plugin contribution and produce secret-free diagnostics.
+- Obsolete executable fields such as `runtime.worker` fail closed during
+  overlay projection and never start a process.
 - Plugin tests use isolated stores, config, data roots, state paths, and fake or
   local providers by default.
 - Codex catalog and Apps tests use a deterministic fake app-server process and
@@ -36,10 +34,9 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 
 The current slice covers local directory and local Git installs, JSON store
 records, TOML policy overlay, static skill/agent/hook roots, source-scoped MCP
-and toolset descriptors, stdio JSON-RPC worker tools, and worker hook handlers.
-Provider and command descriptors remain inert. Interface metadata is display
-only. Codex-owned Apps execute through the broker; portable components from an
-exposed installed package root enter their native owners through a
+and toolset descriptors, and interface metadata. Executable overlay fields are
+rejected. Codex-owned Apps execute through the broker; portable components from
+an exposed installed package root enter their native owners through a
 Codex-authority selected root.
 
 Manual broad validation for code changes is still the Rust workspace gate
@@ -65,9 +62,9 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
   unique.
 - Scoped policy keys keep duplicate installations independently configurable,
   while an unscoped policy key remains effective only for a unique record.
-- Static skill roots, hook sources, and worker tool descriptors are loaded only
-  when the plugin package is enabled, then routed through the owning runtime
-  module.
+- Static skill roots, Agent roots, hook sources, MCP descriptors, and toolsets
+  are loaded only when the Plugin is enabled, then routed through their owning
+  modules.
 - CLI `plugin view` human output shows typed package display metadata from
   Codex-compatible `interface` without exposing executable assumptions.
 - Gateway `plugin/list`, `plugin/read`, and `plugin/doctor` return the same
@@ -79,22 +76,13 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
   stores and profile/project configuration unchanged.
 - Plugin hook sources are listed but not executed when their normalized hook
   hashes are untrusted or modified.
-- Worker-provided hook handlers are routed through 140 Hook Runtime after
-  plugin enablement and hook trust select the handler.
 - Prompt hook declarations from plugin hook sources contribute only turn-local
   context through 140 Hook Runtime.
 - Agent hook declarations from plugin hook sources list and skip with
   adapter-unavailable diagnostics.
-- Worker `contributions/list` receives the effective loaded environment so
-  config-parent and project `.env` variables are available during discovery.
-- Worker tool descriptors enter the shared tool surface as plugin-source
-  bindings and are searchable/deferred by default when `tool_search` is
-  enabled for the invocation.
-- Worker startup failures and discovery timeouts are reported by
-  `plugin doctor` without crashing runtime assembly.
-- Worker tool execution succeeds through the public tool surface adapter.
-- Worker tool execution failures and timeouts return tool errors and keep
-  diagnostics source-qualified.
+- A Plugin overlay containing `runtime`, `worker`, commands, Channels, or
+  providers contributes none of its overlay fields and reports an actionable
+  Extension migration diagnostic.
 - Contribution projection facts from plugin declarations feed owning
   diagnostics such as `plugin doctor`; they do not create a generic
   contributions-inspection command.
@@ -153,7 +141,7 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - `plugin list`, `view`, and `doctor` support secret-free JSON output.
 - `plugin view` human output includes display name, category, capabilities, and
   short description when typed `interface` metadata is present.
-- `plugin install`, `uninstall`, `enable`, and `disable` honor default,
+- `plugin add`, `remove`, `enable`, and `disable` honor default,
   `--local`, and `--global` scope semantics.
 - `plugin marketplace list/add/remove` manages local/Git source catalogs
   separately from plugin enablement policy.
@@ -165,10 +153,8 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Tests must use isolated `PSYCHEVO_HOME`, cwd, config, database, and
   plugin data paths.
 - No default test contacts a network or live provider.
-- Worker tests should use tiny local fixture workers with bounded stdout/stderr
-  and no host-global config access.
-- Timeout tests must use bounded local workers and must not rely on wall-clock
-  sleeps longer than the runtime timeout under test.
+- Rejection tests must prove an executable Plugin overlay spawns no process and
+  contributes no executable capability.
 - The opt-in `codex-plugin-broker-live` check uses an explicitly selected Codex
   executable and an isolated private home only for conformance and read-only
   installed-plugin projection.

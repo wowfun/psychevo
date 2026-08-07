@@ -1,30 +1,18 @@
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
-
-use psychevo_agent_core::{ToolBinding, ToolRouter, ToolSearchOptions};
-use psychevo_ai::AbortSignal;
-use serde_json::{Value, json};
 
 use tempfile::tempdir;
 
-use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolSelectionConfig};
-use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
-use crate::tool_surface::{
-    ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
-};
+use crate::config::{PluginPolicyConfig, PluginPolicyEntry};
 use crate::types::McpTransportInput;
-use crate::types::RunMode;
 
 use super::*;
 
 fn write_plugin(root: &Path, manifest: &str) {
-    let manifest = manifest.replace("./worker.py", test_worker_command());
-    let mut document: Value = serde_json::from_str(&manifest).expect("manifest json");
+    let mut document: Value = serde_json::from_str(manifest).expect("manifest json");
     let overlay = document
         .as_object_mut()
         .and_then(|object| object.remove("psychevo"));
@@ -41,40 +29,6 @@ fn write_plugin(root: &Path, manifest: &str) {
         )
         .expect("overlay");
     }
-}
-
-fn test_worker_command() -> &'static str {
-    if cfg!(windows) {
-        "./worker.cmd"
-    } else {
-        "./worker.py"
-    }
-}
-
-fn test_worker_fixture<'a>(unix: &'a str, windows: &'a str) -> &'a str {
-    if cfg!(windows) { windows } else { unix }
-}
-
-fn write_worker(root: &Path, script: &str) -> PathBuf {
-    let worker = root.join(if cfg!(windows) {
-        "worker.js"
-    } else {
-        "worker.py"
-    });
-    fs::write(&worker, script).expect("worker");
-    #[cfg(windows)]
-    fs::write(
-        root.join("worker.cmd"),
-        "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
-    )
-    .expect("worker command");
-    #[cfg(unix)]
-    {
-        let mut perms = fs::metadata(&worker).expect("metadata").permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&worker, perms).expect("chmod");
-    }
-    worker
 }
 
 fn native_npm_available() -> bool {
@@ -389,7 +343,6 @@ fn companion_overlay_with_shared_component_fails_closed_as_one_unit() {
     let manifest = load_plugin_manifest(&root, true).expect("base remains inspectable");
 
     assert!(manifest.raw_overlay.is_some());
-    assert!(manifest.worker.is_none());
     assert!(manifest.psychevo_extensions.is_empty());
     assert!(manifest.diagnostics.iter().any(|diagnostic| {
         diagnostic.kind == "invalid"
@@ -399,6 +352,36 @@ fn companion_overlay_with_shared_component_fails_closed_as_one_unit() {
             && diagnostic
                 .message
                 .contains("no overlay fields were projected")
+    }));
+}
+
+#[test]
+fn plugin_packages_reject_extension_manifests_and_executable_runtime_overlays() {
+    let temp = tempdir().expect("temp");
+    let extension_root = temp.path().join("extension");
+    write_plugin(&extension_root, r#"{"name":"not-a-plugin"}"#);
+    fs::write(
+        extension_root.join("psychevo.extension.json"),
+        r#"{"schemaVersion":1}"#,
+    )
+    .expect("Extension marker");
+    let error = load_plugin_manifest(&extension_root, true).expect_err("Extension is not Plugin");
+    assert!(error.to_string().contains("pevo install"));
+
+    let plugin_root = temp.path().join("plugin");
+    write_plugin(&plugin_root, r#"{"name":"declarative-only"}"#);
+    fs::write(
+        plugin_root.join("psychevo.plugin.json"),
+        r#"{"runtime":{"worker":{"command":"./worker"}}}"#,
+    )
+    .expect("legacy runtime overlay");
+    let manifest = load_plugin_manifest(&plugin_root, true).expect("inspect invalid overlay");
+    assert!(manifest.psychevo_extensions.is_empty());
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid"
+            && diagnostic
+                .message
+                .contains("belongs to an executable Extension manifest")
     }));
 }
 
@@ -782,7 +765,6 @@ fn manifest_ignores_top_level_runtime_without_psychevo_namespace() {
 
     let manifest = load_plugin_manifest(&root, true).expect("manifest");
 
-    assert!(manifest.worker.is_none());
     assert!(manifest.ignored_fields.contains("runtime"));
 }
 
@@ -1211,195 +1193,6 @@ async fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
     assert_eq!(assembly.toolsets[0].name, "contrib-tools");
 }
 
-#[tokio::test]
-async fn static_plugin_discovery_defers_worker_until_default_tool_materialization() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "cleanup",
-              "version": "1.0.0",
-              "description": "cleanup",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            include_str!("../../tests/fixtures/plugin_worker_tool_discovery.py"),
-            include_str!("../../tests/fixtures/plugin_worker_tool_discovery.js"),
-        ),
-    );
-    install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let mut policy = PluginPolicyConfig::default();
-    policy.plugins.insert(
-        "cleanup".to_string(),
-        PluginPolicyEntry {
-            enabled: Some(true),
-        },
-    );
-
-    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
-
-    assert_eq!(assembly.worker_runtimes.len(), 1);
-    assert!(!assembly.worker_runtimes[0].started().await);
-    let (runtime_tools, warnings) =
-        materialize_plugin_worker_tools(&assembly.worker_runtimes).await;
-    assert!(warnings.is_empty(), "{warnings:?}");
-    assert_eq!(runtime_tools.len(), 1);
-    assert_eq!(runtime_tools[0].name(), "cleanup_status");
-    assert_eq!(runtime_tools[0].source_kind(), Some("plugin"));
-    assert!(
-        runtime_tools[0]
-            .source_id()
-            .is_some_and(|source| source.starts_with("plugin:cleanup@"))
-    );
-
-    let surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
-        cwd,
-        task_id: "test".to_string(),
-        mode: RunMode::Default,
-        lsp: Default::default(),
-        allow_login_shell: false,
-        stream_events: None,
-        workspace_mutations: None,
-        env: BTreeMap::new(),
-        path_prefixes: Vec::new(),
-        sandbox_policy: SandboxPolicy::disabled(),
-        sandbox_grants: SandboxWriteGrants::default(),
-        home: None,
-        image_input_enabled: true,
-        image_generation: None,
-        web_search: Default::default(),
-        selection: crate::tool_surface::compile_tool_selection(
-            RunMode::Default,
-            &ToolSelectionConfig::default(),
-            &BTreeMap::new(),
-            &assembly.toolsets,
-        ),
-        clarify: ClarifyToolSurface::Disabled,
-        skills: None,
-        extension_tools: runtime_tools,
-        agents: None,
-    });
-    let declarations = ToolRouter::from_tools(surface.tools)
-        .expect("unique tools")
-        .with_tool_search(ToolSearchOptions::enabled())
-        .declarations();
-    let names = declarations
-        .into_iter()
-        .map(|declaration| declaration.name)
-        .collect::<Vec<_>>();
-
-    assert!(names.contains(&"tool_search".to_string()));
-    assert!(!names.contains(&"cleanup_status".to_string()));
-    assembly.shutdown_workers().await;
-}
-
-#[tokio::test]
-async fn plugin_assembly_owns_graceful_worker_shutdown() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    let shutdown_marker = temp.path().join("shutdown");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "shutdown-owner",
-              "version": "1.0.0",
-              "description": "shutdown owner",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    let unix_worker = format!(
-        r#"#!/usr/bin/env python3
-import json, pathlib, sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get("method")
-    result = {{"tools": []}} if method == "contributions/list" else {{"ok": True}}
-    print(json.dumps({{
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": result
-    }}), flush=True)
-    if method == "shutdown":
-        pathlib.Path({marker}).write_text("shutdown")
-        break
-"#,
-        marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
-    );
-    let windows_worker = format!(
-        r#"#!/usr/bin/env node
-const fs = require("fs");
-const readline = require("readline");
-const input = readline.createInterface({{ input: process.stdin, crlfDelay: Infinity }});
-input.on("line", (line) => {{
-  const request = JSON.parse(line);
-  const result = request.method === "contributions/list" ? {{ tools: [] }} : {{ ok: true }};
-  process.stdout.write(`${{JSON.stringify({{ jsonrpc: "2.0", id: request.id, result }})}}\n`);
-  if (request.method === "shutdown") {{
-    fs.writeFileSync({marker}, "shutdown");
-    input.close();
-  }}
-}});
-"#,
-        marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
-    );
-    write_worker(&source, test_worker_fixture(&unix_worker, &windows_worker));
-    install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let mut policy = PluginPolicyConfig::default();
-    policy.plugins.insert(
-        "shutdown-owner".to_string(),
-        PluginPolicyEntry {
-            enabled: Some(true),
-        },
-    );
-
-    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
-    assert!(!assembly.worker_runtimes[0].started().await);
-    let (_, warnings) = materialize_plugin_worker_tools(&assembly.worker_runtimes).await;
-    assert!(warnings.is_empty(), "{warnings:?}");
-    assembly.shutdown_workers().await;
-
-    assert_eq!(
-        fs::read_to_string(shutdown_marker).expect("shutdown marker"),
-        "shutdown"
-    );
-}
-
 #[test]
 fn compatibility_manifest_install_allows_missing_description() {
     let temp = tempdir().expect("temp");
@@ -1462,490 +1255,223 @@ fn marketplace_rejects_unsupported_kind() {
     assert!(err.to_string().contains("expected local, git, or npm"));
 }
 
-#[tokio::test]
-async fn worker_tool_executes_through_binding() {
+#[test]
+fn local_marketplace_add_and_plugin_install_preserve_marketplace_identity_disabled() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
+    let marketplace = temp.path().join("marketplace");
+    let plugin = marketplace.join("plugins/review");
+    fs::create_dir_all(marketplace.join(".agents/plugins")).expect("catalog dir");
     fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
     write_plugin(
-        &source,
+        &plugin,
         r#"{
-              "name": "cleanup",
-              "version": "1.0.0",
-              "description": "cleanup",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
+          "name": "review",
+          "version": "1.0.0",
+          "description": "Review changes"
+        }"#,
     );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            include_str!("../../tests/fixtures/plugin_worker_tool_call.py"),
-            include_str!("../../tests/fixtures/plugin_worker_tool_call.js"),
-        ),
-    );
-    let record = install_plugin(
+    fs::write(
+        marketplace.join(".agents/plugins/marketplace.json"),
+        r#"{
+          "name": "personal",
+          "plugins": [{
+            "name": "review",
+            "source": {"source": "local", "path": "./plugins/review"}
+          }]
+        }"#,
+    )
+    .expect("marketplace manifest");
+
+    let added = plugin_marketplace_add_value(
         &home,
         &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
+        PluginScope::Global,
+        PluginMarketplaceEntry {
+            name: String::new(),
+            source: marketplace.display().to_string(),
+            kind: "local".to_string(),
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            force: false,
         },
     )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-    let tools = worker_tools(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect("tools");
-    assert_eq!(tools[0].name, "cleanup_status");
-    let output = call_worker_tool(
-        &record,
-        &spec,
-        &BTreeMap::new(),
-        "cleanup_status",
-        "call_1",
-        json!({}),
-    )
-    .await
-    .expect("call");
-    assert!(!output.is_error);
-    assert_eq!(output.json["status"], "ok");
-}
+    .expect("add marketplace");
+    assert_eq!(added["marketplace"]["name"], "personal");
+    assert_eq!(added["already_added"], false);
 
-#[tokio::test]
-async fn one_worker_session_serves_discovery_tools_and_hooks() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "session-probe",
-              "version": "1.0.0",
-              "description": "session probe",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            r#"#!/usr/bin/env python3
-import json, os, sys
-initialize_count = 0
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get("method")
-    if method == "initialize":
-        initialize_count += 1
-        result = {"ok": True}
-    elif method == "contributions/list":
-        result = {"tools": [{
-            "name": "session_probe",
-            "description": "probe",
-            "parameters": {"type": "object", "properties": {}}
-        }]}
-    elif method in ("tools/call", "hooks/call"):
-        result = {
-            "pid": os.getpid(),
-            "initialize_count": initialize_count,
-            "method": method
-        }
-    else:
-        result = {"ok": True}
-    print(json.dumps({
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": result
-    }), flush=True)
-"#,
-            r#"#!/usr/bin/env node
-const readline = require("readline");
-let initializeCount = 0;
-readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
-  const request = JSON.parse(line);
-  let result = { ok: true };
-  if (request.method === "initialize") {
-    initializeCount += 1;
-  } else if (request.method === "contributions/list") {
-    result = {
-      tools: [{ name: "session_probe", description: "probe", parameters: { type: "object", properties: {} } }],
-    };
-  } else if (request.method === "tools/call" || request.method === "hooks/call") {
-    result = { pid: process.pid, initialize_count: initializeCount, method: request.method };
-  }
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
-});
-"#,
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-    let runtime = PluginWorkerRuntime::new(record, manifest, spec, BTreeMap::new());
-    assert!(!runtime.started().await);
-    let tools = runtime.tools().await.expect("discover tools");
-    let tool = PluginWorkerTool {
-        plugin_name: runtime.plugin_name().to_string(),
-        runtime: Arc::clone(&runtime),
-        descriptor: tools[0].clone(),
-    };
-    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let tool_result = tool
-        .execute("call_1".to_string(), json!({}), AbortSignal::new(abort_rx))
-        .await;
-    let hook_result = runtime
-        .call("hooks/call", json!({"hook": {}, "payload": {}}))
-        .await
-        .expect("hook call");
-    runtime.shutdown().await.expect("shutdown");
+    let installed =
+        plugin_marketplace_install_value(&home, &cwd, PluginScope::Global, "review", "personal")
+            .expect("install marketplace Plugin");
+    assert_eq!(installed["plugin"]["marketplace"], "personal");
+    assert_eq!(installed["enabled"], false);
 
-    assert_eq!(tool_result.json["method"], "tools/call");
-    assert_eq!(hook_result["method"], "hooks/call");
-    assert_eq!(tool_result.json["pid"], hook_result["pid"]);
-    assert_eq!(tool_result.json["initialize_count"], 1);
-    assert_eq!(hook_result["initialize_count"], 1);
-}
-
-#[tokio::test]
-async fn worker_notifications_do_not_consume_correlated_responses() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "notification-probe",
-              "version": "1.0.0",
-              "description": "notification probe",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            r#"#!/usr/bin/env python3
-import json, sys
-for line in sys.stdin:
-    request = json.loads(line)
-    print(json.dumps({
-        "jsonrpc": "2.0",
-        "method": "worker/status",
-        "params": {"method": request.get("method")}
-    }), flush=True)
-    result = {"ok": True}
-    if request.get("method") == "contributions/list":
-        result = {"tools": [{
-            "name": "notification_probe",
-            "description": "probe",
-            "parameters": {"type": "object", "properties": {}}
-        }]}
-    print(json.dumps({
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": result
-    }), flush=True)
-"#,
-            r#"#!/usr/bin/env node
-const readline = require("readline");
-readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
-  const request = JSON.parse(line);
-  process.stdout.write(`${JSON.stringify({
-    jsonrpc: "2.0",
-    method: "worker/status",
-    params: { method: request.method },
-  })}\n`);
-  const result = request.method === "contributions/list"
-    ? { tools: [{ name: "notification_probe", description: "probe", parameters: { type: "object", properties: {} } }] }
-    : { ok: true };
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
-});
-"#,
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect("session");
-
-    let tools = worker_tools_in_session(&session)
-        .await
-        .expect("correlated contribution response");
-
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].name, "notification_probe");
-    session.shutdown().await.expect("shutdown");
-}
-
-#[tokio::test]
-async fn worker_mismatched_response_id_is_a_terminal_protocol_error() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "mismatch-probe",
-              "version": "1.0.0",
-              "description": "mismatch probe",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            r#"#!/usr/bin/env python3
-import json, sys
-for line in sys.stdin:
-    request = json.loads(line)
-    print(json.dumps({
-        "jsonrpc": "2.0",
-        "id": request.get("id") + 1,
-        "result": {"wrong": True}
-    }), flush=True)
-    print(json.dumps({
-        "jsonrpc": "2.0",
-        "id": request.get("id"),
-        "result": {"ok": True}
-    }), flush=True)
-"#,
-            r#"#!/usr/bin/env node
-const readline = require("readline");
-readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
-  const request = JSON.parse(line);
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id + 1, result: { wrong: true } })}\n`);
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { ok: true } })}\n`);
-});
-"#,
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-
-    let error = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect_err("mismatched response id");
-
-    assert!(error.contains("response id"), "{error}");
-}
-
-#[tokio::test]
-async fn worker_contribution_discovery_receives_effective_env() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "cleanup",
-              "version": "1.0.0",
-              "description": "cleanup",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            include_str!("../../tests/fixtures/plugin_worker_effective_env.py"),
-            include_str!("../../tests/fixtures/plugin_worker_effective_env.js"),
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-    let mut env = BTreeMap::new();
-    env.insert("PLUGIN_DISCOVERY_TOKEN".to_string(), "ok".to_string());
-
-    let tools = worker_tools(&record, &manifest, &spec, &env)
-        .await
-        .expect("tools");
-
-    assert_eq!(tools[0].name, "env_tool");
-}
-
-#[tokio::test]
-async fn worker_contribution_discovery_times_out() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "cleanup",
-              "version": "1.0.0",
-              "description": "cleanup",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.py"),
-            include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.js"),
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-
-    let err = worker_tools(&record, &manifest, &spec, &BTreeMap::new())
-        .await
-        .expect_err("timeout");
-
-    assert!(err.contains("timed out waiting for contributions/list response"));
-}
-
-#[tokio::test]
-async fn worker_tool_call_timeout_returns_tool_error() {
-    let temp = tempdir().expect("temp");
-    let home = temp.path().join("home");
-    let cwd = temp.path().join("work");
-    fs::create_dir_all(&cwd).expect("cwd");
-    let source = temp.path().join("source");
-    write_plugin(
-        &source,
-        r#"{
-              "name": "cleanup",
-              "version": "1.0.0",
-              "description": "cleanup",
-              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
-            }"#,
-    );
-    write_worker(
-        &source,
-        test_worker_fixture(
-            include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.py"),
-            include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.js"),
-        ),
-    );
-    let record = install_plugin(
-        &home,
-        &cwd,
-        PluginInstallOptions {
-            source: source.display().to_string(),
-            source_kind: None,
-            scope: PluginScope::Global,
-            git_ref: None,
-            npm_version: None,
-            npm_registry: None,
-            force: false,
-        },
-    )
-    .expect("install");
-    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
-    let spec = manifest.worker.clone().expect("worker");
-    let runtime = PluginWorkerRuntime::new(record.clone(), manifest, spec, BTreeMap::new());
-
-    let tool = PluginWorkerTool {
-        plugin_name: record.name,
-        runtime: Arc::clone(&runtime),
-        descriptor: WorkerToolDescriptor {
-            name: "cleanup_status".to_string(),
-            description: "Remote harness vocabulary remains source-owned.".to_string(),
-            parameters: json!({"type": "object", "properties": {}}),
-        },
-    };
+    let records = super::records::all_records(&home, &cwd).expect("records");
+    let record =
+        super::records::select_record(&records, "review@personal").expect("marketplace selector");
+    assert_eq!(record.marketplace.as_deref(), Some("personal"));
     assert_eq!(
-        tool.description(),
-        "Remote harness vocabulary remains source-owned."
+        super::records::canonical_record_selector(record),
+        "profile:review@personal"
     );
-    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let output = tool
-        .execute("call_1".to_string(), json!({}), AbortSignal::new(abort_rx))
-        .await;
 
-    assert!(output.is_error);
-    assert!(
-        output.json["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("timed out waiting for tools/call response")
+    let error = plugin_marketplace_remove_value(&home, &cwd, PluginScope::Global, "personal")
+        .expect_err("installed Plugin keeps marketplace identity available");
+    assert!(error.to_string().contains("review"));
+    assert!(error.to_string().contains("remove them first"));
+
+    plugin_uninstall_value(&home, &cwd, PluginScope::Global, "review@personal")
+        .expect("remove marketplace Plugin");
+    let removed = plugin_marketplace_remove_value(&home, &cwd, PluginScope::Global, "personal")
+        .expect("remove now-unused marketplace");
+    assert_eq!(removed["removed"], true);
+}
+
+#[test]
+fn marketplace_rejects_plugin_paths_that_escape_its_root() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let marketplace = temp.path().join("marketplace");
+    fs::create_dir_all(marketplace.join(".agents/plugins")).expect("catalog dir");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::write(
+        marketplace.join(".agents/plugins/marketplace.json"),
+        r#"{
+          "name": "unsafe",
+          "plugins": [{"name": "escape", "source": "../outside"}]
+        }"#,
+    )
+    .expect("marketplace manifest");
+
+    let error = plugin_marketplace_add_value(
+        &home,
+        &cwd,
+        PluginScope::Global,
+        PluginMarketplaceEntry {
+            name: "unsafe".to_string(),
+            source: marketplace.display().to_string(),
+            kind: "local".to_string(),
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+        },
+    )
+    .expect_err("escaping Plugin source");
+    assert!(error.to_string().contains("without .."));
+}
+
+#[test]
+fn git_marketplace_upgrade_replaces_validated_snapshot() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let repo = temp.path().join("marketplace-repo");
+    fs::create_dir_all(repo.join(".agents/plugins")).expect("catalog dir");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::write(
+        repo.join(".agents/plugins/marketplace.json"),
+        r#"{"name":"remote-fixture","plugins":[]}"#,
+    )
+    .expect("marketplace");
+    commit_fixture_repo(&repo, "initial");
+
+    let added = plugin_marketplace_add_value(
+        &home,
+        &cwd,
+        PluginScope::Global,
+        PluginMarketplaceEntry {
+            name: String::new(),
+            source: repo.display().to_string(),
+            kind: "git".to_string(),
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+        },
+    )
+    .expect("add Git marketplace");
+    let snapshot = PathBuf::from(added["root"].as_str().expect("snapshot root"));
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &fs::read_to_string(snapshot.join(".agents/plugins/marketplace.json"))
+                .expect("snapshot manifest")
+        )
+        .expect("snapshot json")["plugins"]
+            .as_array()
+            .expect("plugins")
+            .len(),
+        0
     );
-    runtime.shutdown().await.expect("worker shutdown");
+
+    fs::create_dir_all(repo.join("plugins/review/.codex-plugin")).expect("plugin dir");
+    fs::write(
+        repo.join("plugins/review/.codex-plugin/plugin.json"),
+        r#"{"name":"review","version":"1.0.0"}"#,
+    )
+    .expect("plugin manifest");
+    fs::write(
+        repo.join(".agents/plugins/marketplace.json"),
+        r#"{"name":"remote-fixture","plugins":[{"name":"review","source":"./plugins/review"}]}"#,
+    )
+    .expect("updated marketplace");
+    commit_fixture_repo(&repo, "add review");
+
+    let upgraded =
+        plugin_marketplace_upgrade_value(&home, &cwd, PluginScope::Global, Some("remote-fixture"))
+            .expect("upgrade marketplace");
+    assert_eq!(upgraded["marketplaces"][0]["plugin_count"], 1);
+    assert!(
+        snapshot
+            .join("plugins/review/.codex-plugin/plugin.json")
+            .is_file()
+    );
+}
+
+fn commit_fixture_repo(repo: &Path, message: &str) {
+    if !repo.join(".git").is_dir() {
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .arg("init")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("git init")
+                .success()
+        );
+    }
+    assert!(
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["add", "."])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git add")
+            .success()
+    );
+    assert!(
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                message,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git commit")
+            .success()
+    );
 }
 
 #[test]

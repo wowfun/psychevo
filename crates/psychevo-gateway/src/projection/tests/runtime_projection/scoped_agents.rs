@@ -1,4 +1,4 @@
-use psychevo::application::RunStreamEvent;
+use psychevo::application::{RunStreamEvent, TurnEvent};
 use serde_json::json;
 
 use crate::projection::GatewayLiveProjector;
@@ -153,6 +153,41 @@ fn live_projector_routes_scoped_child_entries_to_child_thread() {
             assert_eq!(entry.blocks[0].body.as_deref(), Some("parent only"));
         }
         other => panic!("unexpected parent event: {other:?}"),
+    }
+}
+
+#[test]
+fn live_projector_routes_scoped_framework_child_terminal_to_child_thread() {
+    let mut projector = GatewayLiveProjector::new(Some("parent-thread".to_string()));
+
+    let terminal = projector
+        .project_turn_event(
+            "parent-turn",
+            &TurnEvent::Scoped {
+                thread_id: "child-thread".to_string(),
+                turn_id: "child-turn".to_string(),
+                event: Box::new(TurnEvent::Runtime {
+                    data: json!({
+                        "type": "agent_end",
+                        "outcome": "normal"
+                    }),
+                }),
+            },
+        )
+        .expect("scoped child terminal");
+
+    match terminal {
+        GatewayEvent::TurnCompleted {
+            thread_id,
+            turn_id,
+            turn,
+            ..
+        } => {
+            assert_eq!(thread_id.as_deref(), Some("child-thread"));
+            assert_eq!(turn_id, "child-turn");
+            assert_eq!(turn.thread_id.as_deref(), Some("child-thread"));
+        }
+        other => panic!("unexpected scoped child terminal: {other:?}"),
     }
 }
 

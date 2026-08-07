@@ -35,6 +35,7 @@ libc.workspace = true
 portable-pty.workspace = true
 psychevo-agent-core = { version = "0.1.0", path = "../psychevo-agent-core" }
 psychevo-ai = { version = "0.1.0", path = "../psychevo-ai", default-features = false, features = ["openai", "anthropic", "xiaomi"] }
+psychevo-extension-protocol = { version = "0.1.0", path = "../psychevo-extension-protocol" }
 quick_html2md.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
@@ -56,6 +57,7 @@ tree-sitter-bash.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+pretty_assertions.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

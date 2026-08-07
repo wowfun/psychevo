@@ -3,9 +3,9 @@ use crate::tui::{
     ConfiguredModel, ContextSnapshot, EffectiveSlashConfig, FILE_POPUP_MAX_ROWS, FullscreenUi,
     GatewayApplication, GatewaySource, ModelCatalogCache, ModelState, PermissionMode, RunMode,
     SkillBundle, SkillCatalog, SkillDiscoveryOptions, SkillSearchMatch, SlashMenuItem,
-    TuiJourneyProfileProbe, TuiRenderer, TuiState, WorkspaceDiff, configured_slash_menu_items,
-    discover_agents, discover_skills, fuzzy_subsequence_score, list_skill_bundles,
-    slash_menu_items_from,
+    TuiExtensions, TuiJourneyProfileProbe, TuiRenderer, TuiState, WorkspaceDiff,
+    configured_slash_menu_items, discover_agents, discover_skills, fuzzy_subsequence_score,
+    list_skill_bundles, slash_menu_items_from,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -57,6 +57,7 @@ pub(crate) struct TuiApp {
     pub(crate) clipboard_result_rx: std::sync::mpsc::Receiver<Result<(), String>>,
     pub(crate) clipboard_copies_in_flight: usize,
     pub(crate) slash_config: EffectiveSlashConfig,
+    pub(crate) extensions: TuiExtensions,
     pub(crate) side_conversation: Option<SideConversationState>,
     pub(crate) last_live_agent_reload_check: Option<Instant>,
     pub(crate) last_gateway_live_event_seq: i64,
@@ -178,6 +179,7 @@ impl TuiApp {
 
     pub(crate) fn slash_items(&self) -> Vec<SlashMenuItem> {
         let mut items = configured_slash_menu_items(&self.slash_config);
+        items.extend(self.extensions.menu_items());
         let mut dynamic_names = BTreeSet::new();
         for bundle in self.current_skill_bundles() {
             let command = format!("/{}", bundle.slug);

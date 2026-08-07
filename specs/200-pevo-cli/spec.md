@@ -22,6 +22,7 @@ process behavior, and product-level environment variables.
 - `pevo acp` product positioning
 - `pevo skill` product positioning
 - `pevo plugin` product positioning
+- Extension install, update, temporary load, and direct command dispatch
 - `pevo profile` product positioning
 - local session, model, config, and auth inspection/maintenance commands
 - local session export/share artifacts
@@ -116,6 +117,10 @@ Implemented first-slice commands:
 - `pevo tool`
 - `pevo config`
 - `pevo auth`
+- `pevo install`
+- `pevo remove`
+- `pevo list`
+- `pevo update`
 
 ## Public Documentation
 
@@ -182,6 +187,14 @@ caller's cwd, and non-UI commands reject the root flag instead of silently
 changing their cwd. UI-opening commands do not accept the removed `--dir`
 spelling. Command-specific `--dir` options owned by non-UI commands such as
 `pevo run`, `pevo stats`, and `pevo context` are unaffected.
+
+`pevo -e <local-path> [command...]` temporarily loads one in-place Extension
+for this invocation. It writes no install or policy state. With a trailing
+direct command it resolves that command after built-ins and invokes the
+Extension through `command/run`; without one it adds the temporary Extension to
+the default interactive TUI host. The path and manifest obey the same
+validation, conflicts, permissions, and shutdown rules as installed
+Extensions.
 
 `pevo` with no subcommand is the interactive default entrypoint. When stdin
 and stdout are both terminals, it is equivalent to `pevo tui`; `-C/--cd`
@@ -334,18 +347,58 @@ lifecycle subcommands (`create`, `patch`, `remove`, `enable`, `disable`,
 scanner, hub, bundle, curator, and provenance semantics belong to
 [055 Skills](../055-skills/spec.md).
 
+Extension lifecycle uses Pi-style top-level commands:
+
+```text
+pevo install <source> [-l|--local]
+pevo remove <selector> [-l|--local]
+pevo list [--local] [--json]
+pevo update
+pevo update <selector>
+pevo update --extensions
+pevo update --all
+pevo config extension [selector] [--local]
+```
+
+Profile scope is the default and `-l/--local` selects the current workspace.
+Install immediately enables and trusts the exact Extension fingerprint. Remote
+sources are first-party ids or HTTPS release descriptors containing
+precompiled target artifacts and SHA-256 integrity; local directories remain
+in place. Remove retains Extension data. `list --local` selects project records
+rather than merging them with profile rows.
+
+Bare `pevo update` is product self-update. Source-checkout or unknown installs
+return exact reinstall guidance when no safe updater exists. A selector updates
+one Extension, `--extensions` updates every remote Extension, and `--all`
+updates the product then Extensions. Local development Extensions are reported
+unchanged.
+
+Built-in command parsing always wins. An otherwise unknown top-level command is
+resolved from enabled Extension manifests, and a match is sent to that owner's
+sidecar with `command/run`; there is no `pevo ext` or `pevo extension` command
+family. Two enabled Extension commands with the same name fail activation.
+Help displays direct Extension commands in a separate group.
+
+If a known first-party direct command is absent, a TTY may explain and confirm
+`pevo install <id>` before continuing once. Noninteractive use fails with that
+exact install command and never prompts. Third-party unknown commands never
+trigger automatic discovery or installation. Full manifest, source, host,
+lifecycle, UI, and policy behavior belongs to
+[058 Extensions](../058-extensions/spec.md).
+
 `pevo plugin` owns local plugin package inspection, installation, policy, and
 marketplace catalog management. With no subcommand it shows help. `list`,
 `view`, and `doctor` are read or diagnostic operations and accept `--json`.
-`install`, `uninstall`, `enable`, and `disable` write the active profile scope
+`add`, `remove`, `enable`, and `disable` write the active profile scope
 by default. `--local` writes the current cwd `.psychevo` scope. `-g` or
 `--global` writes the active profile scope and conflicts with `--local`.
-`enable` enables the plugin package in the selected scope. Canonical installed
-package selectors are `profile:name@source` and `project:name@source`; bare
-`name` and unscoped `name@source` are accepted only when unique across both
-installation scopes. `plugin marketplace list/add/remove` manages local
-and Git source catalogs separately from plugin installation and enablement.
-Plugin package, manifest, store, worker, hook, and declaration behavior
+`plugin add <plugin>@<marketplace>` materializes the selected package disabled;
+`enable` is always explicit. Canonical identity is `<plugin>@<marketplace>`
+with a scope qualifier only when profile and project records are ambiguous.
+Bare names are accepted only when unique. `plugin install` and
+`plugin uninstall` are not aliases. `plugin marketplace add|list|upgrade|remove`
+manages discovery independently from installed package state.
+Plugin package, manifest, store, hook, and declaration behavior
 belongs to [054 Plugins](../054-plugins/spec.md),
 [150 Plugin Runtime](../150-plugin-runtime/spec.md), and
 [155 Plugin Manifest](../155-plugin-manifest/spec.md).
@@ -483,6 +536,11 @@ scope; `-g`/`--global` writes `$PSYCHEVO_HOME`; `--local` explicitly selects
 the default local scope. `--global` and `--local` are mutually exclusive.
 `--project` is not accepted.
 
+`pevo config extension [selector] [--local]` is the Extension configuration
+entrypoint. It shows effective source, fingerprint, enablement, trust,
+permissions, protocol compatibility, and runtime state before editing. It does
+not edit an independently co-root Plugin or imply Plugin trust.
+
 `pevo run` accepts `--permission-mode <default|acceptEdits|plan|dontAsk|bypassPermissions>`
 to override the configured permission mode for that invocation. `plan` also
 selects the read-only runtime mode. `dontAsk` is non-interactive and denies
@@ -524,6 +582,20 @@ Windows target, while POSIX-only behavior runs on Unix targets. Tests must not
 simulate one platform's installer behavior by overriding `uname` on another
 host platform.
 
+## Selective Builds
+
+The `psychevo-cli` crate defaults to feature `full`. `full` expands to `acp`,
+`gateway`, and `desktop`, so the ordinary release still ships all product
+entrypoints. Maintainers may build a smaller binary with
+`--no-default-features --features <set>`. Commands excluded at compile time are
+absent from help and parsing; they are not inert stubs.
+
+Extension support is part of the base CLI and is not coupled to `full`.
+First-party Channel SDKs are never CLI or Gateway features; they ship as
+independent Extension artifacts. Each supported feature combination must pass
+compile and process-help tests, and the default build must remain equivalent to
+`full`.
+
 ## Attachments
 
 - [pevo init](pevo-init.md) defines global home initialization.
@@ -546,6 +618,8 @@ host platform.
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle
   semantics exposed by `pevo skill`.
+- [058 Extensions](../058-extensions/spec.md) defines executable Extension
+  packages, direct commands, and sidecar ownership.
 - [051 Agents](../051-agents/spec.md) defines agent definition semantics.
 - [051 Subagents](../051-agents/subagents.md) defines subagent command semantics.
 - [280 Channel UX](../280-channel-ux/spec.md) defines `pevo gateway setup`

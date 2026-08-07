@@ -234,12 +234,6 @@ pub struct PluginDoctorEntryView {
     pub manifest: Value,
     #[ts(type = "unknown")]
     pub inspection: Value,
-    #[serde(default)]
-    #[ts(type = "unknown")]
-    pub worker: Option<Value>,
-    #[serde(default)]
-    #[ts(type = "unknown")]
-    pub sandbox: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -248,6 +242,82 @@ pub struct PluginDoctorResult {
     #[serde(default)]
     #[ts(type = "unknown")]
     pub apps: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionView {
+    pub id: String,
+    pub selector: String,
+    pub version: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub source: String,
+    pub source_kind: String,
+    pub scope: String,
+    pub enabled: bool,
+    pub trusted: bool,
+    pub fingerprint: String,
+    pub trusted_fingerprint: String,
+    pub protocol: String,
+    pub protocol_compatible: bool,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    pub sidecar_state: String,
+    #[serde(default)]
+    pub lease_reason: Option<String>,
+    pub csp_app_readiness: String,
+    #[serde(default)]
+    pub co_root_plugin: Option<String>,
+    #[serde(default)]
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ExtensionListResult {
+    pub extensions: Vec<ExtensionView>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ExtensionReadResult {
+    pub extension: ExtensionView,
+    #[ts(type = "unknown")]
+    pub manifest: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionMutationResult {
+    pub success: bool,
+    pub id: String,
+    pub scope: String,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionAppOpenResult {
+    pub lease_id: String,
+    pub extension_id: String,
+    pub app_id: String,
+    pub resource_uri: String,
+    pub resource_url: String,
+    pub resource_domains: Vec<String>,
+    pub connect_domains: Vec<String>,
+    pub allowed_tools: Vec<String>,
+    pub fallback: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ExtensionAppCloseResult {
+    pub released: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

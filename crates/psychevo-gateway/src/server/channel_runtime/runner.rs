@@ -12,9 +12,6 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::im::adapters::{
-    is_wechat_ilink_session_expired_error, wechat_ilink_error_code_from_message,
-};
 use crate::im::{
     ChannelGateway, ImIdentity, ImInboundMessage, ImOutboundMessage, gateway_input_parts_for_im,
     gateway_source_for_im,
@@ -35,6 +32,18 @@ use super::commands::{ChannelCommandAction, route_channel_command};
 use super::events::{channel_event_sink, channel_reply_thread_id};
 use super::paths::redact_channel_error;
 use super::{CHANNEL_IDLE_SLEEP_MS, CHANNEL_POLL_BACKOFF_MS, ChannelRuntimeState};
+
+const WECHAT_SESSION_EXPIRED_ERRCODE: i64 = -14;
+
+fn wechat_ilink_error_code_from_message(message: &str) -> Option<i64> {
+    (message.contains("errcode=-14") || message.contains("ret=-14"))
+        .then_some(WECHAT_SESSION_EXPIRED_ERRCODE)
+}
+
+fn is_wechat_ilink_session_expired_error(message: &str) -> bool {
+    wechat_ilink_error_code_from_message(message) == Some(WECHAT_SESSION_EXPIRED_ERRCODE)
+        || (message.contains("needs_qr_login") && message.contains("WeChat iLink"))
+}
 
 pub(super) async fn run_channel_loop(
     state: WebState,

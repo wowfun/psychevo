@@ -37,8 +37,8 @@ use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 use crate::types::{
-    PermissionConfig, ReloadContextOptions, ReloadContextResult, RunControl, RunMode, RunOptions,
-    RunResult, RunStreamSink,
+    PermissionConfig, ReloadContextOptions, ReloadContextResult, RunControl, RunOptions, RunResult,
+    RunStreamSink,
 };
 
 pub(crate) const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
@@ -160,7 +160,6 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             runtime_tools: Vec::new(),
         })
         .await;
-    let reload_result = async {
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &cwd)?;
     let agents_home = resolve_agents_home(&env, &cwd)?;
@@ -181,11 +180,6 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         }
         _ => None,
     };
-    if mode == RunMode::Default {
-        extension_assembly.materialize_worker_tools().await;
-    } else {
-        extension_assembly.activate_worker_runtime();
-    }
     let skills_home = resolve_skills_home(&env, &cwd)?;
     let mut explicit_skill_inputs = Vec::new();
     if let Some(agent) = &selected_agent {
@@ -416,10 +410,6 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         model: record.model,
         invalidation_reason: record.invalidation_reason,
     })
-    }
-    .await;
-    extension_assembly.shutdown_workers().await;
-    reload_result
 }
 
 pub(crate) async fn start_agent_task(
@@ -500,14 +490,10 @@ pub(crate) async fn start_agent_task(
             runtime_tools: Vec::new(),
         })
         .await;
-    let spawn_result = async {
     let permission_mode = permission_mode.unwrap_or_default();
     let approvals_reviewer = loaded.config.permissions.approvals_reviewer;
     let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
-    let mut explicit_agent_inputs = selected_parent_agent
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut explicit_agent_inputs = selected_parent_agent.iter().cloned().collect::<Vec<_>>();
     explicit_agent_inputs.extend(extension_assembly.agent_inputs.clone());
     let agent_catalog = discover_agents(&AgentDiscoveryOptions {
         home: agents_home,
@@ -528,11 +514,6 @@ pub(crate) async fn start_agent_task(
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
     let effective_mode = effective_run_mode(mode, selected_parent_agent.as_ref());
-    if effective_mode == RunMode::Default {
-        extension_assembly.materialize_worker_tools().await;
-    } else {
-        extension_assembly.activate_worker_runtime();
-    }
     let child_agent = resolve_agent_definition(&agent_catalog, &agent, &cwd, &loaded.env)?;
     if selected_parent_agent
         .as_ref()
@@ -676,7 +657,10 @@ pub(crate) async fn start_agent_task(
             .unwrap_or_default(),
         required_agent_names: Vec::new(),
         spawn_depth_remaining: None,
-        active_team: crate::agents::active_agent_team_context_for_session(&state, &parent_session_id)
+        active_team: crate::agents::active_agent_team_context_for_session(
+            &state,
+            &parent_session_id,
+        )
         .await
         .ok()
         .flatten(),
@@ -688,8 +672,4 @@ pub(crate) async fn start_agent_task(
         thread_id: parent_session_id,
         agent,
     })
-    }
-    .await;
-    extension_assembly.shutdown_workers().await;
-    spawn_result
 }

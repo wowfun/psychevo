@@ -1,5 +1,4 @@
 use std::env;
-#[cfg(feature = "native-channels")]
 use std::fs;
 use std::path::PathBuf;
 
@@ -42,7 +41,6 @@ impl GatewayContext {
         })
     }
 
-    #[cfg(feature = "native-channels")]
     pub(super) fn load_for_setup() -> Result<Self> {
         let env_map = inherited_env();
         let cwd = env::current_dir()?;

@@ -17,8 +17,8 @@ runtime assembly without receiving direct runtime authority.
   assembly
 
 Out of scope:
-- plugin package formats, manifests, install, update, remove, marketplaces, hot
-  reload, startup protocols, shutdown protocols, or healthcheck protocols
+- Plugin or Extension package formats, manifests, install, update, remove,
+  marketplaces, sidecar protocols, or lifecycle policy
 - concrete hook schemas, hook payloads, hook return fields, CLI commands, UI
   APIs, or SDK APIs
 - concrete tool names, tool schemas, tool result formats, provider wire
@@ -181,11 +181,14 @@ preserve the intended semantics:
   scope, or child-agent use.
 - A hook is the right home for event-scoped observation, review, feedback, or
   bounded direct effects around existing runtime events.
-- A plugin package is the right home when a distributable package bundles one
-  or more extension declarations, worker tools, hook declarations, skills,
-  agents, MCP descriptors, provider descriptors, command descriptors, or
-  toolset descriptors. The plugin does not own the final effect; the relevant
-  runtime module still accepts or omits each declaration.
+- A Plugin is the right home when a distributable declarative package bundles
+  skills, Agents, MCP descriptors, hook declarations, Apps, interface metadata,
+  or toolset descriptors. The Plugin does not own the final effect; the
+  relevant runtime module still accepts or omits each declaration.
+- An Extension is the right home when a capability needs an executable
+  sidecar, a direct `pevo` command, a long-lived Channel transport, or an MCP
+  App resource bridge. Its process still returns host-validated declarations
+  and effects instead of mutating runtime owners.
 - MCP, provider, command, memory, resource, or toolset declarations belong in
   their owning specs and runtime modules whenever their semantics are more
   specific than the generic capability-extension vocabulary.
@@ -302,7 +305,9 @@ context evidence.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships.
 - [031 Storage and Persistence](../031-storage-and-persistence/spec.md) defines persistence boundaries for durable semantic facts.
 - [053 Hooks](../053-hooks/spec.md) defines hook authority.
-- [054 Plugins](../054-plugins/spec.md) defines plugin package boundaries.
+- [054 Plugins](../054-plugins/spec.md) defines Plugin package boundaries.
+- [058 Extensions](../058-extensions/spec.md) defines executable Extension
+  packages and host lifetimes.
 - [055 Skills](../055-skills/spec.md) defines skill packages, discovery, tools, CLI commands, scanning, and provenance.
 - [056 MCP](../056-mcp/spec.md) defines MCP source, naming, dispatch, permission, and evidence boundaries.
 - [027 ACP](../027-acp/spec.md) defines ACP-provided MCP source projection.

@@ -33,6 +33,7 @@ use super::auth_input::{bearer_token, now_ms, session_cookie_value};
 use super::browser_session_store::BrowserSessionStore;
 use super::download_static::{download_session, gateway_fallback, read_media_artifact};
 use super::event_delivery::{ConnectionSender, GatewayEventHub};
+use super::extension_management::ExtensionAppLeaseStore;
 use super::mcp_oauth_store::McpOAuthSessionStore;
 use super::rpc_dispatch::{
     consume_launch, create_launch, managed_identity, managed_shutdown, readyz,
@@ -390,6 +391,7 @@ pub(super) struct WebStateInner {
     pub(super) codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
     pub(super) codex_elicitations:
         Mutex<HashMap<String, codex_capability_broker::PendingCodexElicitation>>,
+    pub(super) extension_app_leases: ExtensionAppLeaseStore,
 }
 
 const AGENT_SESSION_IMPORT_TTL_MS: i64 = 10 * 60 * 1_000;
@@ -598,6 +600,7 @@ impl WebState {
                 channel_runtime,
                 codex_capability_broker,
                 codex_elicitations: Mutex::new(HashMap::new()),
+                extension_app_leases: ExtensionAppLeaseStore::default(),
             }),
         };
         channel_runtime::reconcile(web_state.clone());

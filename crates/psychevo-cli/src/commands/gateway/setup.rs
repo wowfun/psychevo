@@ -2,15 +2,16 @@ use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
-use psychevo::{
-    Configuration, config::ChannelSetupInput, config::set_channel_enabled,
-    config::setup_channel_connection, config::upsert_channel_connection,
+use anyhow::{Context, Result, anyhow};
+use psychevo::extensions::protocol::{
+    ChannelConnectionParams, ChannelStartParams, HostCapabilities, WechatQrPollResult,
 };
-use psychevo_gateway::im::ImAdapter;
-use psychevo_gateway::im::adapters::{
-    WECHAT_ILINK_BASE_URL, WechatIlinkAdapter, WechatIlinkConfig, WechatQrCode, WechatQrPoll,
-    fetch_wechat_qr_code, poll_wechat_qr_code,
+use psychevo::extensions::{ExtensionHostMode, ExtensionLease, ExtensionRuntime, ExtensionStore};
+use psychevo::{
+    Configuration,
+    config::{
+        ChannelSetupInput, set_channel_enabled, setup_channel_connection, upsert_channel_connection,
+    },
 };
 use serde_json::{Value, json};
 
@@ -43,44 +44,30 @@ async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
         let channel = args.channel.clone().ok_or_else(|| {
             anyhow!("pevo gateway setup requires --channel in non-interactive mode")
         })?;
+        if args.qr && channel != "wechat" {
+            return Err(anyhow!("--qr is only supported for --channel wechat"));
+        }
         let id = args.id.clone().unwrap_or_else(|| channel.clone());
+        let store = ExtensionStore::new(&ctx.home, &ctx.cwd);
+        let extension = store.resolve_channel_extension(&channel)?;
+
         let mut credential = read_secret_from_stdin(args.credential_stdin)?;
         let mut account_id = args.account_id.clone();
         let mut ilink_base_url = args.ilink_base_url.clone();
         if args.qr {
-            if channel != "wechat" {
-                return Err(anyhow!("--qr is only supported for --channel wechat"));
-            }
-            let qr = run_wechat_qr_login(
-                args.ilink_base_url
-                    .as_deref()
-                    .unwrap_or(WECHAT_ILINK_BASE_URL),
-            )
-            .await?;
+            let qr =
+                run_wechat_qr_setup(&ctx, extension, &id, args.ilink_base_url.as_deref()).await?;
             credential = Some(qr.token);
             account_id = Some(qr.account_id);
             ilink_base_url = Some(qr.base_url);
-            if args.allow_users.is_empty() {
-                if let Some(user_id) = qr.user_id {
-                    eprintln!("Adding WeChat QR login user to allowlist: {user_id}");
-                    args.allow_users.push(user_id);
-                } else if io::stdin().is_terminal()
-                    && prompt_yes_no_default(
-                        "No WeChat user id was returned. Pair first direct-message sender now? [Y/n]: ",
-                        true,
-                    )?
-                    && let Some(user_id) = discover_wechat_dm_sender(
-                        credential.as_deref().unwrap_or_default(),
-                        account_id.as_deref().unwrap_or_default(),
-                        ilink_base_url.as_deref().unwrap_or(WECHAT_ILINK_BASE_URL),
-                        &id,
-                    )
-                    .await?
-                {
-                    args.allow_users.push(user_id);
-                }
+            if args.allow_users.is_empty()
+                && let Some(user_id) = qr.user_id
+            {
+                eprintln!("Adding WeChat QR login user to allowlist: {user_id}");
+                args.allow_users.push(user_id);
             }
         }
+
         let setup_input = ChannelSetupInput {
             config_dir: ctx.home.clone(),
             id: id.clone(),
@@ -90,13 +77,12 @@ async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
             credential,
             account_env: args.account_env.clone(),
             account_id,
-            base_url_env: matches!(args.channel.as_deref(), Some("wechat"))
-                .then(|| "WECHAT_ILINK_BASE_URL".to_string()),
+            base_url_env: (channel == "wechat").then(|| "WECHAT_ILINK_BASE_URL".to_string()),
             base_url: ilink_base_url,
             allow_users: args.allow_users.clone(),
             allow_groups: args.allow_groups.clone(),
         };
-        let setup = if args.qr && channel == "wechat" {
+        let setup = if args.qr {
             upsert_channel_connection(setup_input)?
         } else {
             setup_channel_connection(setup_input)?
@@ -248,17 +234,78 @@ struct WechatQrLoginCredential {
     user_id: Option<String>,
 }
 
-async fn run_wechat_qr_login(base_url: &str) -> Result<WechatQrLoginCredential> {
-    let client = reqwest::Client::new();
-    let mut qr = request_and_print_wechat_qr(&client, base_url).await?;
+#[derive(Debug)]
+struct WechatQrCode {
+    qrcode: String,
+    qr_url: String,
+    qr_image: Option<String>,
+    qr_terminal: Option<String>,
+    base_url: String,
+}
+
+async fn run_wechat_qr_setup(
+    ctx: &GatewayContext,
+    extension: (
+        psychevo::extensions::ExtensionInstallRecord,
+        psychevo::extensions::ExtensionManifest,
+    ),
+    connection_id: &str,
+    requested_base_url: Option<&str>,
+) -> Result<WechatQrLoginCredential> {
+    let runtime = ExtensionRuntime::with_capabilities(
+        extension.0,
+        extension.1,
+        ctx.env_map.clone(),
+        ExtensionHostMode::OneShot,
+        HostCapabilities {
+            channels: true,
+            ..HostCapabilities::default()
+        },
+    )?;
+    let lease = runtime.acquire().await?;
+    let operation = async {
+        let mut login = run_wechat_qr_login(&lease, requested_base_url).await?;
+        if login.user_id.is_none()
+            && io::stdin().is_terminal()
+            && prompt_yes_no_default(
+                "No WeChat user id was returned. Pair first direct-message sender now? [Y/n]: ",
+                true,
+            )?
+        {
+            login.user_id = discover_wechat_dm_sender(&lease, &login, connection_id).await?;
+        }
+        Ok(login)
+    }
+    .await;
+    let release = lease.release().await;
+    match (operation, release) {
+        (Ok(login), Ok(())) => Ok(login),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error.into()),
+    }
+}
+
+async fn run_wechat_qr_login(
+    lease: &ExtensionLease,
+    requested_base_url: Option<&str>,
+) -> Result<WechatQrLoginCredential> {
+    let mut qr = request_and_print_wechat_qr(lease, requested_base_url).await?;
     let deadline = Instant::now() + Duration::from_secs(180);
     let mut refresh_count = 0;
     loop {
         if Instant::now() >= deadline {
             return Err(anyhow!("WeChat QR login timed out"));
         }
-        match poll_wechat_qr_code(&client, &qr.base_url, &qr.qrcode).await? {
-            WechatQrPoll::Confirmed {
+        let value = lease
+            .channel_control(
+                "channel/wechat/qr/poll",
+                json!({ "baseUrl": qr.base_url, "qrcode": qr.qrcode }),
+            )
+            .await?;
+        let status: WechatQrPollResult = serde_json::from_value(value)
+            .context("WeChat Channel Extension returned an invalid QR status")?;
+        match status {
+            WechatQrPollResult::Confirmed {
                 account_id,
                 token,
                 base_url,
@@ -272,28 +319,23 @@ async fn run_wechat_qr_login(base_url: &str) -> Result<WechatQrLoginCredential> 
                     user_id,
                 });
             }
-            WechatQrPoll::Expired { message } => {
+            WechatQrPollResult::Expired { message } => {
                 refresh_count += 1;
                 if refresh_count > 3 {
-                    return Err(anyhow!("{message}"));
+                    return Err(anyhow!(message));
                 }
                 eprintln!("{message}; refreshing QR ({refresh_count}/3).");
-                qr = request_and_print_wechat_qr(&client, base_url).await?;
+                qr = request_and_print_wechat_qr(lease, Some(&qr.base_url)).await?;
             }
-            WechatQrPoll::Waiting {
-                status,
-                message,
-                base_url,
-            } => {
-                if base_url != qr.base_url {
-                    qr.base_url = base_url;
-                }
-                if status == "scaned" || status == "scaned_but_redirect" {
-                    eprintln!("{message}");
-                } else {
-                    eprint!(".");
-                    io::stderr().flush()?;
-                }
+            WechatQrPollResult::Waiting { base_url, .. } => {
+                qr.base_url = base_url;
+                eprint!(".");
+                io::stderr().flush()?;
+            }
+            WechatQrPollResult::Scanned { message, base_url }
+            | WechatQrPollResult::ScannedRedirect { message, base_url } => {
+                qr.base_url = base_url;
+                eprintln!("{message}");
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -301,66 +343,102 @@ async fn run_wechat_qr_login(base_url: &str) -> Result<WechatQrLoginCredential> 
 }
 
 async fn request_and_print_wechat_qr(
-    client: &reqwest::Client,
-    base_url: &str,
+    lease: &ExtensionLease,
+    base_url: Option<&str>,
 ) -> Result<WechatQrCode> {
-    let qr = fetch_wechat_qr_code(client, base_url).await?;
+    let value = lease
+        .channel_control(
+            "channel/wechat/qr/start",
+            base_url
+                .map(|base_url| json!({ "baseUrl": base_url }))
+                .unwrap_or_else(|| json!({})),
+        )
+        .await?;
+    let qr = WechatQrCode {
+        qrcode: required_string(&value, "qrcode")?,
+        qr_url: required_string(&value, "qrUrl")?,
+        qr_image: optional_string(&value, "qrImage"),
+        qr_terminal: optional_string(&value, "qrTerminal"),
+        base_url: required_string(&value, "baseUrl")?,
+    };
     eprintln!("Scan this QR with WeChat to connect Psychevo:");
+    if let Some(rendered) = qr.qr_terminal.as_deref() {
+        eprintln!("{rendered}");
+    }
     eprintln!("{}", qr.qr_url);
     if qr.qr_image.is_some() {
         eprintln!(
             "iLink returned an image QR payload; use Workbench if your terminal cannot render the data URL."
         );
-    } else if let Some(rendered) = render_wechat_terminal_qr(&qr.qr_url) {
-        eprintln!("{rendered}");
     }
     Ok(qr)
 }
 
-fn render_wechat_terminal_qr(value: &str) -> Option<String> {
-    let code = qrcode::QrCode::new(value.as_bytes()).ok()?;
-    Some(
-        code.render::<qrcode::render::unicode::Dense1x2>()
-            .quiet_zone(true)
-            .build(),
-    )
-}
-
 async fn discover_wechat_dm_sender(
-    token: &str,
-    account_id: &str,
-    base_url: &str,
+    lease: &ExtensionLease,
+    login: &WechatQrLoginCredential,
     connection_id: &str,
 ) -> Result<Option<String>> {
-    eprintln!("Ask the WeChat user to send one direct message to the iLink bot now.");
-    let adapter = WechatIlinkAdapter::new(WechatIlinkConfig {
-        connection_id: Some(connection_id.to_string()),
-        token: token.to_string(),
-        account_id: account_id.to_string(),
-        base_url: base_url.to_string(),
-        timeout_secs: 5,
-        context_store_path: None,
-    })
-    .map_err(|err| anyhow!(err.to_string()))?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while Instant::now() < deadline {
-        let messages = adapter
-            .poll()
-            .await
-            .map_err(|err| anyhow!(err.to_string()))?;
-        if let Some(user_id) = messages
-            .into_iter()
-            .find(|message| message.identity.chat_type.as_deref() == Some("dm"))
-            .and_then(|message| message.identity.user_id)
-        {
-            eprintln!("Adding WeChat direct-message sender to allowlist: {user_id}");
-            return Ok(Some(user_id));
+    lease
+        .channel_start(ChannelStartParams {
+            connection_id: connection_id.to_string(),
+            channel: "wechat".to_string(),
+            configuration: json!({
+                "credential": login.token,
+                "accountId": login.account_id,
+                "baseUrl": login.base_url,
+            }),
+        })
+        .await?;
+    let operation = async {
+        eprintln!("Ask the WeChat user to send one direct message to the iLink bot now.");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while Instant::now() < deadline {
+            let messages = lease
+                .channel_poll(ChannelConnectionParams {
+                    connection_id: connection_id.to_string(),
+                })
+                .await?
+                .messages;
+            if let Some(user_id) = messages
+                .into_iter()
+                .find(|message| message.identity.chat_type.as_deref() == Some("dm"))
+                .and_then(|message| message.identity.user_id)
+            {
+                eprintln!("Adding WeChat direct-message sender to allowlist: {user_id}");
+                return Ok(Some(user_id));
+            }
+            eprint!(".");
+            io::stderr().flush()?;
         }
-        eprint!(".");
-        io::stderr().flush()?;
+        eprintln!("No WeChat direct message was received before pairing timed out.");
+        Ok(None)
     }
-    eprintln!("No WeChat direct message was received before pairing timed out.");
-    Ok(None)
+    .await;
+    let stop = lease
+        .channel_stop(ChannelConnectionParams {
+            connection_id: connection_id.to_string(),
+        })
+        .await;
+    match (operation, stop) {
+        (Ok(user_id), Ok(())) => Ok(user_id),
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error.into()),
+    }
+}
+
+fn required_string(value: &Value, key: &str) -> Result<String> {
+    optional_string(value, key)
+        .with_context(|| format!("WeChat Channel Extension response did not include `{key}`"))
+}
+
+fn optional_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 async fn setup_gateway_action(ctx: &GatewayContext, args: &GatewaySetupArgs) -> Result<Value> {

@@ -131,14 +131,25 @@ impl TuiApp {
     }
 
     pub(crate) fn help_status_text(&self) -> String {
-        format_slash_help_with_config(self.current_skill_count(), &self.slash_config)
+        let mut text =
+            format_slash_help_with_config(self.current_skill_count(), &self.slash_config);
+        let rows = self.extensions.help_rows();
+        if !rows.is_empty() {
+            text.push_str("\n\nExtensions\n");
+            text.push_str(&rows.join("\n"));
+        }
+        text
     }
 
     pub(crate) fn help_panel(&self) -> HelpPanel {
-        HelpPanel::new(slash_help_sections_with_config(
-            self.current_skill_count(),
-            &self.slash_config,
-        ))
+        let mut sections =
+            slash_help_sections_with_config(self.current_skill_count(), &self.slash_config);
+        let rows = self.extensions.help_rows();
+        if !rows.is_empty() {
+            sections.custom_commands.push("Extensions".to_string());
+            sections.custom_commands.extend(rows);
+        }
+        HelpPanel::new(sections)
     }
 
     pub(crate) fn current_skill_count(&self) -> Option<usize> {

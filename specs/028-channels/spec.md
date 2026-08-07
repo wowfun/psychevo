@@ -22,6 +22,7 @@ contracts.
 - normalized inbound turn and outbound delivery contracts
 - delivery capability, slash command, attachment, approval, and Ask boundaries
 - channel-independent diagnostics and fail-closed behavior
+- host/adapter ownership when platform transports are supplied by Extensions
 
 Out of scope:
 
@@ -69,6 +70,13 @@ streaming, buttons, cards, native threads, message deletion, and length limits.
 Capabilities are adapter facts, not product promises. Shared channel logic must
 branch on capabilities instead of platform names whenever possible.
 
+`ChannelAdapter` is an externally supplied platform transport. First-party
+adapters are precompiled Extensions under [058 Extensions](../058-extensions/spec.md),
+not optional SDK dependencies inside Gateway. Gateway owns configuration,
+secret references, normalized ingress and delivery, Thread binding, routing,
+outbox state, diagnostics, and supervision. The adapter owns platform SDK and
+wire payloads only.
+
 ## Configuration
 
 Channel configuration lives in the active profile config under `[channels]` and
@@ -95,6 +103,10 @@ Missing credentials or missing allowlists are blocking diagnostics. A
 connection whose `enabled` flag is true still starts as blocked when local
 checks fail. Channel adapters fail closed instead of accepting messages from
 unknown users, chats, groups, tenants, topics, or operators.
+
+An enabled connection whose adapter Extension is absent is `blocked` with the
+first-party Extension id and exact `pevo install <id>` guidance. It does not
+prevent Gateway, other Channels, or local user entrypoints from starting.
 
 Config readiness and runner liveness are separate states. `ready` means local
 config and env checks passed. Runner status reports whether a Gateway-owned
@@ -134,13 +146,14 @@ flow such as slash commands, interrupt, new/reset conversation, permission
 approvals, and Ask replies before constructing the lower-level runtime turn
 request.
 
-Every adapter exposes asynchronous shutdown; adapters without background work
-may use the default no-op implementation. The Channel Gateway invokes shutdown
-for every started adapter from its finalization path, including error and
-external-cancellation exits, and awaits those shutdowns before reporting the
-runner stopped. The Gateway transport supervisor supplies its shutdown token
-to the tracked Channel runner and waits for that runner's finalizer; it must not
-cancel by dropping the runner future outside the adapter-owned cleanup path.
+Every adapter exposes asynchronous shutdown. Starting a Channel obtains an
+Extension lease and retains it until adapter shutdown completes. The Channel
+Gateway invokes shutdown for every started adapter from its finalization path,
+including error and external-cancellation exits, and awaits those shutdowns
+before releasing the lease and reporting the runner stopped. The Gateway
+transport supervisor supplies its shutdown token to the tracked Channel runner
+and waits for that runner's finalizer; it must not cancel by dropping the runner
+future outside the adapter-owned cleanup path.
 Adapter ingress queues are bounded and apply asynchronous
 backpressure at the platform callback boundary; accepted events are neither
 silently dropped nor buffered without limit.
@@ -297,6 +310,9 @@ delivery is unavailable, channels fall back to text with bounded diagnostics.
   becomes bounded metadata; runtime code does not consume raw platform URLs.
 - Diagnostics, JSON views, logs, transcripts, model-visible context, and
   frontend state remain secret-free.
+- A Gateway or CLI build without Channel artifacts contains no WeChat,
+  Telegram, Feishu, or Lark SDK dependency, while configured missing adapters
+  remain actionable through install guidance.
 
 ## Related Topics
 
@@ -316,3 +332,5 @@ delivery is unavailable, channels fall back to text with bounded diagnostics.
   operation.
 - [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines shared voice
   policy and fallback behavior.
+- [058 Extensions](../058-extensions/spec.md) defines Channel artifact,
+  protocol, lease, and installation behavior.

@@ -123,6 +123,18 @@ or live evidence confirms the media contract.
 
 ## Adapter Behavior
 
+The adapter ships as precompiled Extension `psychevo.channel.wechat`. Gateway
+does not link the iLink client, QR renderer, or WeChat media transport. Setup or
+runner start with the artifact absent reports:
+
+```text
+pevo install psychevo.channel.wechat
+```
+
+The Extension holds one Channel lease from polling start through asynchronous
+adapter shutdown. QR setup uses an explicitly acquired one-shot/operation lease
+and cannot leave the sidecar running after cancellation.
+
 The WeChat adapter polls iLink `getupdates`, submits accepted inbound messages
 as Gateway source-scoped turns, and sends final assistant output through iLink
 `sendmessage`.
@@ -176,6 +188,8 @@ error code.
   semantics.
 - [248 Voice ASR/TTS](../248-voice-asr-tts/spec.md) defines shared ASR/TTS
   policy and WeChat fallback boundaries.
+- [058 Extensions](../058-extensions/spec.md) defines the adapter artifact,
+  installation, protocol, and lease.
 
 ## Attachments
 

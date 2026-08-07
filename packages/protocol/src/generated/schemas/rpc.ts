@@ -74,6 +74,12 @@ import { clientRequestPluginCatalogRemoveSchema } from './rpc/client-request/plu
 import { clientRequestPluginCatalogUpgradeSchema } from './rpc/client-request/plugin-catalog-upgrade';
 import { clientRequestPluginConnectStartSchema } from './rpc/client-request/plugin-connect-start';
 import { clientRequestPluginConnectStatusSchema } from './rpc/client-request/plugin-connect-status';
+import { clientRequestExtensionListSchema } from './rpc/client-request/extension-list';
+import { clientRequestExtensionReadSchema } from './rpc/client-request/extension-read';
+import { clientRequestExtensionRemoveSchema } from './rpc/client-request/extension-remove';
+import { clientRequestExtensionSetEnabledSchema } from './rpc/client-request/extension-set-enabled';
+import { clientRequestExtensionAppOpenSchema } from './rpc/client-request/extension-app-open';
+import { clientRequestExtensionAppCloseSchema } from './rpc/client-request/extension-app-close';
 import { clientRequestSkillListSchema } from './rpc/client-request/skill-list';
 import { clientRequestSkillReadSchema } from './rpc/client-request/skill-read';
 import { clientRequestSkillInstallSchema } from './rpc/client-request/skill-install';
@@ -614,6 +620,24 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/plugin-connect-status.json"
     },
     {
+      "$ref": "ClientRequest/extension-list.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-read.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-app-open.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-app-close.json"
+    },
+    {
       "$ref": "ClientRequest/skill-list.json"
     },
     {
@@ -960,6 +984,12 @@ export const rpcSchemaRefs = [
   clientRequestPluginCatalogUpgradeSchema,
   clientRequestPluginConnectStartSchema,
   clientRequestPluginConnectStatusSchema,
+  clientRequestExtensionListSchema,
+  clientRequestExtensionReadSchema,
+  clientRequestExtensionRemoveSchema,
+  clientRequestExtensionSetEnabledSchema,
+  clientRequestExtensionAppOpenSchema,
+  clientRequestExtensionAppCloseSchema,
   clientRequestSkillListSchema,
   clientRequestSkillReadSchema,
   clientRequestSkillInstallSchema,

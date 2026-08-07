@@ -73,7 +73,7 @@ Descriptions must disambiguate vague or overloaded names. In particular:
 - freeform content fields must say whether they replace a whole file/body,
   patch existing material, send a message, or supply a reason.
 
-Descriptions supplied by external MCP servers, plugin workers, delegated
+Descriptions supplied by external MCP servers, Extensions, delegated
 applications, or other external capability sources retain their source-owned
 wording. Runtime must not rewrite those descriptions merely to enforce the
 first-party declaration style.

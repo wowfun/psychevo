@@ -3,185 +3,173 @@ name: 054. Plugins
 psychevo_self_edit: deny
 ---
 
-Define product-level plugin package boundaries before concrete plugin runtime
-and manifest details.
+Define Psychevo's declarative Plugin package and marketplace boundary.
+
+A Plugin is a Codex-style manifest-first distribution bundle. It is not an
+executable host extension and cannot register code into Psychevo.
 
 ## Scope
 
-- plugin as a manifest-first package, installable source, and policy-controlled
-  declaration source
-- separation between install, enablement, visibility, execution, permission, and evidence
-- relationship between plugin packages, host-owned declaration mapping, and
-  direct runtime assembly
+- Plugin identity, marketplace ownership, and declarative package boundary
+- separation of add, enablement, trust, declaration acceptance, and permission
+- relationship to Codex-compatible packages and executable Extensions
+- profile/project policy and immutable package/data roots
 
 Out of scope:
-- concrete manifest field schemas, worker wire messages, store record schemas, or CLI flags
-- hosted marketplace accounts, signatures, ratings, sharing, graphical stores, or hot reload
-- in-process third-party plugin ABI
-- whole-process sandboxing of workers, MCP servers, hooks, provider clients, skills, or agents
-- reimplementing hosted Codex Apps without their owning service or credentials
 
-## Plugin Model
+- concrete manifest fields and path validation, owned by
+  [155 Plugin Manifest](../155-plugin-manifest/spec.md)
+- store records, marketplace materialization, and CLI operations, owned by
+  [150 Plugin Runtime](../150-plugin-runtime/spec.md)
+- executable sidecars and direct commands, owned by
+  [058 Extensions](../058-extensions/spec.md)
+- hosted accounts, signatures, ratings, reviews, or sharing
+- in-process third-party runtime or frontend ABIs
 
-A plugin package is a directory, materialized Git source, or materialized npm
-package with one recognized Psychevo or Codex manifest. A recognized Hermes or
-OpenCode descriptor is an inspection source, not an installable Psychevo plugin.
-Installing a Psychevo-owned plugin makes a package available to policy but does
-not enable or trust it. Installing a Codex-authority plugin is one explicit GUI
-operation whose successful result enables the authority-qualified package in
-the active profile and trusts that exact installed fingerprint. Neither path
-makes a declaration model-visible, bypasses an owning runtime policy, grants
-permission, or creates connector credentials.
+## Model
 
-A plugin declaration is candidate material declared statically in a manifest or
-reported by a runtime helper such as a Psychevo worker. Candidate declarations
-must be mapped by Psychevo host code before use:
+A Plugin is one immutable package directory with one recognized portable base
+manifest. It may bundle declarative skills, MCP server descriptors, hook
+declarations, Agent roots, toolset descriptors, Apps, and interface metadata.
+Every declaration is candidate material. Psychevo host code maps accepted
+declarations into their owning modules; a manifest never mutates runtime state,
+grants permission, starts arbitrary code, or makes content model-visible by
+itself.
 
-- skills map to 055 Skills
-- MCP servers map to 056 MCP
-- tool declarations, tool bindings, and toolsets map to 007 Tool Surface
-- hooks map to 053 Hooks and 140 Hook Runtime
-- agents and agent backends map to 051 Agents
-- commands map to the shared command catalog and CLI/TUI/Web command surfaces
-- providers map to the provider manager and AI protocol boundary
-- accepted runtime effects map directly into the owning modules defined by 050
-  Capability Extensions
+Plugin identity is `<plugin>@<marketplace>`. Marketplace identity is part of
+the canonical identity even if two marketplaces expose identical display names
+or package content. Scope qualifies an installed record only when profile and
+project records would otherwise be ambiguous.
 
-Plugin identity must be preserved for diagnostics, conflict handling, data-root
-selection, and evidence.
+Adding a Plugin materializes the selected marketplace release and records its
+fingerprint, but leaves the package disabled. Enabling is a separate explicit
+action. This makes acquisition inspectable before declarations can affect an
+invocation. Enablement still does not grant hook trust, MCP/tool approval,
+credentials, provider access, sandbox exceptions, or durable permissions.
 
-Codex-compatible manifest fields keep the pinned behavioral contract
-`codex-plugin/8604689e`. `.codex-plugin` packages are first-class compatibility
-packages. `skills`, `mcpServers`, `hooks`, `apps`, and `interface.*` are parsed,
-inspected, installed, projected, and either executed natively or delegated to
-their owning Codex runtime. Each component reports its highest compatibility
-level and readiness; recognizing a field is never reported as executable
-compatibility.
+Plugin trust, when an owning authority requires it, is bound to the exact
+package fingerprint. Replacing package contents invalidates that trust. Plugin
+trust is independent of Extension trust even when both manifests are supplied
+from one Extension distribution.
 
-The Codex manifest is the portable package base. Optional Psychevo-only
-behavior lives in a companion `psychevo.plugin.json` overlay and may declare
-only Psychevo-owned worker, agent, and toolset sources. The overlay must not
-repeat or replace shared Codex components. Duplicate declarations make the
-overlay invalid instead of creating a second precedence system.
+## Extension Relationship
 
-Plugin hook declarations are candidate hook declarations. Installing or enabling
-a plugin does not trust or run them. Runtime passes accepted plugin hook
-declarations to the hook runtime, then applies the hook system's normalized-hash
-trust review before execution.
+A Plugin root must not contain `psychevo.extension.json`. Discovering that
+manifest during Plugin add fails closed and points to `pevo install`.
+
+An Extension may contain at most one co-root recognized Plugin base manifest.
+Extension installation reports the package but neither adds nor enables it.
+Users opt into the declarative package separately through the Plugin surface.
+This one-way relationship allows one executable product integration to ship
+adjacent skills or MCP metadata without letting an ordinary Plugin acquire a
+sidecar implicitly.
+
+Executable workers, direct CLI commands, Channel transports, and rich UI
+resources that require a process belong to [058 Extensions](../058-extensions/spec.md).
+Plugin manifests do not contain `runtime.worker`, executable command paths,
+package-manager lifecycle hooks, or frontend module imports. MCP server
+descriptors and MCP Apps remain valid declarative components because their
+execution and sandbox are owned by MCP, not by a Plugin runtime ABI.
+
+## Declaration Ownership
+
+Supported Plugin declarations map as follows:
+
+- skills to [055 Skills](../055-skills/spec.md)
+- MCP servers and MCP Apps to [056 MCP](../056-mcp/spec.md)
+- hooks to [053 Hooks](../053-hooks/spec.md) and
+  [140 Hook Runtime](../140-hook-runtime/spec.md)
+- Agents to [051 Agents](../051-agents/spec.md)
+- toolsets to [007 Tool Surface](../007-tool-surface/spec.md)
+- interface metadata to Plugin management and discovery presentation
+
+Each owner resolves conflicts, readiness, trust, permission, execution, and
+evidence. Unknown fields remain inspectable raw data and never silently gain
+authority. Plugin identity stays attached to accepted declarations for
+diagnostics and evidence.
+
+Portable Codex packages use the pinned behavioral compatibility profile
+`codex-plugin/8604689e`. `.codex-plugin/plugin.json` is a first-class base;
+`.claude-plugin/plugin.json` is a compatibility base. Recognizing a component
+does not imply executable compatibility. Each component reports its highest
+compatibility level and actionable readiness.
+
+Compatibility levels are `parse`, `inspect`, `add`, `project`, `execute`, and
+`delegate`. Readiness values are `ready`, `disabled`, `needs_trust`,
+`needs_auth`, `needs_setup`, `unavailable`, and `failed`. Execution owners are
+existing Psychevo modules, MCP, an Extension selected independently by its own
+identity, the Codex capability broker, or metadata-only presentation.
+
+Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
+plugin interfaces. Hermes and OpenCode descriptors may be inspected as data
+with fixed status `inspection_only`; they cannot be added, enabled, trusted,
+projected, or executed as Psychevo Plugins.
 
 ## Policy
 
-Profile and project configuration declare plugin policy. The effective policy
-for one invocation is the profile policy overlaid by project-local policy for
-the selected cwd.
+Effective Plugin policy is active-profile policy overlaid by project-local
+policy for the selected canonical cwd. Profile and project policy may enable or
+disable a Plugin. An owning external authority may impose a stricter rule; for
+Codex authority, project policy may disable an inherited profile Plugin or
+remove that override but cannot enable what the profile disallowed.
 
-Codex-authority policy is intentionally asymmetric. A profile may enable or
-disable `codex:<plugin>@<marketplace>`. Project policy may only disable an
-inherited Codex plugin or remove its override; a project must never enable a
-plugin that its profile did not allow. The Codex authority itself is a
-profile-only, default-off feature and project configuration must not contain its
-feature or binary selection.
+Plugin policy records package enablement only. Fine-grained decisions stay with
+the effect owner:
 
-Hermes and OpenCode descriptors have no plugin execution policy or plugin trust
-state. They may be inspected statically without importing or executing foreign
-runtime code. Inspection does not make the source installable, enabled, or
-executable.
+- hook content trust stays with Hook Runtime
+- MCP startup and tool approval stay with MCP and Tool Surface
+- provider credentials and policy stay with provider management
+- filesystem, process, network, and local writes stay with permission policy
 
-An explicit Codex install or upgrade trusts only the fingerprint returned by
-that operation. Background content changes or externally performed package
-mutations invalidate that trust. Codex binary version changes do not alter a
-package fingerprint and therefore do not invalidate package trust.
-
-Policy can enable or disable a plugin package. Enabling a plugin makes its
-accepted declarations available to the owning runtime modules, but it does not
-bypass permission, hook trust, tool approval, MCP policy, provider policy, or
-sandbox gates. A manifest or worker response never grants permission.
-
-Fine-grained policy belongs to the runtime module that owns the effect. For
-example, MCP server/tool policy belongs to MCP and tool approval surfaces; hook
-trust belongs to the hook runtime; provider credentials and provider policy
-belong to provider management. Plugin policy must not grow per-declaration
-gates that duplicate those owning surfaces.
-
-Profile-global state remains profile-local. Project-local plugin state remains
-under the current cwd's `.psychevo` tree and must not select or mutate the
-active profile.
+Project-local policy must not mutate inactive profile state or select a
+different profile. Disabling a Plugin prevents new invocation leases or
+snapshots while already admitted work completes under its frozen selection.
 
 ## Storage
 
-Profile plugin stores live under:
+Profile Plugin stores live under:
 
 ```text
-$PSYCHEVO_HOME/plugins/cache
-$PSYCHEVO_HOME/plugins/data
+$PSYCHEVO_HOME/plugins/{cache,data}
 ```
 
-Project plugin stores live under:
+Project Plugin stores live under:
 
 ```text
-<cwd>/.psychevo/plugins/cache
-<cwd>/.psychevo/plugins/data
+<cwd>/.psychevo/plugins/{cache,data}
 ```
 
-The cache root contains materialized packages from local, Git, and npm sources.
-Npm package materialization must use an install-time staging directory and must
-not run lifecycle scripts. The data root is the only plugin-owned writable state
-directory granted by plugin identity. Runtime must not treat the install cache
-as mutable plugin state.
+The cache is immutable code and assets. The identity-qualified data root is the
+only Plugin-owned writable state. Plugin code never treats the cache as mutable
+runtime state. Marketplace materialization uses staging, bounded extraction,
+content fingerprinting, and atomic replacement. Failure leaves the existing
+record and policy unchanged.
 
-## Compatibility
+Codex-owned catalog packages remain owned by Codex. Psychevo preserves their
+authority-qualified identity and may read an authority-exposed installed root
+in place or delegate service-owned components, but never mirrors that package
+into the Psychevo cache or imports the user's active Codex configuration.
 
-Psychevo preserves three immutable layers: the raw package document, the
-normalized `codex-plugin/8604689e` package, and the effective turn projection.
-Unknown data remains attached to the raw document; it does not silently become
-runtime authority. A package is fully compatible only when every declared
-component reaches `execute` or `delegate`, or reports an explicit actionable
-readiness blocker.
+## Evidence And Diagnostics
 
-Compatibility levels are `parse`, `inspect`, `install`, `project`, `execute`,
-and `delegate`. Execution owners are Psychevo native modules, the isolated
-Psychevo worker, the Codex capability broker, or metadata-only presentation.
-Readiness values are `ready`, `disabled`, `needs_trust`, `needs_auth`,
-`needs_setup`, `unavailable`, and `failed`.
+Plugin surfaces must be able to explain:
 
-Codex catalog packages remain owned by Codex. Psychevo aggregates them with
-profile/project packages in one management surface but keeps authority-qualified
-identity and delegates catalog mutation to Codex. It does not mirror a Codex
-package into the Psychevo cache.
+- marketplace, selected version, materialized fingerprint, and scope
+- whether the package is added, enabled, trusted when applicable, and ready
+- which declarations were accepted, disabled, invalid, unsupported, omitted by
+  conflict, or unavailable through their owner
+- which hooks require new trust and which MCP/App components require auth
+- whether a co-root Extension manifest caused Plugin add to fail
 
-Runtime may read a Codex-owned installed package in place when `plugin/read` or
-Codex hook metadata exposes its materialized root. The resulting selected root
-keeps Codex plugin and marketplace authority in its turn identity. This is a
-read-only projection, not a second installation. When no root is exposed,
-component status must not claim native execution; effective MCP servers may be
-delegated to Codex, while path-backed skills or hooks report unavailable.
-
-Codex compatibility is an external capability authority, not an import of the
-user's active Codex environment. It uses the configured external binary with
-the private home `$PSYCHEVO_HOME/codex/`, ignores inherited `CODEX_HOME`, and
-never mutates the plugin, marketplace, or configuration state used by Codex
-CLI or third-party applications. Startup validates a semantic version identity
-and the private-home boundary once. It does not pin an exact Codex patch
-version or issue invalid-parameter probes for every possible method; each
-operation validates the response fields it actually consumes.
-
-Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
-plugin interfaces directly.
-
-Hermes or OpenCode manifests may be inspected as data. Inspection reports the
-framework, package metadata, manifest path, declared lanes, unsupported lanes,
-and diagnostics with fixed support state `inspection_only`. Psychevo does not
-materialize, install, enable, trust, import, execute, or project those foreign
-plugin declarations. Users who want to run Hermes or OpenCode use their
-separate ACP Agent runtime profiles.
+Diagnostics remain secret-free and payload-light. Ordinary transcript history
+does not persist full manifests, unused declaration inventories, credentials,
+or package contents.
 
 ## Related Topics
 
-- [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines package manifest loading.
-- [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, worker, and declaration loading.
-- [150 Foreign Plugin Inspection](../150-plugin-runtime/foreign-inspection.md)
-  defines foreign package inspection boundaries.
-- [053 Hooks](../053-hooks/spec.md) defines the hook declaration boundary.
-- [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
-  source/declaration boundaries and direct owning-module mapping.
+  source acceptance and immutable runtime assembly.
+- [058 Extensions](../058-extensions/spec.md) defines executable packages.
+- [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines stores,
+  marketplaces, policy operations, and declaration loading.
+- [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines manifest shape.

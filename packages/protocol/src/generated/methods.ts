@@ -56,6 +56,17 @@ import type {
   CompletionListResult,
   ContextReadParams,
   ContextReadResult,
+  ExtensionAppCloseParams,
+  ExtensionAppCloseResult,
+  ExtensionAppOpenParams,
+  ExtensionAppOpenResult,
+  ExtensionListParams,
+  ExtensionListResult,
+  ExtensionMutationResult,
+  ExtensionReadParams,
+  ExtensionReadResult,
+  ExtensionRemoveParams,
+  ExtensionSetEnabledParams,
   InitializeParams,
   InitializeResult,
   McpListParams,
@@ -332,6 +343,12 @@ export interface GatewayRequestParams {
   "plugin/catalog/upgrade": PluginCatalogUpgradeParams;
   "plugin/connect/start": PluginConnectStartParams;
   "plugin/connect/status": PluginConnectStatusParams;
+  "extension/list": ExtensionListParams;
+  "extension/read": ExtensionReadParams;
+  "extension/remove": ExtensionRemoveParams;
+  "extension/setEnabled": ExtensionSetEnabledParams;
+  "extension/app/open": ExtensionAppOpenParams;
+  "extension/app/close": ExtensionAppCloseParams;
   "skill/list": SkillListParams;
   "skill/read": SkillReadParams;
   "skill/install": SkillInstallParams;
@@ -483,6 +500,12 @@ export interface GatewayRequestResults {
   "plugin/catalog/upgrade": PluginCatalogUpgradeResult;
   "plugin/connect/start": PluginConnectStartResult;
   "plugin/connect/status": PluginConnectStatusResult;
+  "extension/list": ExtensionListResult;
+  "extension/read": ExtensionReadResult;
+  "extension/remove": ExtensionMutationResult;
+  "extension/setEnabled": ExtensionMutationResult;
+  "extension/app/open": ExtensionAppOpenResult;
+  "extension/app/close": ExtensionAppCloseResult;
   "skill/list": SkillListResult;
   "skill/read": SkillReadResult;
   "skill/install": SkillInstallResult;
@@ -638,6 +661,12 @@ export const gatewayMethodContracts = {
   "plugin/catalog/upgrade": { paramsSchema: "PluginCatalogUpgradeParams", resultSchema: "PluginCatalogUpgradeResult", resultValidation: "precise" },
   "plugin/connect/start": { paramsSchema: "PluginConnectStartParams", resultSchema: "PluginConnectStartResult", resultValidation: "precise" },
   "plugin/connect/status": { paramsSchema: "PluginConnectStatusParams", resultSchema: "PluginConnectStatusResult", resultValidation: "precise" },
+  "extension/list": { paramsSchema: "ExtensionListParams", resultSchema: "ExtensionListResult", resultValidation: "precise" },
+  "extension/read": { paramsSchema: "ExtensionReadParams", resultSchema: "ExtensionReadResult", resultValidation: "precise" },
+  "extension/remove": { paramsSchema: "ExtensionRemoveParams", resultSchema: "ExtensionMutationResult", resultValidation: "precise" },
+  "extension/setEnabled": { paramsSchema: "ExtensionSetEnabledParams", resultSchema: "ExtensionMutationResult", resultValidation: "precise" },
+  "extension/app/open": { paramsSchema: "ExtensionAppOpenParams", resultSchema: "ExtensionAppOpenResult", resultValidation: "precise" },
+  "extension/app/close": { paramsSchema: "ExtensionAppCloseParams", resultSchema: "ExtensionAppCloseResult", resultValidation: "precise" },
   "skill/list": { paramsSchema: "SkillListParams", resultSchema: "SkillListResult", resultValidation: "precise" },
   "skill/read": { paramsSchema: "SkillReadParams", resultSchema: "SkillReadResult", resultValidation: "precise" },
   "skill/install": { paramsSchema: "SkillInstallParams", resultSchema: "SkillInstallResult", resultValidation: "precise" },

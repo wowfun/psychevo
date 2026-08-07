@@ -3,452 +3,262 @@ name: 150. Plugin Runtime
 psychevo_self_edit: deny
 ---
 
-Define the current implementation slice for plugin installation, package
-enablement, diagnostics, static declarations, and Psychevo worker execution.
+Define Plugin marketplace acquisition, store and policy operations,
+declaration loading, diagnostics, and external Codex authority integration.
+
+There is no Plugin executable runtime. Executable sidecars belong to
+[058 Extensions](../058-extensions/spec.md).
 
 ## Scope
 
-- plugin store roots for profile and project scopes
-- local directory and Git installation
-- npm package materialization with lifecycle scripts disabled
-- marketplace catalogs for local, Git, and npm sources
-- plugin package enablement overlay in `RunConfig`
-- static declaration loading
-- static Hermes and OpenCode package inspection
-- default-off, profile-isolated Codex plugin authority
-- stdio JSON-RPC worker execution for tools
-- CLI- and Gateway-facing read, diagnostic, install, uninstall, enable,
-  disable, inspect, and catalog operations
+- profile and project Plugin stores and policy overlays
+- local, Git, npm, and HTTPS marketplace indexes
+- bounded package materialization and atomic replacement
+- Plugin add, remove, enable, disable, inspect, and diagnostics
+- host-owned static declaration loading
+- default-off, profile-isolated Codex Plugin authority
+- static Hermes and OpenCode inspection
 
 Out of scope:
-- reimplementation of hosted marketplace accounts, reviews, ratings, or sharing
-- in-process plugin ABI or unbounded host facades
-- worker hot reload, long-lived health checks, streaming worker diagnostics, or whole-process sandboxing
-- provider credential storage inside plugin packages
-- Hermes Dashboard routes or OpenCode TUI/UI slots
 
-## Store
+- in-process Plugin ABI or stdio Plugin workers
+- executable commands, Channels, or UI modules
+- hosted marketplace accounts, ratings, reviews, signatures, or sharing
+- provider credentials stored in packages
 
-A plugin store is scoped to either the active profile home or the current
-cwd. Profile stores use `$PSYCHEVO_HOME/plugins/{cache,data}`. Project
-stores use `<cwd>/.psychevo/plugins/{cache,data}`.
+## Store And Materialization
 
-An install record preserves:
+Profile stores use `$PSYCHEVO_HOME/plugins/{cache,data}`. Project stores use
+`<cwd>/.psychevo/plugins/{cache,data}`. An install record preserves Plugin and
+marketplace identity, selected version, source descriptor, resolved Git
+revision when applicable, scope, immutable package root, data root, manifest
+kind/path, content fingerprint, and diagnostics.
 
-- plugin name
-- version
-- source identity
-- the resolved commit revision for Git sources, separately from the requested
-  ref embedded in source identity
-- install scope
-- package root
-- data root
-- manifest path and manifest kind
-- diagnostics
+Users add a selected `<plugin>@<marketplace>` row rather than installing an
+arbitrary package source directly. A marketplace index may itself be a local
+directory, Git source, or npm package. `marketplace add` infers those source
+classes; Codex-style `owner/repo[@ref]` is normalized to an HTTPS GitHub URL,
+while an explicit `--kind` remains available for ambiguous inputs. Its normalized
+rows name one Plugin, version, package source, optional subpath, integrity
+metadata when supplied, and display metadata. Marketplace source credentials
+and sensitive query values never enter records or output.
 
-Local directory installs copy the package into the cache root. Git installs
-materialize the repository or selected package path into the cache root. Npm
-installs run `npm pack --ignore-scripts` into a staging directory, validate the
-tarball package name and version against the requested source when supplied,
-enforce archive and extracted-size limits, and copy the unpacked package into
-the cache root. Deterministic tests must use local temporary Git repositories
-and fake npm fixtures, not network repositories.
+Materialization uses one staging root and one private bounded policy:
 
-All local, Git, npm, archive extraction, and install-copy paths share one
-private `PluginMaterializationLimits` policy and one bounded walker:
+- 120-second subprocess/materialization deadline
+- 50 MiB archive input
+- 200 MiB total unpacked or installed bytes
+- 10,000 entries
+- 50 MiB per regular file
+- 1,024-byte relative path and 64 path components
 
-- 120-second subprocess/materialization deadline;
-- 50 MiB archive input;
-- 200 MiB total unpacked or installed bytes;
-- 10,000 entries;
-- 50 MiB per regular file;
-- 1,024-byte relative path;
-- 64 path components.
+Git acquisition is shallow, no-tags, and single-branch. Runtime records
+`rev-parse HEAD` then removes only the staging root's top-level `.git`. Npm uses
+`npm pack --ignore-scripts`, validates requested package/version, and never runs
+lifecycle scripts. Archive extraction rejects absolute and parent-traversal
+paths, links, devices, and non-regular entries. Every subprocess owns a process
+tree and one deadline covers exit, descendant termination, and bounded output
+drains.
 
-Git uses shallow, no-tags, single-branch acquisition; an explicit ref is fetched
-and checked out at depth one. After checkout runtime records `rev-parse HEAD`,
-then removes only the staging root's top-level `.git` before bounded inspection
-and copy. Installed Git package roots therefore contain no repository metadata.
-Activating a pre-existing Git install record removes a legacy top-level `.git`
-idempotently without scanning or deleting nested package directories. Separate
-invocations may perform that migration concurrently; disappearance between
-metadata inspection and deletion is success rather than a plugin activation
-failure. Private
-credential-bearing Git URLs remain usable, but credentials enter neither the
-record, resolved revision, diagnostics, nor installed files. Npm packing
-disables lifecycle scripts and shares
-the same deadline. Every materialization subprocess owns a process tree: a Unix
-process group or a Windows kill-on-close Job. The single deadline covers direct
-process exit, descendant termination, and bounded stdout-reader completion, so
-a descendant that inherits stdout cannot extend the operation past it. The
-platform ownership and kill mechanics come from the same minimal
-`ProcessTreeGuard` used by hook commands; materialization does not retain a
-second Unix/Windows process-tree implementation. The
-streaming Rust tar/gzip extractor rejects absolute and
-parent-traversal paths, symlinks, hardlinks, devices, and other non-regular
-entries before writing, and checks every quota per entry. Installation copy
-does not use a second recursive implementation.
+Before publishing a record, Plugin loading rejects
+`psychevo.extension.json`, validates the selected manifest, fingerprints the
+bounded materialization, and atomically replaces the destination. Failure
+removes staging and preserves the previous install and policy. Add always
+writes `enabled = false`; callers must enable separately after inspection.
 
-Source display, identity, and errors redact URL userinfo and credential-bearing
-query values. A failed materialization removes staging and creates no install
-record. External Git/npm cannot guarantee rejection before the first excessive
-network byte reaches their own temporary files; the accepted boundary is the
-deadline, shallow acquisition, archive input limit where Psychevo owns the
-stream, and the bounded post-materialization walk. This slice does not add
-signatures, SBOMs, filesystem quotas, or custom Git/npm clients.
+Remove deletes the record and cache materialization for the selected scope. It
+retains the identity-qualified data root. A future explicit data-removal action
+may change that, but removal must not silently erase state.
 
-Install and inspect operations preserve source kind as `local`, `git`, or
-`npm`. Source identity includes the package locator, selected version or Git
-ref when present, and registry for npm sources when present.
+## Marketplace Operations
 
-Uninstall removes the install record and cache materialization for that scope.
-V1 may leave the data root unless the command explicitly removes data in a
-future spec.
+`pevo plugin marketplace` owns:
+
+- `add <source>`
+- `list`
+- `upgrade [marketplace]`
+- `remove <marketplace>`
+
+Marketplace add and upgrade validate the complete index before atomic
+publication. Upgrading a marketplace changes discovery metadata only; it does
+not upgrade installed Plugins. Removing a marketplace is rejected while its
+installed Plugins exist unless a future explicit force flow defines the
+consequence.
+
+Marketplace identity is stable and source-qualified. Names collide within one
+scope rather than silently shadowing by insertion order. Catalog aggregation
+never merges rows from different authorities or marketplaces by display name.
 
 ## Policy Overlay
 
-`RunConfig` includes plugin package policy. Profile config and project config
-overlay produce the effective plugin policy for an invocation.
+Profile and project config combine into effective per-invocation Plugin policy.
+Add, enable, and disable use the active profile by default; `--local` uses the
+current canonical cwd. `--global` is an alias for profile scope where exposed
+and conflicts with `--local`.
 
-The profile-only authority configuration is:
+Plugin policy contains package enabled state only. Enabling makes static
+declarations eligible for host mapping. Owning modules still control hook
+trust, MCP startup/tool approval, provider credentials, permission, sandbox,
+and evidence.
 
-```toml
-[codex_plugins]
-enabled = false
-binary = "/optional/path/to/codex"
+Installed selectors preserve `<plugin>@<marketplace>` identity and add a scope
+qualifier only when profile and project rows are ambiguous. Bare Plugin names
+are accepted only when they resolve to one installed row.
 
-[plugins."codex:review@openai"]
-enabled = true
-```
-
-`codex_plugins.enabled` defaults to false. An empty binary resolves `codex`
-from `PATH`. Project configuration containing `[codex_plugins]` is invalid.
-Profile Codex plugin policy accepts `true` or `false`; project Codex plugin
-policy accepts only `false`, while deleting the entry restores inheritance.
-Install and explicit upgrade write profile allow and trust for the returned
-current package fingerprint.
-
-Plugin policy records package enabled state only. Enabling a package makes its
-accepted declarations available to the host-owned mapping step. The owning
-runtime module then decides whether the effect is usable:
-
-- MCP server and tool approval policy belongs to MCP and tool surfaces.
-- hook trust belongs to 140 Hook Runtime.
-- provider policy and credentials belong to provider management.
-- sandbox and permission decisions belong to permission runtime.
-
-CLI `install`, `enable`, and `disable` write the active profile scope by
-default. `--local` writes the current cwd `.psychevo/config.toml`.
-`--global` is an alias for the active profile scope and conflicts with
-`--local`.
-
-Hermes and OpenCode sources are inspection-only. They have no adapter mode,
-package trust state, installation record, enablement state, or runtime worker.
-Static inspection reports declared and unsupported lanes without importing or
-executing foreign code.
-
-Installed package identity is scope-qualified as `profile:name@source` or
-`project:name@source`; commands project and accept that canonical selector.
-Bare `name` and unscoped `name@source` remain shorthand only when they resolve
-to one record across both installation scopes.
+For Codex authority, profile config may enable or disable
+`codex:<plugin>@<marketplace>`. Project config may disable an inherited Codex
+Plugin or remove its override but cannot enable one the profile disallows.
+`codex_plugins.enabled` is profile-only and defaults off. Plugin add through
+that authority records the returned fingerprint but still leaves Psychevo
+policy disabled until explicit enable.
 
 ## Declaration Loading
 
-Runtime loads enabled plugins before agent and skill discovery. Static manifest
-declarations can add:
+The host loads enabled Plugin manifests before Agent and Skill discovery and
+maps static candidates directly into owning modules:
 
 - skill roots
-- MCP server descriptors
+- MCP server and MCP App descriptors
 - hook sources
-- agent roots
-- command descriptors
+- Agent roots
 - toolset descriptors
-- provider descriptors
+- typed interface metadata
 
-The owning runtime boundary decides whether each descriptor is usable. Duplicate
-model-visible tool names are conflict-resolved by the existing tool surface
-rules, with plugin identity included in diagnostics.
+Plugin manifests do not supply executable workers, direct commands, Channel
+adapters, providers, or frontend modules. A recognized obsolete
+`runtime.worker` or executable field is an unsupported diagnostic and makes the
+overlay unavailable; it is never started. Authors move that capability to an
+Extension.
 
-Plugin MCP descriptors are parsed into source-scoped MCP server inputs before
-MCP startup. Invalid descriptors omit only the affected server and produce
-plugin diagnostics. Accepted plugin MCP inputs still pass through MCP startup
-permission, MCP tool listing, MCP tool naming, and tool-surface conflict
-handling.
+MCP candidates enter the source-aware MCP catalog before startup, listing,
+naming, approval, and Tool Surface conflict resolution. Hook candidates enter
+Hook Runtime only after package enablement and still require normalized-content
+trust. Toolsets enter Tool Surface only after include resolution, mode
+filtering, disabled subtraction, and binding checks. No declaration creates an
+accepted runtime effect merely by being parsed.
 
-Plugin toolset descriptors are parsed as source-scoped toolset candidates.
-They are accepted only by 007 Tool Surface after include resolution, disabled
-toolset subtraction, mode filtering, and execution-binding checks. A toolset
-descriptor does not create a model-visible tool by itself.
+Every component has exactly one execution owner and retains Plugin identity in
+diagnostics. Unknown and invalid siblings do not grant authority; when an owning
+schema permits partial loading they omit only their affected component.
 
-Command descriptors, provider descriptors, and apps remain inert or descriptive
-in the current implementation slice unless another owning module defines
-acceptance semantics. Typed interface metadata is supported for package display
-only. `plugin doctor` may report inert descriptors as recognized and
-unsupported without implying runtime support.
+## Codex Authority
 
-Portable Codex components are projected independently. For an installed,
-enabled Codex catalog package, the authority resolves an exposed Codex-owned
-package root without copying it into the Psychevo plugin store. A local skill is
-owned by the Psychevo skill runtime, a local hook by the Psychevo hook runtime,
-and an ordinary local MCP declaration by the Psychevo MCP runtime. Remote or
-app-backed MCP and Apps are owned by the Codex broker. App templates, scheduled
-tasks, interface/default-prompt metadata, browser extensions, and unknown
-manifest fields are metadata-only diagnostics: scheduled tasks and browser
-extensions are explicitly unsupported, and interface prompts are never injected
-into a turn. A remote skill or hook without a package root is not downloaded or
-reported as portable. Every component has exactly one owner.
+`CodexPluginAuthority` is the deep module for Codex-owned package inventory and
+service components. Its external interface exposes authority state, management
+operations, a non-blocking turn snapshot, a turn lease, and shutdown. It owns
+process/profile negotiation, broker multiplexing, auth-link setup, inventory
+generation, policy digests, redacted diagnostics, and draining mutations.
 
-`CodexPluginAuthority` is the deep module for this boundary. Its external
-interface exposes only authority state, management operations, a non-blocking
-turn snapshot, a turn lease, and shutdown. Internally it owns process/profile
-negotiation, broker multiplexing, auth-link setup, inventory generation, policy
-digests, redacted diagnostics, and draining mutations. No capability snapshot,
-generation, policy digest, or owner table is persisted; the transcript records
-only actual calls.
+The broker is one managed child:
 
-The broker is one managed external child launched as
-`codex app-server --strict-config -c cli_auth_credentials_store="file" --listen
-stdio://`. It inherits the Psychevo subprocess environment, forcibly replaces
-`CODEX_HOME` with `$PSYCHEVO_HOME/codex/`, and removes binary-selection test
-variables. Profile configuration selects an optional binary path and otherwise
-uses `codex` from `PATH`. Psychevo never reads or imports inherited
-`CODEX_HOME`, and feature-off operation spawns no Codex process.
+```text
+codex app-server --strict-config -c cli_auth_credentials_store="file" --listen stdio://
+```
 
-The reviewed compatibility profile `codex-plugin/8604689e` describes the
-package semantics and response shapes Psychevo consumes. Negotiation extracts a
-semantic version from any originator-shaped `userAgent` and verifies canonical
-`codexHome`, but it does not require one exact Codex CLI patch version and does
-not send parameter-error probes for every possible method at startup. Each
-operation validates its successful response shape when called. A binary
-returning an incompatible shape or reporting a different home remains
-diagnosable; an unsupported operation affects that operation rather than
-globally disabling unrelated local package components.
+It replaces `CODEX_HOME` with `$PSYCHEVO_HOME/codex/`, ignores inherited
+`CODEX_HOME`, and spawns nothing when disabled. Startup validates a semantic
+version identity and canonical private home. It does not pin one Codex patch or
+probe unrelated methods; each called operation validates its own response.
 
-The authority creates a Unix symlink from private `auth.json` to the user's
-`~/.codex/auth.json`; Windows uses a hardlink only when both files are on the
-same volume. It never reads auth contents, reads keyrings, copies tokens, or
-synchronizes credentials. Missing global auth, cross-volume Windows paths, or
-link failure leaves the feature enabled with `auth: unavailable`; local
-unauthenticated components remain usable.
+The authority links private `auth.json` to the user's Codex auth without
+reading or copying its contents: Unix uses a symlink; Windows uses a hardlink
+only on the same volume. Missing auth or link failure affects service-owned
+components, not local declarative package components.
 
-One app-server child has one stdout reader, one writer, and a request-id pending
-map. Server requests route elicitation by `threadId` and `turnId`, so a turn
-waiting for user input does not block catalog, auth, or another turn. Stderr is
-bounded, redacted, and structured. Install, uninstall, upgrade, and tool calls
-are never retried after delivery.
+One child has one stdout reader, writer, and request-id map. Server requests
+route elicitation by Thread and Turn, so one waiting turn cannot block catalog,
+auth, or another turn. Stderr is bounded, redacted, and structured. Mutating
+requests and tool calls are never retried after delivery.
 
-Runtime inventory is keyed by profile plus canonical cwd and carries a
-generation. Initialize, draft creation, and management refresh may prewarm it in
-the background. The provider-dispatch hot path reads only a ready in-memory
-snapshot and never performs app-server RPC. Loading, stale, or failed inventory
-immediately contributes an empty Codex set, continues provider dispatch, and
-writes only a structured diagnostic—never a transcript item, toast, or visual
-delay.
+Inventory is keyed by profile plus canonical cwd and carries a generation. The
+provider hot path reads only a ready memory snapshot. Loading, stale, or failed
+inventory contributes an empty Codex set with structured diagnostics and never
+delays provider dispatch or writes transcript/UI noise.
 
-Each admitted turn snapshots the current inventory generation and policy digest
-and keeps that selection stable for that turn; the next turn observes the newest
-ready generation. Project disables filter a cached inventory without discovery.
-Install, account change, broker replacement, package mutation, and authority
-refresh publish a new generation.
+Each admitted turn freezes generation and policy digest and holds a lease. A
+disable rejects new leases while admitted work completes. Remove, package
+upgrade, marketplace removal/upgrade, binary switch, and feature-off drain
+active leases before physical mutation. Destructive mutations are mutually
+exclusive. A management refresh publishes a new generation only after success.
 
-Turn admission obtains a lease for the generation it actually uses. A policy
-disable immediately prevents new leases while existing turns continue.
-Uninstall, upgrade, marketplace removal/upgrade, binary switch, and feature-off
-enter `draining`, reject new leases, wait for active leases, then perform the
-physical mutation. Destructive draining mutations are mutually exclusive; one
-mutation cannot clear the draining state while another physical mutation is
-still running. Install and marketplace add may finish concurrently but
-appear only in a new generation. Workbench exposes the draining reason and lets
-the user stop related turns.
+The broker advertises only elicitation and MCP Apps capabilities Workbench can
+render faithfully. Apps inventory, authentication, resource reads, and MCP
+tool calls remain broker-owned; local Plugin code is never imported into the
+Workbench. Missing, incompatible, or auth-unavailable Codex affects only its
+owned components.
 
-The broker advertises the pinned app-server elicitation capabilities that the
-Workbench can faithfully answer: MCP standard forms (including titled single-
-and multi-select values), URL elicitations, and the pinned `openai/form`
-`openai/imagePicker` shape. Answers are returned as typed form content with
-Codex `_meta`; arbitrary future custom controls are not inferred from unknown
-schema fields.
+## Foreign Inspection
 
-The broker retries only requests proven not delivered. Install, uninstall, and
-tool calls are not retried after delivery because they may have side effects.
-Missing, disabled, auth-unavailable, or incompatible Codex processes make only
-the affected Codex-owned components unavailable; native package components and
-provider dispatch continue to work.
-
-Plugin hook sources are loaded only when the plugin package is enabled. Loading
-a plugin hook source does not trust or execute its handlers. Runtime passes
-plugin hook declarations to 140 Hook Runtime, where they normalize to the
-canonical hook shape and require hook trust review before execution.
-
-## Worker V1
-
-A plugin worker is an external stdio JSON-RPC process declared by Psychevo
-manifest metadata under `psychevo.runtime`. Runtime starts workers only when the
-plugin package is enabled and an owning runtime path needs the worker.
-
-Startup context includes plugin identity, plugin root, plugin data root,
-invocation scope, manifest resources, Psychevo extension metadata, and host
-capability descriptors.
-
-Worker V1 supports:
-
-- `initialize`
-- `contributions/list`
-- `tools/call`
-- `hooks/call`
-- `shutdown`
-
-One invocation owns one `PluginWorkerSession` for each worker-backed accepted
-plugin. Contribution discovery, worker tool calls, and trusted worker hook
-calls share that initialized process. The session mutex admits one outstanding
-request at a time, so a concurrent pending-request map is unnecessary. The
-stdout reader preserves JSON-RPC envelopes; the caller accepts only the exact
-numeric response id it sent, ignores notifications, and treats malformed or
-mismatched response envelopes as a protocol failure that closes the worker.
-Thus a notification or bad line cannot consume one call's response or poison
-the following call. Invocation
-shutdown sends `shutdown` once and then reaps the child. Runtime does not spawn
-a fresh worker for each contribution list, tool call, or hook call, and does
-not pool workers across independent invocations.
-
-The invocation assembly explicitly retains every started worker session and
-awaits its asynchronous shutdown on both success and failure after tools and
-hooks stop using it. Process `Drop` is only an abnormal best-effort kill
-fallback; it is not the normal production teardown owner.
-
-Static manifest contributions are assembled without starting a worker. Plan
-mode does not call worker `contributions/list`; static skills, Agents, toolsets,
-MCP declarations, and hook descriptors remain available for their owning
-runtime policies, including MCP startup and its read-only Plan projection.
-Default mode starts a worker only when its dynamic tool surface is materialized
-or a selected worker hook actually runs. A per-invocation
-`PluginWorkerRuntime` is the only session owner and starts each accepted plugin
-at most once, so dynamic tool discovery and later hook/tool calls reuse the same
-process. Runtime does not add a second accepted-name registry or retain a
-parallel `worker_sessions` collection.
-
-Worker startup, calls, contribution discovery, hook dispatch, and shutdown are
-asynchronous. One owner holds the Tokio child, stdin, bounded stdout decoder,
-and stderr drain. A call selects among its matching response, the existing
-10-second deadline, and the invocation abort signal. Timeout, abort, malformed
-JSON, a mismatched response id, or an oversized response kills and reaps the
-worker before returning. Stdout accepts at most one 16 MiB JSON line; stderr is
-drained concurrently and only the final 64 KiB is retained for diagnostics.
-Drop never sleeps or waits synchronously; it performs only best-effort
-`start_kill` when it can acquire the process immediately.
-
-The first executable worker declaration is a tool. Worker tool descriptors
-become `ToolBinding` adapters and enter `ToolSurfaceAssembly.extension_tools`.
-Worker-provided hook handlers are candidate hook declarations for the hook
-runtime handler family. A `worker` hook handler calls `hooks/call` through the
-plugin worker adapter after package enablement and hook trust review select that
-handler. Missing worker metadata, missing worker process, method-not-found
-responses, malformed worker responses, and worker timeouts become structured
-hook diagnostics and affect only the hook run.
-
-Worker tools are accepted through the shared extension assembly and tool
-surface. Plugin worker tools are source-qualified as plugin tools. When
-synthetic `tool_search` is enabled, direct plugin worker tools enter the router
-as deferred bindings by default; explicit invocation configuration may disable
-`tool_search` and expose otherwise direct worker tools directly. Plugin
-manifests do not decide direct model visibility by themselves.
-
-## Foreign Inspection V1
-
-Hermes and OpenCode inspection is static and returns the framework, source kind,
-canonical package identity, manifest path, declared lanes, unsupported lanes,
+`plugin inspect` can examine a local path or marketplace row without adding,
+enabling, or executing it. Hermes and OpenCode results report framework,
+source, canonical identity, manifest path, declared/unsupported lanes,
 diagnostics, and fixed support state `inspection_only`. Inspection never starts
-a Python or Node host and never imports package code. Unknown or malformed
-fields remain diagnostics and never become runtime declarations.
+Python or Node or imports package code.
 
-`plugin install` rejects a detected Hermes or OpenCode source before any store
-or configuration mutation and directs the caller to the corresponding ACP Agent
-runtime profile.
+Adding a detected Hermes or OpenCode source is rejected before store or config
+mutation and directs the caller to the corresponding ACP Agent runtime profile.
 
-## CLI Operations
+## CLI And Gateway Operations
 
 `pevo plugin` owns:
 
+- `add <plugin>@<marketplace>`
 - `list`
-- `view`
-- `doctor`
-- `inspect`
-- `install`
-- `uninstall`
-- `enable`
-- `disable`
-- `marketplace list`
-- `marketplace add`
-- `marketplace remove`
+- `view <selector>`
+- `doctor [selector]`
+- `inspect <source-or-row>`
+- `remove <selector>`
+- `enable <selector>`
+- `disable <selector>`
+- `marketplace add|list|upgrade|remove`
 
-All read and diagnostic commands accept `--json` and emit secret-free
-structured output. Human output is concise and action-oriented, using typed
-interface metadata when present for display name, short description, category,
-developer, and capabilities.
+There are no `plugin install` or `plugin uninstall` aliases. Read and diagnostic
+commands accept `--json` and return secret-free structured output. Human output
+uses typed display metadata and emphasizes the next actionable state. Add
+materializes disabled; enable/disable are never implicit consequences of
+inspection or marketplace operations.
 
-`plugin inspect` is a dry-run operation over a local path, Git source, npm
-source, or catalog row. It materializes into a temporary staging directory when
-needed, detects native, Codex, Hermes, and OpenCode package shapes, and does not
-install, enable, import foreign code, or mutate profile/project state. Hermes
-and OpenCode results expose only their inspection-only metadata and lane
-diagnostics.
-CLI commands never mutate the Codex authority, its packages, catalogs, binary,
-or connector sessions; Codex mutation and connection are GUI/Gateway operations.
+Gateway exposes equivalent typed methods:
 
-`plugin doctor` reports discovered packages, manifest path, supported and
-ignored fields, manifest resources, Psychevo extensions, install source, source
-kind, active version, enabled state, skipped reason, owning-surface policy
-state, worker failures, foreign inspection diagnostics, and data root.
+- `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/inspect`
+- `plugin/add`, `plugin/remove`, `plugin/setEnabled`
+- `plugin/marketplace/list`, `add`, `upgrade`, and `remove`
+- `plugin/authority/read`, `write`, `refresh`, and `setTrust`
+- `plugin/connect/start` and `plugin/connect/status`
 
-Gateway exposes plugin metadata and package-management methods for product
-surfaces: `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
-`plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
-`plugin/authority/write`, `plugin/authority/refresh`,
-`plugin/authority/setTrust`,
-`plugin/catalog/list`, `plugin/catalog/add`, `plugin/catalog/remove`,
-`plugin/catalog/upgrade`, `plugin/connect/start`, and `plugin/connect/status`.
-`plugin/setEnabled.enabled` is `boolean | null`, where null deletes the selected
-scope override. Catalog requests are authority-qualified; Codex sources support
-source, ref, and sparse paths. These methods use the same runtime helpers as the CLI,
-honor resolved scope/profile rules, return typed interface metadata, and keep
-responses secret-free. GUI install overwrite and other
-force-worthy actions require an explicit request supplied by the caller.
-Catalog mutation results are method-specific. Codex add exposes
-`marketplaceName`, `installedRoot`, and `alreadyAdded`; Codex remove exposes
-`marketplaceName` and nullable `installedRoot`; Codex upgrade exposes
-`selectedMarketplaces`, `upgradedRoots`, and structured `errors`. Psychevo
-add/remove retain their own typed result alternatives rather than weakening
-the Codex contract with an all-optional object.
-`plugin/authority/setTrust` is restricted to a Codex authority selector and
-records or removes trust for that authority's current installed package
-fingerprint. It is not a generic plugin trust operation and has no Hermes,
-OpenCode, or Psychevo-package path.
+`plugin/setEnabled.enabled` is `boolean | null`; null removes the selected
+scope override. Authority-qualified responses keep Codex and Psychevo results
+typed rather than collapsing method-specific results into all-optional
+objects. Destructive or overwrite behavior requires an explicit caller field.
 
-`plugin/list` returns authority views plus partitioned installed and catalog
-rows. `CodexAuthorityView` separates runtime (`disabled`, `starting`, `ready`,
-`incompatible`, `unavailable`, `draining`) from auth (`available`,
-`unavailable`) and reports the resolved binary, Codex version, compatibility
-profile, canonical private home, platform, generation, inventory readiness, and
-security notes without exposing environment values or content.
+`plugin/list` returns authority views plus partitioned installed and
+marketplace rows. Each component reports compatibility profile, highest level,
+owner, readiness, and a short reason. Codex authority view separates runtime
+and auth status and reports binary/version/private-home/generation facts without
+environment values or content.
 
-Requests and responses use authority-qualified records. Psychevo authority uses
-the existing profile/project canonical selector. Codex authority uses
-`codex:<plugin>@<marketplace>`. Catalog lists may aggregate both authorities, but
-must not merge by display name. Each component record reports compatibility
-profile, highest level, execution owner, readiness, and a short actionable
-reason.
+`plugin/connect/start|status` is a five-minute process-local connection
+session. Apps open the validated install URL; ordinary MCP uses its OAuth owner.
+Gateway restart expires sessions. Plugin removal does not log out a separate
+connector.
 
-`plugin/connect/start|status` is a generic five-minute, process-local connection
-session. Apps open the validated Codex `installUrl` and complete when
-`app/list.isAccessible` becomes true. Ordinary MCP starts
-`mcpServer/oauth/login` and consumes its completion notification. Gateway restart
-expires outstanding sessions. Uninstall never logs out a separate connector,
-and v1 provides no Codex logout UI.
+## Acceptance Criteria
+
+- add requires a marketplace-qualified row and leaves it disabled
+- unsafe or oversized materialization cannot publish partial state
+- a Plugin containing an Extension manifest fails before state mutation
+- no Plugin inspection, listing, or declaration loading starts executable
+  package code
+- enablement never bypasses an owning trust, permission, auth, or conflict gate
+- marketplace and authority identities remain distinct in all selectors/output
+- Codex feature-off spawns no child; inventory failure does not delay turns
+- static foreign inspection never imports or executes the foreign package
 
 ## Related Topics
 
-- [054 Plugins](../054-plugins/spec.md) defines product plugin boundaries.
-- [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines manifest loading.
-- [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution and trust-aware plugin hook loading.
+- [054 Plugins](../054-plugins/spec.md) defines the product boundary.
+- [058 Extensions](../058-extensions/spec.md) defines executable sidecars.
+- [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines manifest shape.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines command spelling.
-- [150 Foreign Plugin Inspection](./foreign-inspection.md) defines foreign
-  package inspection boundaries.
+- [Foreign Plugin Inspection](./foreign-inspection.md) defines foreign static
+  inspection details.

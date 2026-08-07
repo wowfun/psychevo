@@ -86,8 +86,8 @@ therefore be independent of total Thread length.
   correlation immediately.
 - Python stdio accepts at most one 16 MiB JSON line and configures the
   subprocess stream reader for that same boundary.
-- Plugin worker stdout accepts at most one 16 MiB JSON line. Worker stderr is
-  drained continuously and retains only the final 64 KiB for diagnostics.
+- Extension sidecar stdout accepts at most one 16 MiB JSON line. Sidecar stderr
+  is drained continuously and retains only the final 64 KiB for diagnostics.
 - MCP prepares at most eight servers concurrently, preserves resolved catalog
   order in the resulting snapshot, and applies one effective startup deadline
   across authorization, connection, and initial tool discovery. Absent policy
@@ -109,8 +109,9 @@ scheduler, or process-wide actor runtime is introduced for these rules.
 
 Resources live at the narrowest real reuse boundary:
 
-- one plugin worker session is shared by contribution discovery, worker tools,
-  and worker hooks for one invocation, then shut down once;
+- Plugin discovery owns no executable process. Extension sidecars use the
+  lifecycle and fingerprint-keyed pooling contract in
+  [058 Extensions](../058-extensions/spec.md);
 - one skill runtime scans and preprocesses the accepted skill roots for one
   invocation and refreshes only on an explicit skill mutation;
 - one MCP runtime belongs to one materialized Framework Thread, is created

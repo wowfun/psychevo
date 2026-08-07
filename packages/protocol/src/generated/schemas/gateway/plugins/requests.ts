@@ -4730,12 +4730,6 @@ export const gatewayPluginRequestSchemas = {
     "manifest": true,
     "plugin": {
       "$ref": "#/definitions/PluginView"
-    },
-    "sandbox": {
-      "default": null
-    },
-    "worker": {
-      "default": null
     }
   },
   "required": [
@@ -4977,12 +4971,6 @@ export const gatewayPluginRequestSchemas = {
         "manifest": true,
         "plugin": {
           "$ref": "#/definitions/PluginView"
-        },
-        "sandbox": {
-          "default": null
-        },
-        "worker": {
-          "default": null
         }
       },
       "required": [

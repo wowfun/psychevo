@@ -224,6 +224,24 @@
       "$ref": "ClientRequest/plugin-connect-status.json"
     },
     {
+      "$ref": "ClientRequest/extension-list.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-read.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-set-enabled.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-app-open.json"
+    },
+    {
+      "$ref": "ClientRequest/extension-app-close.json"
+    },
+    {
       "$ref": "ClientRequest/skill-list.json"
     },
     {

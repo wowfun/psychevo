@@ -4,6 +4,7 @@ use super::fixtures::{
 };
 use crate::smoke_cli_skills::init_skill_home;
 use crate::{pevo_cmd, read_http_request};
+use psychevo::extensions::{ExtensionScope, ExtensionStore};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -65,6 +66,58 @@ impl MockJsonServer {
         });
         Self { base_url, requests }
     }
+}
+
+fn install_channel_test_extension(
+    psychevo_home: &Path,
+    cwd: &Path,
+    id: &str,
+    channel: &str,
+    executable_fixture: Option<&Path>,
+) {
+    let root = psychevo_home.join("test-extensions").join(id);
+    std::fs::create_dir_all(&root).expect("Channel Extension root");
+    std::fs::write(
+        root.join("psychevo.extension.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "id": id,
+            "version": "local",
+            "runtime": {
+                "protocol": "psychevo-extension/1",
+                "executable": "./sidecar"
+            },
+            "contributions": {
+                "channels": [{
+                    "channel": channel,
+                    "deliveryCapabilities": ["poll", "text"]
+                }]
+            }
+        }))
+        .expect("Channel Extension manifest"),
+    )
+    .expect("write Channel Extension manifest");
+    let executable = root.join("sidecar");
+    if let Some(fixture) = executable_fixture {
+        std::fs::copy(fixture, &executable).expect("copy Channel Extension sidecar");
+    } else {
+        std::fs::write(&executable, b"test fixture is not started\n")
+            .expect("write static Channel Extension sidecar");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("Channel Extension sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions)
+            .expect("make Channel Extension sidecar executable");
+    }
+    ExtensionStore::new(psychevo_home, cwd)
+        .install_local(&root, ExtensionScope::Profile)
+        .expect("install Channel Extension fixture");
 }
 
 #[tokio::test]
@@ -179,6 +232,13 @@ pub(crate) async fn cli_gateway_setup_channels_are_secret_free_and_old_command_i
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
+    install_channel_test_extension(
+        &psychevo_home,
+        &cwd,
+        "psychevo.channel.telegram",
+        "telegram",
+        None,
+    );
 
     let old = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["channel", "list"])
@@ -247,12 +307,59 @@ pub(crate) async fn cli_gateway_setup_channels_are_secret_free_and_old_command_i
 }
 
 #[tokio::test]
+pub(crate) async fn cli_gateway_setup_requires_channel_extension_before_writing_configuration() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    init_skill_home(temp.path(), &psychevo_home);
+    let env_before = std::fs::read_to_string(psychevo_home.join(".env")).unwrap_or_default();
+
+    let mut setup_cmd = admin_cmd(temp.path(), &psychevo_home, &cwd);
+    setup_cmd.args([
+        "gateway",
+        "setup",
+        "--channel",
+        "telegram",
+        "--credential-stdin",
+        "--json",
+    ]);
+    let setup = run_with_stdin(setup_cmd, "must-not-be-written\n");
+    assert!(!setup.status.success());
+    let output: Value = serde_json::from_slice(&setup.stdout).expect("JSON error");
+    assert!(
+        output["message"]
+            .as_str()
+            .is_some_and(|error| error.contains("pevo install psychevo.channel.telegram")),
+        "stdout: {}",
+        String::from_utf8_lossy(&setup.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(psychevo_home.join(".env")).unwrap_or_default(),
+        env_before
+    );
+    let config = std::fs::read_to_string(psychevo_home.join("config.toml")).expect("config");
+    assert!(!config.contains("[[channels.connections]]"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
 pub(crate) async fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaking_secret() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
     init_skill_home(temp.path(), &psychevo_home);
+    install_channel_test_extension(
+        &psychevo_home,
+        &cwd,
+        "psychevo.channel.wechat",
+        "wechat",
+        Some(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../psychevo-gateway/tests/fixtures/channel_wechat_test_sidecar.py"
+        ))),
+    );
     let server = MockJsonServer::start(vec![
         serde_json::json!({
             "qrcode": "qr-token",

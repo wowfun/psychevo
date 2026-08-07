@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,8 +13,6 @@ pub struct HookSourceDescriptor {
     pub display_name: Option<String>,
     pub path: Option<PathBuf>,
     pub hooks: Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker: Option<HookWorkerAdapter>,
 }
 
 impl HookSourceDescriptor {
@@ -32,45 +29,9 @@ impl HookSourceDescriptor {
             display_name,
             path,
             hooks,
-            worker: None,
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HookWorkerAdapter {
-    pub plugin_name: String,
-    pub plugin_version: String,
-    pub plugin_source: String,
-    pub plugin_root: PathBuf,
-    pub plugin_data: PathBuf,
-    pub manifest_path: PathBuf,
-    pub manifest_resources: Vec<String>,
-    pub psychevo_extensions: Vec<String>,
-    pub command: PathBuf,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-    #[serde(skip)]
-    pub(crate) runtime: Option<Arc<crate::plugins::PluginWorkerRuntime>>,
-}
-
-impl PartialEq for HookWorkerAdapter {
-    fn eq(&self, other: &Self) -> bool {
-        self.plugin_name == other.plugin_name
-            && self.plugin_version == other.plugin_version
-            && self.plugin_source == other.plugin_source
-            && self.plugin_root == other.plugin_root
-            && self.plugin_data == other.plugin_data
-            && self.manifest_path == other.manifest_path
-            && self.manifest_resources == other.manifest_resources
-            && self.psychevo_extensions == other.psychevo_extensions
-            && self.command == other.command
-            && self.args == other.args
-            && self.env == other.env
-    }
-}
-
-impl Eq for HookWorkerAdapter {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]

@@ -796,7 +796,7 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     assert_eq!(doctor["plugins"][0]["plugin"]["status"], "Disabled");
     assert_eq!(doctor["plugins"][0]["inspection"]["support"], "built_in");
     assert!(doctor["plugins"][0]["inspection"].get("status").is_none());
-    assert_eq!(doctor["plugins"][0]["worker"]["status"], "not_applicable");
+    assert!(doctor["plugins"][0].get("worker").is_none());
 
     let rejected = capability_rpc(
         &state,

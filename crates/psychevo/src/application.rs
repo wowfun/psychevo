@@ -6514,6 +6514,29 @@ mod tests {
     }
 
     #[test]
+    fn scoped_run_stream_event_preserves_child_thread_and_turn_identity() {
+        let event = TurnEvent::from_run_stream(RunStreamEvent::scoped_turn(
+            "child-thread",
+            "child-turn",
+            RunStreamEvent::AssistantTextDelta {
+                text: "child answer".to_string(),
+            },
+        ))
+        .expect("scoped child event");
+
+        assert_eq!(
+            event,
+            TurnEvent::Scoped {
+                thread_id: "child-thread".to_string(),
+                turn_id: "child-turn".to_string(),
+                event: Box::new(TurnEvent::MessageDelta {
+                    text: "child answer".to_string(),
+                }),
+            }
+        );
+    }
+
+    #[test]
     fn clarify_turn_event_preserves_the_decodable_request_payload() {
         let event = TurnEvent::from_run_stream(RunStreamEvent::ClarifyRequest(
             crate::types::ClarifyRequestEvent {
@@ -7081,118 +7104,6 @@ no_auth = true
         application.shutdown().await.expect("shutdown");
     }
 
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn native_framework_run_awaits_plugin_worker_shutdown() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let temp = tempfile::tempdir().expect("tempdir");
-        let home = temp.path().join("home");
-        let cwd = temp.path().join("workspace");
-        let source = temp.path().join("plugin");
-        let shutdown_marker = temp.path().join("worker-shutdown");
-        std::fs::create_dir_all(source.join(".codex-plugin")).expect("plugin manifest dir");
-        std::fs::create_dir_all(&cwd).expect("cwd");
-        std::fs::write(
-            source.join(".codex-plugin/plugin.json"),
-            r#"{"name":"shutdown-owner","version":"1.0.0","description":"shutdown owner"}"#,
-        )
-        .expect("plugin manifest");
-        std::fs::write(
-            source.join("psychevo.plugin.json"),
-            r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#,
-        )
-        .expect("plugin overlay");
-        let worker = source.join("worker.py");
-        std::fs::write(
-            &worker,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, pathlib, sys
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get("method")
-    result = {{"tools": []}} if method == "contributions/list" else {{"ok": True}}
-    print(json.dumps({{"jsonrpc": "2.0", "id": request.get("id"), "result": result}}), flush=True)
-    if method == "shutdown":
-        pathlib.Path({marker}).write_text("shutdown")
-        break
-"#,
-                marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
-            ),
-        )
-        .expect("worker");
-        let mut permissions = std::fs::metadata(&worker)
-            .expect("worker metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&worker, permissions).expect("worker chmod");
-        crate::plugins::install_plugin(
-            &home,
-            &cwd,
-            crate::plugins::PluginInstallOptions {
-                source: source.display().to_string(),
-                source_kind: None,
-                scope: crate::plugins::PluginScope::Global,
-                git_ref: None,
-                npm_version: None,
-                npm_registry: None,
-                force: false,
-            },
-        )
-        .expect("plugin install");
-        std::fs::write(
-            home.join("config.toml"),
-            r#"
-model = "fake/fake-model"
-
-[provider.fake]
-api = "http://127.0.0.1:9/v1"
-no_auth = true
-
-[provider.fake.models.fake-model]
-
-[plugins."shutdown-owner"]
-enabled = true
-"#,
-        )
-        .expect("config");
-        crate::tests::seed_managed_rg(&home);
-        let provider =
-            psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text("done"))
-                .expect("fake provider")
-                .provider();
-        let application = Application::builder()
-            .home(&home)
-            .provider(provider)
-            .build()
-            .await
-            .expect("application");
-        let thread = application
-            .client()
-            .start_thread(StartThreadRequest::new(&cwd))
-            .await
-            .expect("thread");
-        let mut request = TurnRequest::new("finish normally");
-        request.no_agents = true;
-        request.no_skills = true;
-
-        thread
-            .start_turn(request)
-            .await
-            .expect("accepted turn")
-            .wait()
-            .await
-            .expect("turn result");
-
-        assert_eq!(
-            std::fs::read_to_string(shutdown_marker).expect("shutdown marker"),
-            "shutdown"
-        );
-        application.shutdown().await.expect("shutdown");
-    }
-
-    #[cfg(unix)]
     #[tokio::test]
     async fn application_shell_command_exposes_typed_events_and_control_without_runtime_handles() {
         let temp = tempfile::tempdir().expect("tempdir");

@@ -93,8 +93,8 @@ state, optional owning toolsets, and conflict or omission reason. The plan
 preserves existing effective tool order for unchanged inputs and is the sole
 input to router construction and provider-hosted tool selection.
 
-Built-in tools, clarify tools, skill tools, MCP tools, plugin worker tools,
-hosted provider tools, and agent tools enter the same plan. A contributed tool name becomes
+Built-in tools, clarify tools, skill tools, MCP tools, hosted provider tools,
+Extension-contributed tools, and agent tools enter the same plan. A contributed tool name becomes
 model-visible only when its execution binding is registered for the accepted
 invocation and the current mode permits it. Building the invocation
 `ToolRouter` is fallible. Duplicate canonical identities or duplicate
@@ -196,12 +196,12 @@ tool router, not to plugin manifests, MCP servers, or persistent configuration.
 an invocation or bound the default and maximum number of returned loadable
 declarations.
 
-Exposure policy is source-family aware. Direct MCP tools and plugin worker
-tools enter the router as deferred bindings when `tool_search` is enabled.
+Exposure policy is source-family aware. Direct MCP tools and Extension tools
+enter the router as deferred bindings when `tool_search` is enabled.
 Host-owned runtime tools remain direct unless their own execution binding or
 another owning policy marks them deferred, hidden, or omitted. Existing
 `deferred` and `hidden` binding exposure must be preserved. When `tool_search`
-is disabled, accepted direct MCP and plugin worker bindings are ordinary direct
+is disabled, accepted direct MCP and Extension bindings are ordinary direct
 tools subject to the same mode, conflict, permission, and agent policy checks as
 other tools.
 

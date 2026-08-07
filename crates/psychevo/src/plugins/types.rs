@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,7 +9,6 @@ use crate::hooks::HookSourceDescriptor;
 use crate::types::McpServerInput;
 
 use super::compatibility::PluginComponentStatus;
-use super::worker::PluginWorkerRuntime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -147,7 +145,6 @@ pub struct LoadedPluginManifest {
     pub hooks: Option<Value>,
     pub mcp_servers: Vec<McpServerInput>,
     pub app_resource: Option<PathBuf>,
-    pub worker: Option<PluginWorkerSpec>,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub interface: Option<PluginInterfaceMetadata>,
     pub manifest_resources: BTreeSet<String>,
@@ -192,14 +189,10 @@ pub struct PluginInterfaceMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginWorkerSpec {
-    pub command: PathBuf,
-    pub args: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PluginInstallRecord {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marketplace: Option<String>,
     pub version: String,
     pub description: String,
     pub source_id: String,
@@ -297,20 +290,7 @@ pub(crate) struct PluginRuntimeAssembly {
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
-    pub(crate) worker_runtimes: Vec<Arc<PluginWorkerRuntime>>,
     pub(crate) warnings: Vec<crate::types::RunWarning>,
-}
-
-impl PluginRuntimeAssembly {
-    #[cfg(test)]
-    pub(crate) async fn shutdown_workers(&self) {
-        futures::future::join_all(
-            self.worker_runtimes
-                .iter()
-                .map(|runtime| runtime.shutdown()),
-        )
-        .await;
-    }
 }
 
 pub(crate) struct EnabledPluginManifest {

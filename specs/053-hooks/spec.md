@@ -25,7 +25,7 @@ declarations; runtime normalizes, trusts, matches, and executes them through the
 shared hook module.
 
 A hook source is a managed policy, profile, selected-agent, selected capability
-root, project, plugin, plugin worker, or runtime-owned source that declares
+root, project, plugin, or runtime-owned source that declares
 handlers for named runtime events. A hook declaration is a candidate handler.
 Discovery does not make it trusted, executable, model-visible, or allowed to
 mutate runtime state.
@@ -104,19 +104,19 @@ hook declarations.
 The first-class handler types are:
 
 - `command`: local command adapter with JSON payload on stdin.
-- `worker`: plugin worker hook adapter.
 - `prompt`: typed context or instruction contribution through context assembly.
 - `agent`: delegation to a named agent or subagent interface.
 
 Unsupported handler types and unavailable adapters are skipped with
 source-qualified diagnostics.
 
-Worker handlers call the plugin worker hook method and require package
-enablement plus an accepted hook source. Prompt handlers contribute typed
+Legacy `worker` declarations may be normalized for compatibility diagnostics,
+but they are unsupported and never executable; executable package behavior
+belongs to an Extension. Prompt handlers contribute typed
 context candidates to context assembly. Agent handlers delegate through the
 agent/subagent interface with bounded timeout and turn limits. These adapters
-are hidden behind the hook module interface; callers must not execute worker,
-prompt, or agent handlers directly.
+are hidden behind the hook module interface; callers must not execute prompt or
+agent handlers directly.
 
 ## Authority
 

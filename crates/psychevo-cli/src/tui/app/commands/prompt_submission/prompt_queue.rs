@@ -48,6 +48,10 @@ impl TuiApp {
                 self.handle_fullscreen_command_with_echo(ui, command, Some(text))
                     .await
             }
+            Ok(SubmittedSlashInput::ExtensionCommand { command, args }) => {
+                self.handle_fullscreen_extension_command(ui, &text, command, args)
+                    .await
+            }
             Ok(SubmittedSlashInput::PassThroughPrompt(prompt)) => {
                 let images = ui.take_submitted_images(&text);
                 self.submit_fullscreen_prompt(ui, prompt, images).await?;
@@ -69,6 +73,67 @@ impl TuiApp {
                 Ok(false)
             }
         }
+    }
+
+    async fn handle_fullscreen_extension_command(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        submitted: &str,
+        command: String,
+        args: Vec<String>,
+    ) -> Result<bool> {
+        let command_echo = normalize_submitted_slash_echo(submitted);
+        let effect = self.extensions.invoke(command, args, &self.cwd, true).await;
+        match effect {
+            Ok(psychevo::extensions::protocol::CommandEffect::BoundedText { text }) => {
+                ui.push_command_result(command_echo, None, text, false);
+            }
+            Ok(psychevo::extensions::protocol::CommandEffect::StructuredDisplay {
+                schema,
+                value,
+                fallback,
+            }) => {
+                let value = serde_json::to_string_pretty(
+                    &serde_json::json!({"schema": schema, "value": value}),
+                )?;
+                ui.push_command_result(
+                    command_echo,
+                    Some("Extension Display"),
+                    format!("{fallback}\n\n{value}"),
+                    false,
+                );
+            }
+            Ok(psychevo::extensions::protocol::CommandEffect::PromptSubmission { text }) => {
+                self.submit_fullscreen_prompt(ui, text, Vec::new()).await?;
+            }
+            Ok(psychevo::extensions::protocol::CommandEffect::Artifact {
+                name,
+                media_type,
+                ..
+            }) => {
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    format!(
+                        "error: Extension returned artifact `{name}` ({media_type}); TUI artifact writes require an explicit output contract"
+                    ),
+                    true,
+                );
+            }
+            Ok(psychevo::extensions::protocol::CommandEffect::HostRequest { .. }) => {
+                ui.push_command_result(
+                    command_echo,
+                    None,
+                    "error: Extension requested a host action unavailable in this TUI command context"
+                        .to_string(),
+                    true,
+                );
+            }
+            Err(error) => {
+                ui.push_command_result(command_echo, None, format!("error: {error:#}"), true);
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn handle_permission_approval_slash(

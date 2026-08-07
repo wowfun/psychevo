@@ -110,6 +110,9 @@ pub(super) fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Plugin") || matches!(name, "PsychevoPluginView" | "CodexPluginView") {
         return "gateway/plugins/requests";
     }
+    if name.starts_with("Extension") {
+        return "gateway/extensions/requests";
+    }
     if name.starts_with("Skill") {
         return "gateway/skills/requests";
     }
@@ -322,6 +325,7 @@ pub(super) fn schema_group_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemas",
         "gateway/core" => "gatewayCoreSchemas",
         "gateway/events" => "gatewayEventSchemas",
+        "gateway/extensions/requests" => "gatewayExtensionRequestSchemas",
         "gateway/mcp/requests" => "gatewayMcpRequestSchemas",
         "gateway/plugins/requests" => "gatewayPluginRequestSchemas",
         "gateway/skills/requests" => "gatewaySkillRequestSchemas",
@@ -380,6 +384,7 @@ pub(super) fn schema_group_refs_const(module: &str) -> &'static str {
         "gateway/channels/results" => "gatewayChannelResultSchemaRefs",
         "gateway/core" => "gatewayCoreSchemaRefs",
         "gateway/events" => "gatewayEventSchemaRefs",
+        "gateway/extensions/requests" => "gatewayExtensionRequestSchemaRefs",
         "gateway/mcp/requests" => "gatewayMcpRequestSchemaRefs",
         "gateway/plugins/requests" => "gatewayPluginRequestSchemaRefs",
         "gateway/skills/requests" => "gatewaySkillRequestSchemaRefs",

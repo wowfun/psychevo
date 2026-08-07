@@ -1052,6 +1052,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
+
+[[package]]
 name = "diffy"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3202,6 +3208,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3284,8 +3300,10 @@ dependencies = [
  "landlock",
  "libc",
  "portable-pty",
+ "pretty_assertions",
  "psychevo-agent-core",
  "psychevo-ai",
+ "psychevo-extension-protocol",
  "quick_html2md",
  "reqwest",
  "rmcp",
@@ -3353,6 +3371,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "psychevo-channel-adapters"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "feishu-sdk",
+ "futures",
+ "psychevo-extension-protocol",
+ "qrcode",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "psychevo-channel-sidecar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "psychevo-channel-adapters",
+ "psychevo-extension-protocol",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "psychevo-cli"
 version = "0.1.0"
 dependencies = [
@@ -3368,7 +3416,6 @@ dependencies = [
  "psychevo-gateway",
  "psychevo-gateway-protocol",
  "pulldown-cmark",
- "qrcode",
  "ratatui",
  "ratatui-textarea",
  "regex-lite",
@@ -3387,6 +3434,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "psychevo-extension-channel-feishu-lark"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "psychevo-channel-adapters",
+ "psychevo-channel-sidecar",
+ "psychevo-extension-protocol",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "psychevo-extension-channel-telegram"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "psychevo-channel-adapters",
+ "psychevo-channel-sidecar",
+ "psychevo-extension-protocol",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "psychevo-extension-channel-wechat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures",
+ "psychevo-channel-adapters",
+ "psychevo-channel-sidecar",
+ "psychevo-extension-protocol",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "psychevo-extension-protocol"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "psychevo-gateway"
 version = "0.1.0"
 dependencies = [
@@ -3395,7 +3493,6 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
- "feishu-sdk",
  "futures",
  "getrandom 0.3.4",
  "jsonschema",
@@ -3403,7 +3500,6 @@ dependencies = [
  "portable-pty",
  "psychevo",
  "psychevo-gateway-protocol",
- "qrcode",
  "regex-lite",
  "reqwest",
  "rusqlite",
@@ -5491,7 +5587,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6390,6 +6486,12 @@ dependencies = [
  "libc",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yoke"

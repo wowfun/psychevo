@@ -251,8 +251,10 @@ derived from lifecycle notifications. Gateway forwards each Application-owned
 activity revision as `activityChanged` and stamps the same
 `frameworkRevision` barrier on every activity returned by `thread/list` and
 `thread/browser`, including idle rows. Pending durable-acceptance reservations
-are absent. Gateway does not reorder independent Turn observers or interpret
-`queuePosition` as a queue snapshot.
+are absent. Gateway-local operations may publish a later complete activity on
+the same Framework revision; connection order, rather than a fabricated
+Framework increment, orders those live overlays. Gateway does not reorder
+independent Turn observers or interpret `queuePosition` as a queue snapshot.
 
 The durable Thread snapshot, not a raw Adapter terminal payload, is
 authoritative for the final committed transcript. A first-party Gateway client

@@ -33,9 +33,9 @@ execution.
 
 ## Current Implementation Slice
 
-The current implementation slice covers command, worker, and prompt hook
-handlers through the shared hook runtime. Command tests exercise local command
-fixtures; worker tests exercise a local plugin worker adapter; prompt tests
+The current implementation slice covers command and prompt hook handlers
+through the shared hook runtime. Command tests exercise local command fixtures;
+legacy worker tests assert structured unsupported diagnostics; prompt tests
 assert turn-local context contribution. Agent handlers normalize and list, but
 skip with structured diagnostics until an agent hook adapter is defined.
 
@@ -64,10 +64,8 @@ acceptance coverage should come from focused hook/runtime tests.
   and emit diagnostics.
 - `PostToolUse` hook failures do not alter completed tool output and emit
   diagnostics.
-- Worker hook handlers call the plugin worker adapter only after package
-  enablement and hook trust select that handler.
-- Worker hook handler failures or timeouts degrade only the hook run and return
-  bounded diagnostics.
+- Legacy worker hook handlers never execute and report a structured unsupported
+  diagnostic even when package enablement and hook trust select that handler.
 - Prompt hook handlers contribute turn-local context through typed hook results
   and do not rewrite source prompts, prompt-prefix records, or persistent
   instructions.

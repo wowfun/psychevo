@@ -27,7 +27,8 @@ Out of scope:
 - complete product command inventories
 - process flags, clap schemas, keymaps, terminal layout, editor protocol
   payload shapes, or messaging-platform registration APIs
-- custom command-template files or external plugin command loading
+- process-level Extension command installation and dispatch, owned by
+  [058 Extensions](../058-extensions/spec.md)
 - runtime, provider, storage, session, skill, or tool semantics
 
 ## Command Contract
@@ -123,8 +124,9 @@ typed `command/list` and `command/execute` methods. `command/list` returns
 `CommandListResult { commands: CommandListItem[] }`, where each item carries
 the command name, slash label, usage, summary, aliases, argument kind, source,
 optional expanded target, and optional presentation metadata for GUI-like
-surfaces. `source` is `core`, `dynamic`, or `custom`; `custom` identifies a
-user-configured alias row, not a separately implemented command. TUI, Web,
+surfaces. `source` is `core`, `dynamic`, `extension`, or `custom`; `extension`
+identifies an enabled Extension command and `custom` identifies a user-configured
+alias row, not a separately implemented command. TUI, Web,
 Desktop, ACP, and messaging surfaces must project the shared catalog rather
 than inventing separate slash semantics.
 Web and Desktop shells present the shared catalog through transient command
@@ -160,7 +162,8 @@ from frontend command-name allowlists. `presentationKind` uses:
 - `control` for active-turn or local state controls.
 - `submit` for commands that submit or transform prompt text.
 - `export` for host download/share/artifact actions.
-- `extension` for dynamic skill, bundle, or backend-provided slash commands.
+- `extension` for Extension, dynamic skill, bundle, or backend-provided slash
+  commands.
 
 `destination` names the preferred GUI landing area: `commands`, `history`,
 `agents`, `status`, `preview`, `composer`, `download`, or `none`.
@@ -255,6 +258,13 @@ unless a concrete product spec intentionally keeps a compatibility alias.
 
 ## Discovery
 
+Enabled Extension command descriptors enter this catalog only after the
+Extension host validates the static manifest and resolves conflicts. The same
+descriptor may appear as a slash command on interactive surfaces and as a
+direct process command when [058 Extensions](../058-extensions/spec.md)
+declares that entrypoint. Execution still crosses the Extension host's
+`command/run` method; clients never execute a manifest path themselves.
+
 Interactive command discovery should be available from the command prefix used
 by that surface. For slash commands, `/` opens a completion menu over canonical
 command labels. The menu may include upcoming commands when the owning product
@@ -339,6 +349,8 @@ Concrete surfaces may wrap these messages in their normal error presentation.
   defaults.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` product
   command line.
+- [058 Extensions](../058-extensions/spec.md) defines executable command
+  registration, conflicts, and host dispatch.
 - [210 pevo TUI Interaction](../210-pevo-tui/interaction.md) defines the
   fullscreen interactive slash command surface.
 - [027 ACP](../027-acp/spec.md) defines ACP slash-command projection.

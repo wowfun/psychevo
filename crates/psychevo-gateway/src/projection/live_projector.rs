@@ -119,7 +119,7 @@ impl GatewayLiveProjector {
                     metadata.as_ref(),
                     accounting.as_ref(),
                 );
-                self.project_framework_runtime_event(turn_id, &value)?
+                self.project_framework_runtime_event(turn_id, &value, false)?
             }
             TurnEvent::Tool { stage, data } => {
                 self.prepare_turn(turn_id);
@@ -131,16 +131,16 @@ impl GatewayLiveProjector {
                         psychevo::ItemStage::Completed => "tool_execution_end",
                     },
                 );
-                self.project_framework_runtime_event(turn_id, value.as_ref())?
+                self.project_framework_runtime_event(turn_id, value.as_ref(), false)?
             }
             TurnEvent::Warning { data } => {
                 self.prepare_turn(turn_id);
                 let value = framework_runtime_event_value(data, "warning");
-                self.project_framework_runtime_event(turn_id, value.as_ref())?
+                self.project_framework_runtime_event(turn_id, value.as_ref(), false)?
             }
             TurnEvent::Runtime { data } => {
                 self.prepare_turn(turn_id);
-                self.project_framework_runtime_event(turn_id, data)?
+                self.project_framework_runtime_event(turn_id, data, false)?
             }
             TurnEvent::ActivityChanged { .. }
             | TurnEvent::Accepted { .. }
@@ -194,7 +194,16 @@ impl GatewayLiveProjector {
             .child_projectors
             .entry(thread_id.to_string())
             .or_insert_with(|| GatewayLiveProjector::new(Some(thread_id.to_string())));
-        let mut projected = child.project_turn_event(turn_id, event)?;
+        let mut projected = match event {
+            TurnEvent::Runtime { data } => {
+                let projected = child.project_framework_runtime_event(turn_id, data, true)?;
+                if matches!(projected, GatewayEvent::TurnCompleted { .. }) {
+                    child.reset_turn_state();
+                }
+                projected
+            }
+            _ => child.project_turn_event(turn_id, event)?,
+        };
         if !nested_scoped {
             force_event_thread_id(&mut projected, thread_id);
         }
@@ -213,17 +222,18 @@ impl GatewayLiveProjector {
         &mut self,
         turn_id: &str,
         value: &Value,
+        allow_runtime_terminal: bool,
     ) -> Option<GatewayEvent> {
         let event = self.project_runtime_event(turn_id, value)?;
         if matches!(
             event,
             GatewayEvent::TurnStarted { .. }
-                | GatewayEvent::TurnCompleted { .. }
                 | GatewayEvent::ActionRequested { .. }
                 | GatewayEvent::ActionUpdated { .. }
                 | GatewayEvent::ActionResolved { .. }
                 | GatewayEvent::ActionCancelled { .. }
-        ) {
+        ) || (!allow_runtime_terminal && matches!(event, GatewayEvent::TurnCompleted { .. }))
+        {
             return None;
         }
         Some(event)

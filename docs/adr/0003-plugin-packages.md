@@ -1,8 +1,9 @@
 ---
 name: 0003. Plugin Packages
-status: proposed
+status: superseded
 date: 2026-06-30
 psychevo_self_edit: deny
+superseded-by: 0006. Plugins And Executable Extensions
 ---
 
 ## Context

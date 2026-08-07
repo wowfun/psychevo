@@ -26,6 +26,14 @@ impl TuiApp {
         }
         match self.classify_submitted_slash_input(line) {
             Ok(SubmittedSlashInput::Command(command)) => self.handle_command(command).await,
+            Ok(SubmittedSlashInput::ExtensionCommand { command, args }) => {
+                let result = self.handle_extension_command(command, args).await;
+                if let Err(err) = result {
+                    self.had_error = true;
+                    eprintln!("{}", self.renderer.error(&format!("error: {err:#}")));
+                }
+                Ok(false)
+            }
             Ok(SubmittedSlashInput::PassThroughPrompt(prompt)) => {
                 if let Err(err) = self.submit_prompt(prompt).await {
                     self.had_error = true;
@@ -45,6 +53,44 @@ impl TuiApp {
                 eprintln!("{}", self.renderer.error(&format!("error: {err:#}")));
                 Ok(false)
             }
+        }
+    }
+
+    async fn handle_extension_command(&mut self, command: String, args: Vec<String>) -> Result<()> {
+        let effect = self
+            .extensions
+            .invoke(command, args, &self.cwd, false)
+            .await?;
+        match effect {
+            psychevo::extensions::protocol::CommandEffect::BoundedText { text } => {
+                println!("{text}");
+                Ok(())
+            }
+            psychevo::extensions::protocol::CommandEffect::StructuredDisplay {
+                schema,
+                value,
+                fallback,
+            } => {
+                println!("{fallback}");
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"schema": schema, "value": value})
+                    )?
+                );
+                Ok(())
+            }
+            psychevo::extensions::protocol::CommandEffect::PromptSubmission { text } => {
+                self.submit_prompt(text).await
+            }
+            psychevo::extensions::protocol::CommandEffect::Artifact {
+                name, media_type, ..
+            } => Err(anyhow!(
+                "Extension returned artifact `{name}` ({media_type}); TUI artifact writes require an explicit output contract"
+            )),
+            psychevo::extensions::protocol::CommandEffect::HostRequest { .. } => Err(anyhow!(
+                "Extension requested a host action unavailable in this TUI command context"
+            )),
         }
     }
 

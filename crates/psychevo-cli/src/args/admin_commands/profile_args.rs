@@ -305,6 +305,22 @@ pub(crate) enum ConfigCommand {
     Provider(ConfigProviderArgs),
     #[command(about = "List and remove project-local permission rules")]
     Permissions(ConfigPermissionsArgs),
+    #[command(about = "Inspect or change Extension policy")]
+    Extension(ConfigExtensionArgs),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ConfigExtensionArgs {
+    #[arg(value_name = "SELECTOR", help = "Optional installed Extension id")]
+    pub(crate) selector: Option<String>,
+    #[arg(long, help = "Use current-workspace Extension policy")]
+    pub(crate) local: bool,
+    #[arg(long, conflicts_with = "disable", requires = "selector")]
+    pub(crate) enable: bool,
+    #[arg(long, conflicts_with = "enable", requires = "selector")]
+    pub(crate) disable: bool,
+    #[arg(long, help = "Emit structured JSON instead of human text")]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Parser)]

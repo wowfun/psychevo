@@ -1,6 +1,5 @@
+use crate::pevo_cmd;
 use crate::smoke_cli_skills::init_skill_home;
-use crate::{MockSseServer, pevo_cmd, seed_managed_rg, sse_text};
-use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Command;
@@ -26,52 +25,10 @@ pub(crate) fn write_cli_plugin(root: &Path) {
     )
     .expect("manifest");
     std::fs::write(
-        root.join("psychevo.plugin.json"),
-        if cfg!(windows) {
-            r#"{"runtime":{"worker":{"command":"./worker.cmd"}}}"#
-        } else {
-            r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#
-        },
-    )
-    .expect("overlay");
-    std::fs::write(
         root.join("skills/cleanup/SKILL.md"),
         "---\nname: cleanup\ndescription: \"Clean temporary files\"\n---\n\nUse cleanup_status before cleanup.\n",
     )
     .expect("skill");
-    #[cfg(windows)]
-    {
-        std::fs::write(
-            root.join("worker.js"),
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/cli_plugin_worker.js"
-            )),
-        )
-        .expect("worker");
-        std::fs::write(
-            root.join("worker.cmd"),
-            "@echo off\r\nnode \"%~dp0worker.js\" %*\r\n",
-        )
-        .expect("worker command");
-    }
-    #[cfg(unix)]
-    std::fs::write(
-        root.join("worker.py"),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/cli_plugin_worker.py"
-        )),
-    )
-    .expect("worker");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let worker = root.join("worker.py");
-        let mut permissions = std::fs::metadata(&worker).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(worker, permissions).expect("chmod");
-    }
 }
 
 fn write_display_plugin(root: &Path) {
@@ -96,14 +53,46 @@ fn write_display_plugin(root: &Path) {
     .expect("manifest");
 }
 
-fn sse_tool_call(call_id: &str, tool_name: &str, arguments: &str) -> String {
-    format!(
-        "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"index\":0,\"id\":{},\"function\":{{\"name\":{},\"arguments\":{}}}}}]}},\"finish_reason\":\"tool_calls\"}}]}}\n\n\
-         data: [DONE]\n\n",
-        serde_json::to_string(call_id).expect("call id"),
-        serde_json::to_string(tool_name).expect("tool name"),
-        serde_json::to_string(arguments).expect("arguments")
+fn add_marketplace_plugin(
+    test_home: &Path,
+    psychevo_home: &Path,
+    cwd: &Path,
+    source: &Path,
+    plugin_name: &str,
+    json_output: bool,
+) -> std::process::Output {
+    std::fs::create_dir_all(source.join(".agents/plugins")).expect("marketplace dir");
+    std::fs::write(
+        source.join(".agents/plugins/marketplace.json"),
+        format!(
+            r#"{{
+              "name": "test-marketplace",
+              "plugins": [{{"name": "{plugin_name}", "source": "."}}]
+            }}"#
+        ),
     )
+    .expect("marketplace manifest");
+    let marketplace = plugin_cmd(test_home, psychevo_home, cwd)
+        .args([
+            "plugin",
+            "marketplace",
+            "add",
+            source.to_str().expect("source"),
+            "--json",
+        ])
+        .output()
+        .expect("pevo plugin marketplace add");
+    assert!(
+        marketplace.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&marketplace.stderr)
+    );
+    let mut command = plugin_cmd(test_home, psychevo_home, cwd);
+    command.args(["plugin", "add", &format!("{plugin_name}@test-marketplace")]);
+    if json_output {
+        command.arg("--json");
+    }
+    command.output().expect("pevo plugin add")
 }
 
 #[tokio::test]
@@ -116,10 +105,14 @@ pub(crate) async fn cli_plugin_view_human_output_includes_interface_summary() {
     init_skill_home(temp.path(), &psychevo_home);
     write_display_plugin(&source);
 
-    let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
-        .args(["plugin", "install", source.to_str().expect("source")])
-        .output()
-        .expect("pevo plugin install");
+    let install = add_marketplace_plugin(
+        temp.path(),
+        &psychevo_home,
+        &cwd,
+        &source,
+        "display-plugin",
+        false,
+    );
     assert!(
         install.status.success(),
         "stderr: {}",
@@ -153,15 +146,14 @@ pub(crate) async fn cli_plugin_install_enable_list_and_doctor_json() {
     init_skill_home(temp.path(), &psychevo_home);
     write_cli_plugin(&source);
 
-    let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
-        .args([
-            "plugin",
-            "install",
-            source.to_str().expect("source"),
-            "--json",
-        ])
-        .output()
-        .expect("pevo plugin install");
+    let install = add_marketplace_plugin(
+        temp.path(),
+        &psychevo_home,
+        &cwd,
+        &source,
+        "disk-cleanup",
+        true,
+    );
     assert!(
         install.status.success(),
         "stderr: {}",
@@ -215,11 +207,7 @@ pub(crate) async fn cli_plugin_install_enable_list_and_doctor_json() {
         String::from_utf8_lossy(&doctor.stderr)
     );
     let doctor: Value = serde_json::from_slice(&doctor.stdout).expect("doctor json");
-    assert_eq!(doctor["plugins"][0]["worker"]["status"], "ok");
-    assert_eq!(
-        doctor["plugins"][0]["worker"]["tools"][0]["name"],
-        "cleanup_status"
-    );
+    assert!(doctor["plugins"][0].get("worker").is_none());
 }
 
 #[tokio::test]
@@ -232,15 +220,14 @@ pub(crate) async fn cli_plugin_local_enable_targets_profile_installed_plugin() {
     init_skill_home(temp.path(), &psychevo_home);
     write_cli_plugin(&source);
 
-    let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
-        .args([
-            "plugin",
-            "install",
-            source.to_str().expect("source"),
-            "--json",
-        ])
-        .output()
-        .expect("pevo plugin install");
+    let install = add_marketplace_plugin(
+        temp.path(),
+        &psychevo_home,
+        &cwd,
+        &source,
+        "disk-cleanup",
+        true,
+    );
     assert!(
         install.status.success(),
         "stderr: {}",
@@ -291,87 +278,5 @@ pub(crate) async fn cli_plugin_local_enable_targets_profile_installed_plugin() {
             .expect("manifest resources")
             .contains(&json!("skills"))
     );
-    assert_eq!(disk_cleanup["psychevo_extensions"][0], "runtime");
-}
-
-#[tokio::test]
-pub(crate) async fn cli_run_can_search_and_execute_enabled_plugin_worker_tool_by_default() {
-    let server = MockSseServer::start(vec![
-        sse_tool_call(
-            "call_search",
-            "tool_search",
-            r#"{"query":"cleanup_status"}"#,
-        ),
-        sse_tool_call("call_cleanup", "cleanup_status", "{}"),
-        sse_text("cleanup checked"),
-    ]);
-    let temp = tempdir().expect("temp");
-    let psychevo_home = temp.path().join("psychevo-home");
-    let cwd = temp.path().join("work");
-    let source = temp.path().join("plugin-source");
-    let db = temp.path().join("state.db");
-    std::fs::create_dir_all(&cwd).expect("cwd");
-    std::fs::create_dir_all(&psychevo_home).expect("home");
-    seed_managed_rg(&psychevo_home);
-    write_cli_plugin(&source);
-    std::fs::write(
-        psychevo_home.join("config.toml"),
-        format!(
-            r#"model = "mock/mock-model"
-
-[provider.mock]
-api = "{}"
-
-[plugins.disk-cleanup]
-enabled = true
-"#,
-            server.base_url
-        ),
-    )
-    .expect("config");
-    std::fs::write(psychevo_home.join(".env"), "MOCK_API_KEY=test-key\n").expect("env");
-
-    let install = plugin_cmd(temp.path(), &psychevo_home, &cwd)
-        .args(["plugin", "install", source.to_str().expect("source")])
-        .output()
-        .expect("pevo plugin install");
-    assert!(
-        install.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&install.stderr)
-    );
-
-    let output = pevo_cmd(temp.path())
-        .env("PSYCHEVO_HOME", &psychevo_home)
-        .env("PSYCHEVO_DB", &db)
-        .env("MOCK_API_KEY", "test-key")
-        .current_dir(&cwd)
-        .args(["run", "-f", "json", "check cleanup status"])
-        .output()
-        .expect("pevo run");
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).expect("stdout");
-    assert!(stdout.contains("cleanup checked"));
-
-    let conn = Connection::open(db).expect("db");
-    let plugin_tool_results: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE role = 'tool_result' AND tool_name = 'cleanup_status' AND outcome = 'normal'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("plugin tool results");
-    assert_eq!(plugin_tool_results, 1);
-    let tool_search_results: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM messages WHERE role = 'tool_result' AND tool_name = 'tool_search' AND outcome = 'normal'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("tool search results");
-    assert_eq!(tool_search_results, 1);
+    assert_eq!(disk_cleanup["psychevo_extensions"], json!([]));
 }

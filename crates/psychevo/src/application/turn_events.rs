@@ -191,7 +191,15 @@ impl TurnEvent {
                 kind: "clarify".to_string(),
                 reason: format!("{:?}", resolved.reason).to_lowercase(),
             }),
-            RunStreamEvent::Scoped { event, .. } => Self::from_run_stream(*event),
+            RunStreamEvent::Scoped {
+                session_id,
+                turn_id,
+                event,
+            } => Some(Self::Scoped {
+                thread_id: session_id,
+                turn_id: turn_id?,
+                event: Box::new(Self::from_run_stream(*event)?),
+            }),
         }
     }
 }

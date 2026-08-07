@@ -13,17 +13,12 @@ architecture-layer = 3
 name = "psychevo-app-server"
 path = "src/bin/psychevo-app-server.rs"
 
-[features]
-default = ["native-channels"]
-native-channels = ["dep:feishu-sdk", "dep:qrcode"]
-
 [dependencies]
 axum.workspace = true
 agent-client-protocol.workspace = true
 agent-client-protocol-schema.workspace = true
 base64.workspace = true
 chrono.workspace = true
-feishu-sdk = { workspace = true, optional = true }
 futures.workspace = true
 getrandom.workspace = true
 jsonschema.workspace = true
@@ -31,7 +26,6 @@ percent-encoding.workspace = true
 portable-pty.workspace = true
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
 psychevo = { path = "../psychevo", features = ["native-keyring"] }
-qrcode = { workspace = true, optional = true }
 reqwest.workspace = true
 regex-lite.workspace = true
 serde.workspace = true

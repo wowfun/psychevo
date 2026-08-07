@@ -12,7 +12,7 @@ use crate::server::binding::AuthContext;
 use crate::server::rpc_dispatch::handle_rpc;
 use crate::server::rpc_json::RpcRequest;
 use crate::server::scope_session::default_resolved_scope;
-use crate::server::tests::helpers::web_state;
+use crate::server::tests::helpers::{install_wechat_test_extension, web_state};
 
 #[tokio::test]
 async fn settings_read_and_channel_rpc_expose_secret_free_channels() {
@@ -464,6 +464,7 @@ async fn channel_wechat_qr_rpc_connects_and_writes_secret_free_config() {
     });
 
     let (_temp, state) = web_state().await;
+    install_wechat_test_extension(&state);
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -569,6 +570,7 @@ async fn channel_wechat_qr_rpc_persists_confirmed_token_without_health_gate() {
     });
 
     let (_temp, state) = web_state().await;
+    install_wechat_test_extension(&state);
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),

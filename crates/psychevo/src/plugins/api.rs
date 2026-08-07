@@ -11,7 +11,6 @@ use super::records::{
 };
 use super::store::PluginStore;
 use super::types::{LoadedPluginManifest, PluginInstallRecord, PluginScope};
-use super::worker::worker_tools;
 use crate::config::{
     BuiltinPluginPolicyConfig, CONFIG_FILE_NAME, PluginPolicyConfig, PluginPolicyEntry,
     load_run_config, load_toml_config_file, parse_plugin_policy_config, resolve_config_path,
@@ -106,31 +105,10 @@ pub async fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -
     for record in selected {
         let inspection = inspect_record(record)?;
         let manifest = load_plugin_manifest(&record.package_root, true).ok();
-        let policy = policy_entry(&loaded.config.plugins, &records, record);
-        let mut worker = json!({
-            "configured": manifest.as_ref().and_then(|manifest| manifest.worker.as_ref()).is_some(),
-            "tools": [],
-        });
-        if let Some(manifest) = manifest.as_ref()
-            && policy.is_some_and(PluginPolicyEntry::plugin_enabled)
-            && let Some(spec) = &manifest.worker
-        {
-            worker = match worker_tools(record, manifest, spec, &loaded.env).await {
-                Ok(tools) => json!({"configured": true, "tools": tools, "status": "ok"}),
-                Err(err) => {
-                    json!({"configured": true, "tools": [], "status": "failed", "error": err})
-                }
-            };
-        }
         plugins.push(json!({
             "plugin": record_value(&records, record, &loaded.config.plugins, &project_policy),
             "manifest": manifest.as_ref().map(manifest_value).unwrap_or_else(|| inspection_value(&inspection)),
             "inspection": inspection,
-            "worker": worker,
-            "sandbox": {
-                "worker_process_confined": false,
-                "message": "plugin workers and hook commands are not whole-process sandboxed in V1",
-            }
         }));
     }
     if selector.is_none() {
@@ -521,15 +499,6 @@ fn builtin_browser_doctor_value(
             "unsupported_lanes": [],
             "stages": [],
         },
-        "worker": {
-            "configured": false,
-            "tools": [],
-            "status": "not_applicable",
-        },
-        "sandbox": {
-            "worker_process_confined": true,
-            "message": "Browser is built in; Desktop Browser host automation is not exposed as a plugin worker.",
-        }
     })
 }
 
@@ -586,6 +555,7 @@ fn record_value(
     let readiness = readiness_status(record, enabled);
     json!({
         "name": record.name,
+        "marketplace": record.marketplace,
         "authority": {
             "kind": "psychevo",
             "selector": canonical_record_selector(record),
@@ -637,7 +607,6 @@ fn manifest_value(manifest: &LoadedPluginManifest) -> Value {
         "agent_roots": manifest.agent_roots,
         "hooks": manifest.hooks.is_some(),
         "app_resource": manifest.app_resource,
-        "worker": manifest.worker,
         "interface": manifest.interface,
         "diagnostics": manifest.diagnostics,
     })

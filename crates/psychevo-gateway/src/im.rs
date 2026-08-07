@@ -10,9 +10,6 @@ use psychevo_gateway_protocol::source::{
     GatewayImageInput, GatewayInputPart, GatewaySource, GatewaySourceLifetime,
 };
 
-#[path = "im_adapters/mod.rs"]
-pub mod adapters;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImIdentity {
     pub connection_id: Option<String>,

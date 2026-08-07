@@ -60,13 +60,14 @@ acceptance coverage should come from focused manifest loader tests.
   Psychevo to import or execute Hermes dynamic `register(ctx)` behavior.
 - `apps` reports native-unavailable or Codex-delegated readiness; overlay
   `commands` and `providers` are unsupported.
-- Static `psychevo.tools` is unsupported; executable plugin tools must come
-  from worker discovery, MCP listing, or a future owning static-tool path.
+- Static `psychevo.tools` is unsupported; executable capability belongs to an
+  MCP descriptor or an independently installed Extension.
 - Local path values must start with `./`.
 - Absolute paths are rejected.
 - Paths containing `..` are rejected.
 - Symlink or canonicalization escapes outside the plugin root are rejected.
-- Overlay `runtime.worker.command` paths use the same local path safety rules.
+- Overlay `runtime.worker` is rejected as executable Extension content before
+  any command path is resolved or started.
 
 ## Validation Boundaries
 

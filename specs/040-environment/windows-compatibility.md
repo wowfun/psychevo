@@ -157,6 +157,9 @@ unused path metadata columns.
 
 Deterministic validation must cover:
 
+- native Windows compilation of platform-gated Rust sources after module or
+  ownership-boundary changes, including the restricted-token `exec_command`
+  session path
 - pure parsing for Windows drive, UNC, verbatim, file URI, Git Bash/MSYS,
   Cygwin, WSL mount, and rejected drive-relative/device forms
 - Git Bash discovery and missing-Git-Bash hard failure with fakes

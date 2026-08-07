@@ -6,7 +6,6 @@ mod output;
 mod runtime;
 mod state;
 mod types;
-mod worker;
 
 use std::path::Path;
 
@@ -28,7 +27,6 @@ pub use types::{
     HookPreToolUseOutcome, HookReadOnlyOutcome, HookResponse, HookRunEntry, HookRunStatus,
     HookRunSummary, HookRuntimeConfig, HookSourceDescriptor, HookSourceKind, HookStateRecord,
     HookStateStore, HookStopOutcome, HookTrustStatus, HookUserPromptSubmitOutcome,
-    HookWorkerAdapter,
 };
 
 pub(crate) const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 600;

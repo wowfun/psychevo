@@ -1,20 +1,32 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "gateway")]
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
+#[cfg(feature = "gateway")]
+use anyhow::{Context, anyhow};
+#[cfg(feature = "gateway")]
 use psychevo::paths::canonicalize_cwd;
+#[cfg(feature = "gateway")]
 use psychevo_gateway::composition::GatewayApplication;
+#[cfg(feature = "gateway")]
 use psychevo_gateway::{GatewayWebServerConfig, bind_gateway_web_server};
+#[cfg(feature = "gateway")]
 use serde_json::json;
 
+#[cfg(feature = "gateway")]
 use crate::args::ServeArgs;
+#[cfg(feature = "gateway")]
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
 };
+#[cfg(not(feature = "gateway"))]
+use crate::env::{env_value, resolve_explicit_path};
 
+#[cfg(feature = "gateway")]
 pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
@@ -107,6 +119,7 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+#[cfg(feature = "gateway")]
 async fn ctrl_c_shutdown_signal() {
     if tokio::signal::ctrl_c().await.is_err() {
         std::future::pending::<()>().await;
@@ -114,6 +127,7 @@ async fn ctrl_c_shutdown_signal() {
 }
 
 #[cfg(unix)]
+#[cfg(feature = "gateway")]
 async fn serve_shutdown_signal() {
     let Ok(mut terminate) =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -128,10 +142,12 @@ async fn serve_shutdown_signal() {
 }
 
 #[cfg(not(unix))]
+#[cfg(feature = "gateway")]
 async fn serve_shutdown_signal() {
     ctrl_c_shutdown_signal().await;
 }
 
+#[cfg(feature = "gateway")]
 fn serve_token(
     args: &ServeArgs,
     env_map: &std::collections::BTreeMap<String, String>,

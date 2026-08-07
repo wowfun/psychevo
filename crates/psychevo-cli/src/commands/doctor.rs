@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use crate::args::DoctorArgs;
 use crate::commands::common::CommandConfiguration;
+#[cfg(feature = "gateway")]
 use crate::commands::gateway::managed_status_for_home;
 use crate::commands::model::model_value;
 use crate::commands::serve::{
@@ -74,9 +75,12 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
         "buildCommand": static_dir_build_command(),
         "installCommand": static_dir_install_command(),
     });
+    #[cfg(feature = "gateway")]
     let gateway = managed_status_for_home(&home)
         .await
         .unwrap_or_else(|err| json!({ "ok": false, "error": format!("{err:#}") }));
+    #[cfg(not(feature = "gateway"))]
+    let gateway = json!({"ok": false, "available": false, "reason": "gateway feature omitted"});
     let tools = json!({
         "git": tool_value("git", &env_map),
         "rg": tool_value("rg", &env_map),

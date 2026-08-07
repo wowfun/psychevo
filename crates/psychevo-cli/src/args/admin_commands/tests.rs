@@ -1,12 +1,16 @@
+#[cfg(all(feature = "gateway", feature = "desktop"))]
 use std::path::Path;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use crate::args::{
-    Cli, Commands, DesktopArgs, GatewayOpenArgs, HookKeyArgs, HooksArgs, HooksCommand,
-    HooksListArgs, PluginArgs, PluginCommand, PluginListArgs, SkillsArgs, SkillsCommand,
-    SkillsInstallArgs, SkillsListArgs, TuiArgs, WebArgs,
+    Cli, Commands, ConfigArgs, ConfigCommand, ConfigExtensionArgs, ExtensionInstallArgs,
+    ExtensionListArgs, ExtensionUpdateArgs, HookKeyArgs, HooksArgs, HooksCommand, HooksListArgs,
+    PluginArgs, PluginCommand, PluginListArgs, SkillsArgs, SkillsCommand, SkillsInstallArgs,
+    SkillsListArgs,
 };
+#[cfg(all(feature = "gateway", feature = "desktop"))]
+use crate::args::{DesktopArgs, GatewayOpenArgs, TuiArgs, WebArgs};
 
 #[test]
 fn exposes_compiled_version_without_runtime_initialization() {
@@ -21,7 +25,7 @@ fn exposes_compiled_version_without_runtime_initialization() {
 }
 
 #[test]
-fn parses_singular_skill_and_rejects_plural_skills() {
+fn parses_singular_skill_and_defers_unknown_words_to_extension_dispatch() {
     let cli = Cli::try_parse_from(["pevo", "skill", "list", "--json"]).expect("skill");
     assert!(matches!(
         cli.command,
@@ -29,7 +33,12 @@ fn parses_singular_skill_and_rejects_plural_skills() {
             command: Some(SkillsCommand::List(SkillsListArgs { json: true, .. }))
         }))
     ));
-    assert!(Cli::try_parse_from(["pevo", "skills", "list"]).is_err());
+    assert!(matches!(
+        Cli::try_parse_from(["pevo", "skills", "list"])
+            .expect("unknown top-level words are Extension candidates")
+            .command,
+        Some(Commands::External(arguments)) if arguments == ["skills", "list"]
+    ));
 }
 
 #[test]
@@ -41,32 +50,111 @@ fn parses_singular_plugin_and_rejects_plural_plugins() {
             command: Some(PluginCommand::List(PluginListArgs { json: true }))
         }))
     ));
-    assert!(Cli::try_parse_from(["pevo", "plugins", "list"]).is_err());
-    assert!(
-        Cli::try_parse_from([
-            "pevo",
-            "plugin",
-            "install",
-            "/tmp/plugin",
-            "--local",
-            "--global"
-        ])
-        .is_err()
-    );
+    let add = Cli::try_parse_from(["pevo", "plugin", "add", "review@local"])
+        .expect("marketplace-qualified plugin add");
+    assert!(matches!(
+        add.command,
+        Some(Commands::Plugin(PluginArgs {
+            command: Some(PluginCommand::Add(_))
+        }))
+    ));
+    assert!(Cli::try_parse_from(["pevo", "plugin", "install", "/tmp/plugin"]).is_err());
+    assert!(Cli::try_parse_from(["pevo", "plugin", "uninstall", "review"]).is_err());
     assert!(
         Cli::try_parse_from([
             "pevo",
             "plugin",
             "marketplace",
             "add",
-            "local",
             "/tmp/plugins",
+            "--name",
+            "local",
             "--kind",
             "local",
             "--json"
         ])
         .is_ok()
     );
+    assert!(
+        Cli::try_parse_from([
+            "pevo",
+            "plugin",
+            "marketplace",
+            "upgrade",
+            "local",
+            "--json"
+        ])
+        .is_ok()
+    );
+}
+
+#[test]
+fn parses_pi_style_extension_lifecycle_and_external_commands() {
+    let install = Cli::try_parse_from(["pevo", "install", "./echo", "-l", "--json"])
+        .expect("extension install");
+    assert!(matches!(
+        install.command,
+        Some(Commands::Install(ExtensionInstallArgs {
+            local: true,
+            json: true,
+            ..
+        }))
+    ));
+
+    let list = Cli::try_parse_from(["pevo", "list", "--local", "--json"]).expect("extension list");
+    assert!(matches!(
+        list.command,
+        Some(Commands::List(ExtensionListArgs {
+            local: true,
+            json: true
+        }))
+    ));
+
+    let update = Cli::try_parse_from(["pevo", "update", "--extensions", "--json"])
+        .expect("extension update");
+    assert!(matches!(
+        update.command,
+        Some(Commands::Update(ExtensionUpdateArgs {
+            extensions: true,
+            json: true,
+            ..
+        }))
+    ));
+    assert!(Cli::try_parse_from(["pevo", "update", "review", "--all"]).is_err());
+
+    let external = Cli::try_parse_from(["pevo", "-e", "./echo", "echo", "a b", "literal"])
+        .expect("temporary direct command");
+    assert_eq!(
+        external.extension_paths,
+        vec![std::path::PathBuf::from("./echo")]
+    );
+    assert!(matches!(
+        external.command,
+        Some(Commands::External(arguments))
+            if arguments == ["echo", "a b", "literal"]
+    ));
+
+    let config = Cli::try_parse_from([
+        "pevo",
+        "config",
+        "extension",
+        "example.echo",
+        "--local",
+        "--disable",
+        "--json",
+    ])
+    .expect("Extension config");
+    assert!(matches!(
+        config.command,
+        Some(Commands::Config(ConfigArgs {
+            command: ConfigCommand::Extension(ConfigExtensionArgs {
+                local: true,
+                disable: true,
+                json: true,
+                ..
+            })
+        }))
+    ));
 }
 
 #[test]
@@ -131,6 +219,23 @@ fn parses_local_scope_and_rejects_project_alias() {
 }
 
 #[test]
+fn compiled_feature_commands_match_selected_surface() {
+    let command = Cli::command();
+    let names = command
+        .get_subcommands()
+        .map(|command| command.get_name())
+        .collect::<Vec<_>>();
+
+    assert!(names.contains(&"install"));
+    assert_eq!(names.contains(&"acp"), cfg!(feature = "acp"));
+    for name in ["run", "tui", "web", "serve", "gateway"] {
+        assert_eq!(names.contains(&name), cfg!(feature = "gateway"), "{name}");
+    }
+    assert_eq!(names.contains(&"desktop"), cfg!(feature = "desktop"));
+}
+
+#[test]
+#[cfg(all(feature = "gateway", feature = "desktop"))]
 fn parses_new_cli_command_families() {
     let cli = Cli::try_parse_from(["pevo", "-C", "work"]).expect("default");
     assert_eq!(cli.cd.as_deref(), Some(Path::new("work")));

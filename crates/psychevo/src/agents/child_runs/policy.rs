@@ -378,8 +378,13 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
     let child_stream_events = child.context.stream_events.as_ref().map(|stream| {
         let stream = Arc::clone(stream);
         let child_session_id = child_session.clone();
+        let child_turn_id = child.id.clone();
         Arc::new(move |event| {
-            stream(RunStreamEvent::scoped(child_session_id.clone(), event));
+            stream(RunStreamEvent::scoped_turn(
+                child_session_id.clone(),
+                child_turn_id.clone(),
+                event,
+            ));
         }) as RunStreamSink
     });
     let sink = Arc::new(PersistenceSink {
@@ -499,8 +504,9 @@ fn emit_child_warning_events(child: &ChildRun, child_session_id: &str, warnings:
         return;
     };
     for warning in warnings {
-        stream(RunStreamEvent::scoped(
+        stream(RunStreamEvent::scoped_turn(
             child_session_id.to_string(),
+            child.id.clone(),
             RunStreamEvent::value(crate::run::warning_event(warning)),
         ));
     }

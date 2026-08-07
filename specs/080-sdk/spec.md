@@ -116,10 +116,17 @@ and development tooling. `psychevo-gateway`, `psychevo-acp`, and `psychevo-cli`
 remain private first-party crates, and the TUI remains an internal
 `psychevo-cli` module.
 
-Only `psychevo-ai`, `psychevo-agent-core`, and `psychevo` are Rust SDK crates
-published to crates.io. Their public dependency manifests use released
-versions; path dependencies may additionally be present for workspace
-development.
+Only `psychevo-ai`, `psychevo-agent-core`, `psychevo-extension-protocol`, and
+`psychevo` are Rust crates published to crates.io. The protocol crate is a
+small distribution dependency for the Framework's Extension host boundary,
+not a second Framework authority or general SDK entrypoint. Their public
+dependency manifests use released versions; path dependencies may additionally
+be present for workspace development.
+
+Package validation materializes and compiles every publishable workspace crate
+in dependency order, patching each already-materialized archive into later
+packages. Adding a publishable workspace dependency without adding it to that
+topological package validation is a release-blocking error.
 
 `psychevo-ai` is independently usable through path and git dependencies and
 must produce a publish-ready crate archive. This implementation slice validates

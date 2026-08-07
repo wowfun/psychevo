@@ -4,7 +4,7 @@ use crate::tui::{
     ModelCatalogCache, ModelState, PermissionMode, RunMode, RunningTask, RunningTurn,
     RunningTurnControl, RunningTurnEvents, SessionListView, SidebarSnapshot, StartThreadRequest,
     StartedTurn, StartingTurn, TUI_ROLE_ACCENT, TUI_ROLE_DANGER, TUI_ROLE_DIM, TUI_ROLE_IDENTITY,
-    TUI_ROLE_THINKING, TranscriptHitTarget, TranscriptKind, TranscriptRow, TuiApp,
+    TUI_ROLE_THINKING, TranscriptHitTarget, TranscriptKind, TranscriptRow, TuiApp, TuiExtensions,
     TuiJourneyProfileProbe, TuiRenderer, TuiState, TurnEvent, TurnMetaProjection, TurnOutcome,
     TurnRequest, TurnResult, turn_meta_text,
 };
@@ -366,6 +366,7 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config: EffectiveSlashConfig::default(),
+        extensions: TuiExtensions::empty(),
         side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq: 0,

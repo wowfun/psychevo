@@ -4,14 +4,18 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    Configuration, CreateCustomProviderRequest, config::ConfigScope, paths::canonicalize_cwd,
+    Configuration, CreateCustomProviderRequest,
+    config::ConfigScope,
+    extensions::{ExtensionScope, ExtensionStore},
+    paths::canonicalize_cwd,
 };
 use serde_json::{Value, json};
 
 use crate::args::{
-    ConfigArgs, ConfigCommand, ConfigEditArgs, ConfigJsonArgs, ConfigPermissionRemoveArgs,
-    ConfigPermissionsArgs, ConfigPermissionsCommand, ConfigProviderAddArgs, ConfigProviderArgs,
-    ConfigProviderCommand, ConfigSetArgs, ConfigShowArgs,
+    ConfigArgs, ConfigCommand, ConfigEditArgs, ConfigExtensionArgs, ConfigJsonArgs,
+    ConfigPermissionRemoveArgs, ConfigPermissionsArgs, ConfigPermissionsCommand,
+    ConfigProviderAddArgs, ConfigProviderArgs, ConfigProviderCommand, ConfigSetArgs,
+    ConfigShowArgs,
 };
 use crate::commands::common::{CommandConfiguration, print_json_error, read_secret_from_stdin};
 use crate::env::{env_path, inherited_env, resolve_psychevo_home, resolve_state_db};
@@ -34,6 +38,7 @@ pub(crate) async fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCo
     match &args.command {
         ConfigCommand::Path(args) => print_paths(args, &env_map, &home, &cwd)?,
         ConfigCommand::Edit(args) => edit_config(args, &home, &cwd)?,
+        ConfigCommand::Extension(args) => configure_extension(args, &home, &cwd)?,
         command => {
             let context = CommandConfiguration::open(&env_map, &home, &cwd).await?;
             let result = run_configuration_command(command, context.configuration());
@@ -56,8 +61,95 @@ fn run_configuration_command(command: &ConfigCommand, configuration: &Configurat
         }
         ConfigCommand::Provider(args) => run_provider_command(args, configuration),
         ConfigCommand::Permissions(args) => run_permissions_command(args, configuration),
-        ConfigCommand::Path(_) | ConfigCommand::Edit(_) => unreachable!("handled without state"),
+        ConfigCommand::Path(_) | ConfigCommand::Edit(_) | ConfigCommand::Extension(_) => {
+            unreachable!("handled without state")
+        }
     }
+}
+
+fn configure_extension(
+    args: &ConfigExtensionArgs,
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    let store = ExtensionStore::new(home, cwd);
+    let mutation = args
+        .enable
+        .then_some(true)
+        .or_else(|| args.disable.then_some(false));
+    if let Some(enabled) = mutation {
+        let selector = args.selector.as_deref().expect("clap requires selector");
+        let scope = if args.local {
+            ExtensionScope::Local
+        } else {
+            ExtensionScope::Profile
+        };
+        let record = store.set_enabled(selector, scope, enabled)?;
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "success": true,
+                    "extension": record,
+                }))?
+            );
+        } else {
+            println!(
+                "Extension `{}` is {} in {} scope.",
+                record.id,
+                if enabled { "enabled" } else { "disabled" },
+                record.scope.as_str()
+            );
+        }
+        return Ok(());
+    }
+
+    let records = if args.local {
+        store.records(ExtensionScope::Local)?
+    } else {
+        store.effective_records()?
+    };
+    let records = match args.selector.as_deref() {
+        Some(selector) => {
+            let record = records
+                .into_iter()
+                .find(|record| record.id == selector)
+                .ok_or_else(|| {
+                    anyhow!("Extension `{selector}` is not installed in the selected policy view")
+                })?;
+            vec![record]
+        }
+        None => records,
+    };
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "view": if args.local { "local" } else { "effective" },
+                "extensions": records,
+            }))?
+        );
+    } else if records.is_empty() {
+        println!("No Extensions found in the selected policy view.");
+    } else {
+        for record in records {
+            println!(
+                "{} [{}] {} from {}",
+                record.id,
+                record.scope.as_str(),
+                if record.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                record.source
+            );
+        }
+        if args.selector.is_some() {
+            println!("Use --enable or --disable to change this Extension policy.");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn edit_config(
@@ -510,5 +602,6 @@ pub(crate) fn config_json(args: &ConfigArgs) -> bool {
             ConfigPermissionsCommand::List(args) => args.json,
             ConfigPermissionsCommand::Remove(args) => args.json,
         },
+        ConfigCommand::Extension(args) => args.json,
     }
 }

@@ -96,6 +96,10 @@ come from the focused command and smoke tests below.
 
 ## Command Metadata Coverage
 
+- A dedicated process-help test runs under the base, each individual optional
+  feature, and default/full builds. It verifies that Extension management stays
+  in the base CLI, each optional command appears if and only if its feature is
+  compiled, and omitted product commands are absent from root help.
 - `pevo --help` exposes subcommand descriptions aligned with the shared command
   contract vocabulary while argv parsing remains clap-owned.
 - Representative command help, including `pevo run --help`, `pevo tui --help`,
@@ -163,8 +167,8 @@ come from the focused command and smoke tests below.
   bare `name` and `name@source` remain valid only for a unique match.
 - `pevo plugin marketplace list/add/remove` manages source catalogs separately
   from plugin enablement policy.
-- Plugin worker fixtures can expose a tool through the normal run tool surface
-  without contacting a live provider.
+- Installed Extension fixtures can expose a declared root command through the
+  normal CLI dispatch surface without contacting a live provider.
 
 ## Permission Coverage
 
@@ -285,7 +289,9 @@ for config and credentials, and must not copy credential files automatically.
 VHS terminal captures are projection evidence. Their tape waits should anchor on
 stable user-visible content from the exercised workflow instead of transient
 debug/status-line labels when structured state or durable session evidence is
-available separately.
+available separately. A content marker does not by itself prove Turn settlement:
+before an overloaded key such as Escape is used for navigation, the tape also
+waits for the stable idle footer with no running spinner or elapsed segment.
 
 ## Related Topics
 

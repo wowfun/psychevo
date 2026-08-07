@@ -103,7 +103,6 @@ pub(crate) async fn run_live_internal(
             runtime_tools: options.runtime_tools.clone(),
         })
         .await;
-    let run_result = async {
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
@@ -149,11 +148,6 @@ pub(crate) async fn run_live_internal(
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_agent.as_ref());
     let effective_mode = effective_run_mode(options.mode, selected_agent.as_ref());
-    if effective_mode == RunMode::Default {
-        extension_assembly.materialize_worker_tools().await;
-    } else {
-        extension_assembly.activate_worker_runtime();
-    }
     let extension_warnings = extension_assembly.warnings.clone();
     let mut resolved_options = options.clone();
     if resolved_options.model.is_none()
@@ -184,8 +178,7 @@ pub(crate) async fn run_live_internal(
         &loaded.config.toolsets,
         &extension_assembly.toolsets,
     );
-    let web_search_selected =
-        tool_selection_intent.selects_tool("web_search", effective_mode);
+    let web_search_selected = tool_selection_intent.selects_tool("web_search", effective_mode);
     let image_generation =
         crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
             .ok();
@@ -285,13 +278,13 @@ pub(crate) async fn run_live_internal(
             (
                 store
                     .create_session_with_metadata(
-                    &cwd,
-                    source,
-                    &resolved.model,
-                    &resolved.provider,
-                    Some(session_metadata()),
-                )
-                .await?,
+                        &cwd,
+                        source,
+                        &resolved.model,
+                        &resolved.provider,
+                        Some(session_metadata()),
+                    )
+                    .await?,
                 true,
             )
         }
@@ -299,13 +292,13 @@ pub(crate) async fn run_live_internal(
         (
             store
                 .create_session_with_metadata(
-                &cwd,
-                source,
-                &resolved.model,
-                &resolved.provider,
-                Some(session_metadata()),
-            )
-            .await?,
+                    &cwd,
+                    source,
+                    &resolved.model,
+                    &resolved.provider,
+                    Some(session_metadata()),
+                )
+                .await?,
             true,
         )
     };
@@ -472,17 +465,16 @@ pub(crate) async fn run_live_internal(
         .filter(|record| record.delivered_at_ms.is_some())
         .map(|record| agent_mailbox_event_message(&record))
         .collect::<Vec<_>>();
-    let provider =
-        if let Some(provider) = provider_override.clone() {
-            provider
-        } else {
-            crate::run::generation_provider(
-                resolved.base_url.clone(),
-                resolved.api_key.clone(),
-                resolved.provider.clone(),
-                resolved.inference_idle_timeout_secs,
-            )?
-        };
+    let provider = if let Some(provider) = provider_override.clone() {
+        provider
+    } else {
+        crate::run::generation_provider(
+            resolved.base_url.clone(),
+            resolved.api_key.clone(),
+            resolved.provider.clone(),
+            resolved.inference_idle_timeout_secs,
+        )?
+    };
     let (title_generation, mut title_warnings) = if should_auto_title {
         match resolve_title_generation_provider(&resolved_options, &loaded, &resolved).and_then(
             |title_resolved| {
@@ -734,9 +726,8 @@ pub(crate) async fn run_live_internal(
         } else {
             ClarifyToolSurface::Disabled
         },
-        skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then(|| {
-            SkillRuntime::from_catalog(skill_options, skill_catalog.clone())
-        }),
+        skills: (!options.no_skills || !explicit_skill_inputs.is_empty())
+            .then(|| SkillRuntime::from_catalog(skill_options, skill_catalog.clone())),
         extension_tools,
         agents: agent_tools,
     });
@@ -751,12 +742,13 @@ pub(crate) async fn run_live_internal(
     );
     let hook_runtime_for_lifecycle = hook_runtime.clone();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let outcome = runtime.run_session_start(&json!({
-            "session_id": session_id,
-            "source": if created_session { "startup" } else { "resume" },
-            "cwd": cwd,
-        }))
-        .await;
+        let outcome = runtime
+            .run_session_start(&json!({
+                "session_id": session_id,
+                "source": if created_session { "startup" } else { "resume" },
+                "cwd": cwd,
+            }))
+            .await;
         if let Some(reason) = outcome.stop_reason {
             return Err(Error::Message(reason));
         }
@@ -910,12 +902,13 @@ pub(crate) async fn run_live_internal(
         skill_contextual_user_messages(&skill_context_fragments);
     let mut hook_context_message_count = 0usize;
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let prompt_hook = runtime.run_user_prompt_submit(&json!({
-            "session_id": session_id,
-            "prompt": options.prompt,
-            "cwd": cwd,
-        }))
-        .await;
+        let prompt_hook = runtime
+            .run_user_prompt_submit(&json!({
+                "session_id": session_id,
+                "prompt": options.prompt,
+                "cwd": cwd,
+            }))
+            .await;
         if let Some(reason) = prompt_hook.block_reason {
             return Err(Error::Message(reason));
         }
@@ -1017,9 +1010,7 @@ pub(crate) async fn run_live_internal(
         tool_search: tool_search_options,
         max_turns: DEFAULT_AGENT_MAX_TURNS,
     };
-    let completion = match run_agent_loop(language_model, request, sink, control_receivers)
-        .await
-    {
+    let completion = match run_agent_loop(language_model, request, sink, control_receivers).await {
         Ok(completion) => completion,
         Err(err) => {
             let err = Error::from(err);
@@ -1086,17 +1077,19 @@ pub(crate) async fn run_live_internal(
         .find_map(assistant_text)
         .unwrap_or_default();
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_post_llm_call(&json!({
-            "session_id": session_id,
-            "outcome": completion.outcome.as_str(),
-            "assistant_text": final_answer,
-        }))
-        .await;
-        let stop = runtime.run_stop(&json!({
-            "session_id": session_id,
-            "outcome": completion.outcome.as_str(),
-        }))
-        .await;
+        let _ = runtime
+            .run_post_llm_call(&json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+                "assistant_text": final_answer,
+            }))
+            .await;
+        let stop = runtime
+            .run_stop(&json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+            }))
+            .await;
         if let Some(reason) = stop.block_reason {
             return Err(Error::Message(reason));
         }
@@ -1174,11 +1167,12 @@ pub(crate) async fn run_live_internal(
     warnings.append(&mut tool_surface_warnings);
     warnings.extend(title_warnings);
     if let Some(runtime) = &hook_runtime_for_lifecycle {
-        let _ = runtime.run_session_end(&json!({
-            "session_id": session_id,
-            "outcome": completion.outcome.as_str(),
-        }))
-        .await;
+        let _ = runtime
+            .run_session_end(&json!({
+                "session_id": session_id,
+                "outcome": completion.outcome.as_str(),
+            }))
+            .await;
     }
     Ok(RunResult {
         session_id,
@@ -1201,10 +1195,6 @@ pub(crate) async fn run_live_internal(
         events,
         warnings,
     })
-    }
-    .await;
-    extension_assembly.shutdown_workers().await;
-    run_result
 }
 
 fn hook_contextual_user_messages(

@@ -68,11 +68,14 @@ Out of scope:
   OAuth credential-store interface and fails explicit system-store operations
   with an actionable capability error; first-party product compositions enable
   the native backend. This is a platform-cost boundary, not a product facade.
-- `psychevo-gateway` owns one default-on `native-channels` seam for native
-  channel adapter dependencies. `psychevo-cli` forwards that feature and omits
-  the channel setup command when built without default features. The default
-  product remains complete; the no-default build is an executable dependency
-  graph invariant, not a separate edition.
+- Channel platform SDKs and adapters are standalone Extension-sidecar
+  dependencies. `psychevo-gateway` and `psychevo-cli` depend only on the
+  versioned Extension protocol through the Framework facade; neither owns or
+  forwards a `native-channels` feature. Channel setup remains part of the
+  product command surface and resolves an installed, trusted Channel Extension
+  at runtime. A feature-free Framework/Gateway/CLI graph therefore contains no
+  first-party platform SDK while retaining actionable setup and installation
+  guidance.
 
 Gateway's typed Framework-to-wire projection is one named namespace whose
 ordinary child modules own live state, assistant, Agent, Tool, runtime-event,

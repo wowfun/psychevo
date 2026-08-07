@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "allowedTools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "appId": {
+      "type": "string"
+    },
+    "connectDomains": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "extensionId": {
+      "type": "string"
+    },
+    "fallback": {
+      "type": "string"
+    },
+    "leaseId": {
+      "type": "string"
+    },
+    "resourceDomains": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "resourceUri": {
+      "type": "string"
+    },
+    "resourceUrl": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "allowedTools",
+    "appId",
+    "connectDomains",
+    "extensionId",
+    "fallback",
+    "leaseId",
+    "resourceDomains",
+    "resourceUri",
+    "resourceUrl"
+  ],
+  "title": "ExtensionAppOpenResult",
+  "type": "object"
+}

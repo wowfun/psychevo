@@ -10,7 +10,9 @@ use crate::server::binding::AuthContext;
 use crate::server::rpc_dispatch::handle_rpc;
 use crate::server::rpc_json::RpcRequest;
 use crate::server::scope_session::default_resolved_scope;
-use crate::server::tests::helpers::{web_state, write_agent_definition};
+use crate::server::tests::helpers::{
+    install_wechat_test_extension, web_state, write_agent_definition,
+};
 
 #[tokio::test]
 async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
@@ -29,6 +31,7 @@ async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
     });
 
     let (_temp, state) = web_state().await;
+    install_wechat_test_extension(&state);
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)

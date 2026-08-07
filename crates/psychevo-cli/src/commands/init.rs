@@ -1,13 +1,16 @@
 use std::env;
 use std::fs;
+#[cfg(feature = "gateway")]
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+#[cfg(feature = "gateway")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use psychevo::Application;
 
 use crate::args::InitArgs;
+#[cfg(feature = "gateway")]
 use crate::commands::gateway::stop_managed_for_home;
 use crate::env::{inherited_env, resolve_psychevo_home};
 use crate::profiles::protect_env_file;
@@ -47,8 +50,15 @@ pub(crate) async fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     }
     protect_env_file(&env_file)?;
     if args.reset_state {
-        let _ = stop_managed_for_home(&home).await?;
-        backup_state_files(&home, &state)?;
+        #[cfg(not(feature = "gateway"))]
+        return Err(anyhow!(
+            "`pevo init --reset-state` requires a build with the `gateway` feature so a managed server can be stopped safely"
+        ));
+        #[cfg(feature = "gateway")]
+        {
+            let _ = stop_managed_for_home(&home).await?;
+            backup_state_files(&home, &state)?;
+        }
     }
     let application = Application::builder()
         .home(&home)
@@ -69,6 +79,7 @@ pub(crate) async fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+#[cfg(feature = "gateway")]
 pub(crate) fn backup_state_files(home: &Path, state: &Path) -> Result<()> {
     let timestamp_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)

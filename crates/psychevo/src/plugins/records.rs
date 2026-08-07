@@ -31,6 +31,10 @@ pub(crate) fn select_record<'a>(
         .iter()
         .filter(|record| {
             selector == record.name
+                || record
+                    .marketplace
+                    .as_ref()
+                    .is_some_and(|marketplace| selector == format!("{}@{marketplace}", record.name))
                 || selector == canonical_record_selector(record)
                 || selector == format!("{}@{}", record.name, record.source_slug)
                 || selector == format!("{}@{}", record.name, record.source_id)
@@ -46,11 +50,12 @@ pub(crate) fn select_record<'a>(
 }
 
 pub(crate) fn canonical_record_selector(record: &PluginInstallRecord) -> String {
+    let source = record.marketplace.as_deref().unwrap_or(&record.source_slug);
     format!(
         "{}:{}@{}",
         plugin_scope_name(record.scope),
         record.name,
-        record.source_slug
+        source
     )
 }
 

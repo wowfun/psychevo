@@ -64,6 +64,13 @@ gating must not create or continue a local thread.
 
 ## Adapter Behavior
 
+Feishu and Lark ship together as precompiled Extension
+`psychevo.channel.feishu-lark` because they share the same SDK and transport
+implementation. Gateway does not link that SDK. Setup or runner start with the
+artifact absent reports `pevo install psychevo.channel.feishu-lark`. One
+sidecar may serve both domains, but each configured connection retains its own
+Channel lease and isolated credentials, tenant, source identity, and shutdown.
+
 The adapter uses the platform SDK long-connection event stream. It normalizes
 accepted inbound text and supported media into Gateway source-scoped turns.
 The SDK callback feeds one 64-entry ingress queue and awaits capacity rather
@@ -97,6 +104,8 @@ long-connection failures.
 - [280 Channel UX](../280-channel-ux/spec.md) defines setup and Settings UX.
 - [021 Gateway](../021-gateway/spec.md) defines source, thread, and turn
   semantics.
+- [058 Extensions](../058-extensions/spec.md) defines the shared artifact,
+  installation, protocol, and leases.
 
 ## Attachments
 

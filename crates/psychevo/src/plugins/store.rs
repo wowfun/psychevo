@@ -76,10 +76,11 @@ impl PluginStore {
 
     pub(crate) fn write_catalog_entries(&self, entries: &[PluginMarketplaceEntry]) -> Result<()> {
         self.ensure()?;
-        fs::write(
-            self.cache.join(CATALOG_FILE),
-            serde_json::to_string_pretty(entries)?,
-        )?;
+        let mut file = tempfile::NamedTempFile::new_in(&self.cache)?;
+        serde_json::to_writer_pretty(file.as_file_mut(), entries)?;
+        file.as_file_mut().sync_all()?;
+        file.persist(self.cache.join(CATALOG_FILE))
+            .map_err(|err| crate::error::Error::Io(err.error))?;
         Ok(())
     }
 }

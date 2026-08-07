@@ -92,6 +92,7 @@ pub(crate) use serde_json::Value;
 pub(crate) use tokio::sync::{mpsc, oneshot};
 pub(crate) use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+mod extensions;
 pub(crate) mod plain;
 pub(crate) mod slash;
 pub(crate) mod state;
@@ -99,6 +100,7 @@ pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use self::extensions::TuiExtensions;
 use self::plain::{TuiRenderer, assistant_text_from_event};
 use self::slash::{
     EffectiveSlashConfig, SlashCommand, SlashHelpSections, SlashMenuItem, SlashShortcutMatch,
@@ -127,7 +129,10 @@ pub(crate) enum CompletionPopupTarget {
     Skill(usize),
 }
 
-pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
+pub(crate) async fn run_tui_command(
+    args: &TuiArgs,
+    temporary_extension_paths: &[PathBuf],
+) -> Result<ExitCode> {
     let env_map = inherited_env();
     let journey_profile = TuiJourneyProfileProbe::from_env(&env_map)?;
     let cwd = std::env::current_dir()?;
@@ -147,6 +152,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         None => cwd,
     };
     let cwd = canonicalize_cwd(&cwd)?;
+    let extensions = TuiExtensions::load(&home, &cwd, &env_map, temporary_extension_paths)?;
     let slash_config = load_effective_tui_slash_config(runtime.client(), &env_map, cwd.clone())?;
     let cwd_key = cwd.to_string_lossy().to_string();
     let state_path = home.join("tui-state.json");
@@ -237,6 +243,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         clipboard_result_rx,
         clipboard_copies_in_flight: 0,
         slash_config,
+        extensions,
         side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq,
@@ -256,13 +263,20 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     app.refresh_current_session_title().await?;
     app.refresh_current_session_agent().await?;
     let run_result = app.run(args.message.join(" ")).await;
+    let extension_shutdown_result = app.extensions.shutdown().await;
     let shutdown_result = app.runtime.shutdown().await;
     let profile_result = app.journey_profile.finish();
-    match (run_result, shutdown_result, profile_result) {
-        (Err(err), _, _) => Err(err),
-        (Ok(_), Err(err), _) => Err(err.into()),
-        (Ok(_), Ok(_), Err(err)) => Err(err.into()),
-        (Ok(exit_code), Ok(_), Ok(())) => Ok(exit_code),
+    match (
+        run_result,
+        extension_shutdown_result,
+        shutdown_result,
+        profile_result,
+    ) {
+        (Err(err), _, _, _) => Err(err),
+        (Ok(_), Err(err), _, _) => Err(err),
+        (Ok(_), Ok(_), Err(err), _) => Err(err.into()),
+        (Ok(_), Ok(_), Ok(_), Err(err)) => Err(err.into()),
+        (Ok(exit_code), Ok(()), Ok(_), Ok(())) => Ok(exit_code),
     }
 }
 

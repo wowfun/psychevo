@@ -17,7 +17,19 @@ impl TuiApp {
         if !should_parse_slash_command_input(text) {
             return Ok(SubmittedSlashInput::NotSlash);
         }
-        match parse_tui_slash_with_config(text, &self.slash_config)? {
+        let (submitted_command, submitted_args) = crate::tui::slash::split_command_token(text);
+        let parsed = parse_tui_slash_with_config(text, &self.slash_config)?;
+        if matches!(
+            parsed,
+            TuiSlashParse::Unknown { .. }
+                | TuiSlashParse::Command(SlashCommand::SkillInvoke { .. })
+        ) && let Some((command, args)) = self
+            .extensions
+            .parse_invocation(submitted_command, submitted_args)?
+        {
+            return Ok(SubmittedSlashInput::ExtensionCommand { command, args });
+        }
+        match parsed {
             TuiSlashParse::NotSlash => Ok(SubmittedSlashInput::NotSlash),
             TuiSlashParse::Unknown { original, .. } => {
                 Ok(SubmittedSlashInput::PassThroughPrompt(original))

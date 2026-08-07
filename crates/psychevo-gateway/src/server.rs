@@ -10,6 +10,7 @@ mod commands;
 mod completion;
 mod download_static;
 mod event_delivery;
+mod extension_management;
 mod mcp_oauth_store;
 mod rpc_dispatch;
 mod rpc_json;

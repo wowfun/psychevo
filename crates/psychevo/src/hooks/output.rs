@@ -1,6 +1,5 @@
 use serde_json::Value;
 
-use super::OUTPUT_LIMIT;
 use super::types::{HookEventName, HookPermissionDecision, HookRunEntry};
 
 pub(crate) fn parse_output_entries(
@@ -113,28 +112,4 @@ pub(crate) fn block_reason(stdout: &str, stderr: &str) -> String {
     } else {
         "hook blocked the current event".to_string()
     }
-}
-
-pub(crate) fn bounded_output(bytes: &[u8]) -> String {
-    let text = crate::process_env::decode_process_output(bytes);
-    if text.len() <= OUTPUT_LIMIT {
-        text.trim().to_string()
-    } else {
-        let boundary = floor_char_boundary(&text, OUTPUT_LIMIT);
-        format!("{}...[truncated]", &text[..boundary])
-    }
-}
-
-fn floor_char_boundary(text: &str, limit: usize) -> usize {
-    if limit >= text.len() {
-        return text.len();
-    }
-    if text.is_char_boundary(limit) {
-        return limit;
-    }
-    text.char_indices()
-        .map(|(index, _)| index)
-        .take_while(|index| *index < limit)
-        .last()
-        .unwrap_or(0)
 }

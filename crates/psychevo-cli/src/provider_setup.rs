@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Result, anyhow};
 use psychevo::config::custom_provider_api_key_env;
 
+#[cfg(feature = "gateway")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderSetupPresetId {
     DeepSeek,
@@ -12,6 +13,7 @@ pub(crate) enum ProviderSetupPresetId {
     Custom,
 }
 
+#[cfg(feature = "gateway")]
 impl ProviderSetupPresetId {
     pub(crate) fn key(self) -> &'static str {
         match self {
@@ -32,6 +34,7 @@ pub(crate) struct ProviderSetupBaseUrl {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProviderSetupPreset {
+    #[cfg(feature = "gateway")]
     pub(crate) id: ProviderSetupPresetId,
     pub(crate) label: &'static str,
     pub(crate) provider_id: Option<&'static str>,
@@ -83,6 +86,7 @@ const CUSTOM_BASE_URLS: &[ProviderSetupBaseUrl] = &[ProviderSetupBaseUrl {
 
 const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
     ProviderSetupPreset {
+        #[cfg(feature = "gateway")]
         id: ProviderSetupPresetId::DeepSeek,
         label: "DeepSeek",
         provider_id: Some("deepseek"),
@@ -91,6 +95,7 @@ const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
         api_key_env_candidates: &["DEEPSEEK_API_KEY"],
     },
     ProviderSetupPreset {
+        #[cfg(feature = "gateway")]
         id: ProviderSetupPresetId::Zai,
         label: "Z.AI / GLM",
         provider_id: Some("zai"),
@@ -99,6 +104,7 @@ const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
         api_key_env_candidates: &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
     },
     ProviderSetupPreset {
+        #[cfg(feature = "gateway")]
         id: ProviderSetupPresetId::XiaomiTokenPlan,
         label: "Xiaomi Token Plan",
         provider_id: Some("xiaomi-token-plan"),
@@ -111,6 +117,7 @@ const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
         ],
     },
     ProviderSetupPreset {
+        #[cfg(feature = "gateway")]
         id: ProviderSetupPresetId::OpenCodeZen,
         label: "OpenCode Zen",
         provider_id: Some("opencode-zen"),
@@ -119,6 +126,7 @@ const PROVIDER_SETUP_PRESETS: &[ProviderSetupPreset] = &[
         api_key_env_candidates: &["OPENCODE_ZEN_API_KEY"],
     },
     ProviderSetupPreset {
+        #[cfg(feature = "gateway")]
         id: ProviderSetupPresetId::Custom,
         label: "Custom OpenAI-compatible",
         provider_id: None,
@@ -132,6 +140,7 @@ pub(crate) fn provider_setup_presets() -> &'static [ProviderSetupPreset] {
     PROVIDER_SETUP_PRESETS
 }
 
+#[cfg(feature = "gateway")]
 pub(crate) fn provider_setup_preset(id: ProviderSetupPresetId) -> &'static ProviderSetupPreset {
     PROVIDER_SETUP_PRESETS
         .iter()
@@ -228,6 +237,7 @@ pub(crate) fn looks_like_api_key(value: &str) -> bool {
         || value.chars().filter(|ch| ch.is_ascii_digit()).count() >= 6
 }
 
+#[cfg(feature = "gateway")]
 pub(crate) fn is_loopback_base_url(value: &str) -> bool {
     value.starts_with("http://127.0.0.1")
         || value.starts_with("http://localhost")

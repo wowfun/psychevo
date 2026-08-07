@@ -38,6 +38,17 @@ pub fn install_plugin(
         &SourceRequest::from_install(&options),
         Some(staging),
     )?;
+    install_materialized_plugin(home, cwd, options.scope, options.force, materialized, None)
+}
+
+pub(crate) fn install_materialized_plugin(
+    home: &Path,
+    cwd: &Path,
+    scope: super::types::PluginScope,
+    force: bool,
+    materialized: PluginMaterializedSource,
+    marketplace: Option<&str>,
+) -> Result<PluginInstallRecord> {
     let inspection = inspect_materialized_source(&materialized)?;
     if matches!(
         inspection.framework,
@@ -72,13 +83,13 @@ pub fn install_plugin(
         .unwrap_or_else(|| "local".to_string());
     let description = inspection.description.clone().unwrap_or_default();
     let source_slug = source_slug(&materialized.source_id);
-    let store = PluginStore::new(home, cwd, options.scope)?;
+    let store = PluginStore::new(home, cwd, scope)?;
     store.ensure()?;
     let package_root = store
         .cache
         .join(package_dir_name(&inspection.name, &version, &source_slug));
     if package_root.exists() {
-        if options.force {
+        if force {
             fs::remove_dir_all(&package_root)?;
         } else {
             return Err(Error::Config(format!(
@@ -116,6 +127,7 @@ pub fn install_plugin(
     fs::create_dir_all(&data_root)?;
     let record = PluginInstallRecord {
         name: installed_inspection.name.clone(),
+        marketplace: marketplace.map(str::to_string),
         version,
         description,
         source_id: materialized.source_id,
@@ -123,7 +135,7 @@ pub fn install_plugin(
         source_kind: materialized.source_kind,
         npm_registry: materialized.npm_registry,
         resolved_revision: materialized.resolved_revision,
-        scope: options.scope,
+        scope,
         package_root,
         data_root,
         manifest_path: installed_inspection.manifest_path,

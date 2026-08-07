@@ -848,6 +848,69 @@ pub struct PluginDoctorParams {
     pub scope: Option<GatewayRequestScope>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionListParams {
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionReadParams {
+    pub selector: String,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionRemoveParams {
+    pub selector: String,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionSetEnabledParams {
+    pub selector: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionAppOpenParams {
+    pub selector: String,
+    pub app_id: String,
+    #[serde(default)]
+    pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ExtensionAppCloseParams {
+    pub lease_id: String,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]

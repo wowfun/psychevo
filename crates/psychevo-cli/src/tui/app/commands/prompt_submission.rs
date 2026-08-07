@@ -9,6 +9,7 @@ mod prompt_queue;
 
 pub(crate) enum SubmittedSlashInput {
     Command(SlashCommand),
+    ExtensionCommand { command: String, args: Vec<String> },
     PassThroughPrompt(String),
     NotSlash,
 }

@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::args::{McpArgs, McpCommand, McpServeArgs, PermissionModeArg};
-use crate::commands::run::interactive_approval_handler;
+use crate::commands::common::interactive_approval_handler;
 use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,

@@ -54,6 +54,12 @@ mention gating must not create or continue a local thread.
 
 ## Adapter Behavior
 
+The adapter ships as precompiled Extension `psychevo.channel.telegram`.
+Gateway does not link a Telegram Bot API client. Setup or runner start with the
+artifact absent reports `pevo install psychevo.channel.telegram` and leaves
+other Gateway entrypoints operational. Polling or webhook service holds one
+Channel lease until asynchronous shutdown completes.
+
 Polling uses Bot API `getUpdates` with offset tracking. Startup may clear stale
 webhook state when the connection is configured for polling and doing so is
 safe for the bot.
@@ -85,6 +91,8 @@ Webhook diagnostics must distinguish "configured but unavailable" from
 - [280 Channel UX](../280-channel-ux/spec.md) defines setup and Settings UX.
 - [021 Gateway](../021-gateway/spec.md) defines source, thread, and turn
   semantics.
+- [058 Extensions](../058-extensions/spec.md) defines the adapter artifact,
+  installation, protocol, and lease.
 
 ## Attachments
 

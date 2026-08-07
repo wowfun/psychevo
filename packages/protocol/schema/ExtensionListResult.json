@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ExtensionView": {
+      "properties": {
+        "coRootPlugin": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cspAppReadiness": {
+          "type": "string"
+        },
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "displayName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "leaseReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "protocolCompatible": {
+          "type": "boolean"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "sidecarState": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "sourceKind": {
+          "type": "string"
+        },
+        "trusted": {
+          "type": "boolean"
+        },
+        "trustedFingerprint": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cspAppReadiness",
+        "enabled",
+        "fingerprint",
+        "id",
+        "protocol",
+        "protocolCompatible",
+        "scope",
+        "selector",
+        "sidecarState",
+        "source",
+        "sourceKind",
+        "trusted",
+        "trustedFingerprint",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "count": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "extensions": {
+      "items": {
+        "$ref": "#/definitions/ExtensionView"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "count",
+    "extensions"
+  ],
+  "title": "ExtensionListResult",
+  "type": "object"
+}

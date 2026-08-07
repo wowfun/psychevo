@@ -328,6 +328,11 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     requests.abort_all();
     while requests.join_next().await.is_some() {}
     state.inner.terminals.terminate_owner(&out_tx);
+    state
+        .inner
+        .extension_app_leases
+        .release_owner(out_tx.id())
+        .await;
     relay.abort();
     out_tx.close("gateway connection closed");
     let _ = relay.await;

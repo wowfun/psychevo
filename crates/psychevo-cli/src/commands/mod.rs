@@ -3,8 +3,11 @@ pub(crate) mod auth;
 pub(crate) mod common;
 pub(crate) mod config;
 pub(crate) mod context;
+#[cfg(feature = "desktop")]
 pub(crate) mod desktop;
 pub(crate) mod doctor;
+pub(crate) mod extension;
+#[cfg(feature = "gateway")]
 pub(crate) mod gateway;
 pub(crate) mod hooks;
 pub(crate) mod init;
@@ -12,6 +15,7 @@ pub(crate) mod mcp;
 pub(crate) mod model;
 pub(crate) mod plugin;
 pub(crate) mod profile;
+#[cfg(feature = "gateway")]
 pub(crate) mod run;
 pub(crate) mod serve;
 pub(crate) mod session;

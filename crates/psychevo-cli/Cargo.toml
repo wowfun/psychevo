@@ -10,8 +10,11 @@ publish = false
 architecture-layer = 4
 
 [features]
-default = ["native-channels"]
-native-channels = ["psychevo-gateway/native-channels", "dep:qrcode"]
+default = ["full"]
+full = ["acp", "gateway", "desktop"]
+acp = ["dep:psychevo-acp"]
+gateway = ["dep:psychevo-gateway"]
+desktop = []
 
 [[bin]]
 name = "pevo"
@@ -23,12 +26,11 @@ clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
 ignore.workspace = true
-psychevo-acp = { path = "../psychevo-acp" }
-psychevo-gateway = { path = "../psychevo-gateway", default-features = false }
+psychevo-acp = { path = "../psychevo-acp", optional = true }
+psychevo-gateway = { path = "../psychevo-gateway", default-features = false, optional = true }
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
 psychevo = { path = "../psychevo", features = ["native-keyring"] }
 pulldown-cmark.workspace = true
-qrcode = { workspace = true, optional = true }
 ratatui.workspace = true
 ratatui-textarea.workspace = true
 regex-lite.workspace = true
@@ -37,6 +39,7 @@ serde.workspace = true
 serde_json.workspace = true
 supports-color.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 toml.workspace = true
 unicode-width.workspace = true
@@ -51,4 +54,3 @@ windows-sys.workspace = true
 [dev-dependencies]
 insta.workspace = true
 rusqlite.workspace = true
-tempfile.workspace = true

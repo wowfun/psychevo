@@ -50,6 +50,7 @@ mod reconcile;
 mod runner;
 mod state;
 
+pub(super) use adapters::channel_control;
 pub(super) use paths::redact_channel_error;
 pub(super) use reconcile::reconcile;
 pub(super) use state::ChannelRuntimeState;

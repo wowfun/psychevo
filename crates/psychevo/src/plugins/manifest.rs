@@ -6,7 +6,6 @@ use serde_json::{Map, Value, json};
 
 use super::types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInterfaceMetadata, PluginManifestKind,
-    PluginWorkerSpec,
 };
 use super::{
     CODEX_PLUGIN_COMPATIBILITY_PROFILE, PluginCompatibilityLevel, PluginComponentKind,
@@ -23,6 +22,12 @@ const HERMES_MANIFESTS: [&str; 3] = ["plugin.yaml", "plugin.yml", ".hermes-plugi
 
 pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<LoadedPluginManifest> {
     let root = root.to_path_buf();
+    if root.join("psychevo.extension.json").is_file() {
+        return Err(Error::Config(format!(
+            "{} is an executable Extension package; install it with `pevo install` instead of adding it as a Plugin",
+            root.display()
+        )));
+    }
     let candidates = [
         (CODEX_MANIFEST, PluginManifestKind::Codex),
         (CLAUDE_MANIFEST, PluginManifestKind::Claude),
@@ -191,15 +196,6 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
     if overlay.is_some_and(|overlay| overlay.contains_key("toolsets")) {
         psychevo_extensions.insert("toolsets".to_string());
     }
-    let worker = parse_worker(
-        overlay.and_then(|overlay| overlay.get("runtime")),
-        &root,
-        &overlay_path,
-        &mut diagnostics,
-    )?;
-    if worker.is_some() {
-        psychevo_extensions.insert("runtime".to_string());
-    }
     let interface = parse_manifest_interface(
         object.get("interface"),
         &root,
@@ -235,7 +231,6 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         hooks,
         mcp_servers,
         app_resource,
-        worker,
         toolsets,
         interface,
         manifest_resources,
@@ -283,9 +278,11 @@ fn overlay_for_projection<'a>(
     let object = raw_overlay?.as_object()?;
     let mut valid = true;
     for key in object.keys() {
-        if !matches!(key.as_str(), "runtime" | "agents" | "toolsets") {
+        if !matches!(key.as_str(), "agents" | "toolsets") {
             valid = false;
-            let reason = if matches!(
+            let reason = if key == "runtime" {
+                "belongs to an executable Extension manifest"
+            } else if matches!(
                 key.as_str(),
                 "skills" | "mcpServers" | "hooks" | "apps" | "interface"
             ) {
@@ -411,15 +408,6 @@ fn component_statuses(
                 PluginReadiness::Failed
             },
             "display metadata does not grant runtime authority",
-        ));
-    }
-    if psychevo_extensions.contains("runtime") {
-        statuses.push(PluginComponentStatus::new(
-            PluginComponentKind::Runtime,
-            PluginCompatibilityLevel::Execute,
-            PluginExecutionOwner::PsychevoWorker,
-            PluginReadiness::Ready,
-            "Psychevo companion worker executes out of process",
         ));
     }
     if psychevo_extensions.contains("agents") {
@@ -1480,58 +1468,6 @@ fn merge_hook_declarations(base: &mut Value, overlay: Value) {
             }
         }
     }
-}
-
-fn parse_worker(
-    value: Option<&Value>,
-    root: &Path,
-    manifest_path: &Path,
-    diagnostics: &mut Vec<PluginDiagnostic>,
-) -> Result<Option<PluginWorkerSpec>> {
-    let Some(runtime) = value.and_then(Value::as_object) else {
-        return Ok(None);
-    };
-    let Some(worker) = runtime.get("worker").and_then(Value::as_object) else {
-        return Ok(None);
-    };
-    let Some(command_raw) = worker.get("command").and_then(Value::as_str) else {
-        diagnostics.push(PluginDiagnostic::invalid(
-            "psychevo.runtime.worker.command is required",
-            Some(manifest_path.to_path_buf()),
-        ));
-        return Ok(None);
-    };
-    let command = match resolve_manifest_path(root, command_raw) {
-        Ok(path) => path,
-        Err(err) => {
-            diagnostics.push(PluginDiagnostic::invalid(
-                format!("psychevo.runtime.worker.command `{command_raw}` is invalid: {err}"),
-                Some(manifest_path.to_path_buf()),
-            ));
-            return Ok(None);
-        }
-    };
-    let args = worker
-        .get("args")
-        .map(|value| {
-            value
-                .as_array()
-                .ok_or_else(|| {
-                    Error::Config("psychevo.runtime.worker.args must be an array".to_string())
-                })?
-                .iter()
-                .map(|value| {
-                    value.as_str().map(str::to_string).ok_or_else(|| {
-                        Error::Config(
-                            "psychevo.runtime.worker.args must contain strings".to_string(),
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    Ok(Some(PluginWorkerSpec { command, args }))
 }
 
 fn resolve_manifest_path(root: &Path, raw: &str) -> std::result::Result<PathBuf, String> {

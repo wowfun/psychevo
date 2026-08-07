@@ -16,26 +16,6 @@ pub(super) fn channel_cwd(default_cwd: &Path, connection: &ChannelRuntimeConnect
     psychevo::paths::canonicalize_cwd(&path).unwrap_or(path)
 }
 
-#[cfg(feature = "native-channels")]
-pub(super) fn wechat_context_store_path(home: &Path, id: &str) -> PathBuf {
-    home.join("gateway").join("channels").join(format!(
-        "{}-wechat-context.json",
-        safe_channel_file_stem(id)
-    ))
-}
-
-#[cfg(feature = "native-channels")]
-fn safe_channel_file_stem(value: &str) -> String {
-    let mut out = value
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
-        .collect::<String>();
-    if out.is_empty() {
-        out = "channel".to_string();
-    }
-    out
-}
-
 pub(in crate::server) fn redact_channel_error(value: &str) -> String {
     let mut out = value.replace("Bearer ", "Bearer [redacted] ");
     for key in ["token=", "access_token=", "bot_token="] {
