@@ -1,7 +1,29 @@
 # Changelog
 
+## 2026-08-07
+
+- Separated declarative Plugins from executable Extensions, with marketplace
+  installs for Plugins and manifest-driven Extensions supporting trusted
+  sidecars, lifecycle commands, temporary loading, and direct commands.
+- Packaged WeChat, Telegram, and Feishu/Lark adapters as Channel Extensions so
+  default CLI/Gateway builds stay lean while managed Channel operation remains
+  available.
+- Added Gateway Extension inventory and lease management plus native and
+  sandboxed MCP App views in Workbench, with fail-closed tool authority and
+  desktop/mobile coverage.
+- Hardened Extension delivery and runtime lifecycle with deterministic
+  packaging, HTTPS and disabled-update safeguards, recoverable multiplexed
+  Channels, typed QR states, runtime pooling, stale-lease cleanup, and
+  pre-document CSP.
+- Kept completed Workbench Turns settled by rejecting stale activity and
+  same-Thread snapshot refreshes.
+- Scoped Channel adapter test fixtures to their provider features, eliminating
+  unused-code warnings from feature-free and single-provider test builds.
+
 ## 2026-08-06
 
+- Added Workbench transcript pinning, restored child-session answers, and
+  repaired Windows source installation across their owning boundaries.
 - Upgraded every hosted Python setup step to the immutable `setup-python` v7
   action so its implementation runs on Node.js 24 instead of the retired
   Node.js 20 runtime, without changing the provisioned Python 3.12 toolchain.
