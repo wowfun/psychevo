@@ -1,6 +1,6 @@
-import { lazy, Suspense, type ReactNode } from "react";
-import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
-import { ActionButton, DismissibleDetails, IconButton, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
+import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Pin, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
+import { ActionButton, DismissibleDetails, IconButton, type TranscriptAgentSession, type TranscriptPinnedMessage, type WorkspaceFileLinkContext } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   ContextReadResult,
@@ -19,6 +19,7 @@ import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
 import { WorkspaceFileGatewayAdapterProvider } from "./right-workspace/workspace-file-gateway-adapter";
 import { PreviewPanel } from "./right-workspace/preview";
+import { PinnedMessagePanel } from "./right-workspace/pinned-message";
 import { ReviewPanel } from "./right-workspace/review";
 import { TeamPanel } from "./right-workspace/team";
 import { ThreadPanel } from "./right-workspace/thread";
@@ -78,12 +79,14 @@ export function RightWorkspace({
   onBrowserStateChange,
   onOpenKind,
   onOpenPreview,
+  onPinnedMessageChange,
   onConsumePendingPrompt,
   onRejectChange,
   onRefresh,
   onRefreshTrace,
   onSaveFile,
-  onShowHome
+  onShowHome,
+  pinnedMessageKeys
 }: {
   activeTabId: string | null;
   activity: ThreadSnapshot["activity"];
@@ -121,12 +124,14 @@ export function RightWorkspace({
   onBrowserStateChange(tabId: string, state: RightWorkspaceBrowserState): void;
   onOpenKind(kind: RightWorkspaceTabKind): void;
   onOpenPreview(preview: RightWorkspacePreview): void;
+  onPinnedMessageChange(message: TranscriptPinnedMessage, sourceTitle: string, pinned: boolean): void;
   onConsumePendingPrompt(tabId: string): void;
   onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
   onRefreshTrace(): void;
   onSaveFile(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
   onShowHome(): void;
+  pinnedMessageKeys: ReadonlySet<string>;
 }) {
   const visibleTabs = tabs.filter((tab) => rightWorkspaceTabVisibleForSession(tab, sessionId));
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
@@ -211,6 +216,9 @@ export function RightWorkspace({
                 preview={tab.preview}
               />
             )}
+            {tab.kind === "pinnedMessage" && tab.pinnedMessage && (
+              <PinnedMessagePanel message={tab.pinnedMessage} />
+            )}
             {tab.kind === "browser" && (
               <BrowserPanel
                 hostKind={hostKind}
@@ -256,15 +264,16 @@ export function RightWorkspace({
                 gatewayEventFeed={latestGatewayEvent}
                 kind={tab.kind}
                 parentThreadId={tab.parentThreadId ?? sessionId}
-                historyFidelity={tab.historyFidelity ?? null}
                 pendingPrompt={tab.pendingPrompt ?? null}
                 scope={scope}
                 threadId={tab.threadId ?? null}
                 title={tab.title}
                 onCopyText={onCopyText}
                 onOpenAgentSession={onOpenAgentSession}
+                onPinnedMessageChange={(message, pinned) => onPinnedMessageChange(message, tab.title, pinned)}
                 onPendingPromptConsumed={() => onConsumePendingPrompt(tab.id)}
                 workspaceFileLinks={workspaceFileLinks}
+                pinnedMessageKeys={pinnedMessageKeys}
               />
             )}
           </div>
@@ -318,6 +327,15 @@ function RightWorkspaceTabs({
   onOpenKind(kind: RightWorkspaceTabKind): void;
   onShowHome(): void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const active = Array.from(scrollerRef.current?.children ?? []).find(
+      (element) => element instanceof HTMLElement && element.dataset.rightWorkspaceTabId === activeTabId
+    );
+    if (active instanceof HTMLElement) {
+      active.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeTabId, tabs.length]);
   const menuItems: Array<{ icon: ReactNode; kind: RightWorkspaceTabKind; label: string }> = [
     { icon: <GitPullRequest size={14} />, kind: "review", label: "Review" },
     { icon: <TerminalSquare size={14} />, kind: "terminal", label: "Terminal" },
@@ -341,15 +359,17 @@ function RightWorkspaceTabs({
       >
         <Home size={14} />
       </button>
-      {tabs.map((tab) => (
-        <div className={`rightWorkspaceTab ${tab.id === activeTabId ? "is-selected" : ""}`} key={tab.id}>
-          <button aria-selected={tab.id === activeTabId} onClick={() => onActivate(tab.id)} role="tab" title={tab.title} type="button">
-            {rightWorkspaceTabIcon(tab.kind)}
-            <span>{tab.title}</span>
-          </button>
-          <IconButton icon={<X size={12} />} label={`Close ${tab.title}`} onClick={() => onClose(tab.id)} size="compact" />
-        </div>
-      ))}
+      <div className="rightWorkspaceTabScroller" ref={scrollerRef}>
+        {tabs.map((tab) => (
+          <div className={`rightWorkspaceTab ${tab.id === activeTabId ? "is-selected" : ""}`} data-right-workspace-tab-id={tab.id} key={tab.id}>
+            <button aria-selected={tab.id === activeTabId} onClick={() => onActivate(tab.id)} role="tab" title={tab.title} type="button">
+              {rightWorkspaceTabIcon(tab.kind)}
+              <span>{tab.title}</span>
+            </button>
+            <IconButton icon={<X size={12} />} label={`Close ${tab.title}`} onClick={() => onClose(tab.id)} size="compact" />
+          </div>
+        ))}
+      </div>
       <DismissibleDetails
         className="rightAddMenu"
         summary={<Plus size={15} />}
@@ -459,6 +479,8 @@ function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {
       return <Globe2 size={14} />;
     case "preview":
       return <FileText size={14} />;
+    case "pinnedMessage":
+      return <Pin size={14} />;
     case "review":
     default:
       return <GitPullRequest size={14} />;

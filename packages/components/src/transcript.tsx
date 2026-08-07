@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, GitFork, Image as ImageIcon, Maximize2, Pencil, Volume2, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, GitFork, Image as ImageIcon, Maximize2, Pencil, Pin, Volume2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import {
   sideInheritedMetadataHidden,
@@ -10,7 +10,7 @@ import {
   type TranscriptEntry
 } from "@psychevo/protocol";
 import { MarkdownText } from "./markdown";
-import { ActionButton, IconButton } from "./primitives";
+import { ActionButton, IconButton, ToggleButton } from "./primitives";
 import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay } from "./toolEvidence";
 import { ToolDetail } from "./transcript/tool-detail";
@@ -36,19 +36,33 @@ export interface TranscriptPanelProps {
   onReadUserMessageDraft?: ((entry: TranscriptEntry) => Promise<ThreadHistoryDraftReadResult>) | undefined;
   onUpdateUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
+  onPinnedMessageChange?: ((message: TranscriptPinnedMessage, pinned: boolean) => void) | undefined;
   onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
   olderHistoryLoading?: boolean | undefined;
   threadId?: string | null;
   workspaceFileLinks?: WorkspaceFileLinkContext;
+  pinnedMessageKeys?: ReadonlySet<string> | undefined;
 }
 
 export type TranscriptHistoryView = ThreadHistoryView;
+
+export type TranscriptPinnedMessage = {
+  blockId: string;
+  createdAtMs: number;
+  entryId: string;
+  key: string;
+  role: "user" | "assistant";
+  status: "completed" | "failed" | "cancelled";
+  text: string;
+  threadId: string;
+};
 
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type ReadAloudTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type OpenAgentSessionHandler = ((session: TranscriptAgentSession) => void) | undefined;
 type ReadUserMessageDraftHandler = ((entry: TranscriptEntry) => Promise<ThreadHistoryDraftReadResult>) | undefined;
 type MutateUserMessageHandler = ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
+type PinnedMessageChangeHandler = ((message: TranscriptPinnedMessage, pinned: boolean) => void) | undefined;
 
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const BOTTOM_THRESHOLD_PX = 48;
@@ -57,6 +71,7 @@ const TRANSCRIPT_VIRTUAL_ESTIMATE_PX = 132;
 const TRANSCRIPT_VIRTUAL_MIN_ENTRIES = 40;
 const TRANSCRIPT_VIRTUAL_OVERSCAN_PX = 720;
 const EMPTY_TRANSCRIPT_ENTRIES: TranscriptEntry[] = [];
+const EMPTY_PINNED_MESSAGE_KEYS: ReadonlySet<string> = new Set();
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type TranscriptScrollMemory = {
@@ -64,7 +79,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, history, liveEntries = EMPTY_TRANSCRIPT_ENTRIES, onCopyText, onForkUserMessage, onLoadOlderHistory, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, olderHistoryLoading = false, threadId, workspaceFileLinks }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, history, liveEntries = EMPTY_TRANSCRIPT_ENTRIES, onCopyText, onForkUserMessage, onLoadOlderHistory, onOpenAgentSession, onPinnedMessageChange, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, olderHistoryLoading = false, pinnedMessageKeys = EMPTY_PINNED_MESSAGE_KEYS, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -231,9 +246,11 @@ export function TranscriptPanel({ activity, entries, history, liveEntries = EMPT
                 onForkUserMessage={onForkUserMessage}
                 onMeasure={virtualTranscript.measureEntry}
                 onOpenAgentSession={onOpenAgentSession}
+                onPinnedMessageChange={onPinnedMessageChange}
                 onReadAloudText={onReadAloudText}
                 onReadUserMessageDraft={onReadUserMessageDraft}
                 onUpdateUserMessage={onUpdateUserMessage}
+                pinnedMessageKeys={pinnedMessageKeys}
                 workspaceFileLinks={workspaceFileLinks}
               />
             ))}
@@ -548,9 +565,11 @@ function MeasuredTranscriptEntry({
   onForkUserMessage,
   onMeasure,
   onOpenAgentSession,
+  onPinnedMessageChange,
   onReadAloudText,
   onReadUserMessageDraft,
   onUpdateUserMessage,
+  pinnedMessageKeys,
   workspaceFileLinks
 }: {
   activityTick: number;
@@ -559,9 +578,11 @@ function MeasuredTranscriptEntry({
   onForkUserMessage: MutateUserMessageHandler;
   onMeasure(entryId: string, height: number): void;
   onOpenAgentSession: OpenAgentSessionHandler;
+  onPinnedMessageChange: PinnedMessageChangeHandler;
   onReadAloudText: ReadAloudTextHandler;
   onReadUserMessageDraft: ReadUserMessageDraftHandler;
   onUpdateUserMessage: MutateUserMessageHandler;
+  pinnedMessageKeys: ReadonlySet<string>;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -583,9 +604,11 @@ function MeasuredTranscriptEntry({
         onCopyText={onCopyText}
         onForkUserMessage={onForkUserMessage}
         onOpenAgentSession={onOpenAgentSession}
+        onPinnedMessageChange={onPinnedMessageChange}
         onReadAloudText={onReadAloudText}
         onReadUserMessageDraft={onReadUserMessageDraft}
         onUpdateUserMessage={onUpdateUserMessage}
+        pinnedMessageKeys={pinnedMessageKeys}
         workspaceFileLinks={workspaceFileLinks}
       />
     </div>
@@ -955,9 +978,11 @@ function TranscriptEntryView({
   onCopyText,
   onForkUserMessage,
   onOpenAgentSession,
+  onPinnedMessageChange,
   onReadAloudText,
   onReadUserMessageDraft,
   onUpdateUserMessage,
+  pinnedMessageKeys,
   workspaceFileLinks
 }: {
   activityTick: number;
@@ -965,9 +990,11 @@ function TranscriptEntryView({
   onCopyText: CopyTextHandler;
   onForkUserMessage: MutateUserMessageHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
+  onPinnedMessageChange: PinnedMessageChangeHandler;
   onReadAloudText: ReadAloudTextHandler;
   onReadUserMessageDraft: ReadUserMessageDraftHandler;
   onUpdateUserMessage: MutateUserMessageHandler;
+  pinnedMessageKeys: ReadonlySet<string>;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   const blocks = visibleBlocks(entry);
@@ -1011,7 +1038,9 @@ function TranscriptEntryView({
       onCopyText={onCopyText}
       onEditUserMessage={canEdit ? beginEdit : undefined}
       onOpenAgentSession={onOpenAgentSession}
+      onPinnedMessageChange={onPinnedMessageChange}
       onReadAloudText={onReadAloudText}
+      pinnedMessageKeys={pinnedMessageKeys}
       workspaceFileLinks={workspaceFileLinks}
     />
   ));
@@ -1103,7 +1132,9 @@ function TranscriptBlockView({
   onCopyText,
   onEditUserMessage,
   onOpenAgentSession,
+  onPinnedMessageChange,
   onReadAloudText,
+  pinnedMessageKeys,
   workspaceFileLinks
 }: {
   activityTick: number;
@@ -1112,10 +1143,16 @@ function TranscriptBlockView({
   onCopyText: CopyTextHandler;
   onEditUserMessage: (() => void | Promise<void>) | undefined;
   onOpenAgentSession: OpenAgentSessionHandler;
+  onPinnedMessageChange: PinnedMessageChangeHandler;
   onReadAloudText: ReadAloudTextHandler;
+  pinnedMessageKeys: ReadonlySet<string>;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   const text = transcriptBlockText(block);
+  const pinnableMessage = onPinnedMessageChange
+    ? transcriptPinnedMessage(entry, block, text)
+    : null;
+  const messagePinned = pinnableMessage ? pinnedMessageKeys.has(pinnableMessage.key) : false;
   const display = evidenceDisplay(block, text);
   const shouldDefaultOpen = defaultBlockOpen(block, display);
   const [open, setOpen] = useState(shouldDefaultOpen);
@@ -1146,14 +1183,18 @@ function TranscriptBlockView({
 
   if (block.kind === "text" && entry.role === "user") {
     return (
-      <div className="pevo-messageFrame is-user">
+      <div className={`pevo-messageFrame is-user ${pinnableMessage ? "is-pinnable" : ""} ${messagePinned ? "is-pinned" : ""}`.trim()}>
         <article className="pevo-message is-user" {...transcriptBlockDataAttributes(entry, block)}>
           <MarkdownText text={text} />
         </article>
-        {(onCopyText || onEditUserMessage) && (
+        {(onCopyText || onEditUserMessage || pinnableMessage) && (
           <MessageMeta
             block={block}
             copied={copied}
+            {...(pinnableMessage ? {
+              onPinnedChange: (pinned: boolean) => onPinnedMessageChange?.(pinnableMessage, pinned),
+              pinned: messagePinned
+            } : {})}
             showElapsed={false}
             {...(onCopyText ? { onCopy: async () => {
               try {
@@ -1172,7 +1213,7 @@ function TranscriptBlockView({
   }
   if (block.kind === "text" && entry.role === "assistant") {
     return (
-      <div className="pevo-messageFrame is-assistant">
+      <div className={`pevo-messageFrame is-assistant ${pinnableMessage ? "is-pinnable" : ""} ${messagePinned ? "is-pinned" : ""}`.trim()}>
         <article
           className={`pevo-message is-assistant ${block.status === "running" ? "is-streaming" : ""}`}
           {...transcriptBlockDataAttributes(entry, block)}
@@ -1183,10 +1224,14 @@ function TranscriptBlockView({
             {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
           />
         </article>
-        {(onCopyText || onReadAloudText) && (
+        {(onCopyText || onReadAloudText || pinnableMessage) && (
           <MessageMeta
             block={block}
             copied={copied}
+            {...(pinnableMessage ? {
+              onPinnedChange: (pinned: boolean) => onPinnedMessageChange?.(pinnableMessage, pinned),
+              pinned: messagePinned
+            } : {})}
             onReadAloud={onReadAloudText ? async () => onReadAloudText(text) : undefined}
             showElapsed
             onCopy={onCopyText ? async () => {
@@ -1753,14 +1798,18 @@ function MessageMeta({
   copied,
   onCopy,
   onEdit,
+  onPinnedChange,
   onReadAloud,
+  pinned = false,
   showElapsed
 }: {
   block: TranscriptBlock;
   copied: boolean;
   onCopy?: (() => void | Promise<void>) | undefined;
   onEdit?: (() => void | Promise<void>) | undefined;
+  onPinnedChange?: ((pinned: boolean) => void) | undefined;
   onReadAloud?: (() => void | Promise<void>) | undefined;
+  pinned?: boolean | undefined;
   showElapsed: boolean;
 }) {
   const timestamp = transcriptBlockTimestamp(block);
@@ -1769,6 +1818,17 @@ function MessageMeta({
     <div className="pevo-messageMeta" aria-label="Message actions">
       {onEdit && (
         <IconButton className="pevo-messageCopy" icon={<Pencil size={14} />} label="Edit this message in the same thread or fork a new thread" onClick={() => void onEdit()} size="compact" />
+      )}
+      {onPinnedChange && (
+        <ToggleButton
+          className="pevo-messagePin"
+          icon={<Pin size={14} />}
+          label="Pin message to side"
+          onPressedChange={onPinnedChange}
+          pressed={pinned}
+          size="compact"
+          tooltip={pinned ? "Unpin message from side" : "Pin message to side"}
+        />
       )}
       {onCopy && (
         <IconButton className="pevo-messageCopy" icon={copied ? <Check size={14} /> : <Copy size={14} />} label="Copy message" onClick={() => void onCopy()} size="compact" tooltip={copied ? "Copied" : "Copy message"} />
@@ -1784,6 +1844,32 @@ function MessageMeta({
       )}
     </div>
   );
+}
+
+function transcriptPinnedMessage(
+  entry: TranscriptEntry,
+  block: TranscriptBlock,
+  text: string
+): TranscriptPinnedMessage | null {
+  if (
+    entry.messageSeq == null
+    || (entry.role !== "user" && entry.role !== "assistant")
+    || block.kind !== "text"
+    || !text.trim()
+    || (block.status !== "completed" && block.status !== "failed" && block.status !== "cancelled")
+  ) {
+    return null;
+  }
+  return {
+    blockId: block.id,
+    createdAtMs: block.createdAtMs,
+    entryId: entry.id,
+    key: JSON.stringify([entry.threadId, entry.id, block.id]),
+    role: entry.role,
+    status: block.status,
+    text,
+    threadId: entry.threadId
+  };
 }
 
 function HistoryMessageEditor({

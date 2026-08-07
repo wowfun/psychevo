@@ -15,6 +15,7 @@ import type {
   UsageReadResult,
   WorkspaceDiffResult
 } from "@psychevo/protocol";
+import type { TranscriptPinnedMessage } from "@psychevo/components";
 
 export type ContextUsageCategory = ContextReadResult["categories"][number];
 
@@ -128,7 +129,12 @@ export type RightWorkspaceTabKind =
   | "agentSession"
   | "team"
   | "browser"
-  | "preview";
+  | "preview"
+  | "pinnedMessage";
+
+export type RightWorkspacePinnedMessage = TranscriptPinnedMessage & {
+  sourceTitle: string;
+};
 
 export type RightWorkspaceTab = {
   id: string;
@@ -146,11 +152,12 @@ export type RightWorkspaceTab = {
   diff?: WorkspaceDiffResult | null;
   browser?: RightWorkspaceBrowserState;
   preview?: RightWorkspacePreview | null;
+  pinnedMessage?: RightWorkspacePinnedMessage | null;
   message?: string | null;
 };
 
 export type MainView = "transcript" | "search" | "settings" | "automations" | "capabilities";
-export type CapabilityTab = "agents" | "skills" | "plugins" | "mcp" | "tools";
+export type CapabilityTab = "agents" | "skills" | "plugins" | "extensions" | "mcp" | "tools";
 export type SettingsSection = "appearance" | "models" | "web-search" | "slash" | "usage" | "debug" | "channels";
 export type WorkbenchUsageStats = UsageReadResult;
 export type WorkbenchAutomation = AutomationTaskView;

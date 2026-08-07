@@ -205,7 +205,7 @@ async function assertNoHorizontalOverflow(page: Page, locator: Locator) {
 }
 
 async function assertTranscriptRowsFit(page: Page) {
-  const violations = await page.locator(".pevo-threadItems > article, .pevo-messageFrame").evaluateAll((rows) =>
+  const violations = await page.locator(".pevo-threadItems article[data-entry-id], .pevo-messageFrame").evaluateAll((rows) =>
     rows.flatMap((row, index) => {
       const element = row as HTMLElement;
       const rowBox = element.getBoundingClientRect();

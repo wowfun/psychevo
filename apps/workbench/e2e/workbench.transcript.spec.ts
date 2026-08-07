@@ -8,6 +8,53 @@ import {
 } from "./workbench.support";
 
 test.describe("pevo Web Workbench", () => {
+  test("pins a committed message into the right workspace", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await openPanel(page, isMobile, "Transcript");
+
+      const prompt = "Keep this completed message beside the transcript for comparison.";
+      const composer = page.getByPlaceholder("Ask Psychevo...");
+      await composer.fill(prompt);
+      await page.getByRole("button", { name: "Send message" }).click();
+      await page.getByRole("button", { name: "Interrupt active turn" }).click();
+      await expect(page.getByRole("button", { name: "Send message" })).toBeVisible({ timeout: 30_000 });
+
+      const message = page.locator(".pevo-messageFrame.is-user").filter({ hasText: prompt });
+      await expect(message).toBeVisible();
+      const pin = message.getByRole("button", { name: "Pin message to side" });
+      if (!isMobile) {
+        await message.hover();
+      }
+      await expect(pin).toBeVisible();
+      await expect(pin).toHaveAttribute("aria-pressed", "false");
+      await pin.click();
+
+      const pinned = page.getByRole("region", { name: "Pinned message" });
+      await expect(pinned).toBeVisible();
+      await expect(pinned).toContainText(prompt);
+      if (isMobile) {
+        await expect(page.getByRole("button", { name: "Pinned" })).toHaveAttribute("aria-current", "page");
+        await page.getByRole("button", { name: "Transcript", exact: true }).click();
+        await expect(message.getByRole("button", { name: "Pin message to side" })).toHaveAttribute("aria-pressed", "true");
+        await page.getByRole("button", { name: "Pinned" }).click();
+      } else {
+        await expect(pin).toHaveAttribute("aria-pressed", "true");
+      }
+      await expect.poll(() => page.evaluate(() => (
+        document.scrollingElement!.scrollWidth - document.scrollingElement!.clientWidth
+      ))).toBeLessThanOrEqual(1);
+      await captureWorkbench(page, testInfo, `pinned-message-${isMobile ? "mobile" : "desktop"}`);
+
+      await page.getByRole("button", { name: /^Close You · Keep this completed message/ }).click();
+      await expect(pinned).toHaveCount(0);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("keeps parallel live web search headers inside transcript rows", async ({ page, isMobile }) => {
     const server = await startPevoWeb({ live: false });
     try {

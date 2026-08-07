@@ -2,7 +2,9 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GatewayRequestScope } from "@psychevo/protocol";
+import type { TranscriptPinnedMessage } from "@psychevo/components";
 import { createRightWorkspaceActions } from "./right-workspace-actions";
+import { rightWorkspaceTabVisibleForSession } from "./right-workspace-model";
 import type { RightWorkspaceTab } from "./types";
 
 const scope: GatewayRequestScope = {
@@ -145,3 +147,84 @@ describe("right workspace file actions", () => {
     expect(confirmed.setDirtyRightTabs).toHaveBeenCalledOnce();
   });
 });
+
+describe("right workspace pinned messages", () => {
+  const message: TranscriptPinnedMessage = {
+    blockId: "message:1:block",
+    createdAtMs: 1,
+    entryId: "message:1",
+    key: JSON.stringify(["thread-1", "message:1", "message:1:block"]),
+    role: "assistant",
+    status: "completed",
+    text: "A pinned answer that stays available",
+    threadId: "thread-1"
+  };
+
+  it("creates one application-scoped snapshot tab and reveals Status", () => {
+    const harness = createPinnedActionHarness([]);
+    const snapshotInput = { ...message };
+
+    harness.actions.togglePinnedMessage(snapshotInput, "Source thread", true);
+    snapshotInput.text = "A later source edit";
+
+    const updater = harness.setRightTabs.mock.calls[0]?.[0] as (tabs: RightWorkspaceTab[]) => RightWorkspaceTab[];
+    const tabs = updater([]);
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({
+      kind: "pinnedMessage",
+      pinnedMessage: { ...message, sourceTitle: "Source thread" },
+      title: "Assistant · A pinned answer that stays available"
+    });
+    expect(tabs[0]?.pinnedMessage?.text).toBe(message.text);
+    expect(rightWorkspaceTabVisibleForSession(tabs[0]!, "another-thread")).toBe(true);
+    expect(harness.setRightCollapsed).toHaveBeenCalledWith(false);
+    expect(harness.setMobilePanel).toHaveBeenCalledWith("status");
+    expect(harness.setActiveRightTabId).toHaveBeenCalledWith(tabs[0]?.id);
+  });
+
+  it("focuses an existing source block and closes it when unpinned", () => {
+    const existing: RightWorkspaceTab = {
+      id: "pinned:existing",
+      kind: "pinnedMessage",
+      pinnedMessage: { ...message, sourceTitle: "Source thread" },
+      title: "Assistant · A pinned answer"
+    };
+    const harness = createPinnedActionHarness([existing]);
+
+    harness.actions.togglePinnedMessage(message, "Changed title", true);
+    expect(harness.setRightTabs).not.toHaveBeenCalled();
+    expect(harness.setActiveRightTabId).toHaveBeenCalledWith(existing.id);
+
+    harness.actions.togglePinnedMessage(message, "Changed title", false);
+    const updater = harness.setRightTabs.mock.calls[0]?.[0] as (tabs: RightWorkspaceTab[]) => RightWorkspaceTab[];
+    expect(updater([existing])).toEqual([]);
+  });
+});
+
+function createPinnedActionHarness(rightTabs: RightWorkspaceTab[]) {
+  const setActiveRightTabId = vi.fn();
+  const setMobilePanel = vi.fn();
+  const setRightCollapsed = vi.fn();
+  const setRightTabs = vi.fn();
+  const actions = createRightWorkspaceActions({
+    activeRightTabId: null,
+    client: null,
+    confirmAction: vi.fn().mockResolvedValue(true),
+    currentThreadId: null,
+    debugEnabled: false,
+    dirtyRightTabs: {},
+    rightTabs,
+    rightWidthPx: 420,
+    scope,
+    runAction: async (action) => action(),
+    setActiveCommandOverlay: vi.fn(),
+    setActiveRightTabId,
+    setDirtyRightTabs: vi.fn(),
+    setMobilePanel,
+    setRightCollapsed,
+    setRightTabs,
+    setRightWidthPx: vi.fn(),
+    updateMainView: vi.fn()
+  });
+  return { actions, setActiveRightTabId, setMobilePanel, setRightCollapsed, setRightTabs };
+}

@@ -852,8 +852,11 @@ not recreate their state machine.
 Session rows patch title and terminal metadata from their authoritative
 lifecycle events. Framework running, active-Turn, and queued-Turn state comes
 only from the complete `activityChanged` projection. Each projection carries
-the Application-owned `frameworkRevision`; a row accepts only a newer revision
-and treats equal or older revisions as replay. `turnQueued.queuePosition` is a
+the Application-owned `frameworkRevision`; a row rejects an older revision.
+An equal-revision live event remains ordered on its connection and may carry a
+newer Gateway-local operation state, such as compaction start or finish, so it
+replaces the current activity. Equal-revision snapshot responses remain replay
+and do not roll a live row backward. `turnQueued.queuePosition` is a
 per-Turn notification and never mutates the aggregate row activity. This keeps
 independent Turn delivery order, duplicate delivery, and delayed browser
 rebasing idempotent without a Workbench queue registry.

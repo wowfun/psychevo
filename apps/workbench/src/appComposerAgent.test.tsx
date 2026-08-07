@@ -743,6 +743,32 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
+  it("pins a committed transcript message as a right-side snapshot tab", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Pinned source")];
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [
+      assistantTextEntry("Keep this answer beside the transcript")
+    ];
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Pinned source"));
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/resume",
+      params: expect.objectContaining({ threadId: "thread-1" })
+    }));
+    const pin = await screen.findByRole("button", { name: "Pin message to side" });
+    expect(pin.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(pin);
+
+    const panel = await screen.findByRole("region", { name: "Pinned message" });
+    expect(within(panel).getByText("Keep this answer beside the transcript")).toBeTruthy();
+    expect(within(panel).getByText("Pinned source")).toBeTruthy();
+    expect(pin.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: /Close Assistant · Keep this answer beside the transcript/ }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Pinned message" })).toBeNull());
+    expect(pin.getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("opens a reusable preview-only Browser tab with safe URL handling", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Browser session")];
     render(<App />);

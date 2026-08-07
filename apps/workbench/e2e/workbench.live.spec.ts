@@ -34,7 +34,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
         timeout: 60_000
       });
-      await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+      await expect(transcript.locator(".pevo-threadItems article[data-entry-id]")).toHaveCount(0);
       await selectLiveProviderModel(page, context.model);
 
       await page.getByPlaceholder("Ask Psychevo...").fill(

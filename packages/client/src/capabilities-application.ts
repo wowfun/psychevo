@@ -14,7 +14,7 @@ import {
   type ObserverDiagnosticHandler
 } from "./observer";
 
-export type CapabilityDomain = "agents" | "skills" | "plugins" | "mcp" | "tools";
+export type CapabilityDomain = "agents" | "skills" | "plugins" | "extensions" | "mcp" | "tools";
 
 export interface CapabilitiesClient {
   request<M extends GatewayMethod>(
@@ -73,11 +73,12 @@ type ActivePoll = {
   timer: ReturnType<typeof setTimeout> | null;
 };
 
-const DOMAINS: CapabilityDomain[] = ["agents", "skills", "plugins", "mcp", "tools"];
+const DOMAINS: CapabilityDomain[] = ["agents", "skills", "plugins", "extensions", "mcp", "tools"];
 const EMPTY_VALUES = Object.freeze({
   agents: null,
   skills: null,
   plugins: null,
+  extensions: null,
   mcp: null,
   tools: null
 });
@@ -85,6 +86,7 @@ const EMPTY_LOADING = Object.freeze({
   agents: false,
   skills: false,
   plugins: false,
+  extensions: false,
   mcp: false,
   tools: false
 });
@@ -92,6 +94,7 @@ const EMPTY_SELECTION = Object.freeze({
   agents: null,
   skills: null,
   plugins: null,
+  extensions: null,
   mcp: null,
   tools: null
 });
@@ -483,6 +486,7 @@ async function readDomain(
   }
   if (domain === "skills") return client.request("skill/list", { scope });
   if (domain === "plugins") return client.request("plugin/list", { scope });
+  if (domain === "extensions") return client.request("extension/list", { scope });
   if (domain === "mcp") return client.request("mcp/list", { scope });
   return client.request("tool/list", { scope });
 }
@@ -498,6 +502,7 @@ function mutationDomain(method: GatewayMethod): CapabilityDomain | null {
   }
   if (method.startsWith("skill/")) return readOnlyMethod(method) ? null : "skills";
   if (method.startsWith("plugin/")) return readOnlyMethod(method) ? null : "plugins";
+  if (method.startsWith("extension/")) return readOnlyMethod(method) ? null : "extensions";
   if (method.startsWith("mcp/")) return readOnlyMethod(method) ? null : "mcp";
   if (method.startsWith("tool/")) return readOnlyMethod(method) ? null : "tools";
   return null;
@@ -509,7 +514,9 @@ function readOnlyMethod(method: GatewayMethod): boolean {
     || method.endsWith("/status")
     || method.endsWith("/doctor")
     || method.endsWith("/test")
-    || method.endsWith("/inspect");
+    || method.endsWith("/inspect")
+    || method.endsWith("/open")
+    || method.endsWith("/close");
 }
 
 function requestScope<M extends GatewayMethod>(

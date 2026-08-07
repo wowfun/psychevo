@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { agentRecord, gatewayMock } from "./appComposerAgent.fixture";
 import { App } from "./App";
 
@@ -37,6 +37,7 @@ describe("Workbench capabilities management", () => {
     expect(within(region).getByRole("tab", { name: "Agents" })).toBeTruthy();
     expect(within(region).getByRole("tab", { name: "Skills" })).toBeTruthy();
     expect(within(region).getByRole("tab", { name: "Plugins" })).toBeTruthy();
+    expect(within(region).getByRole("tab", { name: "Extensions" })).toBeTruthy();
     expect(within(region).getByRole("tab", { name: "MCP" })).toBeTruthy();
     expect(within(region).getByRole("tab", { name: "Tools" })).toBeTruthy();
     const reviewSkill = within(region).getByRole("button", { name: "Skill review" });
@@ -59,6 +60,16 @@ describe("Workbench capabilities management", () => {
     });
     expect(await within(region).findByRole("button", { name: /Browser/i })).toBeTruthy();
     expect(await within(region).findByRole("button", { name: /writer-kit/i })).toBeTruthy();
+
+    fireEvent.click(within(region).getByRole("tab", { name: "Extensions" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "extension/list")).toBe(true);
+    });
+    expect(await within(region).findByRole("button", { name: "Extension Telegram Channel" })).toBeTruthy();
+    const evidence = await within(region).findByRole("region", { name: "Extension runtime evidence" });
+    expect(within(evidence).getByText("Trusted fingerprint")).toBeTruthy();
+    expect(within(evidence).getByText(/Static management read/)).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: /install extension/i })).toBeNull();
 
     fireEvent.click(within(region).getByRole("tab", { name: "MCP" }));
     await waitFor(() => {
@@ -107,6 +118,108 @@ describe("Workbench capabilities management", () => {
       });
     });
     expect(await screen.findByText("docs disabled.")).toBeTruthy();
+  });
+
+  it("opens and releases a display-only MCP App through an Extension lease", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      "<!doctype html><html><head><title>Dashboard</title></head><body>Ready</body></html>",
+      { headers: { "content-type": "text/html" }, status: 200 }
+    )));
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+      const region = await screen.findByRole("region", { name: "Capabilities" });
+      fireEvent.click(within(region).getByRole("tab", { name: "Extensions" }));
+      fireEvent.click(await within(region).findByRole("button", { name: "Extension Example Dashboard" }));
+      const appSurface = await within(region).findByRole("region", { name: "Extension MCP App" });
+      expect(within(appSurface).getByText("Use the dashboard text fallback.")).toBeTruthy();
+
+      fireEvent.click(within(appSurface).getByRole("button", { name: "Open App" }));
+      expect(await within(appSurface).findByTitle("dashboard")).toBeTruthy();
+      await waitFor(() => {
+        expect(gatewayMock.requestLog).toContainEqual({
+          method: "extension/app/open",
+          params: expect.objectContaining({
+            selector: "example.dashboard@local",
+            appId: "dashboard"
+          })
+        });
+      });
+
+      fireEvent.click(within(appSurface).getByRole("button", { name: "Close App" }));
+      await waitFor(() => {
+        expect(gatewayMock.requestLog).toContainEqual({
+          method: "extension/app/close",
+          params: expect.objectContaining({ leaseId: "extension-app-lease" })
+        });
+      });
+      expect(within(appSurface).queryByTitle("dashboard")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("closes a late App lease after switching Extension rows", async () => {
+    const dashboard = gatewayMock.extensionRecords.find((extension) => (
+      extension.id === "example.dashboard"
+    ));
+    if (!dashboard) throw new Error("expected dashboard Extension fixture");
+    gatewayMock.extensionRecords = [
+      ...gatewayMock.extensionRecords,
+      {
+        ...dashboard,
+        id: "example.dashboard.two",
+        selector: "example.dashboard.two@local",
+        displayName: "Second Dashboard",
+        source: "/tmp/example-dashboard-two",
+        fingerprint: "sha256:dashboard-two",
+        trustedFingerprint: "sha256:dashboard-two"
+      }
+    ];
+    let resolveOpen!: (value: unknown) => void;
+    gatewayMock.extensionAppOpen = () => new Promise((resolve) => {
+      resolveOpen = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      "<!doctype html><html><head></head><body>late</body></html>",
+      { headers: { "content-type": "text/html" }, status: 200 }
+    )));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Extensions" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Extension Example Dashboard" }));
+    const firstSurface = await within(region).findByRole("region", { name: "Extension MCP App" });
+    fireEvent.click(within(firstSurface).getByRole("button", { name: "Open App" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "extension/app/open")).toBe(true);
+    });
+
+    const secondRow = within(region).getByRole("button", { name: "Extension Second Dashboard" });
+    fireEvent.click(secondRow);
+    await waitFor(() => {
+      expect(secondRow.closest("[role=listitem]")?.className).toContain("is-selected");
+    });
+    resolveOpen({
+      leaseId: "late-extension-app-lease",
+      extensionId: "example.dashboard",
+      appId: "dashboard",
+      resourceUri: "ui://example/dashboard.html",
+      resourceUrl: "https://apps.example.test/dashboard.html",
+      resourceDomains: ["https://apps.example.test"],
+      connectDomains: [],
+      allowedTools: [],
+      fallback: "Use the dashboard text fallback."
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "extension/app/close",
+        params: expect.objectContaining({ leaseId: "late-extension-app-lease" })
+      });
+    });
+    expect(within(region).queryByTitle("dashboard")).toBeNull();
   });
 
   it("manages Project/Profile Markdown agent definitions", async () => {

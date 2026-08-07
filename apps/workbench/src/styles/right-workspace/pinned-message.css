@@ -1,0 +1,86 @@
+.pinnedMessagePanel {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.pinnedMessagePanel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 7px 4px;
+  border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 68%);
+}
+
+.pinnedMessagePanel > header > div:first-child {
+  min-width: 0;
+}
+
+.pinnedMessagePanel h2,
+.pinnedMessagePanel p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinnedMessagePanel h2 {
+  color: var(--pevo-ink);
+  font-size: var(--pevo-font-size-small);
+  font-weight: 650;
+}
+
+.pinnedMessagePanel p,
+.pinnedMessageMeta {
+  color: var(--pevo-muted);
+  font-family: var(--pevo-mono);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.pinnedMessageMeta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pinnedMessageMeta span {
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  border-radius: var(--pevo-radius-pill);
+}
+
+.pinnedMessageMeta .is-failed {
+  color: var(--pevo-danger);
+}
+
+.pinnedMessageMeta .is-cancelled {
+  color: var(--pevo-muted-strong);
+}
+
+.pinnedMessageBody {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 4px 28px;
+  color: var(--pevo-ink);
+}
+
+.pinnedMessageBody > .pevo-markdown {
+  max-width: 760px;
+  margin: 0;
+}
+
+@media (max-width: 780px) {
+  .pinnedMessagePanel > header {
+    align-items: flex-start;
+  }
+
+  .pinnedMessageMeta {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 3px;
+  }
+}

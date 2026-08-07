@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Bot, MessageSquare, RefreshCw } from "lucide-react";
-import { Composer, TranscriptPanel, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
+import { Composer, TranscriptPanel, type TranscriptAgentSession, type TranscriptPinnedMessage, type WorkspaceFileLinkContext } from "@psychevo/components";
 import {
   appendOptimisticPrompt,
   parseThreadSnapshot,
@@ -14,7 +14,6 @@ import type {
   GatewayMention,
   GatewayRequestScope,
   ThreadActionDescriptorView,
-  ThreadHistoryFidelityView,
   ThreadSnapshot
 } from "@psychevo/protocol";
 import {
@@ -34,7 +33,6 @@ type ThreadPanelProps = {
   disabled: boolean;
   gatewayEventFeed: GatewayThreadEventFeed;
   kind: "sideConversation" | "agentSession";
-  historyFidelity?: ThreadHistoryFidelityView | null;
   parentThreadId?: string | null;
   pendingPrompt?: string | null;
   scope: GatewayRequestScope | null;
@@ -42,7 +40,9 @@ type ThreadPanelProps = {
   title: string;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
+  onPinnedMessageChange?: ((message: TranscriptPinnedMessage, pinned: boolean) => void) | undefined;
   onPendingPromptConsumed?: (() => void) | undefined;
+  pinnedMessageKeys?: ReadonlySet<string> | undefined;
   workspaceFileLinks?: WorkspaceFileLinkContext | undefined;
 };
 
@@ -51,7 +51,6 @@ export function ThreadPanel({
   disabled,
   gatewayEventFeed,
   kind,
-  historyFidelity: registeredHistoryFidelity = null,
   parentThreadId,
   pendingPrompt,
   scope,
@@ -59,7 +58,9 @@ export function ThreadPanel({
   title,
   onCopyText,
   onOpenAgentSession,
+  onPinnedMessageChange,
   onPendingPromptConsumed,
+  pinnedMessageKeys,
   workspaceFileLinks
 }: ThreadPanelProps) {
   const threadSession = useMemo(
@@ -79,9 +80,6 @@ export function ThreadPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threadContext, setThreadContext] = useState<ReturnType<typeof parseThreadContext> | null>(null);
-  const [observedHistoryFidelity, setObservedHistoryFidelity] = useState<ThreadHistoryFidelityView | null>(
-    registeredHistoryFidelity
-  );
   const [access, setAccess] = useState<"checking" | "readOnly" | "readWrite">(
     kind === "sideConversation" ? "readWrite" : "checking"
   );
@@ -99,7 +97,6 @@ export function ThreadPanel({
   const liveEntries = snapshotMatchesThread ? sessionView.liveEntries : [];
   const running = activity.running;
   const writable = kind === "sideConversation" || access === "readWrite";
-  const readOnly = kind === "agentSession" && access === "readOnly";
   const promptSubmitDisabled = loading
     || !visibleSnapshot
     || !threadContext
@@ -121,7 +118,6 @@ export function ThreadPanel({
     if (!client || !threadId) {
       threadSession.reset(null);
       setThreadContext(null);
-      setObservedHistoryFidelity(registeredHistoryFidelity);
       setThreadActions([]);
       setSteerAvailable(false);
       setLoading(false);
@@ -137,7 +133,6 @@ export function ThreadPanel({
     try {
       let nextAccess: "readOnly" | "readWrite" = "readWrite";
       let accessError: string | null = null;
-      let nextHistoryFidelity = registeredHistoryFidelity;
       let nextActions: ThreadActionDescriptorView[] = [];
       let nextSteerAvailable = false;
       let nextContext: ReturnType<typeof parseThreadContext> | null = null;
@@ -160,7 +155,6 @@ export function ThreadPanel({
             ? "readWrite"
             : "readOnly";
         }
-        nextHistoryFidelity = nextContext.history.fidelity;
       } catch (contextError) {
         if (kind === "agentSession") {
           nextAccess = "readOnly";
@@ -175,12 +169,10 @@ export function ThreadPanel({
       threadSession.reset(next, nextContext);
       setThreadContext(nextContext);
       refreshAfterTerminal = applyGatewayFeed(threadSession, pending);
-      nextHistoryFidelity = threadSession.getSnapshot()?.history.fidelity ?? nextHistoryFidelity;
       lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? barrierSeq;
       setAccess(nextAccess);
       setThreadActions(nextActions);
       setSteerAvailable(nextSteerAvailable);
-      setObservedHistoryFidelity(nextHistoryFidelity);
       setError(accessError);
     } catch (refreshError) {
       if (refreshGenerationRef.current === refreshGeneration) {
@@ -204,7 +196,7 @@ export function ThreadPanel({
       refreshGenerationRef.current += 1;
       threadSession.dispose();
     };
-  }, [client, kind, registeredHistoryFidelity, scope, threadId, threadSession]);
+  }, [client, kind, scope, threadId, threadSession]);
 
   useEffect(() => {
     const pending = gatewayEventsForThread(gatewayEventFeed, threadId)
@@ -352,16 +344,6 @@ export function ThreadPanel({
       </header>
       <div className="threadPanelNotices">
         {parentThreadId && <p className="threadPanelParent" title={parentThreadId}>Parent {parentThreadId}</p>}
-        {readOnly && (
-          <p
-            className="threadPanelRuntimeNotice"
-            data-history-fidelity={observedHistoryFidelity ?? "unknown"}
-            role="note"
-          >
-            Read-only runtime child
-            {observedHistoryFidelity && ` · ${runtimeHistoryFidelityNotice(observedHistoryFidelity)}`}
-          </p>
-        )}
         {error && <p className="threadPanelError">{error}</p>}
       </div>
       <div className="threadPanelTranscript">
@@ -371,6 +353,8 @@ export function ThreadPanel({
           liveEntries={liveEntries}
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
+          onPinnedMessageChange={onPinnedMessageChange}
+          pinnedMessageKeys={pinnedMessageKeys}
           threadId={threadId}
           {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
         />
@@ -394,13 +378,6 @@ export function ThreadPanel({
       )}
     </section>
   );
-}
-
-function runtimeHistoryFidelityNotice(fidelity: ThreadHistoryFidelityView): string {
-  if (fidelity === "full") return "Full history";
-  if (fidelity === "summary") return "Summary history; only a condensed record is available.";
-  if (fidelity === "unavailable") return "History unavailable; earlier messages could not be restored.";
-  return "Partial history; some messages or detail may be missing.";
 }
 
 function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {

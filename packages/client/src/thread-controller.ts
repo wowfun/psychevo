@@ -19,6 +19,8 @@ import type {
 import {
   appendOptimisticPrompt,
   applyLiveTranscriptEvent,
+  isCurrentOrNewerFrameworkActivity,
+  isNewerFrameworkActivity,
   reconcileThreadSnapshot
 } from "./transcript";
 
@@ -388,12 +390,16 @@ export class ThreadController {
     if (!snapshot) return false;
     const acceptingDetachedTurn = this.acceptingFirstTurn
       && hasUnboundOptimisticPrompt(this.liveEntries);
-    return belongsToActiveThreadTurn(
+    const belongs = belongsToActiveThreadTurn(
       event,
       this.activeThreadId,
       this.activeTurnId,
       acceptingDetachedTurn,
       this.settledTurnId
+    );
+    return belongs && (
+      event.type !== "activityChanged"
+      || isCurrentOrNewerFrameworkActivity(snapshot.activity, event.activity)
     );
   }
 
@@ -429,6 +435,7 @@ export class ThreadController {
       return { applied: true, completed: true, running: false };
     }
     if (event.type === "activityChanged") {
+      this.activeTurnId = event.activity.activeTurnId ?? null;
       return {
         applied: true,
         completed: false,
@@ -773,6 +780,13 @@ function belongsToActiveThreadTurn(
 ): boolean {
   const eventThreadId = eventThreadIdForEvent(event);
   if (eventThreadId && threadId && eventThreadId !== threadId) {
+    return false;
+  }
+  if (
+    event.type === "activityChanged"
+    && event.activity.activeTurnId
+    && event.activity.activeTurnId === settledTurnId
+  ) {
     return false;
   }
   const eventTurnId = eventTurnIdForEvent(event);

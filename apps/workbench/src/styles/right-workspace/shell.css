@@ -64,6 +64,16 @@
   border-radius: 0;
 }
 
+.pinnedMessagePanel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
 .rightWorkspaceHome,
 .reviewPanel,
 .filesPanel,
@@ -79,6 +89,18 @@
   min-height: 32px;
   padding: 0 0 5px;
   border-bottom: 1px solid color-mix(in oklch, var(--pevo-border), transparent 55%);
+}
+
+.rightWorkspaceTabScroller {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: var(--pevo-border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .rightWorkspaceTabs > button,
@@ -113,6 +135,7 @@
   color: var(--pevo-muted);
   background: transparent;
   border-radius: var(--pevo-radius-sm);
+  flex: 0 0 auto;
 }
 
 .rightWorkspaceTab.is-selected {
@@ -150,7 +173,7 @@
 .rightAddMenu {
   position: relative;
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .rightAddMenu summary {

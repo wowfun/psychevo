@@ -118,6 +118,107 @@ describe("TranscriptPanel Markdown rendering", () => {
   });
 });
 
+describe("TranscriptPanel message pinning", () => {
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "exposes a controlled Pin action for committed %s text",
+    (status) => {
+      const onPinnedMessageChange = vi.fn();
+      const block = transcriptBlock({
+        body: "Keep this answer",
+        kind: "text",
+        metadata: null,
+        status
+      });
+      const entry = transcriptEntry([block]);
+      const key = JSON.stringify([entry.threadId, entry.id, block.id]);
+      const view = render(
+        <TranscriptPanel
+          entries={[entry]}
+          onPinnedMessageChange={onPinnedMessageChange}
+          pinnedMessageKeys={new Set()}
+        />
+      );
+
+      const pin = screen.getByRole("button", { name: "Pin message to side" });
+      expect(pin.getAttribute("aria-pressed")).toBe("false");
+      fireEvent.click(pin);
+      expect(onPinnedMessageChange).toHaveBeenCalledWith({
+        blockId: block.id,
+        createdAtMs: block.createdAtMs,
+        entryId: entry.id,
+        key,
+        role: "assistant",
+        status,
+        text: "Keep this answer",
+        threadId: entry.threadId
+      }, true);
+
+      view.rerender(
+        <TranscriptPanel
+          entries={[entry]}
+          onPinnedMessageChange={onPinnedMessageChange}
+          pinnedMessageKeys={new Set([key])}
+        />
+      );
+      expect(screen.getByRole("button", { name: "Pin message to side" }).getAttribute("aria-pressed")).toBe("true");
+    }
+  );
+
+  it.each([
+    ["live entry", { messageSeq: null }],
+    ["running block", { blockStatus: "running" }],
+    ["pending block", { blockStatus: "pending" }],
+    ["needs-input block", { blockStatus: "needsInput" }],
+    ["informational block", { blockStatus: "info" }],
+    ["reasoning block", { blockKind: "reasoning" }],
+    ["diagnostic entry", { role: "diagnostic" }]
+  ] satisfies ReadonlyArray<readonly [string, {
+    blockKind?: TranscriptBlock["kind"];
+    blockStatus?: TranscriptBlock["status"];
+    messageSeq?: number | null;
+    role?: TranscriptEntry["role"];
+  }]>)("does not expose Pin for a %s", (_label, variant) => {
+    const options: {
+      blockKind?: TranscriptBlock["kind"];
+      blockStatus?: TranscriptBlock["status"];
+      messageSeq?: number | null;
+      role?: TranscriptEntry["role"];
+    } = variant;
+    const block = transcriptBlock({
+      body: "Not pinnable",
+      kind: options.blockKind ?? "text",
+      metadata: null,
+      status: options.blockStatus ?? "completed"
+    });
+    const entry = {
+      ...transcriptEntry([block]),
+      messageSeq: options.messageSeq === null ? null : 1,
+      role: options.role ?? "assistant"
+    } satisfies TranscriptEntry;
+
+    render(<TranscriptPanel entries={[entry]} onPinnedMessageChange={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Pin message to side" })).toBeNull();
+  });
+
+  it("keeps identical text blocks independently addressable", () => {
+    const onPinnedMessageChange = vi.fn();
+    const entries = ["message:1", "message:2"].map((id, index) => ({
+      ...transcriptEntry([transcriptBlock({ id: `${id}:block`, kind: "text", body: "Same text", metadata: null })]),
+      id,
+      messageSeq: index + 1
+    }));
+    render(<TranscriptPanel entries={entries} onPinnedMessageChange={onPinnedMessageChange} />);
+
+    const pins = screen.getAllByRole("button", { name: "Pin message to side" });
+    fireEvent.click(pins[0]!);
+    fireEvent.click(pins[1]!);
+
+    expect(onPinnedMessageChange).toHaveBeenCalledTimes(2);
+    expect(onPinnedMessageChange.mock.calls[0]?.[0].key).not.toBe(onPinnedMessageChange.mock.calls[1]?.[0].key);
+  });
+});
+
 describe("TranscriptPanel history editing", () => {
   it("edits ordered text and image parts and distinguishes update from fork", async () => {
     const entry = {

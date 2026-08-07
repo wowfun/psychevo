@@ -40,7 +40,10 @@ product surface and frontend platform.
   session-list, Settings-content, and long-panel scrolling.
 - Browser validation samples rendered transcript order against
   message-derived SQLite transcript facts when live rendering correctness is
-  under test.
+  under test. Transcript-row probes address semantic descendant rows carrying
+  durable entry identity rather than assuming rows are direct children of the
+  scroll container; virtualization is allowed to insert measurement, window,
+  and spacer wrappers without turning the assertions into empty-set passes.
 - Workbench renders parseable update-tool diffs as default-visible inline
   transcript evidence without changing Review preview behavior.
 - Workbench exposes local Automations as an app-level surface with project
@@ -72,7 +75,12 @@ Live model, live skill, GUI automation, and ACP peer validation are opt-in and
 selected through `cargo xtask live`. They may use the repo-local development
 home defined by [065 CI/CD](../065-ci-cd/spec.md), but `xtask` must own explicit
 `PSYCHEVO_CONFIG`, `PSYCHEVO_DB`, cwd, and test artifact paths when isolation is
-required. They must not print tokens or secrets.
+required. A deterministic live check resets its test-owned home, cwd, and
+database before every run while retaining logs, traces, screenshots, and other
+evidence outside those runtime directories. Reusing the same artifact root
+must therefore produce the same preconditions instead of inheriting installed
+backends, Extensions, or workspace declarations from an earlier run. Live
+checks must not print tokens or secrets.
 
 ## Scenario Matrix
 
@@ -89,6 +97,19 @@ required. They must not print tokens or secrets.
 - Runtime-child transcript fixtures cover reconnect tab registration and lazy
   history reads for Full, Summary, and Partial fidelity. Visual assertions keep
   the compact Summary/Partial gap notice legible without horizontal overflow.
+- Transcript pin coverage exposes the controlled toggle only for non-empty,
+  committed user or assistant text blocks in `completed`, `failed`, or
+  `cancelled` state. Main, Side chat, and child-agent Transcripts create
+  independent right-workspace snapshot tabs, deduplicate by source Thread,
+  entry, and block identity, and clear the toggle when a tab closes. Tests keep
+  snapshots stable across source history changes and Thread switches, reject
+  live/reasoning/tool targets, and prove refresh creates no persisted pins.
+  Browser coverage that creates and interrupts a real deterministic Turn waits
+  conditionally for authoritative idle state with a 30-second local full-suite
+  budget; it does not retry or relax the global assertion timeout.
+- Desktop and narrow browser checks cover Pin action discoverability, automatic
+  Status-panel selection on narrow screens, multiple horizontally scrollable
+  pin tabs, and the absence of document-level horizontal overflow.
 - Automations tests cover natural-language draft creation, empty state
   templates, manual creation, template creation, project automation rows, thread
   heartbeat rows, enable/disable, run-now, delete, and open-thread behavior.
@@ -126,7 +147,10 @@ required. They must not print tokens or secrets.
 - The reusable `live-skill` Playwright check is selected by
   `cargo xtask live run --suite skill`, samples the page every three seconds,
   writes screenshots under the live check artifact root, and compares rendered
-  DOM order against the isolated SQLite message-derived transcript.
+  DOM order against the selected live environment's SQLite message-derived
+  transcript. Its completion observation uses the same semantic descendant-row
+  boundary as its sampled assertions so a virtualized wrapper cannot conceal
+  active or completed rows.
 - GUI automation live validation creates a project automation through the
   composer with the fastest supported interval schedule and asserts the final
   transcript answer is not duplicated before inspecting the Automations surface.

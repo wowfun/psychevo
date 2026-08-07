@@ -1,3 +1,4 @@
+import type { TranscriptPinnedMessage } from "@psychevo/components";
 import type { RightWorkspaceTab, RightWorkspaceTabKind } from "./types";
 
 export function createRightTabId(kind: RightWorkspaceTabKind): string {
@@ -23,9 +24,20 @@ export function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
     case "team": return "Team";
     case "browser": return "Browser";
     case "preview": return "Preview";
+    case "pinnedMessage": return "Pinned";
     case "review":
     default: return "Review";
   }
+}
+
+export function pinnedMessageTabTitle(message: TranscriptPinnedMessage): string {
+  const role = message.role === "user" ? "You" : "Assistant";
+  const normalized = message.text.replace(/\s+/g, " ").trim();
+  const characters = Array.from(normalized);
+  const excerpt = characters.length > 48
+    ? `${characters.slice(0, 48).join("")}…`
+    : normalized;
+  return excerpt ? `${role} · ${excerpt}` : "Pinned message";
 }
 
 export function rightWorkspaceTabVisibleForSession(

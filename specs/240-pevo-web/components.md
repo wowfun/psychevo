@@ -62,6 +62,9 @@ idle surface whose caller permits cancellation. A dialog or local action group
 contains at most one primary action, and that action remains transparent at
 rest with theme foreground text. Dangerous confirmation initially
 focuses Cancel and cannot use Enter as an implicit destructive default.
+Page-local tab strips that exceed a narrow viewport own their horizontal
+scrolling. Bringing a tab into view must not programmatically scroll or offset
+the Workbench app shell, page root, or an interaction panel beneath the strip.
 
 Committed GUI mutations publish display-only ledger receipts. Workbench keeps
 at most two receipts visible for eight seconds, pauses expiry while a receipt
@@ -408,6 +411,16 @@ duration immediately left of the timestamp, and the timestamp, using the same
 completed-turn format as TUI metadata. The action copies the raw Markdown source
 for that text block through the host clipboard boundary. Feedback controls such
 as thumbs up or thumbs down are not part of this first interaction.
+Workbench may also supply a controlled `Pin message to side` toggle for one
+visible user or assistant text block. The toggle is available only when the
+entry has a committed message sequence, the text is non-empty, and the block
+status is `completed`, `failed`, or `cancelled`. It is not exposed for live
+overlay entries, reasoning, tools, or other block kinds and statuses. Pinning
+captures that block's current Markdown as an application-memory snapshot; it
+does not subscribe the snapshot to later transcript updates. The toggle keeps
+one stable accessible name and communicates its state with `aria-pressed`.
+Coarse-pointer layouts keep the action discoverable with a minimum `44px` hit
+area while fine-pointer layouts retain the quiet hover/focus treatment.
 Preview-oriented Markdown surfaces such as Files and Capabilities use the
 shared Markdown renderer's copy affordance instead of transcript message
 metadata. That preview action copies raw Markdown source and remains an

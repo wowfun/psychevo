@@ -47,4 +47,4 @@ export type { ConfirmAction, ConfirmActionRequest, ConfirmDialogProps, MenuItem,
 export { ActionReceiptProvider, useActionReceipts } from "./receipts";
 export type { ActionReceiptInput } from "./receipts";
 export { TranscriptPanel } from "./transcript";
-export type { TranscriptAgentSession, TranscriptPanelProps } from "./transcript";
+export type { TranscriptAgentSession, TranscriptPanelProps, TranscriptPinnedMessage } from "./transcript";

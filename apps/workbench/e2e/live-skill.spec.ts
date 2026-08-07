@@ -31,6 +31,7 @@ type DurableRow = {
 };
 
 const defaultSkillCwd = path.resolve(repoRoot, "../feedgarden");
+const transcriptRowSelector = ".pevo-threadItems article[data-entry-id]";
 
 test.describe("pevo Web live skill validation", () => {
   test("runs x-daily with sampled transcript assertions @live", async ({ page, isMobile }, testInfo) => {
@@ -74,7 +75,7 @@ test.describe("pevo Web live skill validation", () => {
       await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
         timeout: 60_000
       });
-      await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+      await expect(transcript.locator(transcriptRowSelector)).toHaveCount(0);
       await selectLiveProviderModel(page, context.model);
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await expect(composer).toBeVisible();
@@ -199,7 +200,7 @@ async function assertNoWorkbenchRenderError(page: Page, sample: number) {
 }
 
 async function transcriptRows(page: Page): Promise<DomRow[]> {
-  return page.locator(".pevo-threadItems > article").evaluateAll((elements) => {
+  return page.locator(transcriptRowSelector).evaluateAll((elements) => {
     return elements.map((element, index) => {
       const className = element.getAttribute("class") ?? "";
       const line = element.querySelector(".pevo-evidenceLine");

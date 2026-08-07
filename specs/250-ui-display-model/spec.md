@@ -116,7 +116,17 @@ second time. A completed turn is terminal for presentation state: after the
 client applies `turnCompleted` for a turn, later live entry or delta
 observations for that same turn must be ignored and must not recreate a
 `runtime.stream` overlay beside the committed message-derived entries. A
-snapshot refresh is also a terminal presentation barrier when the incoming
+later activity projection must likewise not resurrect that settled Turn's
+running state. Application-owned Framework Turn fields reject an older
+`frameworkRevision`. An equal-revision live projection may update Gateway-local
+running state, while an equal-revision snapshot is retained as replay; even a
+newer projection is invalid when its
+`activeTurnId` names the already-settled Turn, while a newer projection for a
+distinct successor Turn remains admissible. A same-Thread snapshot merge
+retains the current activity when the incoming snapshot carries an equal or
+older `frameworkRevision`; snapshot transcript content may advance without
+rolling activity backward. A snapshot refresh is also a
+terminal presentation barrier when the incoming
 snapshot reports no active turn: the client must not inherit the previous
 client snapshot's stale `activeTurnId` to retain same-thread live overlay rows.
 When a terminal carries no committed slice, every writable surface refreshes
@@ -146,8 +156,16 @@ owns a distinct child activity and turn identity; the parent remains active
 independently while it waits for the tool result. Child entries and controls use
 the child identity, and the child activity is idle before its terminal is
 observable. A renderer must never infer child running state from parent
-activity. Parent transcript snapshots still depend on root ownership to stamp
-committed in-progress parent messages before replaying any remaining overlay.
+activity. Runtime-to-Framework event conversion must preserve both identities
+on a scoped child observation; it must never unwrap that observation into the
+parent event stream. A scoped runtime terminal is the child Turn's observable
+terminal even though the parent Framework Turn owns the root execution; it must
+reach child inspectors so an inspector opened before durable child history was
+complete can refresh from that authoritative history. Parent transcript
+snapshots still depend on root ownership to stamp committed in-progress parent
+messages before replaying any remaining overlay. A child inspector communicates
+read-only access by omitting its Composer; it does not add a read-only or history
+fidelity notice above the transcript.
 Workbench and TUI both consume retained boundary events and latest-entry
 snapshots for sessions they display. A foreign live observation is applied only
 when its thread identity matches the visible session or an explicitly tracked

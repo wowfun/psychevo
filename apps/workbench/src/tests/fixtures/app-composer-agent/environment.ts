@@ -297,6 +297,7 @@ afterEach(() => {
   gatewayMock.observabilityRead = null;
   gatewayMock.usageRead = null;
   gatewayMock.wechatQrPoll = null;
+  gatewayMock.extensionAppOpen = null;
   gatewayMock.threadInteractionRespond = (params: unknown) => ({
     accepted: true,
     interactionId: (params as { interactionId?: string }).interactionId ?? "interaction-1",
@@ -310,6 +311,52 @@ afterEach(() => {
   gatewayMock.codexPluginInstalled = false;
   gatewayMock.pluginInstallResult = null;
   gatewayMock.pluginInspectionResult = null;
+  gatewayMock.extensionRecords = [
+    {
+      id: "psychevo.channel.telegram",
+      selector: "psychevo.channel.telegram@profile",
+      version: "1.0.0",
+      displayName: "Telegram Channel",
+      description: "Telegram transport Extension",
+      source: "https://releases.example.test/telegram.json",
+      sourceKind: "https",
+      scope: "profile",
+      enabled: true,
+      trusted: true,
+      fingerprint: "sha256:current",
+      trustedFingerprint: "sha256:current",
+      protocol: "psychevo-extension/1",
+      protocolCompatible: true,
+      permissions: ["channel:telegram"],
+      sidecarState: "not_started",
+      leaseReason: null,
+      cspAppReadiness: "not_applicable",
+      coRootPlugin: null,
+      diagnostics: []
+    },
+    {
+      id: "example.dashboard",
+      selector: "example.dashboard@local",
+      version: "local",
+      displayName: "Example Dashboard",
+      description: "Display-only MCP App Extension",
+      source: "/tmp/example-dashboard",
+      sourceKind: "local",
+      scope: "local",
+      enabled: true,
+      trusted: true,
+      fingerprint: "sha256:dashboard",
+      trustedFingerprint: "sha256:dashboard",
+      protocol: "psychevo-extension/1",
+      protocolCompatible: true,
+      permissions: [],
+      sidecarState: "not_started",
+      leaseReason: null,
+      cspAppReadiness: "ready",
+      coRootPlugin: null,
+      diagnostics: []
+    }
+  ];
   gatewayMock.xtermTerminalOptions.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.connectionGeneration = 1;

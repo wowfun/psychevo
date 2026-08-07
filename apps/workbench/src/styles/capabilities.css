@@ -8,6 +8,28 @@
   padding: 6px 10px 12px;
 }
 
+.mcpAppFrame {
+  overflow: hidden;
+  border: 1px solid var(--pevo-border-subtle);
+  border-radius: 12px;
+  background: var(--pevo-surface-raised);
+}
+
+.mcpAppFrame > iframe {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.mcpAppFallback {
+  padding: 12px 14px;
+  border: 1px dashed var(--pevo-border-subtle);
+  border-radius: 10px;
+  color: var(--pevo-text-muted);
+  font-size: 13px;
+}
+
 .capabilitiesHeader,
 .capabilitiesToolbar,
 .agentCapabilitySegments,
@@ -20,6 +42,17 @@
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+.capabilityTabs {
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.capabilityTabs > button {
+  flex: 0 0 auto;
 }
 
 .capabilitiesHeader {
@@ -489,6 +522,51 @@
   color: var(--pevo-warning, var(--pevo-danger));
   font-size: 11px;
   font-weight: 700;
+}
+
+.extensionRuntimeEvidence {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.extensionEvidenceItem {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 34%);
+  border: 1px solid var(--pevo-border);
+  border-inline-start: 3px solid var(--pevo-accent);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.extensionEvidenceItem.is-trusted {
+  border-inline-start-color: var(--pevo-success);
+}
+
+.extensionEvidenceItem.is-warning {
+  border-inline-start-color: var(--pevo-warning, var(--pevo-danger));
+}
+
+.extensionEvidenceItem > strong,
+.extensionEvidenceItem > span,
+.extensionEvidenceItem > small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.extensionEvidenceItem > strong {
+  font-size: var(--pevo-font-size-small);
+}
+
+.extensionEvidenceItem > span,
+.extensionEvidenceItem > small {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
 }
 
 .skillPreview {

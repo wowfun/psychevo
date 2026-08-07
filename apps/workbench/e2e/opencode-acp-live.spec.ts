@@ -278,7 +278,7 @@ async function expectEmptyDraftReady(page: Page) {
   await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
     timeout: 60_000
   });
-  await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+  await expect(transcript.locator(".pevo-threadItems article[data-entry-id]")).toHaveCount(0);
   await expect(page.getByPlaceholder("Ask Psychevo...")).toBeEditable();
 }
 
@@ -568,7 +568,7 @@ async function assertBackendRowsFit(overlay: Locator) {
 }
 
 async function assertTranscriptRowsFit(page: Page) {
-  const violations = await page.locator(".pevo-threadItems > article, .pevo-messageFrame").evaluateAll((rows) =>
+  const violations = await page.locator(".pevo-threadItems article[data-entry-id], .pevo-messageFrame").evaluateAll((rows) =>
     rows.flatMap((row, index) => {
       const element = row as HTMLElement;
       const rowBox = element.getBoundingClientRect();

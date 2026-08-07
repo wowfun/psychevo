@@ -763,9 +763,23 @@
 
 .pevo-messageFrame:hover .pevo-messageMeta,
 .pevo-messageFrame:focus-within .pevo-messageMeta,
+.pevo-messageFrame.is-pinned .pevo-messageMeta,
 .pevo-messageMeta:hover {
   opacity: 1;
   transform: translateY(0);
+}
+
+@media (pointer: coarse) {
+  .pevo-messageFrame.is-pinnable {
+    --pevo-messageActionHitArea: 48px;
+    --pevo-messageActionHitOffset: -48px;
+  }
+
+  .pevo-messageFrame.is-pinnable .pevo-messageMeta {
+    height: 44px;
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .pevo-messageElapsed,

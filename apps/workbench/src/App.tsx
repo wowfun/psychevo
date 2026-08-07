@@ -197,6 +197,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [channelDoctor, setChannelDoctor] = useState<Record<string, WorkbenchChannelDoctor>>({});
   const [commands, setCommands] = useState<WorkbenchCommand[]>([]);
   const [rightTabs, setRightTabs] = useState<RightWorkspaceTab[]>([]);
+  const pinnedMessageKeys = useMemo(() => new Set(
+    rightTabs.flatMap((tab) => tab.kind === "pinnedMessage" && tab.pinnedMessage
+      ? [tab.pinnedMessage.key]
+      : [])
+  ), [rightTabs]);
   const [activeRightTabId, setActiveRightTabId] = useState<string | null>(null);
   const [mainView, setMainView] = useState<MainView>("transcript");
   const [capabilitiesTab, setCapabilitiesTab] = useState<CapabilityTab>("skills");
@@ -833,7 +838,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     openAgentSessionTab,
     openReviewTab,
     openRightWorkspaceTab,
-    revealRightWorkspace
+    revealRightWorkspace,
+    togglePinnedMessage
   } = rightWorkspaceActions;
 
   const appActions = createAppActions({
@@ -1490,6 +1496,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         openDiffPreview,
         openFilePreview,
         openRightWorkspaceTab,
+        pinnedMessageKeys,
         readWorkspaceFolders,
         readWorkspaceGitBranches,
         refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
@@ -1510,6 +1517,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         setRightWidthPx,
         terminalEvents,
         traceState,
+        togglePinnedMessage,
         workspaceBranch,
         workspaceIsGitRepo,
         workspaceChanges,

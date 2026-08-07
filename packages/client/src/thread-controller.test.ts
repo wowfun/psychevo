@@ -620,6 +620,112 @@ describe("thread transcript controller helpers", () => {
     expect(controller.snapshot()?.activity.running).toBe(false);
   });
 
+  it("does not let replayed activity resurrect a settled Turn", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    initial.activity = {
+      activeTurnId: "turn-active",
+      frameworkRevision: "7",
+      queuedTurns: 0,
+      running: true
+    };
+    const controller = new ThreadController(initial);
+
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "complete",
+      threadId: "thread-current",
+      turnId: "turn-active"
+    })).applied).toBe(true);
+
+    const settledReplay = controller.applyGatewayEvent({
+      type: "activityChanged",
+      threadId: "thread-current",
+      activity: {
+        activeTurnId: "turn-active",
+        frameworkRevision: "8",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+    const olderSuccessor = controller.applyGatewayEvent({
+      type: "activityChanged",
+      threadId: "thread-current",
+      activity: {
+        activeTurnId: "turn-successor",
+        frameworkRevision: "6",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+
+    expect(settledReplay.applied).toBe(false);
+    expect(olderSuccessor.applied).toBe(false);
+    expect(controller.turnId()).toBeNull();
+    expect(controller.snapshot()?.activity).toMatchObject({
+      activeTurnId: null,
+      frameworkRevision: "7",
+      running: false
+    });
+
+    const successor = controller.applyGatewayEvent({
+      type: "activityChanged",
+      threadId: "thread-current",
+      activity: {
+        activeTurnId: "turn-successor",
+        frameworkRevision: "9",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+
+    expect(successor).toEqual({
+      applied: true,
+      completed: false,
+      running: true
+    });
+    expect(controller.turnId()).toBe("turn-successor");
+    expect(controller.snapshot()?.activity).toMatchObject({
+      activeTurnId: "turn-successor",
+      frameworkRevision: "9",
+      running: true
+    });
+  });
+
+  it("applies Gateway-local activity changes at an equal Framework revision", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    initial.activity = {
+      activeTurnId: null,
+      frameworkRevision: "11",
+      queuedTurns: 0,
+      running: false
+    };
+    const controller = new ThreadController(initial);
+
+    const started = controller.applyGatewayEvent({
+      type: "activityChanged",
+      threadId: "thread-current",
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "11",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+    const finished = controller.applyGatewayEvent({
+      type: "activityChanged",
+      threadId: "thread-current",
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "11",
+        queuedTurns: 0,
+        running: false
+      }
+    });
+
+    expect(started).toEqual({ applied: true, completed: false, running: true });
+    expect(finished).toEqual({ applied: true, completed: false, running: false });
+    expect(controller.snapshot()?.activity.running).toBe(false);
+  });
+
   it("ignores a paced live update that flushes after its terminal result", () => {
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope(), "thread-current"));
     controller.setContext(threadContext("native", null));

@@ -205,6 +205,7 @@ export type WorkspaceViewModel = {
   openAgentSessionTab: RightActions["openAgentSessionTab"];
   openFilePreview: AppActions["openFilePreview"];
   openRightWorkspaceTab: RightActions["openRightWorkspaceTab"];
+  pinnedMessageKeys: ReadonlySet<string>;
   readWorkspaceFolders: AppActions["readWorkspaceFolders"];
   readWorkspaceGitBranches: AppActions["readWorkspaceGitBranches"];
   checkoutWorkspaceGitBranch: AppActions["checkoutWorkspaceGitBranch"];
@@ -229,6 +230,7 @@ export type WorkspaceViewModel = {
   setRightWidthPx: SetState<number>;
   terminalEvents: TerminalNotificationEvent[];
   traceState: TraceState;
+  togglePinnedMessage: RightActions["togglePinnedMessage"];
   workspaceBranch: string | null | undefined;
   workspaceIsGitRepo: boolean | undefined;
   workspaceChanges: WorkspaceChangesResult | null;
@@ -383,6 +385,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     patchComposerDraft,
     pinnedSessionIds,
     pinnedSessions,
+    pinnedMessageKeys,
     pauseAutomation,
     pollWechatQrSetup,
     refreshAutomations,
@@ -453,6 +456,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     togglePinnedSession,
     traceState,
     transcriptEntries,
+    togglePinnedMessage,
     voiceAutoSpeak,
     voiceListening,
     voiceRealtimeActive,
@@ -870,6 +874,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                     onForkUserMessage: workbenchIntents.forkUserMessage
                   } : {})}
                   onOpenAgentSession={openAgentSessionTab}
+                  onPinnedMessageChange={(message, pinned) => togglePinnedMessage(
+                    message,
+                    pinnedMessageSourceTitle(message.threadId, sessions),
+                    pinned
+                  )}
+                  pinnedMessageKeys={pinnedMessageKeys}
                   threadId={snapshot.thread?.id ?? null}
                   onReadAloudText={onReadAloudText}
                   olderHistoryLoading={olderHistoryLoading}
@@ -1121,6 +1131,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   );
                 }}
                 onOpenPreview={(preview) => openRightWorkspaceTab("preview", { preview, title: preview.title }, true)}
+                onPinnedMessageChange={togglePinnedMessage}
                 onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
                 onConsumePendingPrompt={clearRightWorkspaceTabPendingPrompt}
                 onRefresh={() => void runAction(async () => {
@@ -1132,6 +1143,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 onRefreshTrace={() => void refreshTrace()}
                 onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
                 onShowHome={() => revealRightWorkspace(null)}
+                pinnedMessageKeys={pinnedMessageKeys}
               />
             </Suspense>
           </aside>
@@ -1177,4 +1189,12 @@ function useComposerDockTransition(
     previousRectRef.current = nextRect;
     previousDraftRef.current = draftSession;
   }, [draftSession, present, ref]);
+}
+
+function pinnedMessageSourceTitle(threadId: string, sessions: SessionSummary[]): string {
+  const session = sessions.find((candidate) => candidate.id === threadId);
+  return session?.displayTitle?.trim()
+    || session?.title?.trim()
+    || threadId.slice(0, 8)
+    || "Thread";
 }

@@ -59,6 +59,21 @@ available. Remote embedding headers may still prevent a page from loading.
 Host/port shorthand defaults public hosts to HTTPS and localhost or loopback
 addresses to HTTP; unsupported explicit schemes are rejected.
 
+Completed user and assistant messages in the main, Side chat, and child-agent
+Transcripts may be pinned as independent `Pinned message` tabs. Pin tabs are
+created only from a Transcript action, never from right-workspace Home or the
+`+` menu. Each tab owns a read-only snapshot identified by source Thread,
+entry, and text-block ids; pinning the same source block focuses its existing
+tab, and closing the tab clears the corresponding toggle. The snapshot remains
+unchanged if source history is later edited, reverted, or deleted. Pin tabs are
+application-scoped rather than Thread-scoped, remain visible while switching
+Threads or collapsing the right workspace, and are discarded on page refresh
+or application restart without Host or Gateway persistence. The tab body shows
+quiet source provenance and renders the captured Markdown without resolving
+workspace paths against the currently selected Thread. Ordinary web links
+remain active. On narrow layouts Pin opens the Status/right-workspace surface;
+the tab strip scrolls horizontally when independent pins exceed its width.
+
 Automations is an app-level operational surface for local project automations
 and thread heartbeats defined by
 [400 Workflow Automations](../400-workflow-automations/spec.md).

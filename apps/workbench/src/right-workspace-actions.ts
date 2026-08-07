@@ -4,11 +4,12 @@ import type {
   SetStateAction
 } from "react";
 import type { GatewayClient } from "@psychevo/client";
-import type { ConfirmAction, TranscriptAgentSession } from "@psychevo/components";
+import type { ConfirmAction, TranscriptAgentSession, TranscriptPinnedMessage } from "@psychevo/components";
 import type { GatewayRequestScope, WorkspaceDiffResult } from "@psychevo/protocol";
 import {
   createRightTabId,
   fileBasename,
+  pinnedMessageTabTitle,
   rightWorkspaceDefaultTitle
 } from "./right-workspace-model";
 import { clampRightWidth } from "./storage";
@@ -92,6 +93,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       path: patch.path ?? null,
       diff: patch.diff ?? null,
       preview: patch.preview ?? null,
+      pinnedMessage: patch.pinnedMessage ?? null,
       message: patch.message ?? null
     };
     if (kind === "files" && patch.fileTreeOpen !== undefined) {
@@ -188,6 +190,30 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     });
   }
 
+  function togglePinnedMessage(
+    message: TranscriptPinnedMessage,
+    sourceTitle: string,
+    pinned: boolean
+  ) {
+    const existing = params.rightTabs.find((tab) => (
+      tab.kind === "pinnedMessage" && tab.pinnedMessage?.key === message.key
+    )) ?? null;
+    if (!pinned) {
+      if (existing) {
+        void closeRightWorkspaceTab(existing.id);
+      }
+      return;
+    }
+    if (existing) {
+      revealRightWorkspace(existing.id);
+      return;
+    }
+    void openRightWorkspaceTab("pinnedMessage", {
+      pinnedMessage: { ...message, sourceTitle },
+      title: pinnedMessageTabTitle(message)
+    }, true);
+  }
+
   function beginRightResize(event: ReactPointerEvent<HTMLButtonElement>) {
     if (window.matchMedia("(max-width: 780px)").matches) {
       return;
@@ -216,7 +242,8 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     openAgentSessionTab,
     openReviewTab,
     openRightWorkspaceTab,
-    revealRightWorkspace
+    revealRightWorkspace,
+    togglePinnedMessage
   };
 }
 

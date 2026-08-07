@@ -2187,6 +2187,70 @@ vi.mock("@psychevo/client", async () => {
         }
         return { plugin: {} };
       }
+      if (method === "extension/list") {
+        return {
+          extensions: gatewayMock.extensionRecords,
+          count: gatewayMock.extensionRecords.length
+        };
+      }
+      if (method === "extension/read") {
+        const record = params as { selector?: string } | undefined;
+        const extension = gatewayMock.extensionRecords.find((item) => item.selector === record?.selector);
+        if (!extension) throw new Error("Extension not found");
+        return {
+          extension,
+          manifest: {
+            schemaVersion: 1,
+            id: extension.id,
+            contributions: extension.cspAppReadiness === "ready"
+              ? {
+                  mcpApps: [{
+                    id: "dashboard",
+                    resourceUri: "ui://example/dashboard.html",
+                    resourceUrl: "https://apps.example.test/dashboard.html",
+                    resourceDomains: ["https://apps.example.test"],
+                    connectDomains: [],
+                    allowedTools: [],
+                    fallback: "Use the dashboard text fallback."
+                  }]
+                }
+              : {}
+          }
+        };
+      }
+      if (method === "extension/setEnabled") {
+        const record = params as { selector?: string; enabled?: boolean } | undefined;
+        gatewayMock.extensionRecords = gatewayMock.extensionRecords.map((extension) => (
+          extension.selector === record?.selector
+            ? { ...extension, enabled: record?.enabled === true }
+            : extension
+        ));
+        return { success: true, id: record?.selector, scope: "profile", enabled: record?.enabled };
+      }
+      if (method === "extension/remove") {
+        const record = params as { selector?: string } | undefined;
+        gatewayMock.extensionRecords = gatewayMock.extensionRecords.filter(
+          (extension) => extension.selector !== record?.selector
+        );
+        return { success: true, id: record?.selector, scope: "profile", enabled: null };
+      }
+      if (method === "extension/app/open") {
+        if (gatewayMock.extensionAppOpen) {
+          return gatewayMock.extensionAppOpen(params);
+        }
+        return {
+          leaseId: "extension-app-lease",
+          extensionId: "example.dashboard",
+          appId: "dashboard",
+          resourceUri: "ui://example/dashboard.html",
+          resourceUrl: "https://apps.example.test/dashboard.html",
+          resourceDomains: ["https://apps.example.test"],
+          connectDomains: [],
+          allowedTools: [],
+          fallback: "Use the dashboard text fallback."
+        };
+      }
+      if (method === "extension/app/close") return { released: true };
       if (method === "plugin/authority/setTrust") {
         const record = params as { selector?: string; trusted?: boolean } | undefined;
         return {

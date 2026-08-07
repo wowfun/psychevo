@@ -176,6 +176,9 @@ export function applyLiveTranscriptEvent(
         )
       };
     case "activityChanged":
+      if (!isCurrentOrNewerFrameworkActivity(snapshot.activity, event.activity)) {
+        return snapshot;
+      }
       return {
         ...snapshot,
         activity: event.activity
@@ -183,6 +186,43 @@ export function applyLiveTranscriptEvent(
     default:
       return snapshot;
   }
+}
+
+export function isNewerFrameworkActivity(
+  current: ThreadSnapshot["activity"],
+  incoming: ThreadSnapshot["activity"]
+): boolean {
+  const currentRevision = current.frameworkRevision;
+  const incomingRevision = incoming.frameworkRevision;
+  if (typeof currentRevision !== "string" || typeof incomingRevision !== "string") {
+    return true;
+  }
+  return compareDecimalRevisions(incomingRevision, currentRevision) > 0;
+}
+
+export function isCurrentOrNewerFrameworkActivity(
+  current: ThreadSnapshot["activity"],
+  incoming: ThreadSnapshot["activity"]
+): boolean {
+  const currentRevision = current.frameworkRevision;
+  const incomingRevision = incoming.frameworkRevision;
+  if (typeof currentRevision !== "string" || typeof incomingRevision !== "string") {
+    return true;
+  }
+  return compareDecimalRevisions(incomingRevision, currentRevision) >= 0;
+}
+
+function compareDecimalRevisions(left: string, right: string): number {
+  const normalize = (value: string) => (
+    /^\d+$/.test(value) ? value.replace(/^0+(?=\d)/, "") : value
+  );
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  if (/^\d+$/.test(normalizedLeft) && /^\d+$/.test(normalizedRight)) {
+    return normalizedLeft.length - normalizedRight.length
+      || normalizedLeft.localeCompare(normalizedRight);
+  }
+  return normalizedLeft.localeCompare(normalizedRight);
 }
 
 export function appendOptimisticPrompt(
@@ -240,7 +280,10 @@ export function reconcileThreadSnapshot(
     return normalizeSnapshotEntries(incoming);
   }
 
-  const entries = normalizeIncomingSnapshotEntries(incoming.entries);
+  const rebasedIncoming = isNewerFrameworkActivity(current.activity, incoming.activity)
+    ? incoming
+    : { ...incoming, activity: current.activity };
+  const entries = normalizeIncomingSnapshotEntries(rebasedIncoming.entries);
   for (const entry of current.entries) {
     if (isHiddenTranscriptEntry(entry)) {
       continue;
@@ -249,14 +292,14 @@ export function reconcileThreadSnapshot(
       entries.push(entry);
       continue;
     }
-    const liveEntry = liveEntryForSnapshotReconcile(entry, entries, current, incoming);
+    const liveEntry = liveEntryForSnapshotReconcile(entry, entries, current, rebasedIncoming);
     if (liveEntry) {
       entries.push(liveEntry);
     }
   }
 
   return {
-    ...incoming,
+    ...rebasedIncoming,
     entries: sortTranscriptEntries(entries)
   };
 }

@@ -86,6 +86,40 @@ describe("CapabilitiesApplication", () => {
     expect(client.calls.filter(([method]) => method === "skill/list")).toHaveLength(2);
   });
 
+  it("owns Extension reads and refreshes after explicit enablement changes", async () => {
+    let enabled = true;
+    const client = fakeClient(async (method) => {
+      if (method === "extension/list") {
+        return { extensions: [{ id: "example.extension", enabled }], count: 1 };
+      }
+      if (method === "extension/setEnabled") {
+        enabled = false;
+        return { success: true, id: "example.extension", scope: "profile", enabled };
+      }
+      throw new Error(`unexpected ${method}`);
+    });
+    const application = new CapabilitiesApplication(client);
+    const activeScope = scope("/repo");
+    application.activate(activeScope);
+
+    await application.refresh("extensions");
+    await application.request("extension/setEnabled", {
+      selector: "example.extension@profile",
+      scopeName: "profile",
+      enabled: false,
+      scope: activeScope
+    });
+
+    expect(application.getSnapshot().data.extensions).toEqual({
+      extensions: [{ id: "example.extension", enabled: false }],
+      count: 1
+    });
+    expect(application.getSnapshot().receipt).toMatchObject({
+      domain: "extensions",
+      method: "extension/setEnabled"
+    });
+  });
+
   it("does not project a late result from an abandoned scope into the active scope", async () => {
     const oldRead = deferred<unknown>();
     const client = fakeClient(async (method, params) => {

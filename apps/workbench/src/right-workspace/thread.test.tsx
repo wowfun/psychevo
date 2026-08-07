@@ -130,6 +130,32 @@ describe("ThreadPanel live event feed", () => {
     expect(onOpen).toHaveBeenCalledWith("reports/result.html");
   });
 
+  it("forwards committed child-message Pin actions without subscribing to live entries", async () => {
+    const onPinnedMessageChange = vi.fn();
+    render(
+      <ThreadPanel
+        client={threadClientWithContext(threadContext("readOnly", "full"))}
+        disabled={false}
+        gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
+        kind="agentSession"
+        onPinnedMessageChange={onPinnedMessageChange}
+        parentThreadId="parent-thread"
+        scope={null}
+        threadId="child-thread"
+        title="Agent"
+      />
+    );
+
+    const pins = await screen.findAllByRole("button", { name: "Pin message to side" });
+    fireEvent.click(pins[1]!);
+    expect(onPinnedMessageChange).toHaveBeenCalledWith(expect.objectContaining({
+      entryId: "message:2",
+      role: "assistant",
+      text: "Initial answer",
+      threadId: "child-thread"
+    }), true);
+  });
+
   it("uses persisted binding ownership for a public child thread", async () => {
     const client = threadClientWithOwnership("readOnly");
 
@@ -147,14 +173,14 @@ describe("ThreadPanel live event feed", () => {
     );
 
     const panel = screen.getByRole("region", { name: "Runtime child" });
-    expect(await within(panel).findByText(/^Read-only runtime child/)).toBeTruthy();
-    expect(within(panel).queryByRole("button", { name: "Send message" })).toBeNull();
-    expect(within(panel).queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
-    expect(client.request).toHaveBeenCalledWith("thread/context/read", {
+    await waitFor(() => expect(client.request).toHaveBeenCalledWith("thread/context/read", {
       threadId: "child-thread",
       target: null,
       scope: childSnapshot().scope
-    });
+    }));
+    expect(within(panel).queryByRole("button", { name: "Send message" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
+    expect(within(panel).queryByText(/Read-only runtime child/)).toBeNull();
   });
 
   it("enables Side Chat submission after its own Thread Context loads", async () => {
@@ -644,39 +670,35 @@ describe("ThreadPanel live event feed", () => {
     expect(within(panel).getByText("retained first answer")).toBeTruthy();
   });
 
-  it.each([
-    ["full", "Read-only runtime child · Full history"],
-    ["summary", "Read-only runtime child · Summary history; only a condensed record is available."],
-    ["partial", "Read-only runtime child · Partial history; some messages or detail may be missing."],
-    ["unavailable", "Read-only runtime child · History unavailable; earlier messages could not be restored."]
-  ] as const)("keeps %s runtime-child history fidelity visible after lazy read", async (fidelity, notice) => {
-    const client = threadClientWithOwnership("readOnly", fidelity);
-    render(
-      <ThreadPanel
-        client={client}
-        disabled={false}
-        gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
-        historyFidelity={fidelity === "summary" ? "partial" : fidelity}
-        kind="agentSession"
-        parentThreadId="parent-thread"
-        scope={null}
-        threadId="child-thread"
-        title={`${fidelity} runtime child`}
-      />
-    );
+  it.each(["full", "summary", "partial", "unavailable"] as const)(
+    "omits the redundant read-only and %s history notice after lazy read",
+    async (fidelity) => {
+      const client = threadClientWithOwnership("readOnly", fidelity);
+      render(
+        <ThreadPanel
+          client={client}
+          disabled={false}
+          gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
+          kind="agentSession"
+          parentThreadId="parent-thread"
+          scope={null}
+          threadId="child-thread"
+          title={`${fidelity} runtime child`}
+        />
+      );
 
-    const historyNotice = await screen.findByRole("note");
-    expect(historyNotice.textContent).toBe(notice);
-    expect(historyNotice.getAttribute("data-history-fidelity")).toBe(fidelity);
-    expect(client.request).toHaveBeenCalledWith("thread/context/read", {
-      threadId: "child-thread",
-      target: null,
-      scope: childSnapshot().scope
-    });
-    expect(client.request).toHaveBeenCalledWith("thread/read", {
-      threadId: "child-thread"
-    });
-  });
+      await waitFor(() => expect(client.request).toHaveBeenCalledWith("thread/context/read", {
+        threadId: "child-thread",
+        target: null,
+        scope: childSnapshot().scope
+      }));
+      expect(client.request).toHaveBeenCalledWith("thread/read", {
+        threadId: "child-thread"
+      });
+      expect(screen.queryByText(/Read-only runtime child/)).toBeNull();
+      expect(screen.queryByRole("note")).toBeNull();
+    }
+  );
 });
 
 function childSnapshot(): ThreadSnapshot {

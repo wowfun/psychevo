@@ -13,6 +13,7 @@ import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, Wren
 import { AgentsConfigPanel, type ManagedBackendAction } from "./capabilities-agents-config";
 import { parseBackendList } from "./data";
 import { formatRuntimeCheckedAt } from "./runtime-context";
+import { McpAppFrame, type McpAppFrameDescriptor } from "./mcp-app-frame";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
 type JsonObject = Record<string, unknown>;
@@ -44,7 +45,7 @@ type MutationOptions = {
 };
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
 type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
-type CatalogCapabilityTab = "plugins" | "mcp" | "tools";
+type CatalogCapabilityTab = "plugins" | "extensions" | "mcp" | "tools";
 
 type AgentDefinitionRow = {
   id: string;
@@ -191,6 +192,7 @@ const TABS: Array<{ id: CapabilityTab; label: string }> = [
   { id: "agents", label: "Agents" },
   { id: "skills", label: "Skills" },
   { id: "plugins", label: "Plugins" },
+  { id: "extensions", label: "Extensions" },
   { id: "mcp", label: "MCP" },
   { id: "tools", label: "Tools" }
 ];
@@ -358,17 +360,19 @@ export function CapabilitiesPage({
             <Search size={15} />
             <input aria-label={`Search ${tabLabel(activeTab)}`} className="pevo-fieldControl pevo-fieldControl--search" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
           </label>
-          <DisclosureButton
-            controls={`capability-create-${activeTab}`}
-            disabled={busy}
-            expanded={createPanel === activeTab}
-            icon={<Plus size={14} />}
-            label={createActionLabel(activeTab)}
-            onExpandedChange={(expanded) => setCreatePanel(expanded ? activeTab : null)}
-            variant={createPanel === activeTab ? "secondary" : "primary"}
-          >
-            {createActionLabel(activeTab)}
-          </DisclosureButton>
+          {supportsCapabilityCreate(activeTab) && (
+            <DisclosureButton
+              controls={`capability-create-${activeTab}`}
+              disabled={busy}
+              expanded={createPanel === activeTab}
+              icon={<Plus size={14} />}
+              label={createActionLabel(activeTab)}
+              onExpandedChange={(expanded) => setCreatePanel(expanded ? activeTab : null)}
+              variant={createPanel === activeTab ? "secondary" : "primary"}
+            >
+              {createActionLabel(activeTab)}
+            </DisclosureButton>
+          )}
         </div>
       )}
 
@@ -513,7 +517,7 @@ function CatalogCapabilityPanel({
     enabledTools: "",
     disabledTools: ""
   });
-  const [pluginDetail, setPluginDetail] = useState<{
+  const [packageDetail, setPackageDetail] = useState<{
     id: string;
     loading: boolean;
     value: JsonObject | null;
@@ -533,18 +537,18 @@ function CatalogCapabilityPanel({
   const listEntries = capabilityListEntries(tab, rows);
 
   useEffect(() => {
-    if (!client || !scope || tab !== "plugins" || !selectedRow) {
-      setPluginDetail(null);
+    if (!client || !scope || !["plugins", "extensions"].includes(tab) || !selectedRow) {
+      setPackageDetail(null);
       return;
     }
     let cancelled = false;
-    setPluginDetail({ id: selectedRow.id, loading: true, value: null, error: null });
-    void client.request("plugin/read", {
-      selector: pluginSelector(selectedRow),
-      scope
-    }).then((value) => {
+    setPackageDetail({ id: selectedRow.id, loading: true, value: null, error: null });
+    const read = tab === "plugins"
+      ? client.request("plugin/read", { selector: pluginSelector(selectedRow), scope })
+      : client.request("extension/read", { selector: selectedRow.id, scope });
+    void read.then((value) => {
       if (!cancelled) {
-        setPluginDetail({
+        setPackageDetail({
           id: selectedRow.id,
           loading: false,
           value: objectValue(value),
@@ -553,7 +557,7 @@ function CatalogCapabilityPanel({
       }
     }).catch((error) => {
       if (!cancelled) {
-        setPluginDetail({
+        setPackageDetail({
           id: selectedRow.id,
           loading: false,
           value: null,
@@ -700,14 +704,30 @@ function CatalogCapabilityPanel({
                   if (sessionId && scope) application.watchPluginConnect(sessionId);
                 }}
                 pluginDetail={
-                  pluginDetail?.id === selectedRow.id ? pluginDetail.value : null
+                  packageDetail?.id === selectedRow.id ? packageDetail.value : null
                 }
               />
               {tab === "plugins" && (
                 <PluginComponentStatuses
-                  detail={pluginDetail?.id === selectedRow.id ? pluginDetail : null}
+                  detail={packageDetail?.id === selectedRow.id ? packageDetail : null}
                   row={selectedRow}
                 />
+              )}
+              {tab === "extensions" && (
+                <>
+                  <ExtensionRuntimeEvidence
+                    detail={packageDetail?.id === selectedRow.id ? packageDetail : null}
+                    row={selectedRow}
+                  />
+                  <ExtensionAppSurface
+                    key={`${selectedRow.id}:${scope?.source.kind ?? "none"}:${scope?.source.rawId ?? "none"}:${scope?.cwd ?? "none"}`}
+                    busy={busy}
+                    client={client}
+                    detail={packageDetail?.id === selectedRow.id ? packageDetail : null}
+                    row={selectedRow}
+                    scope={scope}
+                  />
+                </>
               )}
               <KeyValueView value={selectedRow.raw} />
             </>
@@ -2440,6 +2460,32 @@ function CapabilityActions({
       </div>
     );
   }
+  if (tab === "extensions") {
+    const selector = stringField(row.raw, "selector") || row.id;
+    const scopeName = stringField(row.raw, "scope");
+    return (
+      <div className="capabilityActionGrid">
+        <ActionButton
+          disabled={busy}
+          icon={<Trash2 size={14} />}
+          onClick={() => runConfirmed(
+            `Remove Extension ${row.name}? Its data directory will be retained.`,
+            "Remove Extension",
+            () => mutate(() => client.request("extension/remove", {
+              selector,
+              scopeName: scopeName || null,
+              scope
+            }))
+          )}
+          size="compact"
+          type="button"
+          variant="danger"
+        >
+          Remove
+        </ActionButton>
+      </div>
+    );
+  }
   if (tab === "plugins") {
     const detailPlugin = objectField(pluginDetail, "plugin");
     const trust = Object.keys(detailPlugin).length > 0
@@ -3226,6 +3272,12 @@ async function setCapabilityEnabled(client: CapabilitiesClient | null, scope: Ga
     enabled,
     scope
   });
+  if (tab === "extensions") return client.request("extension/setEnabled", {
+    selector: stringField(row.raw, "selector") || row.id,
+    scopeName: stringField(row.raw, "scope") || null,
+    enabled,
+    scope
+  });
   if (tab === "mcp") return client.request("mcp/setEnabled", { name: row.name, enabled, scope });
 }
 
@@ -3427,6 +3479,23 @@ function rowsForTab(tab: CapabilityTab, data: JsonObject | null): CapabilityRow[
       raw: plugin
     }));
   }
+  if (tab === "extensions") {
+    return arrayObjects(data.extensions).map((extension) => ({
+      id: stringField(extension, "selector") || stringField(extension, "id"),
+      name: stringField(extension, "displayName") || stringField(extension, "id"),
+      description: stringField(extension, "description"),
+      enabled: boolField(extension, "enabled"),
+      status: boolField(extension, "trusted")
+        ? (boolField(extension, "protocolCompatible") ? "Ready" : "Incompatible")
+        : "Changed",
+      badges: [
+        labelForKey(stringField(extension, "scope")),
+        stringField(extension, "version"),
+        labelForKey(stringField(extension, "sidecarState"))
+      ].filter(Boolean),
+      raw: extension
+    }));
+  }
   if (tab === "mcp") {
     return arrayObjects(data.servers).map((server) => {
       const transport = objectField(server, "transport");
@@ -3540,6 +3609,153 @@ function PluginComponentStatuses({
           </div>
         );
       })}
+    </section>
+  );
+}
+
+function ExtensionRuntimeEvidence({
+  detail,
+  row
+}: {
+  detail: { loading: boolean; value: JsonObject | null; error: string | null } | null;
+  row: CapabilityRow;
+}) {
+  if (detail?.loading) return <div className="capabilityEmpty">Loading Extension evidence</div>;
+  if (detail?.error) return <div className="capabilityBanner is-error">{detail.error}</div>;
+  const extension = detail?.value ? objectField(detail.value, "extension") : row.raw;
+  const diagnostics = arrayStrings(extension.diagnostics);
+  const permissions = arrayStrings(extension.permissions);
+  return (
+    <section className="extensionRuntimeEvidence" aria-label="Extension runtime evidence">
+      <div className={`extensionEvidenceItem ${boolField(extension, "trusted") ? "is-trusted" : "is-warning"}`}>
+        <strong>{boolField(extension, "trusted") ? "Trusted fingerprint" : "Fingerprint changed"}</strong>
+        <span>{[
+          stringField(extension, "protocol") || "Unknown protocol",
+          labelForKey(stringField(extension, "sidecarState") || "unknown"),
+          `Apps ${labelForKey(stringField(extension, "cspAppReadiness") || "unknown")}`
+        ].join(" · ")}</span>
+        <small>{stringField(extension, "leaseReason") || "Static management read · no sidecar lease acquired"}</small>
+      </div>
+      {permissions.length > 0 && (
+        <div className="extensionEvidenceItem">
+          <strong>Declared capabilities</strong>
+          <span>{permissions.join(" · ")}</span>
+        </div>
+      )}
+      {stringField(extension, "coRootPlugin") && (
+        <div className="extensionEvidenceItem">
+          <strong>Co-root Plugin</strong>
+          <span>Detected · managed independently</span>
+        </div>
+      )}
+      {diagnostics.map((diagnostic) => (
+        <div className="extensionEvidenceItem is-warning" key={diagnostic}>
+          <strong>Diagnostic</strong>
+          <span>{diagnostic}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ExtensionAppSurface({
+  busy,
+  client,
+  detail,
+  row,
+  scope
+}: {
+  busy: boolean;
+  client: CapabilitiesClient | null;
+  detail: { loading: boolean; value: JsonObject | null; error: string | null } | null;
+  row: CapabilityRow;
+  scope: GatewayRequestScope | null;
+}) {
+  const leaseRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
+  const [opened, setOpened] = useState<McpAppFrameDescriptor | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const manifest = objectField(detail?.value, "manifest");
+  const contributions = objectField(manifest, "contributions");
+  const app = arrayObjects(contributions.mcpApps)[0] ?? null;
+  const appId = app ? stringField(app, "id") : "";
+
+  useEffect(() => {
+    generationRef.current += 1;
+    return () => {
+      generationRef.current += 1;
+      const leaseId = leaseRef.current;
+      leaseRef.current = null;
+      if (leaseId && client && scope) {
+        void client.request("extension/app/close", { leaseId, scope }).catch(() => undefined);
+      }
+    };
+  }, [client, scope?.cwd, row.id]);
+
+  if (!app || detail?.loading) return null;
+  const close = async () => {
+    generationRef.current += 1;
+    const leaseId = leaseRef.current;
+    leaseRef.current = null;
+    setOpened(null);
+    if (leaseId && client && scope) {
+      await client.request("extension/app/close", { leaseId, scope });
+    }
+  };
+  const open = async () => {
+    if (!client || !scope || !appId) return;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    setOpening(true);
+    setError(null);
+    try {
+      const result = await client.request("extension/app/open", {
+        selector: stringField(row.raw, "selector") || row.id,
+        scopeName: stringField(row.raw, "scope") || null,
+        appId,
+        scope
+      });
+      const value = objectValue(result);
+      const leaseId = stringField(value, "leaseId");
+      if (!leaseId) throw new Error("Gateway did not return an Extension App lease");
+      if (generation !== generationRef.current) {
+        await client.request("extension/app/close", { leaseId, scope });
+        return;
+      }
+      leaseRef.current = leaseId;
+      setOpened({
+        id: stringField(value, "appId"),
+        resourceUri: stringField(value, "resourceUri"),
+        resourceUrl: stringField(value, "resourceUrl"),
+        resourceDomains: arrayStrings(value.resourceDomains),
+        connectDomains: arrayStrings(value.connectDomains),
+        allowedTools: arrayStrings(value.allowedTools),
+        fallback: stringField(value, "fallback")
+      });
+    } catch (reason) {
+      if (generation === generationRef.current) setError(errorMessage(reason));
+    } finally {
+      if (generation === generationRef.current) setOpening(false);
+    }
+  };
+  return (
+    <section aria-label="Extension MCP App" className="capabilityStack">
+      <div className="capabilityDetailHeader">
+        <div>
+          <h3>{appId}</h3>
+          <span>{stringField(app, "resourceUri")}</span>
+        </div>
+        {opened ? (
+          <ActionButton disabled={busy} onClick={() => void close()} size="compact" type="button" variant="ghost">Close App</ActionButton>
+        ) : (
+          <ActionButton disabled={busy || opening} onClick={() => void open()} size="compact" type="button" variant="primary">{opening ? "Opening" : "Open App"}</ActionButton>
+        )}
+      </div>
+      {error && <div className="capabilityBanner is-error">{error}</div>}
+      {opened
+        ? <McpAppFrame activeLease descriptor={opened} />
+        : <div className="mcpAppFallback">{stringField(app, "fallback")}</div>}
     </section>
   );
 }
@@ -3704,13 +3920,18 @@ function createActionLabel(tab: CapabilityTab): string {
   return "Create toolset";
 }
 
+function supportsCapabilityCreate(tab: CapabilityTab): boolean {
+  return tab !== "extensions";
+}
+
 function hasCapabilityRowSwitch(tab: CapabilityTab): boolean {
-  return tab === "plugins" || tab === "mcp";
+  return tab === "plugins" || tab === "extensions" || tab === "mcp";
 }
 
 function rowKindLabel(tab: CapabilityTab): string {
   if (tab === "agents") return "Agent";
   if (tab === "plugins") return "Plugin";
+  if (tab === "extensions") return "Extension";
   if (tab === "mcp") return "MCP";
   if (tab === "tools") return "Toolset";
   return "Skill";

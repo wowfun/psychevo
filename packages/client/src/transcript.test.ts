@@ -52,6 +52,44 @@ describe("applyLiveTranscriptEvent block text deltas", () => {
   });
 });
 
+describe("applyLiveTranscriptEvent activity ordering", () => {
+  it("accepts Gateway-local running changes at the current Framework revision", () => {
+    const current: ThreadSnapshot = {
+      ...threadSnapshot(),
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "7",
+        queuedTurns: 0,
+        running: false
+      }
+    };
+
+    const started = applyLiveTranscriptEvent(current, {
+      type: "activityChanged",
+      threadId: "thread-1",
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "7",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+    const finished = applyLiveTranscriptEvent(started, {
+      type: "activityChanged",
+      threadId: "thread-1",
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "7",
+        queuedTurns: 0,
+        running: false
+      }
+    });
+
+    expect(started.activity.running).toBe(true);
+    expect(finished.activity.running).toBe(false);
+  });
+});
+
 describe("applyLiveTranscriptEvent detached drafts", () => {
   it("ignores a stale completed turn for an empty detached draft", () => {
     const current = detachedSnapshot();
@@ -941,6 +979,46 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
 });
 
 describe("reconcileThreadSnapshot", () => {
+  it("does not let a stale same-Thread snapshot roll activity behind live events", () => {
+    const current = {
+      ...threadSnapshot(),
+      activity: {
+        activeTurnId: null,
+        frameworkRevision: "2",
+        queuedTurns: 0,
+        running: false
+      }
+    };
+    const stale = {
+      ...threadSnapshot(),
+      activity: {
+        activeTurnId: "turn-1",
+        frameworkRevision: "1",
+        queuedTurns: 0,
+        running: true
+      }
+    };
+
+    const reconciled = reconcileThreadSnapshot(current, stale);
+
+    expect(reconciled.activity).toEqual(current.activity);
+
+    const successor = reconcileThreadSnapshot(reconciled, {
+      ...stale,
+      activity: {
+        activeTurnId: "turn-2",
+        frameworkRevision: "3",
+        queuedTurns: 0,
+        running: true
+      }
+    });
+    expect(successor.activity).toMatchObject({
+      activeTurnId: "turn-2",
+      frameworkRevision: "3",
+      running: true
+    });
+  });
+
   it("adopts a switched-back running snapshot with live tool output and start time", () => {
     const current = {
       ...threadSnapshot(),
