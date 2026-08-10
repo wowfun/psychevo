@@ -191,7 +191,17 @@ pub(super) fn schema_group_module(name: &str) -> &'static str {
     if name == "ThreadSnapshot" {
         return "thread/snapshot";
     }
-    if matches!(name, "ThreadBrowserResult" | "ThreadBrowserWorkspace") {
+    if matches!(
+        name,
+        "ThreadBrowserResult"
+            | "ThreadBrowserWorkspace"
+            | "WorkspaceView"
+            | "WorkspacePinSetParams"
+            | "WorkspaceCatalogUpdateParams"
+            | "WorkspaceCatalogUpdateResult"
+            | "NavigationReadParams"
+            | "NavigationStateView"
+    ) {
         return "thread/browser";
     }
     if name.starts_with("ThreadTrace") {

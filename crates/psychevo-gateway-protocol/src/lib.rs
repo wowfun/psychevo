@@ -42,9 +42,9 @@ mod thread_application_contract_tests {
     use crate::source::BackendKind;
     use crate::thread_command_turn::{
         RunnableTargetInput, ThreadActionInput, ThreadActionKind, ThreadActionRunParams,
-        ThreadDraftOpenParams, ThreadDraftTargetIntent, ThreadHistoryDraftReadParams,
-        ThreadHistoryReadParams, ThreadInteractionRespondParams, ThreadInteractionResponse,
-        ThreadListParams, ThreadReadParams, TurnStartParams,
+        ThreadDraftLocation, ThreadDraftOpenParams, ThreadDraftTargetIntent,
+        ThreadHistoryDraftReadParams, ThreadHistoryReadParams, ThreadInteractionRespondParams,
+        ThreadInteractionResponse, ThreadListParams, ThreadReadParams, TurnStartParams,
     };
     use ts_rs::TS;
 
@@ -156,8 +156,8 @@ mod thread_application_contract_tests {
             "method": "thread/draft/open",
             "params": {
                 "origin": {
-                    "cwd": "/tmp/workspace",
-                    "source": { "kind": "web", "rawId": "composer" }
+                    "source": { "kind": "web", "rawId": "composer" },
+                    "location": { "kind": "cwd", "cwd": "/tmp/workspace" }
                 },
                 "targetIntent": { "kind": "default" }
             }
@@ -175,8 +175,8 @@ mod thread_application_contract_tests {
             "method": "thread/draft/open",
             "params": {
                 "origin": {
-                    "cwd": "/tmp/workspace",
-                    "source": { "kind": "web", "rawId": "composer" }
+                    "source": { "kind": "web", "rawId": "composer" },
+                    "location": { "kind": "workspace", "workspaceId": "workspace-1" }
                 },
                 "targetIntent": {
                     "kind": "exact",
@@ -198,8 +198,8 @@ mod thread_application_contract_tests {
                 "method": "thread/draft/open",
                 "params": {
                     "origin": {
-                        "cwd": "/tmp/workspace",
-                        "source": { "kind": "web", "rawId": "composer" }
+                        "source": { "kind": "web", "rawId": "composer" },
+                        "location": { "kind": "cwd", "cwd": "/tmp/workspace" }
                     },
                     "targetIntent": null
                 }
@@ -219,6 +219,38 @@ mod thread_application_contract_tests {
                 "legacy or null target intent must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn workspace_draft_location_schema_matches_serde_wire_fields() {
+        let serialized = serde_json::to_value(ThreadDraftLocation::Workspace {
+            workspace_id: "workspace-1".to_string(),
+        })
+        .expect("serialize Workspace draft location");
+        let schema = serde_json::to_value(schemars::schema_for!(ThreadDraftLocation))
+            .expect("Workspace draft location schema");
+        let branch = schema["oneOf"]
+            .as_array()
+            .expect("draft location branches")
+            .iter()
+            .find(|branch| branch["properties"]["kind"]["enum"] == serde_json::json!(["workspace"]))
+            .expect("Workspace draft location branch");
+        let properties = branch["properties"]
+            .as_object()
+            .expect("Workspace draft location properties");
+
+        for key in serialized
+            .as_object()
+            .expect("serialized Workspace draft location")
+            .keys()
+        {
+            assert!(
+                properties.contains_key(key),
+                "serialized Workspace draft key {key:?} is absent from its schema branch"
+            );
+        }
+        assert!(properties.contains_key("workspaceId"));
+        assert!(!properties.contains_key("workspace_id"));
     }
 
     #[test]

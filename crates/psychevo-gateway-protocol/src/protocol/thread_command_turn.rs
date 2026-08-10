@@ -37,10 +37,34 @@ pub enum ThreadDraftTargetIntent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadDraftLocation {
+    Cwd {
+        cwd: String,
+    },
+    Workspace {
+        #[schemars(rename = "workspaceId")]
+        workspace_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ThreadDraftOrigin {
+    pub source: GatewaySourceInput,
+    pub location: ThreadDraftLocation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct ThreadDraftOpenParams {
-    pub origin: GatewayRequestScope,
+    pub origin: ThreadDraftOrigin,
     #[serde(rename = "targetIntent")]
     pub target_intent: ThreadDraftTargetIntent,
 }
@@ -131,8 +155,8 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::events_transcript::{
-    GatewayActionOutcome, PermissionDecision, SessionProjectView, SessionSummaryView,
-    ThreadHistoryView, ThreadSnapshot, TranscriptEntry,
+    GatewayActionOutcome, PermissionDecision, SessionSummaryView, ThreadHistoryView,
+    ThreadSnapshot, TranscriptEntry,
 };
 use crate::safe_integer::{
     JsonSafeI64, JsonSafeU64, json_safe_i64, json_safe_u64, json_safe_usize, option_json_safe_i64,
@@ -141,7 +165,7 @@ use crate::safe_integer::{
 use crate::settings_workspace_context::ModelSettingsScope;
 use crate::source::{
     GatewayImageInput, GatewayInputPart, GatewayMention, GatewayMentionTarget, GatewayRequestScope,
-    GatewaySource, GatewayThread,
+    GatewaySource, GatewaySourceInput, GatewayThread,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
@@ -238,7 +262,7 @@ pub struct ThreadBrowserParams {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct ThreadBrowserCursor {
-    pub cwd: String,
+    pub workspace_id: String,
     #[serde(
         serialize_with = "json_safe_usize::serialize",
         deserialize_with = "json_safe_usize::deserialize"
@@ -258,9 +282,81 @@ pub struct ThreadBrowserResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
+pub struct WorkspaceView {
+    pub id: String,
+    pub name: String,
+    pub roots: Vec<String>,
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
+    pub revision: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+pub struct NavigationReadParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct NavigationStateView {
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
+    pub revision: i64,
+    pub pinned_thread_ids: Vec<String>,
+    pub pinned_workspace_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ThreadPinSetParams {
+    pub thread_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspacePinSetParams {
+    pub workspace_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspaceCatalogUpdateParams {
+    pub workspace_id: String,
+    #[serde(
+        serialize_with = "json_safe_i64::serialize",
+        deserialize_with = "json_safe_i64::deserialize"
+    )]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
+    pub expected_revision: i64,
+    pub name: String,
+    pub roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct WorkspaceCatalogUpdateResult {
+    pub workspace: WorkspaceView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadBrowserWorkspace {
-    pub cwd: String,
-    pub project: SessionProjectView,
+    pub workspace: WorkspaceView,
     pub sessions: Vec<SessionSummaryView>,
     #[serde(default)]
     #[serde(
@@ -339,6 +435,8 @@ pub struct CompletionListParams {
     pub scope: GatewayRequestScope,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub text: String,
     #[serde(
         serialize_with = "json_safe_usize::serialize",
@@ -571,6 +669,8 @@ pub struct ShellStartParams {
     pub scope: GatewayRequestScope,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub command: String,
 }
 
@@ -919,6 +1019,8 @@ pub struct ThreadHistoryDraftReadResult {
 pub struct TurnStartParams {
     pub scope: GatewayRequestScope,
     pub client_turn_id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]

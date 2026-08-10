@@ -94,6 +94,8 @@ import type {
   ModelStateReadParams,
   ModelStateResult,
   ModelStateSetParams,
+  NavigationReadParams,
+  NavigationStateView,
   ObservabilityReadParams,
   ObservabilityReadResult,
   PluginAuthorityRefreshParams,
@@ -203,6 +205,7 @@ import type {
   ThreadListParams,
   ThreadListResult,
   ThreadMutationResult,
+  ThreadPinSetParams,
   ThreadReadParams,
   ThreadRealtimeAppendAudioParams,
   ThreadRealtimeAppendSpeechParams,
@@ -239,6 +242,8 @@ import type {
   WebSearchSettingsReadParams,
   WebSearchSettingsUpdateParams,
   WebSearchSettingsView,
+  WorkspaceCatalogUpdateParams,
+  WorkspaceCatalogUpdateResult,
   WorkspaceChangeFileParams,
   WorkspaceChangeMutationResult,
   WorkspaceChangesParams,
@@ -266,6 +271,7 @@ import type {
   WorkspaceGitBranchesParams,
   WorkspaceGitBranchesResult,
   WorkspaceGitCheckoutParams,
+  WorkspacePinSetParams,
 } from './types';
 
 export interface GatewayRequestParams {
@@ -276,6 +282,10 @@ export interface GatewayRequestParams {
   "thread/trace": ThreadTraceParams;
   "thread/list": ThreadListParams;
   "thread/browser": ThreadBrowserParams;
+  "navigation/read": NavigationReadParams;
+  "thread/pin/set": ThreadPinSetParams;
+  "workspace/pin/set": WorkspacePinSetParams;
+  "workspace/catalog/update": WorkspaceCatalogUpdateParams;
   "thread/rename": ThreadRenameParams;
   "thread/archive": ThreadIdParams;
   "thread/restore": ThreadIdParams;
@@ -433,6 +443,10 @@ export interface GatewayRequestResults {
   "thread/trace": ThreadTraceResult;
   "thread/list": ThreadListResult;
   "thread/browser": ThreadBrowserResult;
+  "navigation/read": NavigationStateView;
+  "thread/pin/set": NavigationStateView;
+  "workspace/pin/set": NavigationStateView;
+  "workspace/catalog/update": WorkspaceCatalogUpdateResult;
   "thread/rename": ThreadMutationResult;
   "thread/archive": ThreadMutationResult;
   "thread/restore": ThreadMutationResult;
@@ -594,6 +608,10 @@ export const gatewayMethodContracts = {
   "thread/trace": { paramsSchema: "ThreadTraceParams", resultSchema: "ThreadTraceResult", resultValidation: "precise" },
   "thread/list": { paramsSchema: "ThreadListParams", resultSchema: "ThreadListResult", resultValidation: "precise" },
   "thread/browser": { paramsSchema: "ThreadBrowserParams", resultSchema: "ThreadBrowserResult", resultValidation: "precise" },
+  "navigation/read": { paramsSchema: "NavigationReadParams", resultSchema: "NavigationStateView", resultValidation: "precise" },
+  "thread/pin/set": { paramsSchema: "ThreadPinSetParams", resultSchema: "NavigationStateView", resultValidation: "precise" },
+  "workspace/pin/set": { paramsSchema: "WorkspacePinSetParams", resultSchema: "NavigationStateView", resultValidation: "precise" },
+  "workspace/catalog/update": { paramsSchema: "WorkspaceCatalogUpdateParams", resultSchema: "WorkspaceCatalogUpdateResult", resultValidation: "precise" },
   "thread/rename": { paramsSchema: "ThreadRenameParams", resultSchema: "ThreadMutationResult", resultValidation: "precise" },
   "thread/archive": { paramsSchema: "ThreadIdParams", resultSchema: "ThreadMutationResult", resultValidation: "precise" },
   "thread/restore": { paramsSchema: "ThreadIdParams", resultSchema: "ThreadMutationResult", resultValidation: "precise" },

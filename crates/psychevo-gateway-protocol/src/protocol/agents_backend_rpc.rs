@@ -789,6 +789,8 @@ pub struct ThreadDraftPrepareParams {
     #[serde(rename = "targetId")]
     pub target_id: String,
     pub scope: GatewayRequestScope,
+    #[serde(default, rename = "workspaceId")]
+    pub workspace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1850,6 +1852,8 @@ pub struct ThreadDraftPrepareResult {
 pub struct ThreadDraftOpenResult {
     pub snapshot: ThreadSnapshot,
     pub context: ThreadContextReadResult,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default)]
     pub problem: Option<RuntimeErrorView>,
 }

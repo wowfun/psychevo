@@ -16,16 +16,16 @@ export const clientRequestThreadBrowserSchema = {
     },
     "ThreadBrowserCursor": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "offset": {
           "$ref": "#/definitions/JsonSafeU64"
+        },
+        "workspaceId": {
+          "type": "string"
         }
       },
       "required": [
-        "cwd",
-        "offset"
+        "offset",
+        "workspaceId"
       ],
       "type": "object"
     },

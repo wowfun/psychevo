@@ -521,6 +521,13 @@ export const turnControlSchemas = {
       "additionalProperties": true,
       "default": {},
       "type": "object"
+    },
+    "workspaceId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

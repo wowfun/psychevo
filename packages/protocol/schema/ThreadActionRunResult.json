@@ -812,6 +812,31 @@
             "$ref": "#/definitions/TurnStartReceipt"
           },
           "type": "array"
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceRootSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadWorkspaceRootSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceRoots": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -824,6 +849,13 @@
         "turnStartReceipts"
       ],
       "type": "object"
+    },
+    "ThreadWorkspaceRootSource": {
+      "enum": [
+        "direct",
+        "workspace"
+      ],
+      "type": "string"
     },
     "TranscriptBlock": {
       "properties": {

@@ -1,5 +1,4 @@
 {
-  "$id": "ClientRequest/thread-draft-open.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewaySourceInput": {
@@ -88,89 +87,20 @@
           "type": "object"
         }
       ]
-    },
-    "ThreadDraftOpenParams": {
-      "properties": {
-        "origin": {
-          "$ref": "#/definitions/ThreadDraftOrigin"
-        },
-        "targetIntent": {
-          "$ref": "#/definitions/ThreadDraftTargetIntent"
-        }
-      },
-      "required": [
-        "origin",
-        "targetIntent"
-      ],
-      "type": "object"
-    },
-    "ThreadDraftOrigin": {
-      "properties": {
-        "location": {
-          "$ref": "#/definitions/ThreadDraftLocation"
-        },
-        "source": {
-          "$ref": "#/definitions/GatewaySourceInput"
-        }
-      },
-      "required": [
-        "location",
-        "source"
-      ],
-      "type": "object"
-    },
-    "ThreadDraftTargetIntent": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "enum": [
-                "default"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "enum": [
-                "exact"
-              ],
-              "type": "string"
-            },
-            "targetId": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "targetId"
-          ],
-          "type": "object"
-        }
-      ]
     }
   },
   "properties": {
-    "method": {
-      "enum": [
-        "thread/draft/open"
-      ],
-      "type": "string"
+    "location": {
+      "$ref": "#/definitions/ThreadDraftLocation"
     },
-    "params": {
-      "$ref": "#/definitions/ThreadDraftOpenParams"
+    "source": {
+      "$ref": "#/definitions/GatewaySourceInput"
     }
   },
   "required": [
-    "method",
-    "params"
+    "location",
+    "source"
   ],
-  "title": "ClientRequest thread/draft/open",
+  "title": "ThreadDraftOrigin",
   "type": "object"
 }

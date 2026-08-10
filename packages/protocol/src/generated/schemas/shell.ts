@@ -80,6 +80,13 @@ export const shellSchemas = {
         "string",
         "null"
       ]
+    },
+    "workspaceId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

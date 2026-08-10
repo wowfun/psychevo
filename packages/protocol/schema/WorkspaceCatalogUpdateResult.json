@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "WorkspaceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "roots"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "workspace": {
+      "$ref": "#/definitions/WorkspaceView"
+    }
+  },
+  "required": [
+    "workspace"
+  ],
+  "title": "WorkspaceCatalogUpdateResult",
+  "type": "object"
+}

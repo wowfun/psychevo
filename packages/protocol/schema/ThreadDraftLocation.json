@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "cwd"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "cwd",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "workspace"
+          ],
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "workspaceId"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadDraftLocation"
+}

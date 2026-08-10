@@ -4,21 +4,6 @@ export const clientRequestThreadDraftOpenSchema = {
   "$id": "ClientRequest/thread-draft-open.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "GatewayRequestScope": {
-      "properties": {
-        "cwd": {
-          "type": "string"
-        },
-        "source": {
-          "$ref": "#/definitions/GatewaySourceInput"
-        }
-      },
-      "required": [
-        "cwd",
-        "source"
-      ],
-      "type": "object"
-    },
     "GatewaySourceInput": {
       "properties": {
         "kind": {
@@ -66,10 +51,50 @@ export const clientRequestThreadDraftOpenSchema = {
       ],
       "type": "string"
     },
+    "ThreadDraftLocation": {
+      "oneOf": [
+        {
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "cwd"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "workspace"
+              ],
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "workspaceId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ThreadDraftOpenParams": {
       "properties": {
         "origin": {
-          "$ref": "#/definitions/GatewayRequestScope"
+          "$ref": "#/definitions/ThreadDraftOrigin"
         },
         "targetIntent": {
           "$ref": "#/definitions/ThreadDraftTargetIntent"
@@ -78,6 +103,21 @@ export const clientRequestThreadDraftOpenSchema = {
       "required": [
         "origin",
         "targetIntent"
+      ],
+      "type": "object"
+    },
+    "ThreadDraftOrigin": {
+      "properties": {
+        "location": {
+          "$ref": "#/definitions/ThreadDraftLocation"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "location",
+        "source"
       ],
       "type": "object"
     },

@@ -7,6 +7,10 @@ import { clientRequestThreadReadSchema } from './rpc/client-request/thread-read'
 import { clientRequestThreadTraceSchema } from './rpc/client-request/thread-trace';
 import { clientRequestThreadListSchema } from './rpc/client-request/thread-list';
 import { clientRequestThreadBrowserSchema } from './rpc/client-request/thread-browser';
+import { clientRequestNavigationReadSchema } from './rpc/client-request/navigation-read';
+import { clientRequestThreadPinSetSchema } from './rpc/client-request/thread-pin-set';
+import { clientRequestWorkspacePinSetSchema } from './rpc/client-request/workspace-pin-set';
+import { clientRequestWorkspaceCatalogUpdateSchema } from './rpc/client-request/workspace-catalog-update';
 import { clientRequestThreadRenameSchema } from './rpc/client-request/thread-rename';
 import { clientRequestThreadArchiveSchema } from './rpc/client-request/thread-archive';
 import { clientRequestThreadRestoreSchema } from './rpc/client-request/thread-restore';
@@ -417,6 +421,18 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/thread-browser.json"
+    },
+    {
+      "$ref": "ClientRequest/navigation-read.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-pin-set.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-pin-set.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-catalog-update.json"
     },
     {
       "$ref": "ClientRequest/thread-rename.json"
@@ -917,6 +933,10 @@ export const rpcSchemaRefs = [
   clientRequestThreadTraceSchema,
   clientRequestThreadListSchema,
   clientRequestThreadBrowserSchema,
+  clientRequestNavigationReadSchema,
+  clientRequestThreadPinSetSchema,
+  clientRequestWorkspacePinSetSchema,
+  clientRequestWorkspaceCatalogUpdateSchema,
   clientRequestThreadRenameSchema,
   clientRequestThreadArchiveSchema,
   clientRequestThreadRestoreSchema,

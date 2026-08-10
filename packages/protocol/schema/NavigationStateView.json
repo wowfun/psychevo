@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "pinnedThreadIds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pinnedWorkspaceIds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "revision": {
+      "$ref": "#/definitions/JsonSafeI64"
+    }
+  },
+  "required": [
+    "pinnedThreadIds",
+    "pinnedWorkspaceIds",
+    "revision"
+  ],
+  "title": "NavigationStateView",
+  "type": "object"
+}

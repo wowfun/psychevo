@@ -388,24 +388,21 @@
     },
     "ThreadBrowserCursor": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "offset": {
           "$ref": "#/definitions/JsonSafeU64"
+        },
+        "workspaceId": {
+          "type": "string"
         }
       },
       "required": [
-        "cwd",
-        "offset"
+        "offset",
+        "workspaceId"
       ],
       "type": "object"
     },
     "ThreadBrowserWorkspace": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "hiddenCount": {
           "allOf": [
             {
@@ -425,20 +422,45 @@
           ],
           "default": null
         },
-        "project": {
-          "$ref": "#/definitions/SessionProjectView"
-        },
         "sessions": {
           "items": {
             "$ref": "#/definitions/SessionSummaryView"
           },
           "type": "array"
+        },
+        "workspace": {
+          "$ref": "#/definitions/WorkspaceView"
         }
       },
       "required": [
-        "cwd",
-        "project",
-        "sessions"
+        "sessions",
+        "workspace"
+      ],
+      "type": "object"
+    },
+    "WorkspaceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "roots"
       ],
       "type": "object"
     }

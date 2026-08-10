@@ -157,6 +157,16 @@ describe("generated method validator registry", () => {
     expect(gatewayResponseResultSchema("plugin/list").safeParse([]).success).toBe(false);
   });
 
+  it("accepts the same camel-case Workspace draft that Rust deserializes", () => {
+    expect(gatewayRequestParamsSchema("thread/draft/open").safeParse({
+      origin: {
+        source: { kind: "web", rawId: "workspace-draft-contract" },
+        location: { kind: "workspace", workspaceId: "workspace-1" }
+      },
+      targetIntent: { kind: "default" }
+    }).success).toBe(true);
+  });
+
   it("validates method-specific Codex marketplace mutation results", () => {
     expect(gatewayResponseResultSchema("plugin/catalog/add").safeParse({
       marketplaceName: "tools",

@@ -501,6 +501,13 @@ export const clientRequestTurnStartSchema = {
           "additionalProperties": true,
           "default": {},
           "type": "object"
+        },
+        "workspaceId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

@@ -80,6 +80,13 @@ export const clientRequestShellStartSchema = {
             "string",
             "null"
           ]
+        },
+        "workspaceId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

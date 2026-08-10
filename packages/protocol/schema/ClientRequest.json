@@ -23,6 +23,18 @@
       "$ref": "ClientRequest/thread-browser.json"
     },
     {
+      "$ref": "ClientRequest/navigation-read.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-pin-set.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-pin-set.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-catalog-update.json"
+    },
+    {
       "$ref": "ClientRequest/thread-rename.json"
     },
     {

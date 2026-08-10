@@ -391,24 +391,21 @@ export const threadBrowserSchemas = {
     },
     "ThreadBrowserCursor": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "offset": {
           "$ref": "#/definitions/JsonSafeU64"
+        },
+        "workspaceId": {
+          "type": "string"
         }
       },
       "required": [
-        "cwd",
-        "offset"
+        "offset",
+        "workspaceId"
       ],
       "type": "object"
     },
     "ThreadBrowserWorkspace": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "hiddenCount": {
           "allOf": [
             {
@@ -428,20 +425,45 @@ export const threadBrowserSchemas = {
           ],
           "default": null
         },
-        "project": {
-          "$ref": "#/definitions/SessionProjectView"
-        },
         "sessions": {
           "items": {
             "$ref": "#/definitions/SessionSummaryView"
           },
           "type": "array"
+        },
+        "workspace": {
+          "$ref": "#/definitions/WorkspaceView"
         }
       },
       "required": [
-        "cwd",
-        "project",
-        "sessions"
+        "sessions",
+        "workspace"
+      ],
+      "type": "object"
+    },
+    "WorkspaceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "roots"
       ],
       "type": "object"
     }
@@ -458,6 +480,41 @@ export const threadBrowserSchemas = {
     "workspaces"
   ],
   "title": "ThreadBrowserResult",
+  "type": "object"
+},
+  WorkspaceView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "revision": {
+      "$ref": "#/definitions/JsonSafeI64"
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "revision",
+    "roots"
+  ],
+  "title": "WorkspaceView",
   "type": "object"
 },
   ThreadBrowserWorkspace: {
@@ -850,24 +907,47 @@ export const threadBrowserSchemas = {
     },
     "ThreadBrowserCursor": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "offset": {
           "$ref": "#/definitions/JsonSafeU64"
+        },
+        "workspaceId": {
+          "type": "string"
         }
       },
       "required": [
-        "cwd",
-        "offset"
+        "offset",
+        "workspaceId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "roots"
       ],
       "type": "object"
     }
   },
   "properties": {
-    "cwd": {
-      "type": "string"
-    },
     "hiddenCount": {
       "allOf": [
         {
@@ -887,22 +967,158 @@ export const threadBrowserSchemas = {
       ],
       "default": null
     },
-    "project": {
-      "$ref": "#/definitions/SessionProjectView"
-    },
     "sessions": {
       "items": {
         "$ref": "#/definitions/SessionSummaryView"
       },
       "type": "array"
+    },
+    "workspace": {
+      "$ref": "#/definitions/WorkspaceView"
     }
   },
   "required": [
-    "cwd",
-    "project",
-    "sessions"
+    "sessions",
+    "workspace"
   ],
   "title": "ThreadBrowserWorkspace",
+  "type": "object"
+},
+  NavigationReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NavigationReadParams",
+  "type": "object"
+},
+  NavigationStateView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "pinnedThreadIds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "pinnedWorkspaceIds": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "revision": {
+      "$ref": "#/definitions/JsonSafeI64"
+    }
+  },
+  "required": [
+    "pinnedThreadIds",
+    "pinnedWorkspaceIds",
+    "revision"
+  ],
+  "title": "NavigationStateView",
+  "type": "object"
+},
+  WorkspacePinSetParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "pinned": {
+      "type": "boolean"
+    },
+    "workspaceId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pinned",
+    "workspaceId"
+  ],
+  "title": "WorkspacePinSetParams",
+  "type": "object"
+},
+  WorkspaceCatalogUpdateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
+  "properties": {
+    "expectedRevision": {
+      "$ref": "#/definitions/JsonSafeI64"
+    },
+    "name": {
+      "type": "string"
+    },
+    "roots": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "workspaceId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "expectedRevision",
+    "name",
+    "roots",
+    "workspaceId"
+  ],
+  "title": "WorkspaceCatalogUpdateParams",
+  "type": "object"
+},
+  WorkspaceCatalogUpdateResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "WorkspaceView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "revision": {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "revision",
+        "roots"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "workspace": {
+      "$ref": "#/definitions/WorkspaceView"
+    }
+  },
+  "required": [
+    "workspace"
+  ],
+  "title": "WorkspaceCatalogUpdateResult",
   "type": "object"
 },
 } as const;

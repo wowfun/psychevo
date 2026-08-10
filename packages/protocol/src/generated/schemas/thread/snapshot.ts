@@ -619,6 +619,13 @@ export const threadSnapshotSchemas = {
       ],
       "type": "object"
     },
+    "ThreadWorkspaceRootSource": {
+      "enum": [
+        "direct",
+        "workspace"
+      ],
+      "type": "string"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -910,6 +917,31 @@ export const threadSnapshotSchemas = {
         "$ref": "#/definitions/TurnStartReceipt"
       },
       "type": "array"
+    },
+    "workspaceId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workspaceRootSource": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadWorkspaceRootSource"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "workspaceRoots": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     }
   },
   "required": [

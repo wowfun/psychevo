@@ -216,24 +216,51 @@ export const threadControlSchemas = {
   ],
   "title": "ThreadDraftTargetIntent"
 },
-  ThreadDraftOpenParams: {
+  ThreadDraftLocation: {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
-    "GatewayRequestScope": {
+  "oneOf": [
+    {
       "properties": {
         "cwd": {
           "type": "string"
         },
-        "source": {
-          "$ref": "#/definitions/GatewaySourceInput"
+        "kind": {
+          "enum": [
+            "cwd"
+          ],
+          "type": "string"
         }
       },
       "required": [
         "cwd",
-        "source"
+        "kind"
       ],
       "type": "object"
     },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "workspace"
+          ],
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "workspaceId"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadDraftLocation"
+},
+  ThreadDraftOrigin: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
     "GatewaySourceInput": {
       "properties": {
         "kind": {
@@ -281,6 +308,167 @@ export const threadControlSchemas = {
       ],
       "type": "string"
     },
+    "ThreadDraftLocation": {
+      "oneOf": [
+        {
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "cwd"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "workspace"
+              ],
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "workspaceId"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "location": {
+      "$ref": "#/definitions/ThreadDraftLocation"
+    },
+    "source": {
+      "$ref": "#/definitions/GatewaySourceInput"
+    }
+  },
+  "required": [
+    "location",
+    "source"
+  ],
+  "title": "ThreadDraftOrigin",
+  "type": "object"
+},
+  ThreadDraftOpenParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "ThreadDraftLocation": {
+      "oneOf": [
+        {
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "cwd"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "cwd",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "workspace"
+              ],
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "workspaceId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadDraftOrigin": {
+      "properties": {
+        "location": {
+          "$ref": "#/definitions/ThreadDraftLocation"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "location",
+        "source"
+      ],
+      "type": "object"
+    },
     "ThreadDraftTargetIntent": {
       "oneOf": [
         {
@@ -320,7 +508,7 @@ export const threadControlSchemas = {
   },
   "properties": {
     "origin": {
-      "$ref": "#/definitions/GatewayRequestScope"
+      "$ref": "#/definitions/ThreadDraftOrigin"
     },
     "targetIntent": {
       "$ref": "#/definitions/ThreadDraftTargetIntent"
@@ -729,16 +917,16 @@ export const threadControlSchemas = {
     },
     "ThreadBrowserCursor": {
       "properties": {
-        "cwd": {
-          "type": "string"
-        },
         "offset": {
           "$ref": "#/definitions/JsonSafeU64"
+        },
+        "workspaceId": {
+          "type": "string"
         }
       },
       "required": [
-        "cwd",
-        "offset"
+        "offset",
+        "workspaceId"
       ],
       "type": "object"
     }
@@ -812,18 +1000,35 @@ export const threadControlSchemas = {
     }
   },
   "properties": {
-    "cwd": {
-      "type": "string"
-    },
     "offset": {
       "$ref": "#/definitions/JsonSafeU64"
+    },
+    "workspaceId": {
+      "type": "string"
     }
   },
   "required": [
-    "cwd",
-    "offset"
+    "offset",
+    "workspaceId"
   ],
   "title": "ThreadBrowserCursor",
+  "type": "object"
+},
+  ThreadPinSetParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "pinned": {
+      "type": "boolean"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pinned",
+    "threadId"
+  ],
+  "title": "ThreadPinSetParams",
   "type": "object"
 },
   ThreadIdParams: {
@@ -1046,6 +1251,13 @@ export const threadControlSchemas = {
     },
     "targetId": {
       "type": "string"
+    },
+    "workspaceId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -3622,6 +3834,31 @@ export const threadControlSchemas = {
             "$ref": "#/definitions/TurnStartReceipt"
           },
           "type": "array"
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceRootSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadWorkspaceRootSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceRoots": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -3634,6 +3871,13 @@ export const threadControlSchemas = {
         "turnStartReceipts"
       ],
       "type": "object"
+    },
+    "ThreadWorkspaceRootSource": {
+      "enum": [
+        "direct",
+        "workspace"
+      ],
+      "type": "string"
     },
     "TranscriptBlock": {
       "properties": {
@@ -5730,6 +5974,31 @@ export const threadControlSchemas = {
             "$ref": "#/definitions/TurnStartReceipt"
           },
           "type": "array"
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceRootSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadWorkspaceRootSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceRoots": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5742,6 +6011,13 @@ export const threadControlSchemas = {
         "turnStartReceipts"
       ],
       "type": "object"
+    },
+    "ThreadWorkspaceRootSource": {
+      "enum": [
+        "direct",
+        "workspace"
+      ],
+      "type": "string"
     },
     "TranscriptBlock": {
       "properties": {
@@ -6001,6 +6277,15 @@ export const threadControlSchemas = {
     "conversationEdit"
   ],
   "title": "ThreadHistoryEditingKind",
+  "type": "string"
+},
+  ThreadWorkspaceRootSource: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "direct",
+    "workspace"
+  ],
+  "title": "ThreadWorkspaceRootSource",
   "type": "string"
 },
   ThreadHistoryRecoveryActionKind: {
@@ -8521,6 +8806,31 @@ export const threadControlSchemas = {
             "$ref": "#/definitions/TurnStartReceipt"
           },
           "type": "array"
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceRootSource": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadWorkspaceRootSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceRoots": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -8533,6 +8843,13 @@ export const threadControlSchemas = {
         "turnStartReceipts"
       ],
       "type": "object"
+    },
+    "ThreadWorkspaceRootSource": {
+      "enum": [
+        "direct",
+        "workspace"
+      ],
+      "type": "string"
     },
     "TranscriptBlock": {
       "properties": {
@@ -8791,6 +9108,13 @@ export const threadControlSchemas = {
     },
     "snapshot": {
       "$ref": "#/definitions/ThreadSnapshot"
+    },
+    "workspaceId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

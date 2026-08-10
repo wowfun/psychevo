@@ -21,6 +21,13 @@ export const clientRequestCompletionListSchema = {
             "string",
             "null"
           ]
+        },
+        "workspaceId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

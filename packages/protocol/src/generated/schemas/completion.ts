@@ -88,6 +88,13 @@ export const completionSchemas = {
         "string",
         "null"
       ]
+    },
+    "workspaceId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

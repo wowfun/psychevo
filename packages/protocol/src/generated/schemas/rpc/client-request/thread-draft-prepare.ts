@@ -73,6 +73,13 @@ export const clientRequestThreadDraftPrepareSchema = {
         },
         "targetId": {
           "type": "string"
+        },
+        "workspaceId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
