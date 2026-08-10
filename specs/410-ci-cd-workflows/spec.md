@@ -583,7 +583,9 @@ Registered live checks:
   `data-composer-state="ready"` draft before sending. The always-visible
   Transcript region is not Composer readiness; a provider response persisted
   by the Gateway but missed by an unbound browser projection is a failed GUI
-  check, not a provider timeout.
+  check, not a provider timeout. After the real Turn settles, the same visible
+  Thread must expose Edit on its durable user message and Pin on both durable
+  user and Assistant messages without a Thread switch.
 - `web-composer-draft-open-first-send`: deterministic Workbench/Gateway check
   for the first Composer send while `thread/draft/open` is pending at the
   client protocol boundary. The harness delays only that RPC result while

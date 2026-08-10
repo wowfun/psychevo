@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-08-08
+
+- Added persistent, renameable Workspaces with ordered multi-directory roots,
+  independent Workspace and Thread pinning, and root-aware Files, completion,
+  Shell, sandbox, ACP, and child-Agent operations.
+- Kept accepted drafts and runtime operations bound to authoritative Workspace
+  snapshots and captured directory identities across navigation, reconnects,
+  delegation, and replaced directories.
+- Hardened filesystem and ACP boundaries with permission-checked callbacks,
+  fail-closed root containment, stale-authority revocation, and cancellation
+  fencing for writes, edits, deletes, terminals, previews, and sandbox setup.
+- Unified Workspace navigation, session history, pinning, and browser snapshots;
+  message Edit and Pin now reconcile from committed state without switching
+  Threads.
+- Protected multi-root Files and completion flows with dirty-draft checks,
+  explicit root intent, fair deduplicated candidates, canceled stale reads,
+  bounded root selection, and atomic absent-target creation.
+
 ## 2026-08-07
 
 - Separated declarative Plugins from executable Extensions, with marketplace

@@ -93,6 +93,20 @@ identity. Exact normalized text is only a fallback for the most recent detached
 optimistic prompt that has not received a turn identity. Text equality never
 merges two committed user entries, so separate turns may intentionally repeat
 the same prompt.
+When a Native completed-user observation still carries live identity rather
+than a durable `messageSeq`, a writable surface performs one epoch-guarded
+same-Thread read. Gateway publishes that observation only after message
+persistence, so the read materializes Edit and Pin identity without polling or
+inventing a durable sequence in the client.
+Pinning is a client-local display snapshot, so an accepted optimistic user
+prompt may expose Pin before durable history projection. Its temporary and
+committed projections share a logical key derived from the non-empty Thread,
+Turn, role, and canonical submitted editable-input identity. Display labels,
+slash-command presentation, and surrounding-whitespace normalization cannot
+change that identity between optimistic and durable projection; reconciliation must therefore preserve the
+pressed state and cannot create a duplicate pinned snapshot. Edit remains
+unavailable until the owner supplies the durable `messageSeq` required by the
+history mutation contract.
 The canonical runtime event stream, live-preview contract, snapshot recovery,
 and delivery diagnostics are defined by [035 Event
 Stream](../035-event-stream/spec.md).

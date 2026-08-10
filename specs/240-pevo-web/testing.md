@@ -107,6 +107,10 @@ checks must not print tokens or secrets.
   Browser coverage that creates and interrupts a real deterministic Turn waits
   conditionally for authoritative idle state with a 30-second local full-suite
   budget; it does not retry or relax the global assertion timeout.
+- That browser journey checks the persisted user row before any Thread switch:
+  Pin appears while the Turn is active, Edit appears after interruption restores
+  history actions, and the pinned right-side Markdown keeps ordinary heading
+  and paragraph wrapping rather than inheriting compact panel-header truncation.
 - Desktop and narrow browser checks cover Pin action discoverability, automatic
   Status-panel selection on narrow screens, multiple horizontally scrollable
   pin tabs, and the absence of document-level horizontal overflow.
@@ -413,6 +417,13 @@ checks must not print tokens or secrets.
   await the initial draft's Agent/Model controls before opening another draft;
   they must not race catalog bootstrap or use timing sleeps. The dedicated
   draft-open startup/live cases retain ownership of pre-ready interactions.
+- Workspace-navigation browser coverage creates state through the real local
+  Gateway and verifies the complete user journey: ordinary and pinned Thread
+  rows retain the same computed visual signature and action menu, Workspace
+  rename and ordered-directory editing survive refresh, a pinned Workspace
+  retains its actions and bound Thread, and Files can select every directory of
+  a new Workspace-targeted Thread. Desktop and mobile runs both retain
+  screenshots of the editor, pinned placement, and secondary-root Files view.
 - Screenshots, traces, and live samples are required evidence for visual/live
   changes, but live provider failures must be reported separately from code
   regressions when caused by credentials, provider state, or environment.

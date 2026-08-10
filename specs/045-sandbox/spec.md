@@ -88,9 +88,16 @@ configured baseline before applying runtime narrowing. Plan forces sandbox
 enabled and read-only even when the configured value is disabled, and clears
 configured, approved, temporary, cache, and other writable roots.
 
-`mode = "workspace-write"` makes the canonical cwd writable for built-in
-writers and shell children. `writable_roots` adds extra writable roots. Each
-entry may be absolute or cwd-relative.
+`mode = "workspace-write"` makes the canonical Thread runtime roots from
+[032 Workspaces](../032-workspaces/spec.md) writable for built-in writers and
+shell children. `writable_roots` adds extra writable roots. Each entry may be
+absolute or cwd-relative. Runtime roots do not change an effective read-only or
+Plan sandbox into workspace-write.
+Workspace-root rules retain the captured filesystem-object identity from Turn
+admission. Immediately before child spawn the sandbox rejects a missing or
+replaced root; where the platform backend accepts file descriptors, it installs
+the rule from the verified open directory handle instead of reopening a mutable
+pathname.
 
 `mode = "read-only"` makes writer tools fail with a sandbox denial and runs
 shell children with no writable roots. It is a hard sandbox mode in Psychevo
@@ -117,6 +124,13 @@ Effective write roots and targets use the shared filesystem identity from
 symlinks/junctions, while missing targets canonicalize the deepest existing
 ancestor and append the normalized tail. This prevents `..`, symlink, junction,
 and sibling-prefix escapes while allowing create operations.
+
+Workspace-root identities are captured before Turn acceptance and reused when
+each shell child installs its rules. Linux Landlock rules are installed from
+verified directory handles. A pathname-only backend such as macOS Seatbelt
+cannot safely grant `workspace-write` under the immutable-root contract and
+must reject that effective mode until it has an identity-bound rule mechanism;
+it must not silently install mutable `(subpath PATH)` authority.
 
 ## Enforcement
 
@@ -219,7 +233,12 @@ same operation elsewhere.
 - network status: `not-confined` in v1
 
 Gateway and Workbench expose the same status through the normal command
-surface; v1 does not add new RPC request fields.
+surface; v1 does not add new RPC request fields. Status is evaluated with the
+same captured Thread runtime roots as execution, so every secondary writable
+Workspace root appears in the reported writer boundary.
+Shell enforcement status uses the same support check as child spawn. In
+particular, an effective macOS `workspace-write` policy rejected by the
+pathname-only Seatbelt backend reports `unsupported`, never `confined`.
 
 ## Acceptance Criteria
 

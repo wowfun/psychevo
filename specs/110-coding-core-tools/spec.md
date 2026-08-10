@@ -162,6 +162,19 @@ the supplied bytes without reading the temporary file back in full; the bytes
 already owned by the caller are the source of truth. Same-size/restored-mtime
 conflicts, atomic replacement, no-clobber creation, permissions, BOM, and line
 ending behavior remain unchanged.
+When permission admission supplies an identity-bound target, the mutation
+backend creates its temporary entry relative to the captured parent directory
+handle and atomically exchanges it with the approved object. It verifies the
+displaced object before commit or restores the exchange, so preserving atomic
+replace/no-clobber behavior never requires reopening the reviewed pathname.
+Replacing an existing regular file preserves its captured permission bits.
+Every hidden temporary entry is owned by an unlink-on-drop guard until the
+mutation commits; write, flush, identity, exchange, link, or unlink failure must
+not leave `.psychevo-write-*` content in the user's directory.
+Creating an approved absent target uses one handle-relative `O_EXCL` operation;
+the absence observation and file creation cannot be separated by an
+`O_CREAT | O_TRUNC` reopen that could truncate an object created by another
+process.
 
 Successful writes return a JSON object with stable fields:
 - `path`: target path or equivalent target identifier

@@ -30,10 +30,11 @@ Out of scope:
 ## Concepts
 
 A profile is the active Psychevo home. It is not a workspace protocol field.
-Interactive context is represented by the current cwd and the existing
-`GatewayRequestScope { cwd, source }` shape. A cwd may be a code
-project, a plain directory, or a GUI-created workspace; runtime, Gateway, and
-session storage do not persist a project/workspace type distinction.
+Interactive transport scope remains represented by the current cwd and the
+existing `GatewayRequestScope { cwd, source }` shape. Framework persists the
+profile-scoped workspace catalog and Thread workspace context defined by
+[032 Workspaces](../032-workspaces/spec.md); profile selection is not embedded
+in those wire values.
 
 The default profile home is:
 

@@ -89,6 +89,51 @@ truncation.
 `session/close` closes the ACP actor and aborts any active invocation for that
 actor.
 
+Outbound ACP Agent sessions receive the Thread Workspace context from
+[032 Workspaces](../032-workspaces/spec.md). New, load, resume, fork, Turn, and
+detached-draft preparation send every non-cwd runtime root as
+`additional_directories`. A required multi-root context fails before prompt
+delivery when the peer rejects it; Psychevo does not silently narrow the Thread
+environment.
+Gateway sends a non-empty `additional_directories` only when the peer advertises
+`session.additionalDirectories`. If a bound explicit Workspace changes between
+Turns, the resident actor reloads the same native session with the latest roots
+before prompting; inability to reload is reported as not-delivered only after
+the old callback context and session terminals are revoked. Root identity is
+part of prepared and resident-session promotion identity, not merely the
+ordered root path strings. Replacing a root object at the same pathname forces
+reload or fail-closed revocation rather than reusing a process whose cwd still
+names the former object. Every pre-prompt reattachment
+wait is interruptible without subsequently dispatching the prompt.
+Revocation is complete only after every session-owned terminal process tree has
+exited; removing registry entries and sending a kill signal is not sufficient.
+Draft preparation registers a resident actor transactionally and removes the
+draft id on every mailbox, capability, protocol, or preparation failure.
+
+Pre-prompt ACP operations with side effects are fenced against cancellation.
+Cancellation of `session/set_config_option`, `session/set_model`, `session/new`,
+or `session/load` does not release the resident-session lane while an ignored
+cooperative cancellation can still complete; Gateway observes the response or
+reaps the process first. A failed root reload removes its callback context and
+terminates every terminal created for that provisional attachment.
+The same cleanup applies after resident attachment succeeds but history commit,
+configuration, notification fencing, input preparation, identity validation, or
+delivery-intent persistence fails or is cancelled. Forced generation teardown
+revokes every attachment guard before clearing its callback-context registry.
+
+Terminal creation accepts a Workspace root itself as cwd, including the omitted
+cwd default. Relative executables such as `./script` are resolved from the
+captured cwd directory object after approval; a renamed/recreated pathname
+cannot supply an executable that runs inside the former root. ACP filesystem
+writes retain their identity-bound handle but perform open, write, and flush on
+a blocking worker rather than the async protocol worker.
+
+The durable transition to unknown delivery is a non-droppable boundary. Gateway
+checks cancellation before entering it, then owns the persistence future through
+commit and immediately dispatches the prompt before observing cancellation
+again. It never leaves a committed unknown-delivery row for a request that was
+not dispatched merely because a biased select dropped the ready transition.
+
 Session history replay uses the Framework `Thread::history()` typed reader and
 ACP session updates. Replay is presentation, not new evidence. A
 `session/load` request with `replay_from = { type = "start" }` replays the full
@@ -114,7 +159,7 @@ resources return a bounded protocol error before delivery; they are not
 silently converted to text.
 
 Text resource links are resolved only when their canonical target is a regular
-file contained by the canonical session cwd; absolute paths, parent traversal,
+file contained by one canonical session runtime root; absolute paths, parent traversal,
 and symlink escapes receive no exception. All text resources are capped at 512
 KiB after decoding, and an embedded or linked text resource above that bound
 rejects admission rather than being truncated or partially delivered. Remote

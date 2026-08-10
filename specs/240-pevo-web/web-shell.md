@@ -388,17 +388,21 @@ current Web source without archiving the previously selected thread. Only an
 explicit `source/reset`, archive action, or delete action may remove a thread
 from the active history list.
 
-Workbench history is a global session browser. `thread/browser` returns grouped
-human-visible sessions from the local state database; the stored session cwd
-is used for grouping and for the target scope on resume. Rows are grouped by
-cwd, with the current cwd first and all other cwds ordered by latest
-session activity. Runtime `source` may appear in diagnostics but must not appear
+Workbench history is a global session browser. `thread/browser` returns the
+stable Workspace groups and human-visible sessions defined by
+[032 Workspaces](../032-workspaces/spec.md). Stored Workspace identity determines
+grouping; the Thread's fixed cwd and root-source mode determine resume behavior.
+Explicit-workspace Threads resolve the latest catalog roots at the next execution
+boundary, while direct-cwd Threads remain fixed to their cwd. Runtime
+`source` may appear in diagnostics but must not appear
 in history rows/search or decide whether GUI, TUI, ACP, Web, or Desktop
 sessions are visible by default.
 
-Workbench issues exactly one initial `thread/browser` request during boot and
-starts it concurrently with `initialize`, then awaits both before deriving the
-startup scope. The Sessions result is committed immediately when the browse
+Workbench issues exactly one initial `thread/browser` request during boot. It
+binds the browser application first, hydrates persisted Navigation ids, and then
+starts that single browse concurrently with any still-running `initialize`, so
+the request includes pinned old Threads without a replacement browse. The
+Sessions result is committed immediately when the browse
 completes and does not wait for `thread/draft/open` or auxiliary surface
 requests.
 Until that request succeeds, the
@@ -406,19 +410,30 @@ Sessions browser is busy and must not render the successful-empty `No sessions`
 state. A failed first request uses the existing error presentation; later
 refreshes keep the current rows visible instead of reverting to an initial
 loading or empty state.
+Navigation hydration does not supersede an in-flight browse and no automatic
+second full browse is issued solely because persisted pins differ from the
+empty client bootstrap state.
 
 Each workspace group initially shows sessions updated within the last 7 days,
-capped to 20 rows. Current, running, and pinned sessions remain visible even
+capped to 20 rows. Current, running, and explicitly included sessions remain visible even
 when older than that default window. Sessions outside the default set are
 collapsed behind one older-sessions row per workspace; activating it appends the
 next 20 rows for that workspace and preserves the existing group collapse
 state. Browsing, expanding, pinning, and selecting rows must not update session
 recency.
+Initial and cursor pages use the same Workspace-membership row set; `cwd` is an
+initial grouping selector only when no Workspace cursor is involved and cannot
+make rows disappear across pages after a primary-root change.
+
+Gateway Navigation state supplies two ordered pin lists. Workbench renders one
+Pinned section with Threads first and Workspaces second, removes pinned items
+from ordinary placement, and uses the same shared row and action menu in both
+placements. Pin and unpin execute immediately.
 
 When Workbench resumes a session from another cwd, it switches the active
-scope to that session's stored cwd before accepting more input. The file
-tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
-refresh against the resumed cwd. Cross-cwd resume must not splice the
+scope to that session's stored cwd before accepting more input. The Files tree
+and `@` completion refresh against its stored roots; diff/status, Git, and
+Terminal refresh against its stored cwd. Cross-cwd resume must not splice the
 old session's transcript into the launch cwd. Archiving, restoring,
 renaming, and deleting sessions operate from the same global list and must
 respect the running-session guard across every source. The idle current session
@@ -465,21 +480,39 @@ foreign running session, it subscribes through the Web Gateway's relayed
 `gateway/event` stream and updates the visible transcript without requiring the
 user to switch away and back. On completion, Workbench still refreshes the
 snapshot so committed entries replace the live overlay.
+After Send acceptance, Workbench reads the authoritative snapshot once the
+completed-user observation proves persistence, so the durable user message
+immediately exposes message Pin without waiting for the Assistant or a session
+switch. History Edit appears at the same terminal boundary that re-enables
+`revertConversation` and `forkBefore`; it does not require switching Threads.
+Pinned-message previews use the shared Markdown typography and never apply
+header truncation rules to Markdown descendants.
 
 The Web Shell uses Gateway `completion/list` for `/`, `$`, and `@` composer
 completion. `$` completion resolves skills, local agents, and ACP capability
 mentions; accepted entries keep the visible `$name` text and send structured
 Gateway mentions on submission. `@` completion resolves subagent-capable agent
-names alongside cwd-scoped file references; accepted agent entries keep the
-visible `@agent-name` text and send structured Gateway agent mentions on
-submission. Cwd file completion remains scoped to the launched cwd and
-must not let the browser read arbitrary host files directly. When the selected
+names alongside Thread-root-scoped file references; accepted agent entries keep
+the visible `@agent-name` text and send structured Gateway agent mentions on
+submission. File completion remains scoped to the authoritative Thread or draft
+Workspace context and must not let the browser read arbitrary host files directly. When the selected
 runtime is a peer backend that cannot orchestrate Psychevo agents, `@`
 completion omits Psychevo agent candidates but keeps file-reference completion;
 manually typed `@agent-name` text remains prompt text.
 Long completion lists remain keyboard-operable: ArrowUp/ArrowDown and
 Ctrl+P/Ctrl+N update the active option and keep it visible inside the popover
 without moving focus out of the composer textarea.
+Filesystem completion scans use process-wide bounded admission in addition to
+their per-request visited-entry budget. A started blocking scan retains its
+permit until traversal actually finishes even if the requesting RPC is dropped.
+
+Files tree and Transcript navigation never mark a dirty transition confirmed
+unless that same navigation actually completed its commit-time confirmation.
+Opening another file under the currently selected root therefore still invokes
+the ordinary dirty-tab guard. When a Transcript link joins a root switch already
+in flight, it reuses that transition's result instead of registering a second
+equivalent discard prompt. Superseding the selected-root intent aborts its
+outstanding `workspace/files` request rather than only ignoring the response.
 
 The Web Shell `Search` action opens a center-surface search view. The first
 slice searches the current cwd's known session ids, session titles, and
@@ -611,6 +644,16 @@ percent, and estimated cost; richer details belong in the right Status view.
 Opening the compact composer context/status popover is a local display action
 and must not reveal, focus, or change the open state of the right Status
 inspector.
+
+Authoritative read-only reconciliation for the same Thread and view generation
+is single-flight. A `turn/start` acceptance fallback and the corresponding live
+entry/Turn completion events join the same `thread/read` plus observability
+refresh instead of issuing overlapping reads whose responses can arrive in a
+different order.
+The Thread-read flight ends as soon as its snapshot is consumed, before the
+independent observability refresh begins. A terminal event arriving during a
+slow observability request therefore starts a post-terminal `thread/read`
+instead of joining an already-consumed pre-terminal result.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell

@@ -57,8 +57,10 @@ are `:read-only`, `:workspace`, and `:danger-full-access`; project profiles may
 extend another profile and add filesystem paths, network hosts/domains, and
 tool-family grants. Profiles are policy gates, not OS sandboxes. `:read-only`
 and `:workspace` may read any host path unless an explicit or protected read
-deny wins. `:workspace` may write inside the canonical cwd and asks before
-writing outside it. Filesystem profile entries may grant paths outside the
+deny wins. `:workspace` may write inside any canonical runtime root captured by
+[032 Workspaces](../032-workspaces/spec.md) and asks before writing outside
+them. A direct-cwd Thread has only its cwd as a runtime root. Filesystem profile
+entries may grant paths outside the
 current cwd without changing the session cwd.
 
 `approval_policy` controls whether an action that needs consent may ask:
@@ -211,6 +213,68 @@ Protected reads are intentionally narrow. Internal Psychevo cache/index paths
 that could inject stale or untrusted runtime material may be denied.
 
 Filesystem reads, writes, and edits are evaluated against the active profile.
+That rule includes local filesystem callbacks made by an outbound ACP Agent:
+peer capability negotiation and Workspace path containment are necessary
+transport checks, not permission grants. Gateway must consult the Framework
+runtime authorization captured for the accepted Turn before performing callback
+I/O, and a denial or unavailable approval path fails closed. That captured ACP
+callback runtime applies the selected Agent's run-mode and permission-mode
+ceiling, the same smart or user reviewer and `PermissionRequest` hooks, the
+Framework-owned session/Turn filesystem grant store, and the accepted Turn's
+abort signal. `AllowSession` survives runtime reconstruction, `AllowTurn` is
+cleared at the authoritative terminal boundary, and stopping a Turn cancels an
+in-flight filesystem approval before local I/O can commit.
+The ACP transport containment check applies to reads as well as writes. A
+permission profile that allows arbitrary host reads does not let a peer escape
+the captured runtime roots; host paths outside those roots require a different
+explicit capability surface. Callback attachment revocation is carried into the
+blocking operation and rechecked immediately before opening, truncating, or
+publishing a mutation, so queued work cannot commit after root reload, Turn
+cancellation, or session teardown.
+
+Permission evaluation validates captured Workspace-root identity only for
+actions that actually consume filesystem scope. It reuses the resolved action
+through one authorization decision and performs only the post-approval
+revalidation required to fence a mutable target; unrelated tools do not scan
+every Workspace root. Callback target capture and the post-approval identity
+fence perform blocking filesystem work through bounded blocking-worker seams on
+either side of the asynchronous permission decision; ACP handlers do not perform
+those scans on a Tokio runtime worker. Outbound ACP filesystem callbacks cross
+the execution boundary with an identity-bound file handle rather than an
+approved pathname, and remain contained by the captured runtime roots.
+Filesystem scope grants retain the approved directory object's
+identity for their lifetime; replacing that pathname revokes the grant instead
+of transferring it to the replacement object.
+This ACP transport bound does not erase an external delegated child's explicit
+parent Turn or Session filesystem grants; those continue through the Framework
+authorizer and the child-inheritance rules in `032-workspaces`.
+Built-in write and edit execution obeys the same rule: authorization carries the
+reviewed file object or parent-directory handle into the mutation, and the
+writer must not reopen the original pathname after the identity fence.
+The identity-bound built-in mutation backend is enabled only on platforms where
+Psychevo implements the required directory-handle-relative mutation primitives.
+That gate matches the actual atomic-exchange implementations (Linux, Android,
+and macOS), not the broader Unix cfg family.
+On native Windows, until that backend exists, built-in write and edit retain the
+functional local mutation backend after the ordinary canonical permission and
+post-approval identity checks; they must not fail merely because the Unix
+identity-bound backend is unavailable, and the product does not claim the Unix
+race fence for that platform-specific fallback.
+
+Outbound ACP advertises read and terminal callbacks only where the
+directory-handle identity backend exists, and advertises write callbacks only
+where the atomic mutation backend exists. A configured tool policy cannot
+advertise a callback that every invocation must reject on that host.
+Root-identity validation in async Turn and ACP admission uses the blocking-worker
+seam; Tokio workers do not synchronously canonicalize a maximum-size Workspace.
+
+The complete callback authorization policy is captured before Turn acceptance,
+including the selected Agent ceiling, parsed permission and sandbox
+configuration, protected configuration sources, reviewer selection, and hook
+runtime inputs. Waiting in a Thread lane or editing configuration files after
+acceptance cannot widen that captured policy. External delegated children use
+the parent Turn's captured roots and share its active `AllowTurn` scope;
+`AllowSession` remains keyed to the child Thread and is not inherited.
 The current cwd is not a hard boundary for file tools; it is the default
 auto-write root used by built-in profiles. External writes are capabilities the
 user may grant at runtime, not security violations by definition.
@@ -399,8 +463,9 @@ recent smart denial with `/approve once|session|always`.
   external aliases that canonically resolve inside an allowed root.
 - Missing write targets use their deepest existing canonical ancestor, so a
   missing child below a symlink cannot bypass policy.
-- Exact, turn-directory, and session-directory grants match canonical paths,
-  expire at their documented lifecycle, and cannot authorize an unoffered root.
+- Exact, turn-directory, and session-directory grants match canonical paths and
+  captured directory objects, expire at their documented lifecycle, and cannot
+  authorize an unoffered or replaced root.
 - A target whose canonical identity changes after review is not mutated.
 - No-handler approval paths fail closed.
 - `approval_policy = "never"` denies prompt-level actions without showing UI.

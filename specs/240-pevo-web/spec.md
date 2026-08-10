@@ -324,9 +324,10 @@ the selected Transcript or Composer controls.
 Workbench composes two additional narrow external-store owners through
 `useSyncExternalStore`:
 
-- `SessionBrowserApplication` owns session/archive/workspace summaries,
-  pagination, pins, scope epoch, and one single-flight refresh;
-- `WorkspaceApplication` owns files, diff, changes, and branch as independent
+- `SessionBrowserApplication` owns Framework Workspace/session projections,
+  Gateway navigation pins, pagination, scope epoch, and one single-flight refresh;
+- `WorkspaceApplication` owns the selected Files inventory, the independent
+  Thread-cwd inventory used by Transcript links, diff, changes, and branch as independent
   facets, each with its own epoch, single-flight latest-wins request, and
   demand-driven `ensure(facet)`.
 
@@ -357,6 +358,12 @@ Reasoning, Permission, or the other Composer controls. The first authoritative
 bound context replaces that retained context atomically. Retaining the prior
 context is presentation continuity only and does not manufacture a durable
 binding.
+Queued Send and Shell actions read the post-readiness draft Workspace identity;
+they never retain a render-time id that can be cleared during draft open.
+Draft reopen and target-change retries preserve the last authoritative explicit
+Workspace id unless the user explicitly chooses a direct directory or another
+Workspace; an omitted call-site option is not authority to narrow a multi-root
+draft to direct-cwd.
 
 Workbench boot treats initialization and the first global session browse as
 one bounded transaction. It starts `initialize` and the single initial
@@ -410,9 +417,10 @@ captured submission just like a text edit does.
 
 New Session does not refresh history or omnibus Settings. History refreshes
 after the first accepted turn; cwd renders from canonical origin immediately;
-the lightweight current Git branch read starts alongside `thread/draft/open`,
-while non-visible model/settings metadata loads only when its owning popover
-opens. Workbench applies the draft context and current branch in one Composer
+the lightweight current Git branch read starts after `thread/draft/open`
+returns the authoritative scope, while non-visible model/settings metadata
+loads only when its owning popover opens. Workbench applies the draft context
+and current branch in one Composer
 environment commit so Agent, Mode, Model, Reasoning, Permission, Workspace, and
 branch do not visibly pop in as separate startup generations.
 `workspace/git/branches` reports whether the active workspace is a Git
@@ -447,8 +455,8 @@ and request value retain the canonical path. The visible path may use a wider
 bounded measure than the other status controls before applying a single-line
 ellipsis. Permission is not duplicated inside the Agent target popover. On an
 unbound draft, Workspace opens
-a switcher of known workspaces and ends with `Open workspace...`; choosing a
-workspace starts a detached draft in that cwd, while opening a new workspace
+a switcher of known Workspaces and ends with `Open workspace...`; choosing a
+Workspace starts a detached draft from its stable id, while opening a new Workspace
 opens a folder-selection panel at the active cwd. The panel supports traversing
 folders across the filesystem visible to the Gateway process, including parent
 folders up to the filesystem root. When the Gateway runs on Windows, the folder
@@ -469,7 +477,9 @@ visible on narrow viewports without requiring the user to discover page scroll.
 `Open folder` resolves any edited path before opening it, so the visible address
 and selected workspace cannot diverge. The parent-folder action uses a pointer
 cursor when it is available. Once a Thread is bound, Workspace keeps its
-existing Files-opening behavior and cannot retarget the Thread.
+existing Files-opening behavior and cannot retarget the Thread. A multi-root
+Files selector changes only the Files tree and preview; it does not change diff,
+changes, Git, Terminal, or Thread cwd.
 
 The Git branch control opens a local-branch switcher for the active workspace
 and ends with `New branch...`. Branch checkout and creation use structured
@@ -508,6 +518,10 @@ Row labels remain one line, truncate with an ellipsis at their available maximum
 and expose the full value as a title when truncation is possible. Switch rows
 reserve the final column for the switch and align every switch to the panel's
 right edge.
+
+The Files multi-root selector is one of these rendered selection surfaces. It
+uses the same trigger, selected-row, keyboard focus, Escape, outside-pointer,
+and dismissal behavior; a native `select` is not an alternative implementation.
 Model shows a proven effective value or an explicit unavailable reason. An ACP
 draft renders only Agent-provided config choices; Settings metadata may enrich
 labels and grouping but never synthesizes values. An unbound draft sends only
@@ -734,7 +748,8 @@ Workbench retains the Transcript, draft, local navigation, and visible
 resources; disables network-dependent actions; and shows one compact reconnect
 status with Retry instead of replacing the product with a full-page error.
 Each recovered transport generation resumes the current source or Thread,
-refreshes its authoritative context, history, and currently visible resources,
+refreshes its authoritative context, Gateway navigation state, history, and
+currently visible resources,
 and applies results only when both the transport generation and view epoch are
 current.
 
@@ -877,6 +892,11 @@ response activity carries the same `frameworkRevision` barrier as live
 the response is therefore a no-op, a lower revision cannot overwrite a higher
 one, and this ordering applies both to the first page and pagination merges.
 
+On initial connection and every connection generation, Workbench binds the
+Session Browser Application to the runtime client and scope before starting
+navigation hydration or history browsing. Both reads capture that same client
+epoch, so the first history bind cannot invalidate a persisted pin response.
+
 A bound Native continuation performs no `thread/read`, `thread/browser`, or
 context read. The first detached Turn performs one history browse after
 acceptance and one context read after completion. ACP completion may perform
@@ -896,6 +916,9 @@ stale. A completed supported file-tool entry triggers the same refresh
 immediately, before the enclosing turn completes. A completion without file
 demand does not add a hidden workspace read. The always-visible Composer
 environment owns one lightweight `workspace/git/branches` read for a new draft;
+an explicit Workspace draft starts that read only after `thread/draft/open`
+returns its authoritative scope, and uses that returned primary root rather
+than a caller-side catalog snapshot;
 this is not a right-Workspace demand or an omnibus Settings refresh.
 
 ## Visual Direction

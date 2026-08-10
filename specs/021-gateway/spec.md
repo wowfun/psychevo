@@ -261,8 +261,17 @@ authoritative for the final committed transcript. A first-party Gateway client
 refreshes every ACP or Agent-owned snapshot after `TurnCompleted`, so history
 imported during Agent reconciliation and committed tool evidence cannot
 disappear from the rendered Thread. A non-empty terminal `committedEntries`
-slice does not prove the external Agent history is complete. Native terminal
-payloads do not trigger an extra hidden read.
+slice does not prove the external Agent history is complete. A Native terminal
+slice is authoritative when populated; when it is empty, the client performs
+one epoch-guarded snapshot read before treating retained live rows as durable
+history.
+
+For Native execution, persistence of a completed message precedes publication
+of that message's public `entryCompleted` observation. The observation remains
+live evidence rather than a persistence record, but a same-Thread snapshot read
+triggered by a completed user message must be able to observe its durable
+message sequence. This ordering lets history Edit and message Pin become
+available without a Thread switch while preserving the snapshot as authority.
 
 `turn/start` success returns the accepted Thread and Turn identity. Validation,
 authorization, or binding failures before acceptance are JSON-RPC errors. Once
@@ -714,6 +723,17 @@ request to finish. Disconnect aborts connection-local work, but accepted
 Application Turns and State-adopted durable mutations finish under their owning
 supervisor.
 
+A client that no longer needs a connection-local request sends the JSON-RPC
+notification `$/cancelRequest` with the original request id. The transport
+removes a still-queued request or aborts its active handler, which drops any
+cooperative blocking-work guard owned by that handler. The notification has no
+response and cannot roll back an Application Turn or durable mutation that has
+already crossed its owning acceptance boundary.
+Client request timeout is also a loss of interest and emits the same
+notification before rejecting the local promise; server work does not continue
+solely because cancellation originated from a deadline instead of an explicit
+AbortSignal.
+
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
 conversion of transport values into typed Framework requests, calling the
 injected Client, and serializing its typed result. It does not
@@ -955,8 +975,11 @@ Source keys should avoid exposing raw local paths. A cwd source key uses a
 stable hash of the canonical cwd, while raw identity metadata may retain
 canonical and display paths for local diagnostics and UI display.
 
-Transport requests that introduce or select a source carry a request-scoped
-`scope` object inside `params`. The scope contains `cwd` plus source intent.
+Transport requests that introduce or select a source carry request-scoped
+source intent. Ordinary execution requests use a `scope` containing `cwd` plus
+source. `thread/draft/open` instead carries `{ source, location }`, where
+location selects either a direct cwd or the stable Workspace defined by
+[032 Workspaces](../032-workspaces/spec.md).
 `source.kind` is an open namespace string such as `web`, `floating`,
 `desktop`, `im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
 raw id from source kind plus canonical cwd. `thread/draft/open`,
@@ -1021,8 +1044,10 @@ persists the prompt fallback and publishes `titleChanged`. Error finalization
 does not start the auxiliary model, delay the Turn error, or overwrite a title
 that won the compare-and-set race.
 
-`thread/browser` is the paged session-browser contract for product surfaces. By
-default it groups sessions by workspace, shows sessions updated within the last
+`thread/browser` is the paged session-browser contract for product surfaces. It
+projects the Framework Workspace catalog and groups sessions by stable
+`workspaceId`; its per-workspace cursor is `{ workspaceId, offset }`. By default
+it shows sessions updated within the last
 7 days, caps the initial visible set to 20 sessions per workspace, and returns a
 per-workspace cursor plus hidden count for older rows. Current, running, and
 explicitly included session ids remain visible even when they fall outside the
@@ -1031,8 +1056,33 @@ workspace without mutating session recency. The Store owns visibility filtering,
 workspace grouping, ordering, and pagination. Gateway projects the selected rows
 with bounded batch reads plus one in-memory activity snapshot; list latency and
 Store read count scale with the returned page, not with the total candidate set.
+Catalog eligibility, retained bindings, page rows, per-Workspace totals, hidden
+counts, and cursors are read from one SQLite read transaction. Rows and totals
+come from one materialized candidate projection rather than two full history
+scans, including the metadata-only case where a Workspace has hidden rows but
+no visible row on the current page.
 Title fallback may use the first displayable user text without loading the full
 transcript.
+Workspace metadata and eligible totals are projected even when the current page
+contains no visible session row, so a Workspace containing only older Threads
+still exposes its hidden count and cursor.
+When an initial request supplies `cwd`, catalog eligibility is filtered in SQL
+by containing roots and retained Thread bindings, and unrelated empty Workspace
+projections are not returned. A Workspace cursor is its own stable page target:
+cursor pages ignore the initial request's possibly stale `cwd` and address only
+the cursor Workspace. Gateway therefore does not canonicalize or require that
+obsolete cwd before dispatching a cursor page.
+Cursor reads load only the addressed Workspace metadata and roots. They do not
+materialize the complete catalog before filtering to one id.
+
+Once Framework has accepted `turn/start`, optional browser-session scope
+projection is best-effort bookkeeping. A post-accept projection read or write
+failure cannot turn the accepted receipt into an RPC error or invite a duplicate
+retry.
+Any pre-accept capability lease is guarded through the complete Workspace
+snapshot revalidation and Framework admission boundary. Every error before an
+accepted handle exists releases the lease; accepted work transfers release to
+the terminal-completion owner.
 
 `thread/read`, `thread/resume`, and the initial `ThreadSnapshot` return the
 latest transcript tail first. The default page is 100 entries and the hard
@@ -1071,16 +1121,18 @@ remove history or change UX.
 
 Explicit `thread/resume` may target a session from a different cwd than
 the caller's current scope. In that case Gateway rebinds the caller's source to
-the target session and returns a snapshot whose scope/project is the session's
-stored cwd. Subsequent turns, completion, diff, files, agents, skills, and
-context operations run in that resumed cwd. Browser-session authorization does
+the target session and resolves its Workspace context. Subsequent turns and
+Agents use its fixed cwd and the roots defined by [032 Workspaces](../032-workspaces/spec.md);
+Files and completion use those runtime roots,
+while diff, Git, and Terminal use its stored cwd. Browser-session authorization does
 not change because it is profile-global; only the default execution scope for
 that client changes. Clients must not append an old project's
 history while continuing to operate in the launch directory.
-Browser clients may also call `thread/draft/open` for any canonicalizable cwd. Gateway
-treats that explicit project-group action as default-scope adoption for the
-client, not as a security grant. Invalid or inaccessible cwd values fail during
-canonicalization or runtime safety checks rather than browser-session ACL.
+Browser clients may also call `thread/draft/open` with a direct canonicalizable
+cwd or stable Workspace id. Framework resolves the location and captures the
+Thread environment; Gateway does not infer runtime roots from cwd grouping.
+Invalid or inaccessible locations fail before admission rather than through a
+browser-session ACL.
 
 Global management RPCs such as Settings, model provider catalogs, slash
 settings, automation management, and session browsing are profile-level
@@ -1141,6 +1193,8 @@ and validate those values against their generated schemas, including active
 Thread activity returned by `thread/read` and `thread/resume`.
 `thread/browser` therefore always emits each workspace's `nextCursor`; the last
 page uses an explicit `null`, matching its required nullable TypeScript field.
+Workspace and Thread pins use the separate Gateway-owned navigation contract and
+never change browser pagination.
 
 Signed and unsigned wire integers use the JavaScript safe-integer boundary in
 both serialization directions. Generated JSON Schema carries the same minimum
@@ -1250,7 +1304,7 @@ cannot be overwritten by the generic fact that the process mailbox closed.
 
 Before Framework delivers a first prompt, it persists the Thread binding,
 including Agent Definition and Runtime Profile snapshots, implementation kind,
-backend reference, cwd, profile fingerprint, safety policy, Adapter revision,
+backend reference, cwd, ordered runtime roots, profile fingerprint, safety policy, Adapter revision,
 ownership, and binding revision. The binding is immutable. A newly created or
 resumed ACP native session id is also persisted before delivery. Source lanes
 may point to a new thread, but cannot rewrite an existing thread identity.

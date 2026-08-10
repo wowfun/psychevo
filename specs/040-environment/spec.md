@@ -62,6 +62,9 @@ The process cwd is the default local scope for workspace-oriented behavior,
 but it is not the universal security boundary. Specs that use workspace roots
 must say whether they mean caller intent, default path resolution, permission
 profile defaults, sandbox writer roots, Gateway source scope, or UI grouping.
+The ordered runtime roots in [032 Workspaces](../032-workspaces/spec.md) are
+Thread environment facts. Direct-cwd callers expose only that cwd; choosing a
+catalog Workspace explicitly exposes its captured directory set.
 
 ## Authority Relationship
 

@@ -45,7 +45,8 @@ Out of scope:
   other production owner opens or adopts a SQLite pool. Application may issue
   one opaque, typed `GatewayDurability` capability over that same pool so
   Gateway can perform only its source-lane, activity-lease, durable-control,
-  retained-live, channel-outbox, and automation durability operations. Thread
+  retained-live, channel-outbox, automation, and product-navigation durability
+  operations. Thread
   and Turn lifecycle, Agent bindings, history, Framework Turn delivery, and
   terminal evidence remain Framework-owned operations outside this capability.
   The capability cannot expose `StateRuntime`, a pool or connection, SQL,
