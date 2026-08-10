@@ -22,6 +22,7 @@ pub(crate) async fn base_options(temp: &tempfile::TempDir) -> RunOptions {
             .await
             .expect("state runtime"),
         cwd: temp.path().join("work"),
+        workspace_roots: Vec::new(),
         snapshot_root: Some(temp.path().join("snapshots")),
         session: None,
         continue_latest: false,

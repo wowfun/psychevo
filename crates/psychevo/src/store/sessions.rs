@@ -3,7 +3,7 @@ use std::path::Path;
 
 use psychevo_agent_core::{now_ms, user_text_message};
 use serde_json::{Map, Value};
-use sqlx::Row;
+use sqlx::{Acquire, Row};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -14,11 +14,27 @@ use crate::types::SessionSummary;
 use super::store_message_fields::parse_optional_json;
 use super::store_messages::insert_inherited_message_in_tx;
 use super::store_runtime_bindings::snapshot_resolved_writable_runtime_binding_in_tx;
+use super::store_workspaces::{
+    bind_thread_workspace_in_tx, copy_thread_workspace_in_tx, workspace_in_executor,
+    workspace_list_for_cwd_in_executor, workspace_list_in_executor,
+};
 use super::{
     ChildSessionSnapshotInput, SessionBrowserRequest, SessionBrowserWorkspaceProjection,
     SessionListCursor, SessionListProjection, SessionListProjectionPage, SessionSummaryPage,
-    StateRuntime,
+    StateRuntime, WorkspaceSessionSnapshotInput,
 };
+
+struct CreateSessionInput<'a> {
+    cwd: &'a Path,
+    source: &'a str,
+    parent_session_id: Option<&'a str>,
+    workspace_id: Option<&'a str>,
+    captured_workspace_roots: Option<&'a [String]>,
+    captured_workspace_revision: Option<i64>,
+    model: &'a str,
+    provider: &'a str,
+    metadata: Option<Value>,
+}
 
 impl StateRuntime {
     pub async fn create_session(&self, cwd: &Path) -> Result<String> {
@@ -34,8 +50,60 @@ impl StateRuntime {
         provider: &str,
         metadata: Option<Value>,
     ) -> Result<String> {
-        self.create_session_with_parent_and_metadata(cwd, source, None, model, provider, metadata)
-            .await
+        self.create_session_with_parent_and_metadata(CreateSessionInput {
+            cwd,
+            source,
+            parent_session_id: None,
+            workspace_id: None,
+            captured_workspace_roots: None,
+            captured_workspace_revision: None,
+            model,
+            provider,
+            metadata,
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn create_session_in_workspace_with_metadata(
+        &self,
+        cwd: &Path,
+        workspace_id: &str,
+        source: &str,
+        model: &str,
+        provider: &str,
+        metadata: Option<Value>,
+    ) -> Result<String> {
+        self.create_session_with_parent_and_metadata(CreateSessionInput {
+            cwd,
+            source,
+            parent_session_id: None,
+            workspace_id: Some(workspace_id),
+            captured_workspace_roots: None,
+            captured_workspace_revision: None,
+            model,
+            provider,
+            metadata,
+        })
+        .await
+    }
+
+    pub(crate) async fn create_session_in_workspace_snapshot_with_metadata(
+        &self,
+        input: WorkspaceSessionSnapshotInput<'_>,
+    ) -> Result<String> {
+        self.create_session_with_parent_and_metadata(CreateSessionInput {
+            cwd: input.cwd,
+            source: input.source,
+            parent_session_id: None,
+            workspace_id: Some(input.workspace_id),
+            captured_workspace_roots: Some(input.workspace_roots),
+            captured_workspace_revision: Some(input.workspace_revision),
+            model: input.model,
+            provider: input.provider,
+            metadata: input.metadata,
+        })
+        .await
     }
 
     pub async fn create_child_session_with_metadata(
@@ -47,14 +115,17 @@ impl StateRuntime {
         provider: &str,
         metadata: Option<Value>,
     ) -> Result<String> {
-        self.create_session_with_parent_and_metadata(
+        self.create_session_with_parent_and_metadata(CreateSessionInput {
             cwd,
             source,
-            Some(parent_session_id),
+            parent_session_id: Some(parent_session_id),
+            workspace_id: None,
+            captured_workspace_roots: None,
+            captured_workspace_revision: None,
             model,
             provider,
             metadata,
-        )
+        })
         .await
     }
 
@@ -104,6 +175,8 @@ impl StateRuntime {
                     input.parent_session_id
                 )));
             }
+            copy_thread_workspace_in_tx(&mut tx, input.parent_session_id, &child_session_id, now)
+                .await?;
 
             let inherited_count = sqlx::query(
                 r#"
@@ -182,19 +255,15 @@ impl StateRuntime {
         .await
     }
 
-    pub(crate) async fn create_session_with_parent_and_metadata(
+    async fn create_session_with_parent_and_metadata(
         &self,
-        cwd: &Path,
-        source: &str,
-        parent_session_id: Option<&str>,
-        model: &str,
-        provider: &str,
-        metadata: Option<Value>,
+        input: CreateSessionInput<'_>,
     ) -> Result<String> {
         let id = Uuid::now_v7().to_string();
         let now = now_ms();
-        let cwd = cwd.to_string_lossy().to_string();
-        let metadata_json = metadata
+        let cwd = input.cwd.to_string_lossy().to_string();
+        let metadata_json = input
+            .metadata
             .map(|value| serde_json::to_string(&value))
             .transpose()?;
         let mut operation = self.begin_sqlx_operation();
@@ -211,15 +280,29 @@ impl StateRuntime {
                 "#,
             )
             .bind(&id)
-            .bind(source)
-            .bind(parent_session_id)
+            .bind(input.source)
+            .bind(input.parent_session_id)
             .bind(&cwd)
-            .bind(model)
-            .bind(provider)
+            .bind(input.model)
+            .bind(input.provider)
             .bind(now)
             .bind(&metadata_json)
             .execute(&mut *tx)
             .await?;
+            if let Some(parent_session_id) = input.parent_session_id {
+                copy_thread_workspace_in_tx(&mut tx, parent_session_id, &id, now).await?;
+            } else {
+                bind_thread_workspace_in_tx(
+                    &mut tx,
+                    &id,
+                    &cwd,
+                    input.workspace_id,
+                    input.captured_workspace_roots,
+                    input.captured_workspace_revision,
+                    now,
+                )
+                .await?;
+            }
             tx.commit().await?;
             Ok(id)
         }
@@ -399,21 +482,61 @@ impl StateRuntime {
         let include_ids_json = serde_json::to_string(request.include_session_ids)?;
         let active_ids_json = serde_json::to_string(request.active_session_ids)?;
         let archived = i64::from(request.archived);
-        let has_cursor = i64::from(request.cursor_cwd.is_some());
+        let has_cursor = i64::from(request.cursor_workspace_id.is_some());
         let cursor_offset = request.cursor_offset as i64;
         let limit = request.limit as i64;
         let mut operation = self.begin_sqlx_operation();
         let result = async {
             let mut conn = self.acquire_sqlx().await?;
+            let mut tx = conn.begin().await?;
+            let catalog = if let Some(workspace_id) = request.cursor_workspace_id {
+                vec![
+                    workspace_in_executor(&mut tx, workspace_id)
+                        .await?
+                        .ok_or_else(|| {
+                            Error::Message(format!(
+                                "workspace cursor `{workspace_id}` was not found"
+                            ))
+                        })?,
+                ]
+            } else if let Some(cwd) = request.cwd {
+                workspace_list_for_cwd_in_executor(&mut tx, cwd).await?
+            } else {
+                workspace_list_in_executor(&mut tx).await?
+            };
+            let eligible_workspace_ids = if request.cursor_workspace_id.is_some() {
+                None
+            } else if request.cwd.is_some() {
+                Some(
+                    catalog
+                        .iter()
+                        .map(|workspace| workspace.id.clone())
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            };
+            let eligible_workspace_ids_json =
+                serde_json::to_string(&eligible_workspace_ids.clone().unwrap_or_default())?;
             let rows = sqlx::query(
                 r#"
             WITH visible AS MATERIALIZED (
-                SELECT s.*,
+                SELECT s.*, b.workspace_id,
                        CASE WHEN s.id IN (SELECT value FROM json_each(?4))
                                   OR s.id IN (SELECT value FROM json_each(?5))
                             THEN 1 ELSE 0 END AS is_exception
                 FROM sessions s
-                WHERE (?1 IS NULL OR s.cwd = ?1)
+                JOIN thread_workspace_bindings b ON b.thread_id = s.id
+                WHERE (
+                    (?10 = 1 AND b.workspace_id = ?7)
+                    OR (
+                        ?10 = 0
+                        AND (
+                            ?1 IS NULL
+                            OR b.workspace_id IN (SELECT value FROM json_each(?11))
+                        )
+                    )
+                  )
                   AND ((?2 = 0 AND s.archived_at_ms IS NULL)
                     OR (?2 = 1 AND s.archived_at_ms IS NOT NULL))
                   AND s.parent_session_id IS NULL
@@ -423,14 +546,43 @@ impl StateRuntime {
             ranked AS MATERIALIZED (
                 SELECT visible.*,
                        SUM(CASE WHEN is_exception = 0 THEN 1 ELSE 0 END) OVER (
-                           PARTITION BY cwd
+                           PARTITION BY workspace_id
                            ORDER BY updated_at_ms DESC, id ASC
                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
                        ) AS normal_rank,
                        SUM(CASE WHEN is_exception = 0 THEN 1 ELSE 0 END) OVER (
-                           PARTITION BY cwd
+                           PARTITION BY workspace_id
                        ) AS normal_total
                 FROM visible
+            ),
+            selected AS MATERIALIZED (
+                SELECT r.id, r.workspace_id
+                FROM ranked r
+                WHERE (
+                        ?10 = 0
+                        AND (
+                            r.is_exception = 1
+                            OR (r.updated_at_ms >= ?6 AND r.normal_rank <= ?9)
+                        )
+                      )
+                   OR (
+                        ?10 = 1
+                        AND r.workspace_id = ?7
+                        AND r.is_exception = 0
+                        AND r.normal_rank > ?8
+                        AND r.normal_rank <= (?8 + ?9)
+                      )
+            ),
+            chosen AS (
+                SELECT id, workspace_id, 0 AS is_metadata
+                FROM selected
+                UNION ALL
+                SELECT r.id, r.workspace_id, 1 AS is_metadata
+                FROM ranked r
+                WHERE r.normal_rank = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM selected s WHERE s.workspace_id = r.workspace_id
+                  )
             )
             SELECT r.id, r.source, r.parent_session_id, r.cwd, r.model, r.provider,
                    r.started_at_ms, r.updated_at_ms, r.ended_at_ms, r.end_reason,
@@ -446,24 +598,12 @@ impl StateRuntime {
                        ORDER BY m.session_seq ASC
                        LIMIT 1
                    ) AS first_user_text,
-                   b.backend_kind, b.runtime_ref, r.is_exception, r.normal_total
-            FROM ranked r
+                   b.backend_kind, b.runtime_ref, r.is_exception, r.normal_total,
+                   r.workspace_id, c.is_metadata
+            FROM chosen c
+            JOIN ranked r ON r.id = c.id
             LEFT JOIN gateway_runtime_bindings b ON b.thread_id = r.id
-            WHERE (
-                    ?10 = 0
-                    AND (
-                        r.is_exception = 1
-                        OR (r.updated_at_ms >= ?6 AND r.normal_rank <= ?9)
-                    )
-                  )
-               OR (
-                    ?10 = 1
-                    AND r.cwd = ?7
-                    AND r.is_exception = 0
-                    AND r.normal_rank > ?8
-                    AND r.normal_rank <= (?8 + ?9)
-                  )
-            ORDER BY r.cwd ASC, r.updated_at_ms DESC, r.id ASC
+            ORDER BY r.workspace_id ASC, c.is_metadata ASC, r.updated_at_ms DESC, r.id ASC
             "#,
             )
             .bind(request.cwd)
@@ -472,36 +612,49 @@ impl StateRuntime {
             .bind(include_ids_json)
             .bind(active_ids_json)
             .bind(request.recent_since_ms)
-            .bind(request.cursor_cwd)
+            .bind(request.cursor_workspace_id)
             .bind(cursor_offset)
             .bind(limit)
             .bind(has_cursor)
-            .fetch_all(&mut *conn)
+            .bind(&eligible_workspace_ids_json)
+            .fetch_all(&mut *tx)
             .await?;
             let mut grouped: BTreeMap<String, (Vec<SessionListProjection>, usize, usize)> =
                 BTreeMap::new();
             for row in rows {
-                let (projection, is_exception, normal_total) =
+                let workspace_id: String = row.try_get("workspace_id")?;
+                let workspace = grouped.entry(workspace_id).or_default();
+                workspace.1 = usize::try_from(row.try_get::<i64, _>("normal_total")?).unwrap_or(0);
+                if row.try_get::<i64, _>("is_metadata")? != 0 {
+                    continue;
+                }
+                let (projection, is_exception, _normal_total) =
                     projection_from_raw(session_browser_projection_from_row(&row)?)?;
-                let workspace = grouped.entry(projection.summary.cwd.clone()).or_default();
-                workspace.1 = normal_total;
                 if !is_exception {
                     workspace.2 += 1;
                 }
                 workspace.0.push(projection);
             }
-            let base_offset = if request.cursor_cwd.is_some() {
+            tx.commit().await?;
+            let base_offset = if request.cursor_workspace_id.is_some() {
                 request.cursor_offset
             } else {
                 0
             };
-            Ok(grouped
+            Ok(catalog
                 .into_iter()
-                .map(|(cwd, (sessions, normal_total, selected_normal_count))| {
+                .filter(|workspace| {
+                    request
+                        .cursor_workspace_id
+                        .is_none_or(|workspace_id| workspace.id == workspace_id)
+                })
+                .map(|workspace| {
+                    let (sessions, normal_total, selected_normal_count) =
+                        grouped.remove(&workspace.id).unwrap_or_default();
                     let next_offset = base_offset.saturating_add(selected_normal_count);
                     let hidden_count = normal_total.saturating_sub(next_offset);
                     SessionBrowserWorkspaceProjection {
-                        cwd,
+                        workspace,
                         sessions,
                         hidden_count,
                         next_offset: (hidden_count > 0).then_some(next_offset),
@@ -973,6 +1126,13 @@ impl StateRuntime {
         let mut operation = self.begin_sqlx_operation();
         let result = async {
             let mut tx = self.begin_sqlx_write().await?;
+            let was_pinned = sqlx::query_scalar::<_, i64>(
+                "SELECT EXISTS(SELECT 1 FROM gateway_pinned_threads WHERE thread_id = ?1)",
+            )
+            .bind(session_id)
+            .fetch_one(&mut *tx)
+            .await?
+                != 0;
             let messages = sqlx::query("DELETE FROM messages WHERE session_id = ?1")
                 .bind(session_id)
                 .execute(&mut *tx)
@@ -985,6 +1145,9 @@ impl StateRuntime {
                 .rows_affected();
             if messages + sessions == 0 {
                 return Err(Error::Message(format!("session not found: {session_id}")));
+            }
+            if was_pinned && sessions > 0 {
+                advance_gateway_navigation_revision(&mut tx).await?;
             }
             tx.commit().await?;
             Ok(())
@@ -1006,6 +1169,20 @@ impl StateRuntime {
         let mut operation = self.begin_sqlx_operation();
         let result = async {
             let mut tx = self.begin_sqlx_write().await?;
+            let ids_json = serde_json::to_string(&ids)?;
+            let removes_pin = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM gateway_pinned_threads
+                    WHERE thread_id IN (SELECT value FROM json_each(?1))
+                )
+                "#,
+            )
+            .bind(ids_json)
+            .fetch_one(&mut *tx)
+            .await?
+                != 0;
             for id in &ids {
                 sqlx::query("DELETE FROM messages WHERE session_id = ?1")
                     .bind(id)
@@ -1015,6 +1192,9 @@ impl StateRuntime {
                     .bind(id)
                     .execute(&mut *tx)
                     .await?;
+            }
+            if removes_pin {
+                advance_gateway_navigation_revision(&mut tx).await?;
             }
             tx.commit().await?;
             Ok(ids.len())
@@ -1071,6 +1251,15 @@ impl StateRuntime {
         operation.finish(&result);
         result
     }
+}
+
+async fn advance_gateway_navigation_revision(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+) -> Result<()> {
+    sqlx::query("UPDATE gateway_navigation_state SET revision = revision + 1 WHERE singleton = 1")
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 type RawSessionProjection = (

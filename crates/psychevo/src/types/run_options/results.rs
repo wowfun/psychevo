@@ -88,6 +88,10 @@ pub struct UserShellOptions {
 pub struct UserShellContextOptions {
     pub state: StateRuntime,
     pub session: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_roots: Option<Vec<String>>,
+    pub workspace_revision: Option<i64>,
+    pub workspace_root_capture: Option<crate::WorkspaceRootCapture>,
     pub continue_latest: bool,
     pub source: String,
     pub continue_sources: Vec<String>,

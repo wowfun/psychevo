@@ -35,6 +35,7 @@ mod turn_completion;
 mod turn_events;
 mod turn_request;
 mod voice;
+mod workspaces;
 
 use event_log::EventLog;
 use interaction_broker::InteractionBroker;
@@ -63,8 +64,8 @@ pub use gateway_durability::{
     GatewayChannelOutboxRecord, GatewayChannelOutboxStatus, GatewayControlCommandInput,
     GatewayControlCommandKind, GatewayControlCommandRecord, GatewayControlCommandStatus,
     GatewayDurability, GatewayLiveEventCommit, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, GatewaySourceBindingRecord, GatewaySourceLaneInput,
-    GatewaySourceLaneRecord,
+    GatewayLiveSnapshotRecord, GatewayNavigationState, GatewaySourceBindingRecord,
+    GatewaySourceLaneInput, GatewaySourceLaneRecord,
 };
 pub use history_editing::{
     ThreadConversationEditConflict, ThreadConversationEditRestoreOutcome,
@@ -102,6 +103,9 @@ pub use voice::{
     VoiceRealtimeConnection, VoiceRealtimeControl, VoiceRealtimeEvent, VoiceRealtimeEvents,
     VoiceRealtimeRequest, VoiceRealtimeTransport, VoiceRealtimeVoice, VoiceSpeech,
     VoiceSpeechRequest, VoiceTranscription, VoiceTranscriptionRequest,
+};
+pub use workspaces::{
+    ThreadWorkspaceContext, ThreadWorkspaceRootSource, Workspace, WorkspaceUpdate,
 };
 
 /// Validate a message retained by a caller before a `TurnHandle` exists.
@@ -297,6 +301,8 @@ pub struct ApplicationStorageSnapshot {
 #[derive(Debug, Clone)]
 pub struct StartThreadRequest {
     pub cwd: PathBuf,
+    pub workspace_id: Option<String>,
+    workspace_snapshot: Option<Workspace>,
     pub source: String,
     pub metadata: Option<Value>,
     requested_id: Option<String>,
@@ -650,6 +656,45 @@ pub struct AgentTurnInvocation {
     pub control: TurnControl,
     child_turns: AgentChildTurnDispatcher,
     mcp_resolver: agent_session::AgentMcpServerResolver,
+    filesystem_authorizer: AgentFilesystemAuthorizer,
+    workspace_root_capture: crate::filesystem_identity::WorkspaceRootCapture,
+}
+
+#[derive(Clone)]
+pub struct AgentFilesystemAuthorizer {
+    runtime: std::result::Result<crate::permissions::PermissionRuntime, String>,
+    abort: psychevo_ai::AbortSignal,
+}
+
+#[derive(Debug)]
+pub struct AgentAuthorizedFile {
+    target: crate::filesystem_identity::CapturedFileTarget,
+    writable: bool,
+}
+
+impl AgentAuthorizedFile {
+    pub fn into_read_file(self) -> Result<std::fs::File> {
+        if self.writable {
+            return Err(Error::Message(
+                "authorized filesystem target is write-only".to_string(),
+            ));
+        }
+        self.target.open_after_authorization()
+    }
+
+    pub fn write_all(self, content: &[u8]) -> Result<()> {
+        use std::io::Write as _;
+
+        if !self.writable {
+            return Err(Error::Message(
+                "authorized filesystem target is read-only".to_string(),
+            ));
+        }
+        let mut file = self.target.open_after_authorization()?;
+        file.write_all(content)?;
+        file.flush()?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -660,6 +705,7 @@ pub struct AgentTurnPreparation {
     pub inherited_env: BTreeMap<String, String>,
     pub purpose: AgentTurnPurpose,
     pub native_backend: NativeTurnBackend,
+    pub workspace_root_capture: crate::filesystem_identity::WorkspaceRootCapture,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -859,6 +905,8 @@ impl fmt::Debug for NativeTurnBackend {
 struct AgentChildTurnDispatcher {
     inner: Weak<ApplicationInner>,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    parent_thread: ThreadExecutionContext,
+    parent_workspace_root_capture: crate::filesystem_identity::WorkspaceRootCapture,
 }
 
 #[derive(Clone)]
@@ -1186,6 +1234,8 @@ const MAX_HISTORY_PAGE_SIZE: usize = 200;
 pub struct ThreadExecutionContext {
     pub id: String,
     pub cwd: String,
+    pub workspace_id: Option<String>,
+    pub roots: Vec<String>,
     pub source: String,
     pub source_key: Option<String>,
 }
@@ -1209,6 +1259,7 @@ pub struct HistoryPage {
 pub struct ThreadSnapshot {
     #[serde(flatten)]
     pub summary: ThreadSummary,
+    pub workspace: ThreadWorkspaceContext,
     pub pending_interactions: Vec<PendingInteraction>,
     pub items: Vec<ThreadItem>,
     pub history_cursor: Option<i64>,
@@ -1607,6 +1658,36 @@ mod tests {
         first_started: Arc<Notify>,
         release_first: Arc<Notify>,
         second_snapshot_items: Arc<Mutex<Option<usize>>>,
+        second_thread: Arc<Mutex<Option<ThreadExecutionContext>>>,
+    }
+
+    #[derive(Debug)]
+    struct CapturedThreadAgentSessionAdapter {
+        threads: Arc<Mutex<Vec<ThreadExecutionContext>>>,
+        authorization: Option<(PathBuf, Arc<Mutex<Option<String>>>)>,
+    }
+
+    #[derive(Debug)]
+    struct QueuedFilesystemPolicyAgentSessionAdapter {
+        calls: AtomicUsize,
+        first_started: Arc<Notify>,
+        release_first: Arc<Notify>,
+        target: PathBuf,
+        second_denied: Arc<Mutex<Option<bool>>>,
+    }
+
+    #[derive(Debug)]
+    struct QueuedRootIdentityAgentSessionAdapter {
+        calls: AtomicUsize,
+        first_started: Arc<Notify>,
+        release_first: Arc<Notify>,
+        second_denied: Arc<Mutex<Option<bool>>>,
+    }
+
+    #[derive(Debug)]
+    struct PreparationRootReplacementAgentSessionAdapter {
+        root: PathBuf,
+        original: PathBuf,
     }
 
     #[derive(Debug)]
@@ -2618,11 +2699,14 @@ mod tests {
             let first_started = self.first_started.clone();
             let release_first = self.release_first.clone();
             let second_snapshot_items = self.second_snapshot_items.clone();
+            let second_thread = self.second_thread.clone();
             Box::pin(async move {
                 if call == 0 {
                     first_started.notify_one();
                     release_first.notified().await;
                 } else {
+                    *second_thread.lock().expect("Thread observation poisoned") =
+                        Some(request.thread.clone());
                     *second_snapshot_items
                         .lock()
                         .expect("snapshot observation poisoned") = Some(
@@ -2651,6 +2735,141 @@ mod tests {
                     selected_skills: Vec::new(),
                 })
             })
+        }
+    }
+
+    impl TestAgentSession for CapturedThreadAgentSessionAdapter {
+        fn admission_facts(&self, request: &AgentTurnPreparation) -> AgentAdmissionFacts {
+            test_acp_admission(request)
+        }
+
+        fn run_turn(&self, request: AgentTurnInvocation) -> BoxFuture<'static, Result<TurnResult>> {
+            self.threads
+                .lock()
+                .expect("captured Threads poisoned")
+                .push(request.thread.clone());
+            let authorization = self.authorization.clone();
+            Box::pin(async move {
+                if let Some((path, result)) = authorization {
+                    let outcome = request
+                        .filesystem_authorizer()
+                        .authorize_write("delegated-turn-grant", &path)
+                        .await;
+                    *result.lock().expect("authorization result poisoned") = Some(
+                        outcome
+                            .map(|_| "allowed".to_string())
+                            .unwrap_or_else(|error| error),
+                    );
+                }
+                Ok(completed_test_turn(request.receipt.thread_id, "captured"))
+            })
+        }
+    }
+
+    impl TestAgentSession for QueuedFilesystemPolicyAgentSessionAdapter {
+        fn admission_facts(&self, request: &AgentTurnPreparation) -> AgentAdmissionFacts {
+            test_acp_admission(request)
+        }
+
+        fn run_turn(&self, request: AgentTurnInvocation) -> BoxFuture<'static, Result<TurnResult>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let first_started = Arc::clone(&self.first_started);
+            let release_first = Arc::clone(&self.release_first);
+            let target = self.target.clone();
+            let second_denied = Arc::clone(&self.second_denied);
+            Box::pin(async move {
+                if call == 0 {
+                    first_started.notify_one();
+                    release_first.notified().await;
+                } else {
+                    let denied = request
+                        .filesystem_authorizer()
+                        .authorize_write("queued-acp-write", &target)
+                        .await
+                        .is_err();
+                    *second_denied.lock().expect("policy observation poisoned") = Some(denied);
+                }
+                Ok(completed_test_turn(
+                    request.receipt.thread_id,
+                    &format!("turn {call}"),
+                ))
+            })
+        }
+    }
+
+    impl TestAgentSession for QueuedRootIdentityAgentSessionAdapter {
+        fn run_turn(&self, request: AgentTurnInvocation) -> BoxFuture<'static, Result<TurnResult>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let first_started = Arc::clone(&self.first_started);
+            let release_first = Arc::clone(&self.release_first);
+            let second_denied = Arc::clone(&self.second_denied);
+            Box::pin(async move {
+                if call == 0 {
+                    first_started.notify_one();
+                    release_first.notified().await;
+                } else {
+                    let cwd = PathBuf::from(&request.thread.cwd);
+                    *second_denied
+                        .lock()
+                        .expect("root identity observation poisoned") =
+                        Some(request.workspace_root_capture.open_directory(&cwd).is_err());
+                }
+                Ok(completed_test_turn(
+                    request.receipt.thread_id,
+                    &format!("turn {call}"),
+                ))
+            })
+        }
+    }
+
+    impl TestAgentSession for PreparationRootReplacementAgentSessionAdapter {
+        fn observe_preparation(&self) {
+            std::fs::rename(&self.root, &self.original).expect("retain accepted root");
+            std::fs::create_dir(&self.root).expect("replacement root");
+        }
+
+        fn run_turn(&self, request: AgentTurnInvocation) -> BoxFuture<'static, Result<TurnResult>> {
+            Box::pin(
+                async move { Ok(completed_test_turn(request.receipt.thread_id, "unexpected")) },
+            )
+        }
+    }
+
+    fn completed_test_turn(thread_id: String, answer: &str) -> TurnResult {
+        TurnResult {
+            thread_id,
+            outcome: TurnOutcome::Completed,
+            final_answer: answer.to_string(),
+            provider: "fake".to_string(),
+            model: "fake-model".to_string(),
+            reasoning_effort: None,
+            tool_failures: 0,
+            context_limit: None,
+            context_snapshot: None,
+            warnings: Vec::new(),
+            terminal_reason: None,
+            terminal_error: None,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+        }
+    }
+
+    fn test_acp_admission(request: &AgentTurnPreparation) -> AgentAdmissionFacts {
+        AgentAdmissionFacts {
+            initial_binding: Some(InitialAgentBinding {
+                agent_ref: None,
+                agent_fingerprint: "test-acp-agent".to_string(),
+                agent_definition_json: "null".to_string(),
+                runtime_ref: "acp:test".to_string(),
+                backend_kind: "acp".to_string(),
+                native_kind: "agent_session".to_string(),
+                native_session_id: Some(request.thread.id.clone()),
+                profile_fingerprint: "test-acp-profile".to_string(),
+                profile_revision: "1".to_string(),
+                profile_config_json: "{}".to_string(),
+                adapter_kind: "acp".to_string(),
+                adapter_revision: "test".to_string(),
+            }),
         }
     }
 
@@ -5217,11 +5436,18 @@ mod tests {
     #[tokio::test]
     async fn bound_thread_delivery_inherits_runtime_and_rejects_mismatched_intent() {
         let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.toml");
+        std::fs::write(&config_path, "default_permissions = \":workspace\"\n").expect("config");
         let started = Arc::new(Notify::new());
         let release = Arc::new(Notify::new());
         let preparations = Arc::new(AtomicUsize::new(0));
         let application = Application::builder()
             .home(temp.path())
+            .config_path(&config_path)
+            .inherited_environment(BTreeMap::from([(
+                "HOME".to_string(),
+                temp.path().to_string_lossy().into_owned(),
+            )]))
             .database_path(":memory:")
             .agent_session_adapter(Arc::new(PreparationCountingInteractionAdapter {
                 inner: InteractionAgentSessionAdapter {
@@ -5251,9 +5477,9 @@ mod tests {
             .state
             .create_gateway_runtime_binding(crate::state::GatewayRuntimeBindingInput {
                 thread_id: thread.id(),
-                agent_ref: Some("remote-agent"),
+                agent_ref: None,
                 agent_fingerprint: "remote-agent-fingerprint",
-                agent_definition_json: r#"{"name":"remote-agent"}"#,
+                agent_definition_json: "null",
                 runtime_ref: "acp-production",
                 backend_kind: "acp",
                 native_kind: "acp",
@@ -5867,6 +6093,7 @@ mod tests {
         let first_started = Arc::new(Notify::new());
         let release_first = Arc::new(Notify::new());
         let second_snapshot_items = Arc::new(Mutex::new(None));
+        let second_thread = Arc::new(Mutex::new(None));
         let application = Application::builder()
             .home(temp.path())
             .database_path(":memory:")
@@ -5875,15 +6102,49 @@ mod tests {
                 first_started: first_started.clone(),
                 release_first: release_first.clone(),
                 second_snapshot_items: second_snapshot_items.clone(),
+                second_thread: second_thread.clone(),
             }))
             .build()
             .await
             .expect("application");
-        let thread = application
+        let seed = application
             .client()
             .start_thread(StartThreadRequest::new(temp.path()))
             .await
             .expect("thread");
+        let secondary = temp.path().join("secondary");
+        let replacement = temp.path().join("replacement");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        std::fs::create_dir_all(&replacement).expect("replacement");
+        let context = application
+            .client()
+            .thread_workspace_context(seed.id())
+            .await
+            .expect("Workspace context");
+        let workspace = application
+            .client()
+            .workspace(&context.workspace_id)
+            .await
+            .expect("Workspace lookup")
+            .expect("Workspace");
+        let accepted_workspace = application
+            .client()
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: workspace.id,
+                expected_revision: workspace.revision,
+                name: workspace.name,
+                roots: vec![temp.path().to_path_buf(), secondary.clone()],
+            })
+            .await
+            .expect("accepted Workspace roots");
+        let thread = application
+            .client()
+            .start_thread(
+                StartThreadRequest::new(temp.path())
+                    .with_workspace_snapshot(accepted_workspace.clone()),
+            )
+            .await
+            .expect("explicit Workspace thread");
         let first = thread
             .start_turn(TurnRequest::new("first"))
             .await
@@ -5942,6 +6203,17 @@ mod tests {
         ));
 
         application
+            .client()
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: accepted_workspace.id,
+                expected_revision: accepted_workspace.revision,
+                name: accepted_workspace.name,
+                roots: vec![temp.path().to_path_buf(), replacement],
+            })
+            .await
+            .expect("mutate Workspace while second Turn is queued");
+
+        application
             .inner
             .state
             .append_message(
@@ -5959,6 +6231,173 @@ mod tests {
                 .expect("snapshot observation poisoned"),
             Some(1)
         );
+        assert_eq!(
+            second_thread
+                .lock()
+                .expect("Thread observation poisoned")
+                .as_ref()
+                .expect("second invocation")
+                .roots,
+            vec![
+                temp.path().display().to_string(),
+                secondary.display().to_string()
+            ]
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn queued_turn_captures_acp_filesystem_policy_before_acceptance() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let cwd = temp.path().join("workspace");
+        std::fs::create_dir_all(&home).expect("home");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let target = cwd.join("protected.txt");
+        std::fs::write(&target, "protected").expect("target");
+        let config_path = home.join("config.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "default_permissions = \"local\"\n\
+                 [permissions.local]\n\
+                 extends = \":workspace\"\n\
+                 [permissions.local.filesystem]\n\
+                 {:?} = \"deny\"\n",
+                target.to_string_lossy()
+            ),
+        )
+        .expect("deny config");
+        let first_started = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let second_denied = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(&home)
+            .config_path(&config_path)
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(QueuedFilesystemPolicyAgentSessionAdapter {
+                calls: AtomicUsize::new(0),
+                first_started: Arc::clone(&first_started),
+                release_first: Arc::clone(&release_first),
+                target,
+                second_denied: Arc::clone(&second_denied),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("Thread");
+        let first = thread
+            .start_turn(TurnRequest::new("first"))
+            .await
+            .expect("first Turn");
+        first_started.notified().await;
+        let second = thread
+            .start_turn(TurnRequest::new("second"))
+            .await
+            .expect("queued Turn");
+
+        std::fs::write(
+            &config_path,
+            "default_permissions = \"local\"\n[permissions.local]\nextends = \":workspace\"\n",
+        )
+        .expect("widen config after acceptance");
+        release_first.notify_one();
+        first.wait().await.expect("first result");
+        second.wait().await.expect("second result");
+
+        assert_eq!(
+            *second_denied.lock().expect("policy observation poisoned"),
+            Some(true),
+            "the queued Turn must retain the policy captured before its acceptance"
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn queued_native_turn_captures_root_identity_before_acceptance() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cwd = temp.path().join("workspace");
+        let original = temp.path().join("original-workspace");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let first_started = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let second_denied = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(QueuedRootIdentityAgentSessionAdapter {
+                calls: AtomicUsize::new(0),
+                first_started: Arc::clone(&first_started),
+                release_first: Arc::clone(&release_first),
+                second_denied: Arc::clone(&second_denied),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("Thread");
+        let first = thread
+            .start_turn(TurnRequest::new("first"))
+            .await
+            .expect("first Turn");
+        first_started.notified().await;
+        let second = thread
+            .start_turn(TurnRequest::new("second"))
+            .await
+            .expect("queued Turn");
+
+        std::fs::rename(&cwd, &original).expect("retain original root");
+        std::fs::create_dir(&cwd).expect("replacement root");
+        release_first.notify_one();
+        first.wait().await.expect("first result");
+        second.wait().await.expect("second result");
+
+        assert_eq!(
+            *second_denied
+                .lock()
+                .expect("root identity observation poisoned"),
+            Some(true),
+            "the queued native Turn must not establish a replacement root as its baseline"
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn root_identity_is_captured_before_asynchronous_agent_preparation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cwd = temp.path().join("workspace");
+        let original = temp.path().join("workspace-original");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(PreparationRootReplacementAgentSessionAdapter {
+                root: cwd.clone(),
+                original,
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("Thread");
+
+        let error = thread
+            .start_turn(TurnRequest::new("must not run"))
+            .await
+            .expect_err("preparation cannot establish a replacement identity baseline");
+
+        assert!(error.to_string().contains("path_identity_changed"));
         application.shutdown().await.expect("shutdown");
     }
 
@@ -6747,9 +7186,34 @@ mod tests {
         let plan = TurnRequest::new("child permission")
             .with_approval(Some(captured_parent_wrapper), false)
             .resolve(BTreeMap::new(), None);
+        let parent_summary = application
+            .inner
+            .state
+            .session_summary(parent.id())
+            .await
+            .expect("parent summary")
+            .expect("parent Thread");
+        let parent_workspace = application
+            .inner
+            .state
+            .thread_workspace_context(parent.id())
+            .await
+            .expect("parent Workspace")
+            .expect("parent context");
+        let parent_thread = ThreadExecutionContext::from_summary(parent_summary, parent_workspace);
+        let parent_workspace_root_capture = crate::WorkspaceRootCapture::capture(
+            &parent_thread
+                .roots
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>(),
+        )
+        .expect("parent root capture");
         let dispatcher = AgentChildTurnDispatcher {
             inner: Arc::downgrade(&application.inner),
             approval_handler: Some(raw_handler),
+            parent_thread,
+            parent_workspace_root_capture,
         };
         let handle = dispatcher
             .start_child_turn(parent.id(), &child_id, plan)
@@ -6786,6 +7250,178 @@ mod tests {
             FrameworkInteractionStatus::Resolved
         );
         assert!(parent_interactions.is_empty());
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn delegated_child_inherits_the_running_parent_turn_root_snapshot() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let primary = temp.path().join("primary");
+        let captured_secondary = temp.path().join("captured-secondary");
+        let replacement = temp.path().join("replacement");
+        let delegated_root = temp.path().join("delegated-turn-grant");
+        for root in [&primary, &captured_secondary, &replacement, &delegated_root] {
+            std::fs::create_dir_all(root).expect("Workspace root");
+        }
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let config_path = home.join("config.toml");
+        std::fs::write(&config_path, "default_permissions = \":workspace\"\n").expect("config");
+        let captured_threads = Arc::new(Mutex::new(Vec::new()));
+        let delegated_authorized = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(&home)
+            .config_path(&config_path)
+            .inherited_environment(BTreeMap::from([(
+                "HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            )]))
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(CapturedThreadAgentSessionAdapter {
+                threads: Arc::clone(&captured_threads),
+                authorization: Some((
+                    delegated_root.join("allowed.txt"),
+                    Arc::clone(&delegated_authorized),
+                )),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let seed = client
+            .start_thread(StartThreadRequest::new(&primary))
+            .await
+            .expect("seed Thread");
+        let seed_context = client
+            .thread_workspace_context(seed.id())
+            .await
+            .expect("seed context");
+        let workspace = client
+            .workspace(&seed_context.workspace_id)
+            .await
+            .expect("Workspace")
+            .expect("Workspace record");
+        let captured_workspace = client
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: workspace.id,
+                expected_revision: workspace.revision,
+                name: "Delegated roots".to_string(),
+                roots: vec![primary.clone(), captured_secondary.clone()],
+            })
+            .await
+            .expect("captured Workspace");
+        let parent = client
+            .start_thread(
+                StartThreadRequest::new(&primary)
+                    .with_workspace_snapshot(captured_workspace.clone()),
+            )
+            .await
+            .expect("explicit parent Thread");
+        let parent_summary = application
+            .inner
+            .state
+            .session_summary(parent.id())
+            .await
+            .expect("parent summary")
+            .expect("parent Thread");
+        let parent_workspace = application
+            .inner
+            .state
+            .thread_workspace_context(parent.id())
+            .await
+            .expect("parent Workspace")
+            .expect("parent context");
+        let captured_parent =
+            ThreadExecutionContext::from_summary(parent_summary, parent_workspace);
+        application
+            .inner
+            .state
+            .filesystem_grants(parent.id())
+            .grant_scope(&crate::types::FilesystemApprovalScope {
+                directory: delegated_root.display().to_string(),
+                lifetime: crate::types::FilesystemApprovalLifetime::Turn,
+            })
+            .expect("parent AllowTurn grant");
+
+        client
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: captured_workspace.id,
+                expected_revision: captured_workspace.revision,
+                name: captured_workspace.name,
+                roots: vec![primary.clone(), replacement],
+            })
+            .await
+            .expect("mutate catalog during parent Turn");
+        let child_id = application
+            .inner
+            .state
+            .create_child_session_with_metadata(
+                parent.id(),
+                &primary,
+                "agent",
+                "fake-model",
+                "fake-provider",
+                None,
+            )
+            .await
+            .expect("child Thread");
+        application
+            .inner
+            .state
+            .upsert_agent_edge(
+                parent.id(),
+                &child_id,
+                crate::state::AgentEdgeStatus::Open,
+                None,
+            )
+            .await
+            .expect("child edge");
+        let parent_workspace_root_capture = crate::WorkspaceRootCapture::capture(
+            &captured_parent
+                .roots
+                .iter()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>(),
+        )
+        .expect("parent root capture");
+        let dispatcher = AgentChildTurnDispatcher {
+            inner: Arc::downgrade(&application.inner),
+            approval_handler: None,
+            parent_thread: captured_parent,
+            parent_workspace_root_capture,
+        };
+        let handle = dispatcher
+            .start_child_turn(
+                parent.id(),
+                &child_id,
+                TurnRequest::new("delegated child").resolve(
+                    BTreeMap::from([("HOME".to_string(), home.to_string_lossy().into_owned())]),
+                    Some(config_path),
+                ),
+            )
+            .await
+            .expect("child Turn");
+        handle.wait().await.expect("child result");
+
+        let observed_roots = {
+            let observed = captured_threads.lock().expect("captured Threads poisoned");
+            assert_eq!(observed.len(), 1);
+            observed[0].roots.clone()
+        };
+        assert_eq!(
+            observed_roots,
+            vec![
+                primary.display().to_string(),
+                captured_secondary.display().to_string(),
+            ]
+        );
+        assert_eq!(
+            *delegated_authorized
+                .lock()
+                .expect("delegated authorization poisoned"),
+            Some("allowed".to_string()),
+            "the external child must share the active parent AllowTurn grant"
+        );
         application.shutdown().await.expect("shutdown");
     }
 
@@ -7147,6 +7783,152 @@ no_auth = true
                 ] if command == command_text
             ));
         }
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn first_persistent_shell_rejects_a_stale_workspace_capture() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        for path in [&home, &primary, &secondary] {
+            std::fs::create_dir_all(path).expect("directory");
+        }
+        std::fs::write(
+            home.join("config.toml"),
+            r#"
+model = "lmstudio/test-model"
+[provider.lmstudio.models.test-model]
+"#,
+        )
+        .expect("config");
+        let application = Application::builder()
+            .home(&home)
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let seed = client
+            .start_thread(StartThreadRequest::new(&primary))
+            .await
+            .expect("seed Thread");
+        let seed_context = client
+            .thread_workspace_context(seed.id())
+            .await
+            .expect("seed context");
+        let workspace = client
+            .workspace(&seed_context.workspace_id)
+            .await
+            .expect("workspace")
+            .expect("workspace record");
+        let workspace = client
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: workspace.id,
+                expected_revision: workspace.revision,
+                name: "Multi-root".to_string(),
+                roots: vec![primary.clone(), secondary.clone()],
+            })
+            .await
+            .expect("workspace update");
+
+        let command = client
+            .shell_command(
+                ShellCommandRequest::new(&primary, "printf workspace-shell")
+                    .source("web")
+                    .workspace_snapshot(workspace.clone()),
+            )
+            .expect("shell command");
+        client
+            .update_workspace(WorkspaceUpdate {
+                workspace_id: workspace.id.clone(),
+                expected_revision: workspace.revision,
+                name: workspace.name.clone(),
+                roots: vec![secondary.clone(), primary.clone()],
+            })
+            .await
+            .expect("reorder after shell acceptance");
+
+        let error = command
+            .run(|_| {})
+            .await
+            .expect_err("stale Workspace capture must be rejected");
+        assert!(error.to_string().contains("changed before shell admission"));
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn public_workspace_view_cannot_be_modified_into_a_wider_capture() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let extra = temp.path().join("extra");
+        std::fs::create_dir_all(&extra).expect("extra root");
+        let application = Application::builder()
+            .home(temp.path().join("home"))
+            .database_path(":memory:")
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let seed = client
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("seed Thread");
+        let context = client
+            .thread_workspace_context(seed.id())
+            .await
+            .expect("Workspace context");
+        let mut workspace = client
+            .workspace(&context.workspace_id)
+            .await
+            .expect("Workspace lookup")
+            .expect("Workspace");
+        workspace.roots.push(extra.to_string_lossy().into_owned());
+
+        let error = client
+            .start_thread(StartThreadRequest::new(temp.path()).with_workspace_snapshot(workspace))
+            .await
+            .expect_err("modified Workspace capture must be rejected");
+
+        assert!(error.to_string().contains("modified outside the Framework"));
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn workspace_targeted_shell_ignores_a_missing_constructor_cwd() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let primary = temp.path().join("primary");
+        std::fs::create_dir_all(&primary).expect("primary");
+        let application = Application::builder()
+            .home(&home)
+            .database_path(":memory:")
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let seed = client
+            .start_thread(StartThreadRequest::new(&primary))
+            .await
+            .expect("seed Thread");
+        let workspace_id = client
+            .thread_workspace_context(seed.id())
+            .await
+            .expect("Workspace context")
+            .workspace_id;
+
+        let missing_cwd = temp.path().join("missing-cwd");
+        let _command = client
+            .shell_command(
+                ShellCommandRequest::new(&missing_cwd, "printf workspace")
+                    .workspace(workspace_id)
+                    .source("test"),
+            )
+            .expect("Workspace target resolves before caller cwd validation");
+
+        assert!(
+            !missing_cwd.exists(),
+            "constructing a Workspace-targeted shell must not create the discarded cwd"
+        );
         application.shutdown().await.expect("shutdown");
     }
 }

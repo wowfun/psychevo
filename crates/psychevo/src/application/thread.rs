@@ -20,7 +20,8 @@ use super::{
     InitialThreadSourceAssociation, InteractionResponse, InteractionResponseReceipt,
     MAX_HISTORY_PAGE_SIZE, MAX_THREAD_LIST_LIMIT, PendingInteraction, StartThreadRequest, Thread,
     ThreadActivitySnapshot, ThreadExecutionContext, ThreadItem, ThreadListCursor, ThreadListPage,
-    ThreadListQuery, ThreadSnapshot, ThreadSummary, TurnHandle, TurnRequest,
+    ThreadListQuery, ThreadSnapshot, ThreadSummary, ThreadWorkspaceContext, TurnHandle,
+    TurnRequest, Workspace,
 };
 use crate::compaction::{CompactSessionOptions, CompactionResult};
 use crate::paths::canonicalize_cwd;
@@ -67,6 +68,8 @@ impl Client {
         let context = ThreadExecutionContext {
             id: id.clone(),
             cwd: cwd.to_string_lossy().into_owned(),
+            workspace_id: None,
+            roots: vec![cwd.to_string_lossy().into_owned()],
             source: source.clone(),
             source_key: None,
         };
@@ -142,7 +145,8 @@ impl Client {
         mut start: StartThreadRequest,
         request: TurnRequest,
     ) -> Result<TurnHandle> {
-        let cwd = canonicalize_cwd(&start.cwd)?;
+        let (cwd, workspace_id, runtime_roots, workspace_revision) =
+            self.resolve_start_workspace(&start).await?;
         let id = start
             .requested_id
             .take()
@@ -155,6 +159,9 @@ impl Client {
             request,
             Some(NewThreadAdmission {
                 cwd,
+                workspace_id,
+                runtime_roots,
+                workspace_revision,
                 source: start.source,
                 metadata: start.metadata,
                 initial_source: start.initial_source,
@@ -168,7 +175,8 @@ impl Client {
     }
 
     pub async fn start_thread(&self, request: StartThreadRequest) -> Result<Thread> {
-        let cwd = canonicalize_cwd(&request.cwd)?;
+        let (cwd, workspace_id, runtime_roots, workspace_revision) =
+            self.resolve_start_workspace(&request).await?;
         let runtime = self.inner.runtime.clone();
         let admission = runtime.begin_admission().await?;
         let reservation = runtime.reserve_application_operation()?;
@@ -178,15 +186,34 @@ impl Client {
             drop(admission);
             let result = async {
                 let _reservation = reservation.acquire().await?;
-                state
-                    .create_session_with_metadata(
-                        &cwd,
-                        &request.source,
-                        "pending",
-                        "pending",
-                        request.metadata,
-                    )
-                    .await
+                if let (Some(workspace_id), Some(workspace_revision)) =
+                    (workspace_id.as_deref(), workspace_revision)
+                {
+                    state
+                        .create_session_in_workspace_snapshot_with_metadata(
+                            crate::store::WorkspaceSessionSnapshotInput {
+                                cwd: &cwd,
+                                workspace_id,
+                                workspace_roots: &runtime_roots,
+                                workspace_revision,
+                                source: &request.source,
+                                model: "pending",
+                                provider: "pending",
+                                metadata: request.metadata,
+                            },
+                        )
+                        .await
+                } else {
+                    state
+                        .create_session_with_metadata(
+                            &cwd,
+                            &request.source,
+                            "pending",
+                            "pending",
+                            request.metadata,
+                        )
+                        .await
+                }
             }
             .await;
             let _ = result_tx.send(result);
@@ -198,6 +225,70 @@ impl Client {
             client: self.clone(),
             id,
         })
+    }
+
+    async fn resolve_start_workspace(
+        &self,
+        request: &StartThreadRequest,
+    ) -> Result<(PathBuf, Option<String>, Vec<String>, Option<i64>)> {
+        if let Some(workspace) = request.workspace_snapshot.as_ref() {
+            workspace.validate_capture()?;
+            if request.workspace_id.as_deref() != Some(workspace.id.as_str()) {
+                return Err(Error::Message(
+                    "captured Workspace identity does not match the requested Workspace"
+                        .to_string(),
+                ));
+            }
+            let current = self
+                .inner
+                .state
+                .workspace(&workspace.id)
+                .await?
+                .ok_or_else(|| Error::Message(format!("workspace not found: {}", workspace.id)))?;
+            if current.id != workspace.id
+                || current.name != workspace.name
+                || current.roots != workspace.roots
+                || current.revision != workspace.revision
+            {
+                return Err(Error::Message(format!(
+                    "workspace `{}` changed before admission",
+                    workspace.id
+                )));
+            }
+            let cwd = workspace.roots.first().map(PathBuf::from).ok_or_else(|| {
+                Error::Message(format!("workspace `{}` has no roots", workspace.id))
+            })?;
+            return Ok((
+                cwd,
+                Some(workspace.id.clone()),
+                workspace.roots.clone(),
+                Some(workspace.revision),
+            ));
+        }
+        if let Some(workspace_id) = request.workspace_id.as_deref() {
+            let workspace = self
+                .inner
+                .state
+                .workspace(workspace_id)
+                .await?
+                .ok_or_else(|| Error::Message(format!("workspace not found: {workspace_id}")))?;
+            let cwd = workspace.roots.first().map(PathBuf::from).ok_or_else(|| {
+                Error::Message(format!("workspace `{workspace_id}` has no roots"))
+            })?;
+            return Ok((
+                cwd,
+                Some(workspace.id),
+                workspace.roots,
+                Some(workspace.revision),
+            ));
+        }
+        let cwd = canonicalize_cwd(&request.cwd)?;
+        Ok((
+            cwd.clone(),
+            None,
+            vec![cwd.to_string_lossy().into_owned()],
+            None,
+        ))
     }
 
     pub async fn resume_thread(&self, id: impl Into<String>) -> Result<Thread> {
@@ -274,6 +365,7 @@ impl Client {
     }
 
     async fn snapshot_from_summary(&self, summary: SessionSummary) -> Result<ThreadSnapshot> {
+        let workspace = self.thread_workspace_context(&summary.id).await?;
         let summary = self.summary_from_summary(summary);
         let pending_interactions = self
             .inner
@@ -288,6 +380,7 @@ impl Client {
             .await?;
         Ok(ThreadSnapshot::from_summary(
             summary,
+            workspace,
             pending_interactions,
             history.items,
             history.next_before,
@@ -299,6 +392,8 @@ impl StartThreadRequest {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),
+            workspace_id: None,
+            workspace_snapshot: None,
             source: "sdk".to_string(),
             metadata: None,
             requested_id: None,
@@ -307,6 +402,23 @@ impl StartThreadRequest {
             initial_binding: None,
             initial_thread_preferences: BTreeMap::new(),
         }
+    }
+
+    pub fn with_workspace(mut self, workspace_id: impl Into<String>) -> Self {
+        self.workspace_id = Some(workspace_id.into());
+        self.workspace_snapshot = None;
+        self
+    }
+
+    pub fn with_workspace_snapshot(mut self, workspace: Workspace) -> Self {
+        self.cwd = workspace
+            .roots
+            .first()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        self.workspace_id = Some(workspace.id.clone());
+        self.workspace_snapshot = Some(workspace);
+        self
     }
 
     pub fn with_initial_context(
@@ -329,6 +441,9 @@ impl StartThreadRequest {
 
 pub(super) struct NewThreadAdmission {
     cwd: PathBuf,
+    workspace_id: Option<String>,
+    runtime_roots: Vec<String>,
+    workspace_revision: Option<i64>,
     source: String,
     metadata: Option<Value>,
     initial_source: Option<InitialThreadSourceAssociation>,
@@ -342,6 +457,8 @@ impl NewThreadAdmission {
         ThreadExecutionContext {
             id: thread_id.to_string(),
             cwd: self.cwd.to_string_lossy().into_owned(),
+            workspace_id: self.workspace_id.clone(),
+            roots: self.runtime_roots.clone(),
             source: self.source.clone(),
             source_key: self.execution_source_key.clone().or_else(|| {
                 self.initial_source
@@ -409,6 +526,12 @@ impl NewThreadAdmission {
             .accept_new_framework_thread_turn(NewFrameworkThreadTurnInput {
                 thread_id: delivery.thread_id,
                 cwd: &self.cwd,
+                workspace_id: self.workspace_id.as_deref(),
+                workspace_roots: self
+                    .workspace_id
+                    .as_ref()
+                    .map(|_| self.runtime_roots.as_slice()),
+                workspace_revision: self.workspace_revision,
                 source: &self.source,
                 metadata: self.metadata,
                 delivery,
@@ -687,7 +810,16 @@ impl Thread {
                 .await?
                 .map(AgentBindingSnapshot::try_from)
                 .transpose()?;
-            let context = ThreadExecutionContext::from_summary(summary);
+            let workspace = thread
+                .client
+                .inner
+                .state
+                .thread_workspace_context(&thread.id)
+                .await?
+                .ok_or_else(|| {
+                    Error::Message(format!("Thread `{}` has no Workspace context", thread.id))
+                })?;
+            let context = ThreadExecutionContext::from_summary(summary, workspace);
             let mcp_resolver = thread.client.agent_mcp_server_resolver(&context);
             let metadata = thread
                 .client
@@ -846,10 +978,21 @@ impl Thread {
                         thread.id
                     ))
                 })?;
-            let source_context = ThreadExecutionContext::from_summary(summary);
+            let source_workspace = thread
+                .client
+                .inner
+                .state
+                .thread_workspace_context(&thread.id)
+                .await?
+                .ok_or_else(|| {
+                    Error::Message(format!("Thread `{}` has no Workspace context", thread.id))
+                })?;
+            let source_context = ThreadExecutionContext::from_summary(summary, source_workspace);
             let destination_context = ThreadExecutionContext {
                 id: Uuid::now_v7().to_string(),
                 cwd: source_context.cwd.clone(),
+                workspace_id: source_context.workspace_id.clone(),
+                roots: source_context.roots.clone(),
                 source: source.clone(),
                 source_key: None,
             };
@@ -1122,10 +1265,15 @@ impl ThreadSummary {
 }
 
 impl ThreadExecutionContext {
-    pub(super) fn from_summary(summary: SessionSummary) -> Self {
+    pub(super) fn from_summary(
+        summary: SessionSummary,
+        workspace: crate::store::ThreadWorkspaceRecord,
+    ) -> Self {
         Self {
             id: summary.id,
             cwd: summary.cwd,
+            workspace_id: Some(workspace.workspace_id),
+            roots: workspace.roots,
             source: summary.source,
             source_key: None,
         }
@@ -1242,12 +1390,14 @@ impl fmt::Debug for HistoryReader {
 impl ThreadSnapshot {
     fn from_summary(
         summary: ThreadSummary,
+        workspace: ThreadWorkspaceContext,
         pending_interactions: Vec<PendingInteraction>,
         items: Vec<ThreadItem>,
         history_cursor: Option<i64>,
     ) -> Self {
         Self {
             summary,
+            workspace,
             pending_interactions,
             items,
             history_cursor,

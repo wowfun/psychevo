@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 use super::store_undo_state::{
     ensure_native_history_fork_boundary, ensure_native_history_fork_eligible,
 };
+use super::store_workspaces::copy_thread_workspace_in_tx;
 use super::{NativeSessionForkInput, StateRuntime};
 
 impl StateRuntime {
@@ -127,6 +128,13 @@ impl StateRuntime {
                     "failed to create forked session from {source_session_id}"
                 )));
             }
+            copy_thread_workspace_in_tx(
+                &mut tx,
+                source_session_id,
+                &child_session_id,
+                now,
+            )
+            .await?;
 
             sqlx::query(
                 r#"

@@ -19,6 +19,9 @@ pub(crate) struct PermissionRuntime {
 
 pub(super) struct PermissionRuntimeInner {
     pub(super) cwd: PathBuf,
+    pub(super) workspace_roots: Vec<PathBuf>,
+    pub(super) workspace_root_identities:
+        Vec<crate::filesystem_identity::CapturedDirectoryIdentity>,
     pub(super) project_config_dir: PathBuf,
     pub(super) protected_config_paths: Vec<PathBuf>,
     pub(super) mode: PermissionMode,

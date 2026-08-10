@@ -20,6 +20,8 @@ pub(super) mod results;
 pub struct RunOptions {
     pub state: StateRuntime,
     pub cwd: PathBuf,
+    /// Canonical execution roots for this Thread. Empty means cwd-only.
+    pub workspace_roots: Vec<PathBuf>,
     pub snapshot_root: Option<PathBuf>,
     pub session: Option<String>,
     pub continue_latest: bool,

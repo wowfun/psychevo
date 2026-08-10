@@ -124,12 +124,8 @@ impl EventSink for PersistenceSink {
             {
                 events.lock().expect("event lock poisoned").push(value);
             }
-            if let Some(stream_events) = &stream_events
-                && let Some(value) =
-                    project_run_stream_event_with_accounting(&event, accounting.as_ref())
-            {
-                stream_events(value);
-            }
+            let stream_event =
+                project_run_stream_event_with_accounting(&event, accounting.as_ref());
             match event {
                 AgentEvent::MessageEnd {
                     message,
@@ -197,6 +193,11 @@ impl EventSink for PersistenceSink {
                     .await
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
                 _ => {}
+            }
+            if let Some(stream_events) = &stream_events
+                && let Some(value) = stream_event
+            {
+                stream_events(value);
             }
             Ok(())
         })

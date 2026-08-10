@@ -5,6 +5,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use super::Workspace;
 use super::{
     AgentRemoteDeleteState, Client, DEFAULT_THREAD_LIST_LIMIT, MAX_THREAD_LIST_LIMIT, Thread,
     ThreadItem, ThreadSummary,
@@ -77,7 +78,7 @@ pub struct HumanThreadListPage {
 pub struct HumanThreadBrowserQuery {
     pub cwd: Option<PathBuf>,
     pub archived: bool,
-    pub cursor_cwd: Option<String>,
+    pub cursor_workspace_id: Option<String>,
     pub cursor_offset: usize,
     pub limit: usize,
     pub recent_since_ms: i64,
@@ -87,7 +88,7 @@ pub struct HumanThreadBrowserQuery {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HumanThreadBrowserWorkspace {
-    pub cwd: String,
+    pub workspace: Workspace,
     pub threads: Vec<HumanThreadSummary>,
     pub hidden_count: usize,
     pub next_offset: Option<usize>,
@@ -180,7 +181,7 @@ impl Client {
             .browse_human_sessions(SessionBrowserRequest {
                 cwd: cwd.as_deref(),
                 archived: query.archived,
-                cursor_cwd: query.cursor_cwd.as_deref(),
+                cursor_workspace_id: query.cursor_workspace_id.as_deref(),
                 cursor_offset: query.cursor_offset,
                 limit: query.limit.clamp(1, MAX_HUMAN_THREAD_BROWSER_LIMIT),
                 recent_since_ms: query.recent_since_ms,
@@ -193,7 +194,7 @@ impl Client {
             .into_iter()
             .map(|workspace| {
                 Ok(HumanThreadBrowserWorkspace {
-                    cwd: workspace.cwd,
+                    workspace: Workspace::from(workspace.workspace),
                     threads: workspace
                         .sessions
                         .into_iter()
@@ -209,7 +210,7 @@ impl Client {
             let right_latest = workspace_latest_at(right);
             right_latest
                 .cmp(&left_latest)
-                .then_with(|| left.cwd.cmp(&right.cwd))
+                .then_with(|| left.workspace.name.cmp(&right.workspace.name))
         });
         Ok(workspaces)
     }
@@ -956,7 +957,7 @@ mod tests {
             .browse_human_threads(HumanThreadBrowserQuery {
                 cwd: Some(temp.path().to_path_buf()),
                 archived: false,
-                cursor_cwd: None,
+                cursor_workspace_id: None,
                 cursor_offset: 0,
                 limit: 20,
                 recent_since_ms: 0,

@@ -19,7 +19,18 @@ use crate::types::{
     ApprovalsReviewer, PermissionApprovalOutcome, PermissionConfig, PermissionMode,
 };
 
+#[derive(Clone, Copy)]
+struct AuthorizationIdentityCheck<'a> {
+    expected: Option<&'a Option<Vec<PathBuf>>>,
+    roots_prevalidated: bool,
+}
+
 impl PermissionRuntime {
+    #[cfg(test)]
+    pub(crate) fn has_smart_approval_handler(&self) -> bool {
+        self.inner.smart_approval_handler.is_some()
+    }
+
     pub(crate) fn update_cache_identity_hasher(&self, hasher: &mut sha2::Sha256) {
         fn update_value(hasher: &mut sha2::Sha256, value: &str) {
             hasher.update(value.len().to_le_bytes());
@@ -27,6 +38,9 @@ impl PermissionRuntime {
         }
 
         update_value(hasher, &self.inner.cwd.to_string_lossy());
+        for root in &self.inner.workspace_roots {
+            update_value(hasher, &root.to_string_lossy());
+        }
         update_value(hasher, &self.inner.project_config_dir.to_string_lossy());
         update_value(hasher, self.inner.mode.as_str());
         update_value(hasher, &format!("{:?}", self.inner.config));
@@ -56,6 +70,11 @@ impl PermissionRuntime {
         .collect();
         Self {
             inner: Arc::new(PermissionRuntimeInner {
+                workspace_roots: vec![cwd.clone()],
+                workspace_root_identities:
+                    crate::filesystem_identity::CapturedDirectoryIdentity::capture(&cwd)
+                        .into_iter()
+                        .collect(),
                 cwd,
                 project_config_dir,
                 protected_config_paths,
@@ -71,6 +90,59 @@ impl PermissionRuntime {
                 hook_runtime: None,
             }),
         }
+    }
+
+    pub(crate) fn with_workspace_roots(
+        mut self,
+        roots: impl IntoIterator<Item = PathBuf>,
+    ) -> crate::error::Result<Self> {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("Workspace roots must be attached before PermissionRuntime is cloned");
+        let mut identities =
+            vec![crate::filesystem_identity::CapturedDirectoryIdentity::capture(&inner.cwd)?];
+        for root in roots {
+            let identity = crate::filesystem_identity::CapturedDirectoryIdentity::capture(&root)?;
+            if !identities
+                .iter()
+                .any(|current| current.path() == identity.path())
+            {
+                identities.push(identity);
+            }
+        }
+        inner.workspace_roots = identities
+            .iter()
+            .map(|identity| identity.path().to_path_buf())
+            .collect();
+        inner.workspace_root_identities = identities;
+        Ok(self)
+    }
+
+    pub(crate) fn with_workspace_root_capture(
+        mut self,
+        capture: &crate::filesystem_identity::WorkspaceRootCapture,
+    ) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("Workspace roots must be attached before PermissionRuntime is cloned");
+        inner.workspace_roots = capture.paths();
+        inner.workspace_root_identities = capture.identities().to_vec();
+        self
+    }
+
+    pub(super) fn validate_workspace_root_identities(&self) -> crate::error::Result<()> {
+        for identity in &self.inner.workspace_root_identities {
+            identity.validate()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn open_captured_workspace_directory(
+        &self,
+        target: &std::path::Path,
+    ) -> crate::error::Result<std::fs::File> {
+        crate::filesystem_identity::WorkspaceRootCapture::from_identities(
+            self.inner.workspace_root_identities.clone(),
+        )
+        .open_directory(target)
     }
 
     pub(crate) fn with_protected_config_paths(
@@ -169,6 +241,99 @@ impl PermissionRuntime {
             .await
     }
 
+    pub(crate) async fn authorize_filesystem_callback_target(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        path: &std::path::Path,
+        writable: bool,
+        abort: AbortSignal,
+        require_workspace_containment: bool,
+    ) -> std::result::Result<crate::filesystem_identity::CapturedFileTarget, ToolOutput> {
+        let args = json!({ "path": path });
+        let prepared_runtime = self.clone();
+        let prepared_args = args.clone();
+        let prepared_tool_name = tool_name.to_string();
+        let (approved_action, approved_identity, captured_target) =
+            tokio::task::spawn_blocking(move || {
+                let approved_action = PermissionAction::from_tool_call(
+                    &prepared_runtime.inner.cwd,
+                    &prepared_runtime.inner.workspace_roots,
+                    &prepared_tool_name,
+                    &prepared_args,
+                )
+                .map_err(|err| format!("filesystem identity resolution failed: {err}"))?;
+                let approved_identity = approved_action
+                    .as_ref()
+                    .and_then(PermissionAction::filesystem_identity_snapshot)
+                    .ok_or_else(|| "filesystem permission action is unavailable".to_string())?;
+                let target = approved_identity
+                    .first()
+                    .ok_or_else(|| "filesystem permission target is unavailable".to_string())?;
+                prepared_runtime
+                    .validate_workspace_identity_for_target(target, require_workspace_containment)
+                    .map_err(|error| error.to_string())?;
+                let captured_target =
+                    crate::filesystem_identity::CapturedFileTarget::capture(target, writable)
+                        .map_err(|error| error.to_string())?;
+                Ok::<_, String>((approved_action, approved_identity, captured_target))
+            })
+            .await
+            .map_err(|error| {
+                ToolOutput::error(format!("filesystem identity worker failed: {error}"))
+            })?
+            .map_err(ToolOutput::error)?;
+        let approved_identity_expectation = Some(approved_identity.clone());
+        self.authorize_resolved_inner(
+            tool_call_id,
+            tool_name,
+            &args,
+            approved_action.as_ref(),
+            Some(abort),
+            AuthorizationIdentityCheck {
+                expected: Some(&approved_identity_expectation),
+                roots_prevalidated: true,
+            },
+        )
+        .await?;
+        let current_runtime = self.clone();
+        let current_tool_name = tool_name.to_string();
+        tokio::task::spawn_blocking(move || {
+            let target = approved_identity
+                .first()
+                .ok_or_else(|| "filesystem permission target is unavailable".to_string())?;
+            current_runtime
+                .validate_workspace_identity_for_target(target, require_workspace_containment)
+                .map_err(|error| error.to_string())?;
+            let current_identity = PermissionAction::from_tool_call(
+                &current_runtime.inner.cwd,
+                &current_runtime.inner.workspace_roots,
+                &current_tool_name,
+                &args,
+            )
+            .map_err(|err| {
+                format!(
+                    "path_identity_changed: filesystem identity could not be revalidated: {err}"
+                )
+            })?
+            .and_then(|action| action.filesystem_identity_snapshot())
+            .ok_or_else(|| "filesystem permission action is unavailable".to_string())?;
+            if current_identity != approved_identity {
+                return Err(
+                    "path_identity_changed: filesystem identity changed after permission evaluation"
+                        .to_string(),
+                );
+            }
+            captured_target
+                .revalidate()
+                .map_err(|error| error.to_string())?;
+            Ok(captured_target)
+        })
+        .await
+        .map_err(|error| ToolOutput::error(format!("filesystem identity worker failed: {error}")))?
+        .map_err(ToolOutput::error)
+    }
+
     #[cfg(test)]
     pub(crate) async fn authorize_with_abort(
         &self,
@@ -186,15 +351,20 @@ impl PermissionRuntime {
         tool_call_id: &str,
         tool_name: &str,
         args: &Value,
+        action: &Option<PermissionAction>,
         abort: AbortSignal,
         expected_identity: &Option<Vec<PathBuf>>,
     ) -> std::result::Result<(), ToolOutput> {
-        self.authorize_inner(
+        self.authorize_resolved_inner(
             tool_call_id,
             tool_name,
             args,
+            action.as_ref(),
             Some(abort),
-            Some(expected_identity),
+            AuthorizationIdentityCheck {
+                expected: Some(expected_identity),
+                roots_prevalidated: false,
+            },
         )
         .await
     }
@@ -207,42 +377,75 @@ impl PermissionRuntime {
         abort: Option<AbortSignal>,
         expected_identity: Option<&Option<Vec<PathBuf>>>,
     ) -> std::result::Result<(), ToolOutput> {
+        let action = PermissionAction::from_tool_call(
+            &self.inner.cwd,
+            &self.inner.workspace_roots,
+            tool_name,
+            args,
+        )
+        .map_err(|err| {
+            permission_error(
+                "denied",
+                &format!("filesystem identity resolution failed: {err}"),
+                None,
+            )
+        })?;
+        self.authorize_resolved_inner(
+            tool_call_id,
+            tool_name,
+            args,
+            action.as_ref(),
+            abort,
+            AuthorizationIdentityCheck {
+                expected: expected_identity,
+                roots_prevalidated: false,
+            },
+        )
+        .await
+    }
+
+    async fn authorize_resolved_inner(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+        action: Option<&PermissionAction>,
+        abort: Option<AbortSignal>,
+        identity_check: AuthorizationIdentityCheck<'_>,
+    ) -> std::result::Result<(), ToolOutput> {
         if abort.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(ToolOutput::error("aborted"));
         }
-        let action =
-            PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args).map_err(|err| {
-                permission_error(
-                    "denied",
-                    &format!("filesystem identity resolution failed: {err}"),
-                    None,
-                )
-            })?;
-        if let Some(expected_identity) = expected_identity
+        if !identity_check.roots_prevalidated
             && action
-                .as_ref()
                 .and_then(PermissionAction::filesystem_identity_snapshot)
-                != *expected_identity
+                .is_some()
+        {
+            self.validate_workspace_root_identities()
+                .map_err(|error| ToolOutput::error(error.to_string()))?;
+        }
+        if let Some(expected_identity) = identity_check.expected
+            && action.and_then(PermissionAction::filesystem_identity_snapshot) != *expected_identity
         {
             return Err(ToolOutput::error(
                 "path_identity_changed: filesystem identity changed before permission evaluation",
             ));
         }
-        match self.evaluate_resolved_action(action.as_ref()) {
+        match self.evaluate_resolved_action(action) {
             PermissionDecision::Allow => {
-                let sandbox_grant = match action.as_ref() {
+                let sandbox_grant = match action {
                     Some(action) => self
                         .sandbox_write_grant_request(action)
                         .map_err(ToolOutput::error)?,
                     None => None,
                 };
                 if let Some(grant) = sandbox_grant {
-                    let session_key = action
-                        .as_ref()
-                        .map(PermissionAction::session_key)
-                        .unwrap_or_else(|| {
-                            format!("{tool_name}:{}", action_summary(tool_name, args))
-                        });
+                    let session_key =
+                        action
+                            .map(PermissionAction::session_key)
+                            .unwrap_or_else(|| {
+                                format!("{tool_name}:{}", action_summary(tool_name, args))
+                            });
                     if self
                         .inner
                         .sandbox_grants
@@ -276,7 +479,7 @@ impl PermissionRuntime {
                 session_key,
                 persistent_grants,
             } => {
-                let sandbox_grant = match action.as_ref() {
+                let sandbox_grant = match action {
                     Some(action) => self
                         .sandbox_write_grant_request(action)
                         .map_err(ToolOutput::error)?,
@@ -305,11 +508,8 @@ impl PermissionRuntime {
                         matched_rule: matched_rule.as_deref(),
                         suggested_rule: suggested_rule.clone(),
                         allow_always: allow_always && sandbox_grant.is_none(),
-                        filesystem: action
-                            .as_ref()
-                            .and_then(PermissionAction::filesystem_approval_request),
+                        filesystem: action.and_then(PermissionAction::filesystem_approval_request),
                         mcp_startup: action
-                            .as_ref()
                             .and_then(PermissionAction::mcp_startup_approval_request),
                         abort,
                     })
@@ -407,5 +607,28 @@ impl PermissionRuntime {
                 }
             }
         }
+    }
+
+    fn validate_workspace_identity_for_target(
+        &self,
+        target: &std::path::Path,
+        required: bool,
+    ) -> crate::error::Result<()> {
+        let identity = self
+            .inner
+            .workspace_root_identities
+            .iter()
+            .filter(|identity| crate::filesystem_identity::is_within(identity.path(), target))
+            .max_by_key(|identity| identity.path().components().count());
+        let Some(identity) = identity else {
+            if !required {
+                return Ok(());
+            }
+            return Err(crate::Error::Message(format!(
+                "filesystem target is outside the captured Workspace: {}",
+                target.display()
+            )));
+        };
+        identity.validate()
     }
 }

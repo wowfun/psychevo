@@ -69,6 +69,12 @@ use crate::types::{
     RuntimeTool,
 };
 
+#[derive(Clone, Default)]
+pub(crate) struct RunLiveDependencies {
+    pub(crate) workspace_root_capture: Option<crate::filesystem_identity::WorkspaceRootCapture>,
+    pub(crate) provider_override: Option<Provider>,
+}
+
 pub(crate) async fn run_live_internal(
     options: RunOptions,
     source: &str,
@@ -76,8 +82,12 @@ pub(crate) async fn run_live_internal(
     stream_events: Option<RunStreamSink>,
     control: Option<RunControl>,
     overflow_retry_attempted: bool,
-    provider_override: Option<Provider>,
+    dependencies: RunLiveDependencies,
 ) -> Result<RunResult> {
+    let RunLiveDependencies {
+        workspace_root_capture,
+        provider_override,
+    } = dependencies;
     let cwd = canonical_cwd(&options.cwd)?;
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
         return Err(Error::Message("prompt is empty".to_string()));
@@ -585,6 +595,10 @@ pub(crate) async fn run_live_internal(
         effective_mode,
         &loaded.env,
     )?;
+    let sandbox_policy = match workspace_root_capture.as_ref() {
+        Some(capture) => sandbox_policy.with_workspace_root_capture(capture),
+        None => sandbox_policy.with_workspace_roots(&options.workspace_roots)?,
+    };
     let sandbox_grants = options.state.filesystem_grants(&session_id);
     let _turn_filesystem_grant_guard = options
         .state
@@ -606,6 +620,8 @@ pub(crate) async fn run_live_internal(
             context_limit: resolved.context_limit,
             generation_metadata: generation_metadata.clone(),
             cwd: cwd.clone(),
+            workspace_roots: options.workspace_roots.clone(),
+            workspace_root_capture: workspace_root_capture.clone(),
             mode: effective_mode,
             project_context_mode,
             permission_config: loaded.config.permissions.clone(),
@@ -667,6 +683,10 @@ pub(crate) async fn run_live_internal(
             generation_metadata.clone(),
         ),
     );
+    let permission_runtime = match workspace_root_capture.as_ref() {
+        Some(capture) => permission_runtime.with_workspace_root_capture(capture),
+        None => permission_runtime.with_workspace_roots(options.workspace_roots.clone())?,
+    };
     let permission_runtime = permission_runtime
         .with_protected_config_paths(loaded.sources.clone())
         .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
@@ -1050,7 +1070,10 @@ pub(crate) async fn run_live_internal(
                     stream_events_after.clone(),
                     None,
                     true,
-                    provider_override.clone(),
+                    RunLiveDependencies {
+                        workspace_root_capture: workspace_root_capture.clone(),
+                        provider_override: provider_override.clone(),
+                    },
                 ))
                 .await;
             }

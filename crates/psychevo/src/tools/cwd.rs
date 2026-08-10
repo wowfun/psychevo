@@ -101,6 +101,19 @@ impl CwdTool {
         }
     }
 
+    pub(crate) fn take_authorized_file_mutation(
+        &self,
+        tool_call_id: Option<&str>,
+    ) -> Option<super::file_mutation::IdentityBoundFileMutation> {
+        let targets = self
+            .context
+            .sandbox_grants
+            .take_authorized_files(tool_call_id?)?;
+        Some(super::file_mutation::IdentityBoundFileMutation::new(
+            targets,
+        ))
+    }
+
     pub(crate) fn relative(&self, path: &Path) -> String {
         let cwd = crate::filesystem_identity::canonicalize_deepest_existing(&self.cwd)
             .unwrap_or_else(|_| self.cwd.clone());

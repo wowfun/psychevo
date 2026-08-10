@@ -38,8 +38,10 @@ pub(super) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         PermissionAction::ExecCommand {
             normalized, cwd, ..
         } => {
-            if cwd.as_ref().is_some_and(|target| !target.within_cwd) {
-                return Some("command cwd outside accepted cwd requires approval".to_string());
+            if cwd.as_ref().is_some_and(|target| !target.within_workspace) {
+                return Some(
+                    "command cwd outside the Workspace roots requires approval".to_string(),
+                );
             }
             dangerous_bash_reason(normalized)
         }
@@ -79,17 +81,17 @@ fn workspace_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluati
         PermissionAction::File {
             paths, mutating, ..
         } => {
-            if !mutating || paths.iter().all(|target| target.within_cwd) {
+            if !mutating || paths.iter().all(|target| target.within_workspace) {
                 return ActionPolicyEvaluation::Allow;
             }
             let outside = paths
                 .iter()
-                .filter(|target| !target.within_cwd)
+                .filter(|target| !target.within_workspace)
                 .map(|target| target.absolute.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             ActionPolicyEvaluation::Ask {
-                reason: "file write outside the working directory requires approval".to_string(),
+                reason: "file write outside the Workspace roots requires approval".to_string(),
                 matched_rule: None,
                 suggested_rule: Some(format!("filesystem:{outside}")),
                 persistent_grants: action.persistent_grants(),

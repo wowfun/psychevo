@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v32_rejects_legacy_state_databases_with_reset_guidance() {
+pub(crate) async fn sqlite_schema_v33_rejects_legacy_state_databases_with_reset_guidance() {
     for version in 1..=28 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
@@ -47,7 +47,7 @@ pub(crate) async fn sqlite_schema_v32_rejects_legacy_state_databases_with_reset_
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v32_rejects_unknown_state_database() {
+pub(crate) async fn sqlite_schema_v33_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -67,7 +67,7 @@ pub(crate) async fn sqlite_schema_v32_rejects_unknown_state_database() {
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v32_creates_framework_and_gateway_coordination_schema() {
+pub(crate) async fn sqlite_schema_v33_creates_framework_and_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -91,7 +91,7 @@ pub(crate) async fn sqlite_schema_v32_creates_framework_and_gateway_coordination
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 32);
+    assert_eq!(user_version, 33);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());

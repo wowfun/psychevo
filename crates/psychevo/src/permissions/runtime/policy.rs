@@ -7,7 +7,7 @@ use super::super::rules::{
     InlineInterpreterReview, dangerous_bash_reason, inline_interpreter_review,
     is_known_safe_command,
 };
-use super::actions::{PermissionAction, file_target};
+use super::actions::PermissionAction;
 use super::exec_matching::{command_tokens, exec_prefix_label, exec_prefix_matches};
 use super::profiles::{builtin_profile_decision, explicit_profile_decision, hardline_deny};
 use super::protected_paths::{protected_permission_config_reason, protected_read_reason};
@@ -20,7 +20,19 @@ use crate::types::{ApprovalPolicy, ExecPolicyDecision, PermissionMode};
 impl PermissionRuntime {
     #[cfg(test)]
     pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecisionView {
-        let action = match PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args) {
+        if let Err(err) = self.validate_workspace_root_identities() {
+            return PermissionDecision::Deny {
+                reason: err.to_string(),
+                matched_rule: None,
+            }
+            .into();
+        }
+        let action = match PermissionAction::from_tool_call(
+            &self.inner.cwd,
+            &self.inner.workspace_roots,
+            tool_name,
+            args,
+        ) {
             Ok(action) => action,
             Err(err) => {
                 return PermissionDecision::Deny {
@@ -97,7 +109,7 @@ impl PermissionRuntime {
             } => {
                 if self.inner.mode == PermissionMode::AcceptEdits
                     && action.is_safe_file_edit()
-                    && action.file_targets_all_within_cwd()
+                    && action.file_targets_all_within_workspace()
                 {
                     return PermissionDecision::Allow;
                 }
@@ -148,7 +160,7 @@ impl PermissionRuntime {
         else {
             return None;
         };
-        if cwd.as_ref().is_some_and(|target| !target.within_cwd) {
+        if cwd.as_ref().is_some_and(|target| !target.within_workspace) {
             return Some(ActionPolicyEvaluation::Ask {
                 reason: "command cwd outside accepted cwd requires approval".to_string(),
                 matched_rule: None,
@@ -219,7 +231,13 @@ impl PermissionRuntime {
         }
         let targets = paths
             .iter()
-            .map(|path| file_target(&self.inner.cwd, path))
+            .map(|path| {
+                super::actions::file_target_in_workspace(
+                    &self.inner.cwd,
+                    &self.inner.workspace_roots,
+                    path,
+                )
+            })
             .collect::<crate::error::Result<Vec<_>>>();
         let Ok(targets) = targets else {
             return false;

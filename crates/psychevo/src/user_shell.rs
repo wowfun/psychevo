@@ -152,9 +152,54 @@ pub(crate) async fn prepare_user_shell_context(
     cwd: &Path,
     command: &str,
 ) -> Result<PreparedUserShellContext> {
+    let store = context.state.clone();
+    let continue_sources = context
+        .continue_sources
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let existing_session = if let Some(session_id) = context.session.clone() {
+        Some(session_id)
+    } else if context.continue_latest {
+        store
+            .latest_session_for_cwd_with_sources(cwd, &continue_sources)
+            .await?
+    } else {
+        None
+    };
+    let workspace_roots = if let Some(session_id) = existing_session.as_deref() {
+        store
+            .thread_workspace_context(session_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!("Thread `{session_id}` has no Workspace context"))
+            })?
+            .roots
+    } else if let Some(roots) = context.workspace_roots.clone() {
+        roots
+    } else {
+        vec![cwd.to_string_lossy().into_owned()]
+    };
+    let workspace_root_paths = workspace_roots
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let workspace_root_capture = match context.workspace_root_capture.as_ref() {
+        Some(capture) => {
+            if capture.paths() != workspace_root_paths {
+                return Err(Error::Message(
+                    "captured Workspace roots do not match shell admission".to_string(),
+                ));
+            }
+            capture.validate_async().await?;
+            capture.clone()
+        }
+        None => crate::WorkspaceRootCapture::capture_async(workspace_root_paths.clone()).await?,
+    };
     let options = RunOptions {
         state: context.state.clone(),
         cwd: cwd.to_path_buf(),
+        workspace_roots: workspace_root_paths,
         snapshot_root: None,
         session: context.session.clone(),
         continue_latest: context.continue_latest,
@@ -195,36 +240,44 @@ pub(crate) async fn prepare_user_shell_context(
         cwd,
         context.mode,
         &loaded.env,
-    )?;
-    let store = context.state.clone();
-    let continue_sources = context
-        .continue_sources
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let existing_session = if let Some(session_id) = context.session.clone() {
-        Some(session_id)
-    } else if context.continue_latest {
-        store
-            .latest_session_for_cwd_with_sources(cwd, &continue_sources)
-            .await?
-    } else {
-        None
-    };
+    )?
+    .with_workspace_root_capture(&workspace_root_capture);
+    workspace_root_capture.validate_async().await?;
     let (session_id, created_session) = if let Some(session_id) = existing_session {
         store.resume_session(&session_id).await?;
         (session_id, false)
     } else {
         (
-            store
-                .create_session_with_metadata(
-                    cwd,
-                    &context.source,
-                    &resolved.model,
-                    &resolved.provider,
-                    Some(user_shell_session_metadata(&resolved, context.mode)),
-                )
-                .await?,
+            if let Some(workspace_id) = context.workspace_id.as_deref() {
+                store
+                    .create_session_in_workspace_snapshot_with_metadata(
+                        crate::store::WorkspaceSessionSnapshotInput {
+                            cwd,
+                            workspace_id,
+                            workspace_roots: &workspace_roots,
+                            workspace_revision: context.workspace_revision.ok_or_else(|| {
+                                Error::Message(
+                                    "captured Workspace revision is unavailable".to_string(),
+                                )
+                            })?,
+                            source: &context.source,
+                            model: &resolved.model,
+                            provider: &resolved.provider,
+                            metadata: Some(user_shell_session_metadata(&resolved, context.mode)),
+                        },
+                    )
+                    .await?
+            } else {
+                store
+                    .create_session_with_metadata(
+                        cwd,
+                        &context.source,
+                        &resolved.model,
+                        &resolved.provider,
+                        Some(user_shell_session_metadata(&resolved, context.mode)),
+                    )
+                    .await?
+            },
             true,
         )
     };
@@ -366,4 +419,246 @@ pub(crate) fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod workspace_context_tests {
+    use super::*;
+    use crate::sandbox::SandboxWriteDecision;
+    use crate::types::UserShellContextOptions;
+
+    #[tokio::test]
+    async fn thread_bound_user_shell_restores_secondary_workspace_roots() {
+        let temp = tempfile::tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        let home = temp.path().join("home");
+        for path in [&primary, &secondary, &home] {
+            std::fs::create_dir_all(path).expect("directory");
+        }
+        std::fs::write(
+            home.join("config.toml"),
+            r#"
+model = "lmstudio/test-model"
+[provider.lmstudio.models.test-model]
+[sandbox]
+enabled = true
+mode = "workspace-write"
+writable_roots = []
+include_tmp = false
+include_common_caches = false
+"#,
+        )
+        .expect("config");
+        let state = StateRuntime::open(":memory:").await.expect("state");
+        let seed = state.create_session(&primary).await.expect("seed");
+        let seed_context = state
+            .thread_workspace_context(&seed)
+            .await
+            .expect("context")
+            .expect("workspace context");
+        let workspace = state
+            .workspace(&seed_context.workspace_id)
+            .await
+            .expect("workspace")
+            .expect("workspace record");
+        let workspace = state
+            .update_workspace(
+                &workspace.id,
+                workspace.revision,
+                "Multi-root",
+                &[primary.clone(), secondary.clone()],
+            )
+            .await
+            .expect("update workspace");
+        let thread = state
+            .create_session_in_workspace_with_metadata(
+                &primary,
+                &workspace.id,
+                "web",
+                "test-model",
+                "lmstudio",
+                None,
+            )
+            .await
+            .expect("explicit Workspace Thread");
+        let environment = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let context = UserShellContextOptions {
+            state,
+            session: Some(thread),
+            workspace_id: None,
+            workspace_roots: None,
+            workspace_revision: None,
+            workspace_root_capture: None,
+            continue_latest: false,
+            source: "web".to_string(),
+            continue_sources: vec!["web".to_string()],
+            config_path: None,
+            model: None,
+            reasoning_effort: None,
+            mode: crate::types::RunMode::Default,
+        };
+
+        let prepared = prepare_user_shell_context(&context, &environment, &primary, "true")
+            .await
+            .expect("prepared shell");
+
+        assert_eq!(
+            prepared
+                .sandbox_policy
+                .write_decision(&secondary.join("write.txt"))
+                .expect("sandbox decision"),
+            SandboxWriteDecision::Allowed
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn invalid_captured_shell_roots_do_not_create_a_thread() {
+        let temp = tempfile::tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        let home = temp.path().join("home");
+        for path in [&primary, &secondary, &home] {
+            std::fs::create_dir_all(path).expect("directory");
+        }
+        let dangling = temp.path().join("dangling-root");
+        std::os::unix::fs::symlink(temp.path().join("missing-root"), &dangling)
+            .expect("dangling symlink");
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"
+model = "lmstudio/test-model"
+[provider.lmstudio.models.test-model]
+[sandbox]
+enabled = true
+mode = "workspace-write"
+writable_roots = ["{}"]
+include_tmp = false
+include_common_caches = false
+"#,
+                dangling.display()
+            ),
+        )
+        .expect("config");
+        let state = StateRuntime::open(":memory:").await.expect("state");
+        let seed = state.create_session(&primary).await.expect("seed");
+        let context = state
+            .thread_workspace_context(&seed)
+            .await
+            .expect("context")
+            .expect("workspace context");
+        let workspace = state
+            .workspace(&context.workspace_id)
+            .await
+            .expect("workspace")
+            .expect("workspace record");
+        let workspace = state
+            .update_workspace(
+                &workspace.id,
+                workspace.revision,
+                "Multi-root",
+                &[primary.clone(), secondary.clone()],
+            )
+            .await
+            .expect("update workspace");
+        let environment = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let context = UserShellContextOptions {
+            state: state.clone(),
+            session: None,
+            workspace_revision: Some(workspace.revision),
+            workspace_id: Some(workspace.id),
+            workspace_roots: Some(workspace.roots),
+            workspace_root_capture: None,
+            continue_latest: false,
+            source: "web".to_string(),
+            continue_sources: vec!["web".to_string()],
+            config_path: None,
+            model: None,
+            reasoning_effort: None,
+            mode: crate::types::RunMode::Default,
+        };
+
+        assert!(
+            prepare_user_shell_context(&context, &environment, &primary, "true")
+                .await
+                .is_err(),
+            "missing captured root must reject"
+        );
+
+        assert!(
+            state
+                .session_ids_for_cwd_with_source(&primary, "web")
+                .await
+                .expect("web Threads")
+                .is_empty()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn first_shell_rejects_a_replaced_captured_workspace_root_before_persistence() {
+        let temp = tempfile::tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        let original_secondary = temp.path().join("secondary-original");
+        let home = temp.path().join("home");
+        for path in [&primary, &secondary, &home] {
+            std::fs::create_dir_all(path).expect("directory");
+        }
+        std::fs::write(
+            home.join("config.toml"),
+            "model = \"lmstudio/test-model\"\n[provider.lmstudio.models.test-model]\n",
+        )
+        .expect("config");
+        let state = StateRuntime::open(":memory:").await.expect("state");
+        let roots = vec![primary.clone(), secondary.clone()];
+        let capture = crate::WorkspaceRootCapture::capture(&roots).expect("shell capture");
+        std::fs::rename(&secondary, &original_secondary).expect("retain original root");
+        std::fs::create_dir(&secondary).expect("replacement root");
+        let environment = BTreeMap::from([
+            ("HOME".to_string(), home.display().to_string()),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+        ]);
+        let context = UserShellContextOptions {
+            state: state.clone(),
+            session: None,
+            workspace_id: Some("workspace-capture".to_string()),
+            workspace_roots: Some(
+                roots
+                    .iter()
+                    .map(|root| root.display().to_string())
+                    .collect(),
+            ),
+            workspace_revision: Some(1),
+            workspace_root_capture: Some(capture),
+            continue_latest: false,
+            source: "web".to_string(),
+            continue_sources: vec!["web".to_string()],
+            config_path: None,
+            model: None,
+            reasoning_effort: None,
+            mode: crate::types::RunMode::Default,
+        };
+
+        let error = prepare_user_shell_context(&context, &environment, &primary, "true")
+            .await
+            .err()
+            .expect("replacement must fail before Thread creation");
+        assert!(error.to_string().contains("path_identity_changed"));
+        assert!(
+            state
+                .session_ids_for_cwd_with_source(&primary, "web")
+                .await
+                .expect("web Threads")
+                .is_empty()
+        );
+    }
 }

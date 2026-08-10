@@ -320,7 +320,8 @@ pub(crate) async fn exec_command_tool_impl_with_context(
             root_tool_call_id: tool_call_id,
             stream_events: context.stream_events,
         },
-    )?;
+    )
+    .await?;
     if let Some(sink) = workspace_mutations {
         sink.observe(WorkspaceMutation::Opaque {
             source: "exec_command".to_string(),
@@ -416,7 +417,8 @@ pub(crate) async fn run_exec_command_for_user_shell(
             root_tool_call_id: "user_shell".to_string(),
             stream_events: None,
         },
-    )?;
+    )
+    .await?;
     let started = Instant::now();
     let mut output = String::new();
     let mut final_value = await_session_result(
@@ -710,10 +712,14 @@ impl ExecProcess {
     }
 }
 
-pub(crate) fn spawn_exec_session(
+pub(crate) async fn spawn_exec_session(
     invocation: ExecInvocation,
     context: ExecSessionContext,
 ) -> Result<Arc<ExecSession>> {
+    invocation
+        .sandbox_policy
+        .ensure_shell_supported_async()
+        .await?;
     if invocation.tty && invocation.sandbox_policy.enabled {
         return Err(crate::sandbox::sandbox_denied(
             "tty=true is not supported when sandbox is enabled",
@@ -745,7 +751,9 @@ pub(crate) fn spawn_pipe_session(
     stdin_allowed: bool,
     initial_output: &[u8],
 ) -> Result<Arc<ExecSession>> {
-    invocation.sandbox_policy.ensure_shell_supported()?;
+    invocation
+        .sandbox_policy
+        .ensure_shell_platform_supported()?;
     #[cfg(windows)]
     if invocation.sandbox_policy.enabled
         && matches!(

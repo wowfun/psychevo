@@ -19,7 +19,7 @@ use super::config_types::{
     PluginPolicyConfig, RuntimeProfileConfig,
 };
 use crate::agents::AgentBackendConfig;
-use crate::types::{ProjectContextInstructionMode, RunOptions};
+use crate::types::{ProjectContextInstructionMode, RunOptions, RunSandboxOverride};
 use crate::{Error, Result};
 
 pub(crate) fn load_run_config(options: &RunOptions, cwd: &Path) -> Result<LoadedRunConfig> {
@@ -27,11 +27,27 @@ pub(crate) fn load_run_config(options: &RunOptions, cwd: &Path) -> Result<Loaded
         .inherited_env
         .clone()
         .unwrap_or_else(|| env::vars().collect());
-    let mut loaded = load_run_config_from(options.config_path.as_deref(), &inherited_env, cwd)?;
-    if let Some(mode) = options.project_context_override {
+    load_run_config_for_execution(
+        options.config_path.as_deref(),
+        &inherited_env,
+        cwd,
+        options.project_context_override,
+        options.sandbox_override.as_ref(),
+    )
+}
+
+pub(crate) fn load_run_config_for_execution(
+    config_path: Option<&Path>,
+    inherited_env: &BTreeMap<String, String>,
+    cwd: &Path,
+    project_context_override: Option<ProjectContextInstructionMode>,
+    sandbox_override: Option<&RunSandboxOverride>,
+) -> Result<LoadedRunConfig> {
+    let mut loaded = load_run_config_from(config_path, inherited_env, cwd)?;
+    if let Some(mode) = project_context_override {
         loaded.config.project_context.instructions = mode;
     }
-    if let Some(sandbox) = &options.sandbox_override {
+    if let Some(sandbox) = sandbox_override {
         loaded.config.sandbox = crate::sandbox::SandboxConfig {
             enabled: sandbox.enabled,
             mode: match sandbox.mode {

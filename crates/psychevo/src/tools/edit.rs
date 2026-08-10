@@ -127,9 +127,14 @@ pub(crate) fn edit_replace(
     let new_string = required_string(&args, "new_string")?;
     let replace_all = optional_bool(&args, "replace_all")?.unwrap_or(false);
     let target = tool.resolve_existing(path)?;
+    let authorized = tool.take_authorized_file_mutation(tool_call_id);
+    let backend: &dyn FileMutationBackend = authorized
+        .as_ref()
+        .map(|backend| backend as &dyn FileMutationBackend)
+        .unwrap_or(&LOCAL_FILE_MUTATION);
     tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
     let _locks = acquire_path_locks(std::slice::from_ref(&target));
-    let (text, expected) = read_text_snapshot(&LOCAL_FILE_MUTATION, &target)?;
+    let (text, expected) = read_text_snapshot(backend, &target)?;
     let old = normalize_lf(old_string.trim_start_matches('\u{feff}'));
     let new = normalize_lf(new_string.trim_start_matches('\u{feff}'));
     let outcome = match fuzzy_find_and_replace(&text.normalized, &old, &new, replace_all) {
@@ -145,7 +150,7 @@ pub(crate) fn edit_replace(
     let diff = git_patch_update(&rel, &text.normalized, &outcome.content);
     let restored = restore_text_file(&text, &outcome.content);
     let baseline = snapshot_lsp_baseline(&tool, &target, Some(&text.original));
-    LOCAL_FILE_MUTATION
+    backend
         .replace(tool.task_id(), &target, expected, restored.as_bytes())
         .map_err(Error::from)?;
     record_written_file(tool.file_reads(), &target, restored.as_bytes()).map_err(Error::from)?;
@@ -172,6 +177,11 @@ pub(crate) fn edit_patch(tool: CwdTool, tool_call_id: Option<&str>, args: Value)
         Ok(operations) => operations,
         Err(err) => return Ok(json!({ "success": false, "error": err.to_string() })),
     };
+    let authorized = tool.take_authorized_file_mutation(tool_call_id);
+    let backend: &dyn FileMutationBackend = authorized
+        .as_ref()
+        .map(|backend| backend as &dyn FileMutationBackend)
+        .unwrap_or(&LOCAL_FILE_MUTATION);
     let mut lock_paths = Vec::new();
     for op in &operations {
         match op.kind {
@@ -198,8 +208,7 @@ pub(crate) fn edit_patch(tool: CwdTool, tool_call_id: Option<&str>, args: Value)
         }));
     }
     let _locks = acquire_path_locks(&lock_paths);
-    let plan = match validate_v4a_operations(&tool, tool_call_id, &operations, &LOCAL_FILE_MUTATION)
-    {
+    let plan = match validate_v4a_operations(&tool, tool_call_id, &operations, backend) {
         Ok(plan) => plan,
         Err(err) => {
             return Ok(json!({
@@ -208,7 +217,7 @@ pub(crate) fn edit_patch(tool: CwdTool, tool_call_id: Option<&str>, args: Value)
             }));
         }
     };
-    apply_v4a_plan_with_backend(&tool, plan, &LOCAL_FILE_MUTATION)
+    apply_v4a_plan_with_backend(&tool, plan, backend)
 }
 
 pub(crate) fn overlapping_patch_targets(paths: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {

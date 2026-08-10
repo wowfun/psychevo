@@ -13,8 +13,8 @@ use crate::session_trace::{
 };
 use crate::types::SessionSummary;
 
-pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 32;
-pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 29;
+pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 33;
+pub(crate) const MIN_SUPPORTED_SQLITE_SCHEMA_VERSION: i64 = 33;
 pub(crate) const SESSION_REVERT_METADATA_KEY: &str = "revert";
 pub(crate) const MESSAGE_UNDO_METADATA_KEY: &str = "undo";
 pub(crate) const MESSAGE_PRE_SNAPSHOT_KEY: &str = "pre_snapshot";
@@ -146,6 +146,17 @@ pub struct ChildSessionSnapshotInput<'a> {
     pub runtime_binding: Option<ChildSessionRuntimeBindingSnapshotInput<'a>>,
 }
 
+pub(crate) struct WorkspaceSessionSnapshotInput<'a> {
+    pub cwd: &'a Path,
+    pub workspace_id: &'a str,
+    pub workspace_roots: &'a [String],
+    pub workspace_revision: i64,
+    pub source: &'a str,
+    pub model: &'a str,
+    pub provider: &'a str,
+    pub metadata: Option<Value>,
+}
+
 pub struct ChildSessionRuntimeBindingSnapshotInput<'a> {
     pub expected_binding_revision: i64,
     pub expected_control_revision: i64,
@@ -229,6 +240,9 @@ pub(crate) struct ExistingFrameworkThreadTurnInput<'a> {
 pub(crate) struct NewFrameworkThreadTurnInput<'a> {
     pub thread_id: &'a str,
     pub cwd: &'a Path,
+    pub workspace_id: Option<&'a str>,
+    pub workspace_roots: Option<&'a [String]>,
+    pub workspace_revision: Option<i64>,
     pub source: &'a str,
     pub metadata: Option<Value>,
     pub delivery: GatewayTurnDeliveryInput<'a>,
@@ -577,7 +591,7 @@ pub(crate) struct SessionListProjectionPage {
 pub(crate) struct SessionBrowserRequest<'a> {
     pub(crate) cwd: Option<&'a str>,
     pub(crate) archived: bool,
-    pub(crate) cursor_cwd: Option<&'a str>,
+    pub(crate) cursor_workspace_id: Option<&'a str>,
     pub(crate) cursor_offset: usize,
     pub(crate) limit: usize,
     pub(crate) recent_since_ms: i64,
@@ -587,7 +601,7 @@ pub(crate) struct SessionBrowserRequest<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SessionBrowserWorkspaceProjection {
-    pub(crate) cwd: String,
+    pub(crate) workspace: WorkspaceRecord,
     pub(crate) sessions: Vec<SessionListProjection>,
     pub(crate) hidden_count: usize,
     pub(crate) next_offset: Option<usize>,
@@ -1123,6 +1137,16 @@ impl StateRuntime {
         grants.entry(session_id.to_string()).or_default().clone()
     }
 
+    pub(crate) fn filesystem_grants_with_turn_scopes(
+        &self,
+        session_id: &str,
+        turn_owner_session_id: &str,
+    ) -> crate::sandbox::SandboxWriteGrants {
+        let local = self.filesystem_grants(session_id);
+        let turn_owner = self.filesystem_grants(turn_owner_session_id);
+        local.with_turn_scopes_from(&turn_owner)
+    }
+
     pub(crate) fn turn_filesystem_grant_guard(
         &self,
         session_id: impl Into<String>,
@@ -1231,6 +1255,11 @@ pub(crate) mod store_sqlx_runtime;
 pub(crate) mod store_turn_delivery;
 #[path = "store/undo_helpers.rs"]
 pub(crate) mod store_undo_helpers;
+#[path = "store/workspaces.rs"]
+pub(crate) mod store_workspaces;
+pub(crate) use store_workspaces::{
+    GatewayNavigationRecord, ThreadWorkspaceRecord, WorkspaceRecord,
+};
 
 #[cfg(test)]
 mod state_runtime_tests {
@@ -1272,5 +1301,50 @@ mod state_runtime_tests {
         );
         state.clear_session_filesystem_grants("session-1");
         assert!(grants.scoped_roots().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delegated_grants_share_only_the_parent_turn_scope() {
+        let temp = tempfile::tempdir().expect("temp");
+        let turn_root = temp.path().join("turn");
+        let parent_session_root = temp.path().join("parent-session");
+        let child_session_root = temp.path().join("child-session");
+        for root in [&turn_root, &parent_session_root, &child_session_root] {
+            std::fs::create_dir_all(root).expect("grant root");
+        }
+        let state = StateRuntime::open(":memory:").await.expect("state");
+        let parent = state.filesystem_grants("parent");
+        parent
+            .grant_scope(&FilesystemApprovalScope {
+                directory: turn_root.display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Turn,
+            })
+            .expect("parent turn grant");
+        parent
+            .grant_scope(&FilesystemApprovalScope {
+                directory: parent_session_root.display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            })
+            .expect("parent session grant");
+        let child = state.filesystem_grants_with_turn_scopes("child", "parent");
+        child
+            .grant_scope(&FilesystemApprovalScope {
+                directory: child_session_root.display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            })
+            .expect("child session grant");
+
+        let child_roots = child.scoped_roots();
+        assert!(child_roots.contains(&turn_root.canonicalize().expect("turn identity")));
+        assert!(child_roots.contains(&child_session_root.canonicalize().expect("child identity")));
+        assert!(
+            !child_roots.contains(&parent_session_root.canonicalize().expect("parent identity"))
+        );
+
+        state.clear_turn_filesystem_grants("parent");
+        assert_eq!(
+            child.scoped_roots(),
+            vec![child_session_root.canonicalize().expect("child identity")]
+        );
     }
 }

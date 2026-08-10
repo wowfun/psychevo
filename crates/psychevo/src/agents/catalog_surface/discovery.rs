@@ -230,6 +230,8 @@ pub(crate) struct AgentToolContext {
     pub(crate) context_limit: Option<u64>,
     pub(crate) generation_metadata: Value,
     pub(crate) cwd: PathBuf,
+    pub(crate) workspace_roots: Vec<PathBuf>,
+    pub(crate) workspace_root_capture: Option<crate::WorkspaceRootCapture>,
     pub(crate) mode: RunMode,
     pub(crate) project_context_mode: ProjectContextInstructionMode,
     pub(crate) permission_config: PermissionConfig,

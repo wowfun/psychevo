@@ -683,7 +683,12 @@ pub(crate) async fn cli_session_commands_manage_active_and_archived_sessions() {
         .args(["session", "archive", "latest", "--json"])
         .output()
         .expect("session archive");
-    assert!(archive.status.success());
+    assert!(
+        archive.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&archive.stdout),
+        String::from_utf8_lossy(&archive.stderr)
+    );
 
     let archived = admin_cmd(temp.path(), &psychevo_home, &cwd)
         .args(["session", "list", "--archived", "--json"])

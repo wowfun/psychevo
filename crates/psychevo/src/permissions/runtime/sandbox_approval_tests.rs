@@ -204,7 +204,7 @@ async fn workspace_write_through_symlink_to_external_requires_approval() {
     assert!(!target.exists());
     let requests = handler.requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].reason.contains("outside the working directory"));
+    assert!(requests[0].reason.contains("outside the Workspace roots"));
     let filesystem = requests[0].filesystem.as_ref().expect("filesystem scope");
     assert_eq!(
         filesystem.targets[0].requested_path,

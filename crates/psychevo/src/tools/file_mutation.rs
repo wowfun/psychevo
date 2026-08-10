@@ -107,6 +107,109 @@ pub(crate) struct LocalFileMutation;
 
 pub(crate) const LOCAL_FILE_MUTATION: LocalFileMutation = LocalFileMutation;
 
+#[derive(Debug)]
+pub(crate) struct IdentityBoundFileMutation {
+    targets: Mutex<HashMap<PathBuf, crate::filesystem_identity::CapturedFileTarget>>,
+}
+
+impl IdentityBoundFileMutation {
+    pub(crate) fn new(targets: Vec<crate::filesystem_identity::CapturedFileTarget>) -> Self {
+        Self {
+            targets: Mutex::new(
+                targets
+                    .into_iter()
+                    .map(|target| (target.target().to_path_buf(), target))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn with_target<T>(
+        &self,
+        path: &Path,
+        action: impl FnOnce(&mut crate::filesystem_identity::CapturedFileTarget) -> crate::Result<T>,
+    ) -> MutationResult<T> {
+        let mut targets = self.targets.lock().map_err(|_| {
+            MutationError::Message(
+                "identity-bound filesystem target lock is unavailable".to_string(),
+            )
+        })?;
+        let target = targets.get_mut(path).ok_or_else(|| {
+            MutationError::Message(format!(
+                "identity-bound filesystem target was not authorized: {}",
+                path.display()
+            ))
+        })?;
+        action(target).map_err(|error| MutationError::Message(error.to_string()))
+    }
+}
+
+impl FileMutationBackend for IdentityBoundFileMutation {
+    fn snapshot(&self, path: &Path) -> MutationResult<FileSnapshot> {
+        self.with_target(path, |target| {
+            let before = target.metadata()?;
+            let bytes = target.read_bytes()?;
+            let after = target.metadata()?;
+            let before_modified = before.modified().map_err(Error::from)?;
+            let after_modified = after.modified().map_err(Error::from)?;
+            if before.len() != after.len() || before_modified != after_modified {
+                return Err(Error::Message(
+                    MutationConflict::Modified {
+                        path: path.to_path_buf(),
+                    }
+                    .to_string(),
+                ));
+            }
+            Ok(FileSnapshot {
+                version: FileVersion {
+                    len: after.len(),
+                    modified: after_modified,
+                    sha256: sha256_bytes(&bytes),
+                },
+                bytes,
+            })
+        })
+    }
+
+    fn create(&self, task_id: &str, path: &Path, content: &[u8]) -> MutationResult<()> {
+        self.with_target(path, |target| target.create_bytes(content))?;
+        note_file_write(task_id, path);
+        Ok(())
+    }
+
+    fn replace(
+        &self,
+        task_id: &str,
+        path: &Path,
+        expected: FileVersion,
+        content: &[u8],
+    ) -> MutationResult<()> {
+        let current = self.snapshot(path)?;
+        if current.version != expected {
+            return Err(MutationConflict::Modified {
+                path: path.to_path_buf(),
+            }
+            .into());
+        }
+        self.with_target(path, |target| target.replace_bytes(content))?;
+        note_file_write(task_id, path);
+        Ok(())
+    }
+
+    fn delete(&self, task_id: &str, path: &Path, expected: FileVersion) -> MutationResult<()> {
+        let current = self.snapshot(path)?;
+        if current.version != expected {
+            return Err(MutationConflict::Modified {
+                path: path.to_path_buf(),
+            }
+            .into());
+        }
+        self.with_target(path, crate::filesystem_identity::CapturedFileTarget::delete)?;
+        note_file_write(task_id, path);
+        Ok(())
+    }
+}
+
 impl FileMutationBackend for LocalFileMutation {
     fn snapshot(&self, path: &Path) -> MutationResult<FileSnapshot> {
         let before = current_file_metadata(path)?;
@@ -760,5 +863,58 @@ pub(crate) mod file_mutation_tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("second runtime owner entered after release");
         second.join().expect("second owner");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_bound_replace_never_mutates_a_path_replacement() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("approved.txt");
+        let original = temp.path().join("approved-original.txt");
+        fs::write(&path, "approved object").expect("seed");
+        let captured = crate::filesystem_identity::CapturedFileTarget::capture(&path, true)
+            .expect("capture approved object");
+        let backend = IdentityBoundFileMutation::new(vec![captured]);
+        let snapshot = backend.snapshot(&path).expect("authorized snapshot");
+
+        fs::rename(&path, &original).expect("retain approved object");
+        fs::write(&path, "replacement object").expect("replace pathname");
+        let error = backend
+            .replace("agent", &path, snapshot.version, b"mutated")
+            .expect_err("replacement must fail closed");
+
+        assert!(error.to_string().contains("path_identity_changed"));
+        assert_eq!(
+            fs::read_to_string(&path).expect("replacement"),
+            "replacement object"
+        );
+        assert_eq!(
+            fs::read_to_string(&original).expect("approved"),
+            "approved object"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn identity_bound_replace_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("script.sh");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").expect("seed");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o751)).expect("permissions");
+        let captured = crate::filesystem_identity::CapturedFileTarget::capture(&path, true)
+            .expect("capture approved object");
+        let backend = IdentityBoundFileMutation::new(vec![captured]);
+        let snapshot = backend.snapshot(&path).expect("authorized snapshot");
+
+        backend
+            .replace("agent", &path, snapshot.version, b"#!/bin/sh\nexit 1\n")
+            .expect("replace");
+
+        assert_eq!(
+            fs::metadata(&path).expect("metadata").permissions().mode() & 0o777,
+            0o751
+        );
     }
 }

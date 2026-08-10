@@ -181,7 +181,7 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
     let sandbox_grants = child
         .context
         .state
-        .filesystem_grants(&child.context.parent_session_id);
+        .filesystem_grants_with_turn_scopes(&child_session, &child.context.parent_session_id);
     let permission_mode =
         narrow_permission_mode_for_agent(child.context.permission_mode, Some(&child.agent));
     let permission_runtime = PermissionRuntime::new(
@@ -192,6 +192,18 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
         child.context.approval_handler.clone(),
         None,
     );
+    let workspace_root_capture = match child.context.workspace_root_capture.as_ref() {
+        Some(capture) => {
+            capture.validate_async().await?;
+            capture.clone()
+        }
+        None => {
+            crate::WorkspaceRootCapture::capture_async(child.context.workspace_roots.clone())
+                .await?
+        }
+    };
+    let permission_runtime =
+        permission_runtime.with_workspace_root_capture(&workspace_root_capture);
     let permission_runtime = permission_runtime
         .with_protected_config_paths(child.context.protected_config_paths.clone());
     let permission_runtime = match hook_runtime.clone() {
@@ -580,6 +592,7 @@ fn child_hook_runtime_config(
     let options = crate::types::RunOptions {
         state: context.state.clone(),
         cwd: context.cwd.clone(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: None,
         continue_latest: false,

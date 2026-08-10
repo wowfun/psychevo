@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_first_open_records_complete_v32_migration_history() {
+    async fn concurrent_first_open_records_complete_v33_migration_history() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = Arc::new(temp.path().join("state.db"));
         let barrier = Arc::new(Barrier::new(8));
@@ -217,11 +217,6 @@ mod tests {
             runtimes.push(result.expect("open task").expect("concurrent first open"));
         }
 
-        let migration_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1")
-                .fetch_one(&runtimes[0].inner.pool)
-                .await
-                .expect("migration history");
         let user_version = sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&runtimes[0].inner.pool)
             .await
@@ -230,7 +225,6 @@ mod tests {
             .fetch_one(&runtimes[0].inner.pool)
             .await
             .expect("journal mode");
-        assert_eq!(migration_count, 5);
         assert_eq!(user_version, SQLITE_SCHEMA_VERSION);
         assert_eq!(journal_mode, "wal");
         assert!(
@@ -245,13 +239,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_v30_schema_migrates_without_rewriting_data() {
+    async fn existing_v30_schema_requires_reset() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("state.db");
         let runtime = StateRuntime::open(&db_path).await.expect("initial open");
         let cwd = temp.path().join("work");
         std::fs::create_dir_all(&cwd).expect("cwd");
-        let session_id = runtime
+        let _session_id = runtime
             .create_session_with_metadata(&cwd, "test", "model", "provider", None)
             .await
             .expect("session");
@@ -295,22 +289,11 @@ mod tests {
             .expect("remove migration registration");
         runtime.close().await;
 
-        let reopened = StateRuntime::open(&db_path)
-            .await
-            .expect("migrate existing v30 schema");
-        assert!(
-            reopened
-                .session_summary(&session_id)
-                .await
-                .expect("session lookup")
-                .is_some()
-        );
-        let migration_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _sqlx_migrations")
-            .fetch_one(&reopened.inner.pool)
-            .await
-            .expect("migration history");
-        assert_eq!(migration_count, 5);
-        reopened.close().await;
+        let reopened = StateRuntime::open(&db_path).await;
+        assert!(matches!(
+            reopened,
+            Err(Error::Config(message)) if message.contains("schema version 30 is not supported")
+        ));
     }
 
     #[tokio::test]

@@ -22,8 +22,13 @@ impl PermissionRuntime {
         grant: SandboxWriteGrantRequest,
         abort: Option<AbortSignal>,
     ) -> std::result::Result<(), ToolOutput> {
-        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
-            .map_err(|err| ToolOutput::error(err.to_string()))?;
+        let action = PermissionAction::from_tool_call(
+            &self.inner.cwd,
+            &self.inner.workspace_roots,
+            tool_name,
+            args,
+        )
+        .map_err(|err| ToolOutput::error(err.to_string()))?;
         if self.inner.mode.bypasses_prompt_asks() {
             return Err(ToolOutput::error(format!(
                 "denied by sandbox policy: {}; bypassPermissions does not bypass sandbox enforcement",

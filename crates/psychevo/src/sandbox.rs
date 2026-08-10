@@ -91,6 +91,7 @@ pub(crate) struct SandboxPolicy {
     pub(crate) backend: SandboxBackend,
     pub(crate) writable_roots: Vec<PathBuf>,
     pub(crate) shell_extra_roots: Vec<PathBuf>,
+    workspace_root_identities: Vec<crate::filesystem_identity::CapturedDirectoryIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,17 +104,42 @@ pub(crate) enum SandboxWriteDecision {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SandboxWriteGrants {
     inner: Arc<Mutex<SandboxWriteGrantState>>,
+    turn_roots: Arc<Mutex<Vec<crate::filesystem_identity::CapturedDirectoryIdentity>>>,
+    authorized_files:
+        Arc<Mutex<BTreeMap<String, Vec<crate::filesystem_identity::CapturedFileTarget>>>>,
 }
 
 #[derive(Debug, Default)]
 struct SandboxWriteGrantState {
     once: BTreeMap<String, Vec<PathBuf>>,
     session: BTreeMap<String, Vec<PathBuf>>,
-    turn_roots: Vec<PathBuf>,
-    session_roots: Vec<PathBuf>,
+    session_roots: Vec<crate::filesystem_identity::CapturedDirectoryIdentity>,
 }
 
 impl SandboxWriteGrants {
+    pub(crate) fn install_authorized_files(
+        &self,
+        tool_call_id: &str,
+        targets: Vec<crate::filesystem_identity::CapturedFileTarget>,
+    ) {
+        if let Ok(mut files) = self.authorized_files.lock() {
+            files.insert(tool_call_id.to_string(), targets);
+        }
+    }
+
+    pub(crate) fn take_authorized_files(
+        &self,
+        tool_call_id: &str,
+    ) -> Option<Vec<crate::filesystem_identity::CapturedFileTarget>> {
+        self.authorized_files.lock().ok()?.remove(tool_call_id)
+    }
+
+    pub(crate) fn clear_authorized_files(&self, tool_call_id: &str) {
+        if let Ok(mut files) = self.authorized_files.lock() {
+            files.remove(tool_call_id);
+        }
+    }
+
     pub(crate) fn grant_once(&self, tool_call_id: &str, paths: &[PathBuf]) -> Result<()> {
         let paths = canonicalize_grant_paths(paths)?;
         if paths.is_empty() {
@@ -158,41 +184,57 @@ impl SandboxWriteGrants {
 
     pub(crate) fn grant_scope(&self, scope: &crate::types::FilesystemApprovalScope) -> Result<()> {
         let requested_root = PathBuf::from(&scope.directory);
-        let root = crate::filesystem_identity::canonicalize_deepest_existing(&requested_root)?;
-        if root != requested_root {
+        let root = crate::filesystem_identity::CapturedDirectoryIdentity::capture(&requested_root)?;
+        if root.path() != requested_root {
             return Err(Error::Message(
                 "path_identity_changed: approved directory identity changed before grant"
                     .to_string(),
             ));
         }
-        if let Ok(mut state) = self.inner.lock() {
-            match scope.lifetime {
-                crate::types::FilesystemApprovalLifetime::Turn => {
-                    push_unique(&mut state.turn_roots, root)
+        match scope.lifetime {
+            crate::types::FilesystemApprovalLifetime::Turn => {
+                if let Ok(mut roots) = self.turn_roots.lock() {
+                    push_unique_identity(&mut roots, root);
                 }
-                crate::types::FilesystemApprovalLifetime::Session => {
-                    push_unique(&mut state.session_roots, root)
+            }
+            crate::types::FilesystemApprovalLifetime::Session => {
+                if let Ok(mut state) = self.inner.lock() {
+                    push_unique_identity(&mut state.session_roots, root);
                 }
             }
         }
         Ok(())
     }
 
+    pub(crate) fn with_turn_scopes_from(mut self, source: &Self) -> Self {
+        self.turn_roots = Arc::clone(&source.turn_roots);
+        self
+    }
     pub(crate) fn grant_call_from_scopes(
         &self,
         tool_call_id: &str,
         paths: &[PathBuf],
     ) -> Result<bool> {
         let paths = canonicalize_grant_paths(paths)?;
+        let turn_roots = self
+            .turn_roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
         let Ok(mut state) = self.inner.lock() else {
             return Ok(false);
         };
+        let roots = turn_roots
+            .iter()
+            .chain(state.session_roots.iter())
+            .collect::<Vec<_>>();
+        for root in &roots {
+            root.validate()?;
+        }
         let allowed = paths.iter().all(|path| {
-            state
-                .turn_roots
+            roots
                 .iter()
-                .chain(state.session_roots.iter())
-                .any(|root| crate::filesystem_identity::is_within(root, path))
+                .any(|root| crate::filesystem_identity::is_within(root.path(), path))
         });
         if allowed {
             merge_paths(
@@ -204,28 +246,38 @@ impl SandboxWriteGrants {
     }
 
     pub(crate) fn scoped_roots(&self) -> Vec<PathBuf> {
+        let turn_roots = self
+            .turn_roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
         let Ok(state) = self.inner.lock() else {
-            return Vec::new();
+            return turn_roots
+                .into_iter()
+                .filter_map(|root| root.validate().ok().map(|_| root.path().to_path_buf()))
+                .collect();
         };
         let mut roots = Vec::new();
-        for root in state.turn_roots.iter().chain(state.session_roots.iter()) {
-            push_unique(&mut roots, root.clone());
+        for root in turn_roots.iter().chain(state.session_roots.iter()) {
+            if root.validate().is_ok() {
+                push_unique(&mut roots, root.path().to_path_buf());
+            }
         }
         roots
     }
 
     pub(crate) fn clear_turn_scopes(&self) {
-        if let Ok(mut state) = self.inner.lock() {
-            state.turn_roots.clear();
+        if let Ok(mut roots) = self.turn_roots.lock() {
+            roots.clear();
         }
     }
 
     pub(crate) fn clear_session_scopes(&self) {
         if let Ok(mut state) = self.inner.lock() {
-            state.turn_roots.clear();
             state.session_roots.clear();
             state.session.clear();
         }
+        self.clear_turn_scopes();
     }
 
     pub(crate) fn allows_once(&self, tool_call_id: &str, path: &Path) -> Result<bool> {
@@ -249,6 +301,7 @@ impl SandboxPolicy {
             backend: SandboxBackend::Disabled,
             writable_roots: Vec::new(),
             shell_extra_roots: Vec::new(),
+            workspace_root_identities: Vec::new(),
         }
     }
 
@@ -301,6 +354,11 @@ impl SandboxPolicy {
             }
         }
 
+        let workspace_root_identities = if matches!(effective_mode, SandboxMode::WorkspaceWrite) {
+            vec![crate::filesystem_identity::CapturedDirectoryIdentity::capture(&cwd)?]
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             enabled: true,
             configured_mode: config.mode,
@@ -309,6 +367,7 @@ impl SandboxPolicy {
             backend,
             writable_roots,
             shell_extra_roots,
+            workspace_root_identities,
         })
     }
 
@@ -319,6 +378,7 @@ impl SandboxPolicy {
             self.backend = backend_for_platform();
             self.writable_roots.clear();
             self.shell_extra_roots.clear();
+            self.workspace_root_identities.clear();
         }
         self
     }
@@ -332,7 +392,63 @@ impl SandboxPolicy {
         self
     }
 
+    pub(crate) fn with_workspace_roots(mut self, roots: &[PathBuf]) -> Result<Self> {
+        if self.enabled && matches!(self.effective_mode, SandboxMode::WorkspaceWrite) {
+            for root in roots {
+                let identity =
+                    crate::filesystem_identity::CapturedDirectoryIdentity::capture(root)?;
+                push_unique(&mut self.writable_roots, identity.path().to_path_buf());
+                if !self
+                    .workspace_root_identities
+                    .iter()
+                    .any(|current| current.path() == identity.path())
+                {
+                    self.workspace_root_identities.push(identity);
+                }
+            }
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn with_workspace_root_capture(
+        mut self,
+        capture: &crate::filesystem_identity::WorkspaceRootCapture,
+    ) -> Self {
+        if self.enabled && matches!(self.effective_mode, SandboxMode::WorkspaceWrite) {
+            self.workspace_root_identities = capture.identities().to_vec();
+            for identity in capture.identities() {
+                push_unique(&mut self.writable_roots, identity.path().to_path_buf());
+            }
+        }
+        self
+    }
+
+    #[cfg(test)]
     pub(crate) fn ensure_shell_supported(&self) -> Result<()> {
+        self.validate_workspace_root_identities()?;
+        self.ensure_shell_platform_supported()
+    }
+
+    pub(crate) async fn ensure_shell_supported_async(&self) -> Result<()> {
+        let identities = self.workspace_root_identities.clone();
+        tokio::task::spawn_blocking(move || {
+            for identity in identities {
+                identity.validate()?;
+            }
+            Ok::<(), Error>(())
+        })
+        .await
+        .map_err(|error| Error::Message(format!("sandbox root validation failed: {error}")))??;
+        self.ensure_shell_platform_supported()
+    }
+
+    pub(crate) fn ensure_shell_platform_supported(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        if self.enabled && matches!(self.effective_mode, SandboxMode::WorkspaceWrite) {
+            return Err(sandbox_denied(
+                "macOS Seatbelt cannot bind workspace-write rules to captured directory identities",
+            ));
+        }
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         if self.enabled && matches!(self.backend, SandboxBackend::Unsupported) {
             return Err(sandbox_denied(format!(
@@ -356,6 +472,7 @@ impl SandboxPolicy {
         if !self.enabled {
             return Ok(SandboxWriteDecision::Allowed);
         }
+        self.validate_workspace_root_identities()?;
         let path = crate::filesystem_identity::canonicalize_deepest_existing(path)?;
         if matches!(self.effective_mode, SandboxMode::ReadOnly) {
             return Ok(SandboxWriteDecision::Denied {
@@ -418,6 +535,26 @@ impl SandboxPolicy {
             push_unique(&mut roots, root.clone());
         }
         roots
+    }
+
+    pub(crate) fn validate_workspace_root_identities(&self) -> Result<()> {
+        for identity in &self.workspace_root_identities {
+            identity.validate()?;
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn non_workspace_shell_writable_roots(&self) -> Vec<PathBuf> {
+        self.shell_writable_roots()
+            .into_iter()
+            .filter(|root| {
+                !self
+                    .workspace_root_identities
+                    .iter()
+                    .any(|identity| identity.path() == root)
+            })
+            .collect()
     }
 
     pub(crate) fn env_markers(&self) -> [(&'static str, String); 4] {
@@ -510,14 +647,16 @@ fn merge_paths(target: &mut Vec<PathBuf>, paths: Vec<PathBuf>) {
 pub fn sandbox_status_value(options: &RunOptions, mode: RunMode) -> Result<Value> {
     let cwd = canonical_cwd(&options.cwd)?;
     let loaded = load_run_config(options, &cwd)?;
-    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?;
+    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?
+        .with_workspace_roots(&options.workspace_roots)?;
     Ok(policy.status_value())
 }
 
 pub fn sandbox_status_text(options: &RunOptions, mode: RunMode) -> Result<String> {
     let cwd = canonical_cwd(&options.cwd)?;
     let loaded = load_run_config(options, &cwd)?;
-    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?;
+    let policy = SandboxPolicy::from_config(&loaded.config.sandbox, &cwd, mode, &loaded.env)?
+        .with_workspace_roots(&options.workspace_roots)?;
     Ok(policy.status_text())
 }
 
@@ -528,8 +667,8 @@ pub(crate) fn sandbox_denied(message: impl Into<String>) -> Error {
 #[cfg(target_os = "linux")]
 pub(crate) fn apply_landlock(policy: &SandboxPolicy) -> std::io::Result<()> {
     use landlock::{
-        ABI, Access, AccessFs, CompatLevel, Compatible, Ruleset, RulesetAttr, RulesetCreatedAttr,
-        path_beneath_rules,
+        ABI, Access, AccessFs, CompatLevel, Compatible, PathBeneath, Ruleset, RulesetAttr,
+        RulesetCreatedAttr, path_beneath_rules,
     };
 
     if !policy.enabled {
@@ -539,7 +678,7 @@ pub(crate) fn apply_landlock(policy: &SandboxPolicy) -> std::io::Result<()> {
     let abi = ABI::V3;
     let read_access = AccessFs::from_read(abi);
     let write_access = AccessFs::from_all(abi);
-    let writable_roots = policy.shell_writable_roots();
+    let writable_roots = policy.non_workspace_shell_writable_roots();
 
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -553,6 +692,12 @@ pub(crate) fn apply_landlock(policy: &SandboxPolicy) -> std::io::Result<()> {
     if !writable_roots.is_empty() {
         ruleset = ruleset
             .add_rules(path_beneath_rules(&writable_roots, write_access))
+            .map_err(landlock_io_error)?;
+    }
+    for identity in &policy.workspace_root_identities {
+        let root = identity.open_verified()?;
+        ruleset = ruleset
+            .add_rule(PathBeneath::new(root, write_access))
             .map_err(landlock_io_error)?;
     }
 
@@ -611,6 +756,8 @@ fn landlock_io_error<E: std::fmt::Display>(err: E) -> std::io::Error {
 fn shell_enforcement(policy: &SandboxPolicy) -> &'static str {
     if !policy.enabled {
         "disabled"
+    } else if policy.ensure_shell_platform_supported().is_err() {
+        "unsupported"
     } else {
         match policy.backend {
             #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -702,6 +849,18 @@ fn push_unique(roots: &mut Vec<PathBuf>, path: PathBuf) {
     let existing: BTreeSet<_> = roots.iter().cloned().collect();
     if !existing.contains(&path) {
         roots.push(path);
+    }
+}
+
+fn push_unique_identity(
+    roots: &mut Vec<crate::filesystem_identity::CapturedDirectoryIdentity>,
+    identity: crate::filesystem_identity::CapturedDirectoryIdentity,
+) {
+    if roots
+        .iter()
+        .all(|current| current.path() != identity.path())
+    {
+        roots.push(identity);
     }
 }
 
@@ -858,6 +1017,117 @@ mod tests {
         assert!(!matches!(policy.backend, SandboxBackend::Disabled));
     }
 
+    #[test]
+    fn workspace_write_policy_includes_all_runtime_roots() {
+        let temp = tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&primary).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let config = SandboxConfig {
+            enabled: true,
+            mode: SandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        };
+
+        let policy =
+            SandboxPolicy::from_config(&config, &primary, RunMode::Default, &BTreeMap::new())
+                .expect("base policy")
+                .with_workspace_roots(std::slice::from_ref(&secondary))
+                .expect("Workspace roots");
+
+        assert_eq!(
+            policy
+                .write_decision(&secondary.join("file.txt"))
+                .expect("decision"),
+            SandboxWriteDecision::Allowed
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_write_policy_rejects_a_recreated_root_before_spawn() {
+        let temp = tempdir().expect("temp");
+        let root = temp.path().join("root");
+        let original = temp.path().join("original");
+        std::fs::create_dir(&root).expect("root");
+        let config = SandboxConfig {
+            enabled: true,
+            mode: SandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        };
+        let policy = SandboxPolicy::from_config(&config, &root, RunMode::Default, &BTreeMap::new())
+            .expect("policy")
+            .with_workspace_roots(std::slice::from_ref(&root))
+            .expect("Workspace root");
+        std::fs::rename(&root, &original).expect("retain original");
+        std::fs::create_dir(&root).expect("replacement");
+
+        let error = policy
+            .validate_workspace_root_identities()
+            .expect_err("replacement must fail closed");
+
+        assert!(error.to_string().contains("path_identity_changed"));
+    }
+
+    #[test]
+    fn filesystem_scope_grant_does_not_transfer_to_a_recreated_directory() {
+        let temp = tempdir().expect("temp");
+        let granted = temp.path().join("granted");
+        let original = temp.path().join("original");
+        std::fs::create_dir(&granted).expect("granted");
+        let grants = SandboxWriteGrants::default();
+        grants
+            .grant_scope(&crate::types::FilesystemApprovalScope {
+                directory: granted.display().to_string(),
+                lifetime: crate::types::FilesystemApprovalLifetime::Session,
+            })
+            .expect("scope grant");
+        std::fs::rename(&granted, &original).expect("retain original");
+        std::fs::create_dir(&granted).expect("replacement");
+
+        let error = grants
+            .grant_call_from_scopes("write", &[granted.join("file.txt")])
+            .expect_err("replacement must revoke the grant");
+
+        assert!(error.to_string().contains("path_identity_changed"));
+        assert!(grants.scoped_roots().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invocation_policy_reuses_the_pre_acceptance_root_capture() {
+        let temp = tempdir().expect("temp");
+        let root = temp.path().join("root");
+        let original = temp.path().join("original");
+        std::fs::create_dir(&root).expect("root");
+        let capture =
+            crate::filesystem_identity::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
+                .expect("admission capture");
+        std::fs::rename(&root, &original).expect("retain original");
+        std::fs::create_dir(&root).expect("replacement");
+        let config = SandboxConfig {
+            enabled: true,
+            mode: SandboxMode::WorkspaceWrite,
+            writable_roots: Vec::new(),
+            include_tmp: false,
+            include_common_caches: false,
+        };
+
+        let policy = SandboxPolicy::from_config(&config, &root, RunMode::Default, &BTreeMap::new())
+            .expect("invocation config")
+            .with_workspace_root_capture(&capture);
+
+        let error = policy
+            .ensure_shell_supported()
+            .expect_err("replacement must not become the invocation baseline");
+        assert!(error.to_string().contains("path_identity_changed"));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn landlock_partial_or_missing_enforcement_fails_closed() {
@@ -880,6 +1150,7 @@ mod tests {
             backend: SandboxBackend::Disabled,
             writable_roots: vec![dir.path().to_path_buf()],
             shell_extra_roots: vec![dir.path().join("tmp")],
+            workspace_root_identities: Vec::new(),
         }
         .narrowed_for_run_mode(RunMode::Plan);
 
@@ -991,12 +1262,34 @@ mod tests {
             backend: SandboxBackend::WindowsRestricted,
             writable_roots: Vec::new(),
             shell_extra_roots: Vec::new(),
+            workspace_root_identities: Vec::new(),
         };
 
         assert_eq!(shell_enforcement(&policy), "not-confined");
         assert_eq!(
             policy.status_value()["shell_enforcement"],
             serde_json::json!("not-confined")
+        );
+    }
+
+    #[test]
+    fn status_reports_unsupported_when_spawn_support_check_rejects_policy() {
+        let policy = SandboxPolicy {
+            enabled: true,
+            configured_mode: SandboxMode::WorkspaceWrite,
+            effective_mode: SandboxMode::WorkspaceWrite,
+            platform: "windows".to_string(),
+            backend: SandboxBackend::WindowsRestricted,
+            writable_roots: Vec::new(),
+            shell_extra_roots: Vec::new(),
+            workspace_root_identities: Vec::new(),
+        };
+
+        assert!(policy.ensure_shell_supported().is_err());
+        assert_eq!(shell_enforcement(&policy), "unsupported");
+        assert_eq!(
+            policy.status_value()["shell_enforcement"],
+            serde_json::json!("unsupported")
         );
     }
 }

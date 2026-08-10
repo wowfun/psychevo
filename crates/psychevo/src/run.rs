@@ -5,15 +5,20 @@ use crate::error::{Error, Result};
 #[path = "run/entrypoints.rs"]
 mod entrypoints;
 pub(crate) use entrypoints::reload_session_context;
-pub(crate) use entrypoints::run_live_streaming_controlled;
 pub(crate) use entrypoints::{
-    SESSION_TITLE_MAX_CHARS, run_live_streaming_controlled_with_provider, start_agent_task,
+    SESSION_TITLE_MAX_CHARS, run_live_streaming_controlled_with_capture, start_agent_task,
 };
+#[cfg(test)]
+pub(crate) use entrypoints::{
+    run_live_streaming_controlled, run_live_streaming_controlled_with_provider,
+};
+pub(crate) use execution::{smart_approval_handler, smart_reviewer_model};
 #[path = "run/execution.rs"]
 mod execution;
 #[cfg(test)]
 pub(crate) use execution::{
-    materialize_first_use_empty_session, run_live_internal, should_title_visible_first_turn,
+    RunLiveDependencies, materialize_first_use_empty_session, run_live_internal,
+    should_title_visible_first_turn,
 };
 #[path = "run/titles.rs"]
 mod titles;

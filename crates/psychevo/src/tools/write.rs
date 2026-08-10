@@ -87,6 +87,11 @@ pub(crate) fn write_tool_impl_for_call(
     let path = required_string(&args, "path")?;
     let content = required_string(&args, "content")?;
     let (target, dirs_created) = tool.resolve_write_target(path)?;
+    let authorized = tool.take_authorized_file_mutation(tool_call_id);
+    let backend: &dyn FileMutationBackend = authorized
+        .as_ref()
+        .map(|backend| backend as &dyn FileMutationBackend)
+        .unwrap_or(&LOCAL_FILE_MUTATION);
     tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
     let initially_existed = target.exists();
     let _locks = acquire_path_locks(std::slice::from_ref(&target));
@@ -98,7 +103,7 @@ pub(crate) fn write_tool_impl_for_call(
             .into());
         }
         let expected = require_fresh_read(tool.file_reads(), tool.task_id(), &target)?;
-        let (text, snapshot_version) = read_text_snapshot(&LOCAL_FILE_MUTATION, &target)?;
+        let (text, snapshot_version) = read_text_snapshot(backend, &target)?;
         if snapshot_version != expected {
             return Err(MutationConflict::Modified {
                 path: target.clone(),
@@ -108,13 +113,13 @@ pub(crate) fn write_tool_impl_for_call(
         let normalized = normalize_lf(content.trim_start_matches('\u{feff}'));
         let persisted = restore_text_file(&text, &normalized);
         let baseline = snapshot_lsp_baseline(&tool, &target, Some(&text.original));
-        LOCAL_FILE_MUTATION
+        backend
             .replace(tool.task_id(), &target, expected, persisted.as_bytes())
             .map_err(Error::from)?;
         (Some(text.original), persisted, baseline)
     } else {
         let baseline = snapshot_lsp_baseline(&tool, &target, None);
-        LOCAL_FILE_MUTATION
+        backend
             .create(tool.task_id(), &target, content.as_bytes())
             .map_err(Error::from)?;
         (None, content.to_string(), baseline)

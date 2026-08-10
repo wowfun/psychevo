@@ -317,6 +317,7 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
     let project_context_options = RunOptions {
         state: options.state.clone(),
         cwd: cwd.clone(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: Some(summary.id.clone()),
         continue_latest: false,
@@ -770,6 +771,7 @@ pub(crate) fn configured_context_limit(
     let run_options = crate::types::RunOptions {
         state: options.state.clone(),
         cwd: cwd.to_path_buf(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: None,
         continue_latest: false,

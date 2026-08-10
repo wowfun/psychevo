@@ -52,12 +52,24 @@ pub(super) struct FileTarget {
     pub(super) absolute: PathBuf,
     pub(super) uri: String,
     pub(super) relative: String,
-    pub(super) within_cwd: bool,
+    pub(super) within_workspace: bool,
 }
 
 impl PermissionAction {
+    pub(super) fn mutating_file_paths(&self) -> Option<Vec<PathBuf>> {
+        match self {
+            Self::File {
+                paths,
+                mutating: true,
+                ..
+            } => Some(paths.iter().map(|target| target.absolute.clone()).collect()),
+            _ => None,
+        }
+    }
+
     pub(super) fn from_tool_call(
         cwd: &Path,
+        workspace_roots: &[PathBuf],
         tool_name: &str,
         args: &Value,
     ) -> crate::error::Result<Option<Self>> {
@@ -70,23 +82,27 @@ impl PermissionAction {
                     command: command.to_string(),
                     normalized: normalize_command(command),
                     cwd: match args.get("cwd").and_then(Value::as_str) {
-                        Some(path) => Some(file_target(cwd, path)?),
+                        Some(path) => Some(file_target_in_workspace(cwd, workspace_roots, path)?),
                         None => None,
                     },
                 })
             }
-            "read" => file_paths_from_args(cwd, args, &["path"])?.map(|paths| Self::File {
-                tool: "read".to_string(),
-                paths,
-                mutating: false,
+            "read" => file_paths_from_args(cwd, workspace_roots, args, &["path"])?.map(|paths| {
+                Self::File {
+                    tool: "read".to_string(),
+                    paths,
+                    mutating: false,
+                }
             }),
-            "write" => file_paths_from_args(cwd, args, &["path"])?.map(|paths| Self::File {
-                tool: "write".to_string(),
-                paths,
-                mutating: true,
+            "write" => file_paths_from_args(cwd, workspace_roots, args, &["path"])?.map(|paths| {
+                Self::File {
+                    tool: "write".to_string(),
+                    paths,
+                    mutating: true,
+                }
             }),
             "edit" => {
-                let paths = edit_paths_from_args(cwd, args)?;
+                let paths = edit_paths_from_args(cwd, workspace_roots, args)?;
                 (!paths.is_empty()).then(|| Self::File {
                     tool: "edit".to_string(),
                     paths,
@@ -247,9 +263,9 @@ impl PermissionAction {
         }
     }
 
-    pub(super) fn file_targets_all_within_cwd(&self) -> bool {
+    pub(super) fn file_targets_all_within_workspace(&self) -> bool {
         match self {
-            Self::File { paths, .. } => paths.iter().all(|path| path.within_cwd),
+            Self::File { paths, .. } => paths.iter().all(|path| path.within_workspace),
             _ => false,
         }
     }
@@ -355,19 +371,24 @@ fn common_scope_candidates(paths: &[FileTarget]) -> Vec<String> {
 
 fn file_paths_from_args(
     cwd: &Path,
+    workspace_roots: &[PathBuf],
     args: &Value,
     keys: &[&str],
 ) -> crate::error::Result<Option<Vec<FileTarget>>> {
     let paths = keys
         .iter()
         .filter_map(|key| args.get(*key).and_then(Value::as_str))
-        .map(|path| file_target(cwd, path))
+        .map(|path| file_target_in_workspace(cwd, workspace_roots, path))
         .collect::<crate::error::Result<Vec<_>>>()?;
     Ok((!paths.is_empty()).then_some(paths))
 }
 
-fn edit_paths_from_args(cwd: &Path, args: &Value) -> crate::error::Result<Vec<FileTarget>> {
-    if let Some(paths) = file_paths_from_args(cwd, args, &["path"])? {
+fn edit_paths_from_args(
+    cwd: &Path,
+    workspace_roots: &[PathBuf],
+    args: &Value,
+) -> crate::error::Result<Vec<FileTarget>> {
+    if let Some(paths) = file_paths_from_args(cwd, workspace_roots, args, &["path"])? {
         return Ok(paths);
     }
     args.get("patch")
@@ -376,7 +397,7 @@ fn edit_paths_from_args(cwd: &Path, args: &Value) -> crate::error::Result<Vec<Fi
             patch
                 .lines()
                 .flat_map(patch_file_paths)
-                .map(|path| file_target(cwd, &path))
+                .map(|path| file_target_in_workspace(cwd, workspace_roots, &path))
                 .collect::<crate::error::Result<Vec<_>>>()
         })
         .unwrap_or_else(|| Ok(Vec::new()))
@@ -403,10 +424,21 @@ fn patch_file_paths(line: &str) -> Vec<String> {
     Vec::new()
 }
 
+#[cfg(test)]
 pub(super) fn file_target(cwd: &Path, raw: &str) -> crate::error::Result<FileTarget> {
+    file_target_in_workspace(cwd, &[cwd.to_path_buf()], raw)
+}
+
+pub(super) fn file_target_in_workspace(
+    cwd: &Path,
+    workspace_roots: &[PathBuf],
+    raw: &str,
+) -> crate::error::Result<FileTarget> {
     let identity = crate::filesystem_identity::resolve(raw, cwd)?;
-    let cwd = crate::filesystem_identity::canonicalize_deepest_existing(cwd)?;
-    let within_cwd = crate::filesystem_identity::is_within(&cwd, &identity.resolved);
+    let cwd = crate::host_paths::normalized_native_path(cwd);
+    let within_workspace = workspace_roots
+        .iter()
+        .any(|root| crate::filesystem_identity::is_within(root, &identity.resolved));
     let relative = relative_path_from(&cwd, &identity.resolved)
         .unwrap_or_else(|| identity.resolved.clone())
         .to_string_lossy()
@@ -417,7 +449,7 @@ pub(super) fn file_target(cwd: &Path, raw: &str) -> crate::error::Result<FileTar
         absolute: identity.resolved,
         uri: identity.uri,
         relative,
-        within_cwd,
+        within_workspace,
     })
 }
 
@@ -462,7 +494,7 @@ mod action_path_tests {
         let target = file_target(cwd, "a b.txt").expect("target");
 
         assert_eq!(target.relative, "a b.txt");
-        assert!(target.within_cwd);
+        assert!(target.within_workspace);
     }
 
     #[test]
@@ -475,7 +507,7 @@ mod action_path_tests {
         let target = file_target(cwd, &path_ref.uri).expect("target");
 
         assert_eq!(target.relative, "a b.txt");
-        assert!(target.within_cwd);
+        assert!(target.within_workspace);
         assert!(target.uri.ends_with("/a%20b.txt"));
     }
 }

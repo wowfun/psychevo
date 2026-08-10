@@ -8,6 +8,7 @@ use crate::run::normalize_session_title;
 
 use super::store_message_fields::{message_fields, optional_json_string};
 use super::store_runtime_bindings::validate_runtime_binding_input;
+use super::store_workspaces::{bind_thread_workspace_in_tx, copy_thread_workspace_in_tx};
 use super::{AgentThreadImportCommit, AgentThreadImportCommitInput, StateRuntime};
 
 impl StateRuntime {
@@ -84,6 +85,21 @@ impl StateRuntime {
             .bind(&metadata_json)
             .execute(&mut *tx)
             .await?;
+            if let Some(parent_thread_id) = input.parent_thread_id {
+                copy_thread_workspace_in_tx(&mut tx, parent_thread_id, input.thread_id, now)
+                    .await?;
+            } else {
+                bind_thread_workspace_in_tx(
+                    &mut tx,
+                    input.thread_id,
+                    input.cwd.to_string_lossy().as_ref(),
+                    None,
+                    None,
+                    None,
+                    now,
+                )
+                .await?;
+            }
 
             let binding = &input.binding;
             sqlx::query(

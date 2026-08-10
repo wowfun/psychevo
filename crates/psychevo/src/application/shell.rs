@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{Client, TurnHandle};
+use super::{Client, TurnHandle, Workspace};
 use crate::types::{
     RunControl, RunControlHandle, RunMode, RunStreamEvent, RunStreamSink, UserShellContextOptions,
     UserShellOptions, run_control,
@@ -18,6 +18,8 @@ pub struct ShellCommandRequest {
     cwd: PathBuf,
     command: String,
     thread_id: Option<String>,
+    workspace_id: Option<String>,
+    workspace_snapshot: Option<Workspace>,
     continue_latest: bool,
     continue_sources: Vec<String>,
     source: String,
@@ -35,6 +37,8 @@ impl ShellCommandRequest {
             cwd: cwd.into(),
             command: command.into(),
             thread_id: None,
+            workspace_id: None,
+            workspace_snapshot: None,
             continue_latest: false,
             continue_sources: Vec::new(),
             source: "shell".to_string(),
@@ -49,12 +53,37 @@ impl ShellCommandRequest {
 
     pub fn thread(mut self, thread_id: impl Into<String>) -> Self {
         self.thread_id = Some(thread_id.into());
+        self.workspace_id = None;
+        self.workspace_snapshot = None;
+        self.continue_latest = false;
+        self
+    }
+
+    pub fn workspace(mut self, workspace_id: impl Into<String>) -> Self {
+        self.thread_id = None;
+        self.workspace_id = Some(workspace_id.into());
+        self.workspace_snapshot = None;
+        self.continue_latest = false;
+        self
+    }
+
+    pub fn workspace_snapshot(mut self, workspace: Workspace) -> Self {
+        self.cwd = workspace
+            .roots
+            .first()
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        self.thread_id = None;
+        self.workspace_id = Some(workspace.id.clone());
+        self.workspace_snapshot = Some(workspace);
         self.continue_latest = false;
         self
     }
 
     pub fn continue_latest(mut self, sources: impl IntoIterator<Item = String>) -> Self {
         self.thread_id = None;
+        self.workspace_id = None;
+        self.workspace_snapshot = None;
         self.continue_latest = true;
         self.continue_sources = sources.into_iter().collect();
         self
@@ -89,6 +118,8 @@ impl ShellCommandRequest {
     pub fn transient(mut self) -> Self {
         self.persist = false;
         self.thread_id = None;
+        self.workspace_id = None;
+        self.workspace_snapshot = None;
         self.continue_latest = false;
         self.continue_sources.clear();
         self.inject_into = None;
@@ -177,7 +208,9 @@ pub struct ShellCommandResult {
 impl Client {
     pub fn shell_command(&self, mut request: ShellCommandRequest) -> Result<ShellCommand> {
         self.ensure_open()?;
-        request.cwd = crate::paths::canonicalize_cwd(&request.cwd)?;
+        if request.workspace_id.is_none() {
+            request.cwd = crate::paths::canonicalize_cwd(&request.cwd)?;
+        }
         if request.command.trim().is_empty() {
             return Err(Error::Message("shell command is empty".to_string()));
         }
@@ -206,7 +239,56 @@ impl ShellCommand {
         self,
         emit: impl Fn(ShellCommandEvent) + Send + Sync + 'static,
     ) -> Result<ShellCommandResult> {
-        self.client.ensure_open()?;
+        let ShellCommand {
+            client,
+            mut request,
+            control,
+            ..
+        } = self;
+        client.ensure_open()?;
+        let (workspace_roots, workspace_revision) =
+            if let Some(workspace) = request.workspace_snapshot.as_ref() {
+                workspace.validate_capture()?;
+                if request.workspace_id.as_deref() != Some(workspace.id.as_str()) {
+                    return Err(Error::Message(
+                        "captured Workspace identity does not match the requested Workspace"
+                            .to_string(),
+                    ));
+                }
+                let current = client.workspace(&workspace.id).await?.ok_or_else(|| {
+                    Error::Message(format!("workspace not found: {}", workspace.id))
+                })?;
+                if current != *workspace {
+                    return Err(Error::Message(format!(
+                        "workspace `{}` changed before shell admission",
+                        workspace.id
+                    )));
+                }
+                request.cwd = workspace.roots.first().map(PathBuf::from).ok_or_else(|| {
+                    Error::Message(format!("workspace `{}` has no roots", workspace.id))
+                })?;
+                (Some(workspace.roots.clone()), Some(workspace.revision))
+            } else if let Some(workspace_id) = request.workspace_id.as_deref() {
+                let workspace = client.workspace(workspace_id).await?.ok_or_else(|| {
+                    Error::Message(format!("workspace not found: {workspace_id}"))
+                })?;
+                request.cwd = workspace.roots.first().map(PathBuf::from).ok_or_else(|| {
+                    Error::Message(format!("workspace `{workspace_id}` has no roots"))
+                })?;
+                let revision = workspace.revision;
+                (Some(workspace.roots), Some(revision))
+            } else {
+                (None, None)
+            };
+        request.cwd = crate::paths::canonicalize_cwd(&request.cwd)?;
+        let workspace_root_capture = workspace_roots
+            .as_ref()
+            .map(|roots| {
+                crate::WorkspaceRootCapture::capture(
+                    &roots.iter().map(PathBuf::from).collect::<Vec<_>>(),
+                )
+            })
+            .transpose()?;
         let emit = Arc::new(emit);
         let event_emit = Arc::clone(&emit);
         let stream: RunStreamSink = Arc::new(move |event| {
@@ -214,30 +296,32 @@ impl ShellCommand {
                 event_emit(event);
             }
         });
-        let environment = self
-            .client
-            .application_environment(self.request.inherited_env);
-        let context = self.request.persist.then(|| UserShellContextOptions {
-            state: self.client.inner.state.clone(),
-            session: self.request.thread_id,
-            continue_latest: self.request.continue_latest,
-            source: self.request.source,
-            continue_sources: self.request.continue_sources,
-            config_path: self.client.inner.config_path.clone(),
-            model: self.request.model,
-            reasoning_effort: self.request.reasoning_effort,
-            mode: self.request.mode,
+        let environment = client.application_environment(request.inherited_env);
+        let context = request.persist.then(|| UserShellContextOptions {
+            state: client.inner.state.clone(),
+            session: request.thread_id,
+            workspace_id: request.workspace_id,
+            workspace_roots,
+            workspace_revision,
+            workspace_root_capture,
+            continue_latest: request.continue_latest,
+            source: request.source,
+            continue_sources: request.continue_sources,
+            config_path: client.inner.config_path.clone(),
+            model: request.model,
+            reasoning_effort: request.reasoning_effort,
+            mode: request.mode,
         });
         let result = crate::user_shell::run_user_shell_command_streaming_controlled(
             UserShellOptions {
-                cwd: self.request.cwd,
-                command: self.request.command,
+                cwd: request.cwd,
+                command: request.command,
                 environment,
                 context,
-                inject_into: self.request.inject_into.map(|turn| turn.control),
+                inject_into: request.inject_into.map(|turn| turn.control),
             },
             stream,
-            self.control,
+            control,
         )
         .await?;
         Ok(ShellCommandResult {

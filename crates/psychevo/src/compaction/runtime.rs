@@ -1001,6 +1001,7 @@ pub(crate) fn auto_compaction_check_run_options(
     RunOptions {
         state: options.state.clone(),
         cwd: cwd.to_path_buf(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: Some(options.session.clone()),
         continue_latest: false,
@@ -1048,6 +1049,7 @@ pub(crate) fn compaction_run_options(
     RunOptions {
         state: options.state.clone(),
         cwd: cwd.to_path_buf(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: Some(options.session.clone()),
         continue_latest: false,

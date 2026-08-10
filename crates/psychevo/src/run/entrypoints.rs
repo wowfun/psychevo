@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use psychevo_ai::Provider;
 use serde_json::json;
 
 use super::execution::{
-    main_agent_input_from_sources, run_live_internal, selected_agent_for_result,
-    session_model_metadata,
+    RunLiveDependencies, main_agent_input_from_sources, run_live_internal,
+    selected_agent_for_result, session_model_metadata,
 };
 use crate::agents::{
     AgentDiscoveryOptions, AgentSupervisor, AgentToolContext, agent_catalog_for_prompt,
@@ -45,7 +46,8 @@ pub(crate) const TITLE_GENERATION_TIMEOUT_SECS: u64 = 15;
 pub(crate) const DEFAULT_AGENT_MAX_TURNS: usize = 128;
 pub(crate) const SESSION_TITLE_MAX_CHARS: usize = 100;
 
-pub async fn run_live_streaming_controlled(
+#[cfg(test)]
+pub(crate) async fn run_live_streaming_controlled(
     options: RunOptions,
     source: &str,
     continue_sources: &[&str],
@@ -59,11 +61,12 @@ pub async fn run_live_streaming_controlled(
         Some(stream),
         Some(control),
         false,
-        None,
+        RunLiveDependencies::default(),
     )
     .await
 }
 
+#[cfg(test)]
 pub(crate) async fn run_live_streaming_controlled_with_provider(
     options: RunOptions,
     source: &str,
@@ -79,7 +82,34 @@ pub(crate) async fn run_live_streaming_controlled_with_provider(
         Some(stream),
         Some(control),
         false,
-        Some(provider),
+        RunLiveDependencies {
+            provider_override: Some(provider),
+            ..RunLiveDependencies::default()
+        },
+    )
+    .await
+}
+
+pub(crate) async fn run_live_streaming_controlled_with_capture(
+    options: RunOptions,
+    source: &str,
+    continue_sources: &[&str],
+    stream: RunStreamSink,
+    control: RunControl,
+    capture: crate::filesystem_identity::WorkspaceRootCapture,
+    provider: Option<Provider>,
+) -> Result<RunResult> {
+    run_live_internal(
+        options,
+        source,
+        continue_sources,
+        Some(stream),
+        Some(control),
+        false,
+        RunLiveDependencies {
+            workspace_root_capture: Some(capture),
+            provider_override: provider,
+        },
     )
     .await
 }
@@ -111,6 +141,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
     let project_context_options = RunOptions {
         state: options.state.clone(),
         cwd: cwd.clone(),
+        workspace_roots: Vec::new(),
         snapshot_root: None,
         session: Some(summary.id.clone()),
         continue_latest: false,
@@ -207,6 +238,12 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             summary.provider.clone(),
             psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
         )?;
+        let workspace_roots = options
+            .state
+            .thread_workspace_context(&summary.id)
+            .await?
+            .map(|context| context.roots.into_iter().map(PathBuf::from).collect())
+            .unwrap_or_else(|| vec![cwd.clone()]);
         Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),
@@ -236,6 +273,8 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
                 "model_metadata": model_metadata.public_json(),
             }),
             cwd: cwd.clone(),
+            workspace_root_capture: crate::WorkspaceRootCapture::capture(&workspace_roots).ok(),
+            workspace_roots,
             mode,
             project_context_mode,
             permission_config: PermissionConfig::default(),
@@ -435,13 +474,17 @@ pub(crate) async fn start_agent_task(
         skill_inputs,
         mcp_servers,
     } = request;
-    let cwd = canonical_cwd(&cwd)?;
+    let (cwd, workspace_roots) =
+        inherited_agent_workspace_context(&state, parent_thread_id.as_deref(), cwd).await?;
     if prompt.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
+    let workspace_root_capture =
+        crate::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     let run_options = RunOptions {
         state: state.clone(),
         cwd: cwd.clone(),
+        workspace_roots: workspace_roots.clone(),
         snapshot_root: None,
         session: parent_thread_id.clone(),
         continue_latest: false,
@@ -616,6 +659,8 @@ pub(crate) async fn start_agent_task(
             "reasoning_effort": resolved.reasoning_effort.clone(),
         }),
         cwd: cwd.clone(),
+        workspace_roots: workspace_roots.clone(),
+        workspace_root_capture: Some(workspace_root_capture.clone()),
         mode: effective_mode,
         project_context_mode: loaded.config.project_context.instructions,
         permission_config: loaded.config.permissions.clone(),
@@ -639,7 +684,8 @@ pub(crate) async fn start_agent_task(
             &cwd,
             effective_mode,
             &loaded.env,
-        )?,
+        )?
+        .with_workspace_root_capture(&workspace_root_capture),
         home,
         mcp_oauth_credentials: Arc::new(crate::config::SystemMcpOAuthCredentialStore),
         image_input_enabled,
@@ -672,4 +718,102 @@ pub(crate) async fn start_agent_task(
         thread_id: parent_session_id,
         agent,
     })
+}
+
+async fn inherited_agent_workspace_context(
+    state: &crate::state::StateRuntime,
+    parent_thread_id: Option<&str>,
+    requested_cwd: PathBuf,
+) -> Result<(PathBuf, Vec<PathBuf>)> {
+    let Some(parent_thread_id) = parent_thread_id else {
+        let cwd = canonical_cwd(&requested_cwd)?;
+        return Ok((cwd.clone(), vec![cwd]));
+    };
+    let context = state
+        .thread_workspace_context(parent_thread_id)
+        .await?
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "parent Thread `{parent_thread_id}` has no Workspace context"
+            ))
+        })?;
+    Ok((
+        PathBuf::from(context.cwd),
+        context.roots.into_iter().map(PathBuf::from).collect(),
+    ))
+}
+
+#[cfg(test)]
+mod workspace_context_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn standalone_agent_uses_its_cwd_as_the_direct_workspace_root() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("standalone");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let state = crate::state::StateRuntime::open(":memory:")
+            .await
+            .expect("state");
+
+        let (resolved_cwd, roots) = inherited_agent_workspace_context(&state, None, cwd.clone())
+            .await
+            .expect("standalone context");
+
+        assert_eq!(resolved_cwd, cwd);
+        assert_eq!(roots, vec![resolved_cwd]);
+    }
+
+    #[tokio::test]
+    async fn child_agent_inherits_the_parent_threads_authoritative_roots() {
+        let temp = tempfile::tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&primary).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let state = crate::state::StateRuntime::open(":memory:")
+            .await
+            .expect("state");
+        let seed = state.create_session(&primary).await.expect("seed");
+        let context = state
+            .thread_workspace_context(&seed)
+            .await
+            .expect("context")
+            .expect("workspace context");
+        let workspace = state
+            .workspace(&context.workspace_id)
+            .await
+            .expect("workspace")
+            .expect("workspace record");
+        let workspace = state
+            .update_workspace(
+                &workspace.id,
+                workspace.revision,
+                "Multi-root",
+                &[primary.clone(), secondary.clone()],
+            )
+            .await
+            .expect("update workspace");
+        let parent = state
+            .create_session_in_workspace_with_metadata(
+                &primary,
+                &workspace.id,
+                "test",
+                "model",
+                "provider",
+                None,
+            )
+            .await
+            .expect("parent");
+
+        let ignored_cwd = temp.path().join("wrong-cwd");
+        let (cwd, roots) =
+            inherited_agent_workspace_context(&state, Some(&parent), ignored_cwd.clone())
+                .await
+                .expect("inherited context");
+
+        assert_eq!(cwd, primary);
+        assert_eq!(roots, vec![primary, secondary]);
+        assert!(!ignored_cwd.exists());
+    }
 }

@@ -91,6 +91,8 @@ Coordinate.
             context_limit: None,
             generation_metadata: json!({}),
             cwd: tmp.path().to_path_buf(),
+            workspace_roots: vec![tmp.path().to_path_buf()],
+            workspace_root_capture: None,
             mode: RunMode::Default,
             project_context_mode: Default::default(),
             permission_config: PermissionConfig::default(),

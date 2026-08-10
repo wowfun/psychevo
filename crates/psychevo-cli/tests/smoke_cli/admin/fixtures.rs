@@ -345,6 +345,8 @@ pub(crate) fn insert_session(
     started_at_ms: i64,
     updated_at_ms: i64,
 ) {
+    let cwd = cwd.to_string_lossy().into_owned();
+    let workspace_id = format!("fixture-workspace:{cwd}");
     conn.execute(
         r#"
         INSERT INTO sessions (
@@ -354,15 +356,29 @@ pub(crate) fn insert_session(
         ) VALUES (?1, ?2, NULL, ?3, 'model', 'provider',
             ?4, ?5, NULL, NULL, NULL, 0, 0, NULL, NULL)
         "#,
-        rusqlite::params![
-            id,
-            source,
-            cwd.to_string_lossy(),
-            started_at_ms,
-            updated_at_ms
-        ],
+        rusqlite::params![id, source, cwd, started_at_ms, updated_at_ms],
     )
     .expect("insert session");
+    conn.execute(
+        "INSERT OR IGNORE INTO workspaces(id, display_name, revision, created_at_ms, updated_at_ms) VALUES (?1, ?2, 1, ?3, ?3)",
+        rusqlite::params![workspace_id, cwd, started_at_ms],
+    )
+    .expect("insert fixture workspace");
+    conn.execute(
+        "INSERT OR IGNORE INTO workspace_roots(workspace_id, ordinal, canonical_path) VALUES (?1, 0, ?2)",
+        rusqlite::params![workspace_id, cwd],
+    )
+    .expect("insert fixture workspace root");
+    conn.execute(
+        "INSERT INTO thread_workspace_bindings(thread_id, workspace_id, root_source, created_at_ms) VALUES (?1, ?2, 'direct', ?3)",
+        rusqlite::params![id, workspace_id, started_at_ms],
+    )
+    .expect("bind fixture session workspace");
+    conn.execute(
+        "INSERT INTO thread_workspace_roots(thread_id, ordinal, canonical_path) VALUES (?1, 0, ?2)",
+        rusqlite::params![id, cwd],
+    )
+    .expect("insert fixture session root");
 }
 
 pub(crate) struct CatalogJsonServer {

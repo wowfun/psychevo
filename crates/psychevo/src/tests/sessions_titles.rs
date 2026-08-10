@@ -1,8 +1,8 @@
 use crate::config::ResolvedRunProvider;
 use crate::paths::canonical_cwd;
 use crate::run::{
-    SESSION_TITLE_MAX_CHARS, ensure_new_visible_session_title, run_live_internal,
-    run_live_streaming_controlled, run_live_streaming_controlled_with_provider,
+    RunLiveDependencies, SESSION_TITLE_MAX_CHARS, ensure_new_visible_session_title,
+    run_live_internal, run_live_streaming_controlled, run_live_streaming_controlled_with_provider,
     visible_session_source_allows_auto_title,
 };
 use crate::session_lookup::latest_run_session_for_cwd;
@@ -754,7 +754,10 @@ model = "bad\nmodel"
             None,
             None,
             false,
-            Some(fake_provider("Main turn completed.")),
+            RunLiveDependencies {
+                workspace_root_capture: None,
+                provider_override: Some(fake_provider("Main turn completed.")),
+            },
         ),
     )
     .await

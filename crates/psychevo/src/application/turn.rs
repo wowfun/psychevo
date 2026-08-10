@@ -1,5 +1,6 @@
 use super::thread::NewThreadAdmission;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -291,6 +292,8 @@ impl AgentChildTurnDispatcher {
         let thread_id = thread_id.into();
         let inner = self.inner.clone();
         let approval_handler = self.approval_handler.clone();
+        let parent_thread = self.parent_thread.clone();
+        let parent_workspace_root_capture = self.parent_workspace_root_capture.clone();
         Box::pin(async move {
             let inner = inner.upgrade().ok_or_else(|| {
                 Error::Message("Psychevo Application is shutting down".to_string())
@@ -307,11 +310,32 @@ impl AgentChildTurnDispatcher {
                     "Runtime-backed child `{thread_id}` is not owned by parent `{parent_thread_id}`"
                 )));
             }
+            if parent_thread.id != parent_thread_id {
+                return Err(Error::Message(format!(
+                    "captured parent Turn `{}` does not own delegated child `{thread_id}`",
+                    parent_thread.id
+                )));
+            }
+            let child_context = ThreadExecutionContext {
+                id: thread_id.clone(),
+                cwd: parent_thread.cwd,
+                workspace_id: parent_thread.workspace_id,
+                roots: parent_thread.roots,
+                source: child.source,
+                source_key: parent_thread.source_key,
+            };
             let thread = client.resume_thread(thread_id).await?;
             let mut plan = plan;
             plan.execution.approval_handler = approval_handler;
             thread
-                .start_resolved_turn_inner(plan, None, AgentTurnPurpose::Child)
+                .start_resolved_turn_inner(
+                    plan,
+                    None,
+                    AgentTurnPurpose::Child,
+                    Some(child_context),
+                    Some(parent_thread_id),
+                    Some(parent_workspace_root_capture),
+                )
                 .await
         })
     }
@@ -414,7 +438,7 @@ impl Thread {
             .client
             .application_environment(request.inherited_env.take());
         let plan = request.resolve(inherited_env, self.client.inner.config_path.clone());
-        self.start_resolved_turn_inner(plan, new_thread, purpose)
+        self.start_resolved_turn_inner(plan, new_thread, purpose, None, None, None)
             .await
     }
 
@@ -423,6 +447,9 @@ impl Thread {
         mut plan: ResolvedTurnPlan,
         new_thread: Option<NewThreadAdmission>,
         purpose: AgentTurnPurpose,
+        captured_thread_context: Option<ThreadExecutionContext>,
+        turn_grant_owner: Option<String>,
+        captured_workspace_root_capture: Option<crate::filesystem_identity::WorkspaceRootCapture>,
     ) -> Result<TurnHandle> {
         let admission_cancellation = plan.admission_cancellation.take();
         let admission_guard = if let Some(cancellation) = admission_cancellation.as_ref() {
@@ -473,21 +500,66 @@ impl Thread {
         let task_interactions = interactions.clone();
         let agent_sessions = Arc::clone(&client.inner.agent_sessions);
         let state = client.inner.state.clone();
-        let thread_context = match new_thread.as_ref() {
-            Some(new_thread) => new_thread.execution_context(&thread_id),
-            None => ThreadExecutionContext::from_summary(
-                state
-                    .session_summary(&thread_id)
-                    .await?
-                    .ok_or_else(|| Error::Message(format!("thread not found: {thread_id}")))?,
-            ),
+        let thread_context = match captured_thread_context {
+            Some(context) if context.id == thread_id => context,
+            Some(context) => {
+                return Err(Error::Message(format!(
+                    "captured Thread context `{}` does not match `{thread_id}`",
+                    context.id
+                )));
+            }
+            None => match new_thread.as_ref() {
+                Some(new_thread) => new_thread.execution_context(&thread_id),
+                None => {
+                    let summary = state
+                        .session_summary(&thread_id)
+                        .await?
+                        .ok_or_else(|| Error::Message(format!("thread not found: {thread_id}")))?;
+                    let workspace = state
+                        .thread_workspace_context(&thread_id)
+                        .await?
+                        .ok_or_else(|| {
+                            Error::Message(format!("Thread `{thread_id}` has no Workspace context"))
+                        })?;
+                    ThreadExecutionContext::from_summary(summary, workspace)
+                }
+            },
         };
         let binding_cwd = thread_context.cwd.clone();
+        let accepted_thread_context = thread_context.clone();
+        let workspace_root_capture = match captured_workspace_root_capture {
+            Some(capture) => {
+                let expected = accepted_thread_context
+                    .roots
+                    .iter()
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>();
+                if capture.paths() != expected {
+                    return Err(Error::Message(
+                        "captured Workspace roots do not match the delegated Thread context"
+                            .to_string(),
+                    ));
+                }
+                capture.validate_async().await?;
+                capture
+            }
+            None => {
+                crate::filesystem_identity::WorkspaceRootCapture::capture_async(
+                    accepted_thread_context
+                        .roots
+                        .iter()
+                        .map(PathBuf::from)
+                        .collect::<Vec<_>>(),
+                )
+                .await?
+            }
+        };
         let binding = state
             .gateway_runtime_binding(&thread_id)
             .await?
             .map(AgentBindingSnapshot::try_from)
             .transpose()?;
+        let authorization_binding = binding.clone();
         let binding_exists = binding.is_some();
         let existing_runtime_ref = binding.as_ref().map(|binding| binding.runtime_ref.clone());
         if let (Some(requested_runtime_ref), Some(existing_runtime_ref)) = (
@@ -506,6 +578,7 @@ impl Thread {
             inherited_env: plan.environment.inherited_env.clone(),
             purpose,
             native_backend: client.inner.native_backend.clone(),
+            workspace_root_capture: workspace_root_capture.clone(),
         });
         let prepared = if let Some(cancellation) = admission_cancellation.as_ref() {
             tokio::select! {
@@ -528,6 +601,7 @@ impl Thread {
                 "Turn admission cancelled before acceptance".to_string(),
             ));
         }
+        workspace_root_capture.validate_async().await?;
         let admission_facts = prepared.admission();
         let runtime_ref = existing_runtime_ref
             .as_deref()
@@ -547,16 +621,6 @@ impl Thread {
                 "runtime target `{requested_runtime_ref}` conflicts with the immutable binding runtime `{runtime_ref}`"
             )));
         }
-        let durable_input = serde_json::to_string(&serde_json::json!({
-            "prompt": plan.input.prompt,
-            "imageCount": plan.input.image_inputs.len(),
-            "clientTurnId": plan.client_turn_id,
-            "source": plan.execution.source,
-            "model": plan.model.model,
-            "reasoningEffort": plan.model.reasoning_effort,
-            "runtimeRef": runtime_ref,
-        }))?;
-        let durable_input_hash = format!("{:x}", Sha256::digest(durable_input.as_bytes()));
         let interaction_broker = InteractionBroker::new(
             state.clone(),
             client.inner.runtime.clone(),
@@ -567,6 +631,40 @@ impl Thread {
             turn_id.clone(),
         );
         let task_interaction_broker = interaction_broker.clone();
+        let child_approval_handler = plan.execution.approval_handler.clone();
+        plan.execution.approval_handler = Some(Arc::new(FrameworkApprovalHandler {
+            delegate: plan.execution.approval_handler.take(),
+            interactions: task_interactions.clone(),
+            broker: task_interaction_broker.clone(),
+        }));
+        let filesystem_authorizer = if runtime_ref == "native" {
+            super::AgentFilesystemAuthorizer::unavailable_for_native(control.abort_signal())
+        } else {
+            super::AgentFilesystemAuthorizer::capture_for_turn(
+                super::agent_session::AgentFilesystemCapture {
+                    thread: &accepted_thread_context,
+                    execution: &plan.execution,
+                    environment: &plan.environment,
+                    binding: authorization_binding.as_ref(),
+                    initial_binding: admission_facts.initial_binding.as_ref(),
+                    model: &plan.model,
+                    state: &state,
+                    turn_grant_owner: turn_grant_owner.as_deref(),
+                    abort: control.abort_signal(),
+                    workspace_root_capture: &workspace_root_capture,
+                },
+            )?
+        };
+        let durable_input = serde_json::to_string(&serde_json::json!({
+            "prompt": plan.input.prompt,
+            "imageCount": plan.input.image_inputs.len(),
+            "clientTurnId": plan.client_turn_id,
+            "source": plan.execution.source,
+            "model": plan.model.model,
+            "reasoningEffort": plan.model.reasoning_effort,
+            "runtimeRef": runtime_ref,
+        }))?;
+        let durable_input_hash = format!("{:x}", Sha256::digest(durable_input.as_bytes()));
         let (acceptance_tx, acceptance_rx) = oneshot::channel();
         let handle = TurnHandle {
             receipt: receipt.clone(),
@@ -720,22 +818,12 @@ impl Thread {
                     turn_id: turn_id.clone(),
                 });
                 let result = async {
-                    let summary = state
-                        .session_summary(&thread_id)
-                        .await?
-                        .ok_or_else(|| Error::Message(format!("thread not found: {thread_id}")))?;
-                    let thread = ThreadExecutionContext::from_summary(summary);
+                    let thread = accepted_thread_context.clone();
                     let history = HistoryReader::new(state.clone(), thread_id.clone());
                     let event_sender = TurnEventSender {
                         log: Arc::clone(&task_events),
                         interactions: task_interaction_broker.clone(),
                     };
-                    let child_approval_handler = plan.execution.approval_handler.clone();
-                    plan.execution.approval_handler = Some(Arc::new(FrameworkApprovalHandler {
-                        delegate: plan.execution.approval_handler.take(),
-                        interactions: task_interactions.clone(),
-                        broker: task_interaction_broker.clone(),
-                    }));
                     let mcp_resolver = super::agent_session::AgentMcpServerResolver::for_turn(
                         &thread,
                         task_client.inner.home.clone(),
@@ -759,9 +847,11 @@ impl Thread {
                         .await?
                         .map(AgentBindingSnapshot::try_from)
                         .transpose()?;
+                    let _turn_filesystem_grant_guard =
+                        state.turn_filesystem_grant_guard(thread_id.clone());
                     prepared
                         .invoke(AgentTurnInvocation {
-                            thread,
+                            thread: thread.clone(),
                             history,
                             receipt: task_receipt.clone(),
                             binding,
@@ -788,8 +878,12 @@ impl Thread {
                             child_turns: AgentChildTurnDispatcher {
                                 inner: Arc::downgrade(&task_client.inner),
                                 approval_handler: child_approval_handler,
+                                parent_thread: thread.clone(),
+                                parent_workspace_root_capture: workspace_root_capture.clone(),
                             },
                             mcp_resolver,
+                            filesystem_authorizer,
+                            workspace_root_capture,
                         })
                         .await
                 }

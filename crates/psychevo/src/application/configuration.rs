@@ -42,6 +42,7 @@ pub struct ConfigureProviderRequest {
 #[derive(Clone)]
 pub struct ConfigurationQuery {
     pub cwd: PathBuf,
+    pub workspace_roots: Vec<PathBuf>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub inherited_env: Option<BTreeMap<String, String>>,
@@ -54,6 +55,7 @@ impl ConfigurationQuery {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),
+            workspace_roots: Vec::new(),
             model: None,
             reasoning_effort: None,
             inherited_env: None,
@@ -76,6 +78,7 @@ impl fmt::Debug for ConfigurationQuery {
         formatter
             .debug_struct("ConfigurationQuery")
             .field("cwd", &self.cwd)
+            .field("workspace_roots", &self.workspace_roots)
             .field("model", &self.model)
             .field("reasoning_effort", &self.reasoning_effort)
             .field("has_inherited_env", &self.inherited_env.is_some())
@@ -122,6 +125,7 @@ impl Client {
             options: RunOptions {
                 state: self.inner.state.clone(),
                 cwd,
+                workspace_roots: query.workspace_roots,
                 snapshot_root: None,
                 session: None,
                 continue_latest: false,

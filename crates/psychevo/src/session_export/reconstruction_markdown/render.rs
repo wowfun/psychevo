@@ -439,6 +439,8 @@ pub(crate) fn reconstructed_tool_declarations(
             context_limit: metadata.get("context_limit").and_then(Value::as_u64),
             generation_metadata: json_value_object_with_model_metadata(metadata),
             cwd: cwd.to_path_buf(),
+            workspace_roots: vec![cwd.to_path_buf()],
+            workspace_root_capture: None,
             mode,
             project_context_mode: Default::default(),
             permission_config: Default::default(),

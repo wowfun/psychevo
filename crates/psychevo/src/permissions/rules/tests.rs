@@ -445,6 +445,61 @@ fn outside_cwd_exec_cwd_defaults_to_ask() {
 }
 
 #[test]
+fn workspace_profile_accepts_secondary_runtime_roots() {
+    let temp = tempfile::tempdir().expect("temp");
+    let primary = temp.path().join("primary");
+    let secondary = temp.path().join("secondary");
+    std::fs::create_dir_all(&primary).expect("primary");
+    std::fs::create_dir_all(&secondary).expect("secondary");
+    let runtime = PermissionRuntime::new(
+        primary.clone(),
+        primary.join(".psychevo"),
+        PermissionConfig::default(),
+        PermissionMode::Default,
+        None,
+        None,
+    )
+    .with_workspace_roots([primary, secondary.clone()])
+    .expect("Workspace roots");
+
+    assert_eq!(
+        runtime.evaluate("write", &json!({"path": secondary.join("file.txt")})),
+        PermissionDecision::Allow
+    );
+    assert_eq!(
+        runtime.evaluate("exec_command", &json!({"cmd": "pwd", "cwd": secondary})),
+        PermissionDecision::Allow
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_profile_rejects_a_recreated_runtime_root() {
+    let temp = tempfile::tempdir().expect("temp");
+    let primary = temp.path().join("primary");
+    let original = temp.path().join("primary-original");
+    std::fs::create_dir(&primary).expect("primary");
+    let runtime = PermissionRuntime::new(
+        primary.clone(),
+        primary.join(".psychevo"),
+        PermissionConfig::default(),
+        PermissionMode::Default,
+        None,
+        None,
+    )
+    .with_workspace_roots([primary.clone()])
+    .expect("Workspace roots");
+    std::fs::rename(&primary, &original).expect("retain original");
+    std::fs::create_dir(&primary).expect("replacement");
+
+    let decision = runtime.evaluate("write", &json!({"path": primary.join("new.txt")}));
+
+    assert!(
+        matches!(decision, PermissionDecision::Deny { reason } if reason.contains("path_identity_changed"))
+    );
+}
+
+#[test]
 fn web_fetch_defaults_to_allow_but_profile_rules_match_hosts() {
     let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
     let decision = default_runtime.evaluate("web_fetch", &json!({"url": "https://example.com/a"}));
@@ -610,7 +665,7 @@ fn workspace_external_write_reason_does_not_repeat_structured_target_path() {
 
     assert_eq!(
         reason,
-        "file write outside the working directory requires approval"
+        "file write outside the Workspace roots requires approval"
     );
     assert!(!reason.contains(target));
 }
@@ -787,6 +842,8 @@ fn profile_deny_wins_over_session_grant() {
 
 #[test]
 fn profile_deny_wins_over_filesystem_scope_grant() {
+    let temp = tempfile::tempdir().expect("temp");
+    let cwd = temp.path().to_path_buf();
     let mut profiles = BTreeMap::new();
     profiles.insert(
         "local".to_string(),
@@ -799,17 +856,21 @@ fn profile_deny_wins_over_filesystem_scope_grant() {
     let grants = crate::sandbox::SandboxWriteGrants::default();
     grants
         .grant_scope(&FilesystemApprovalScope {
-            directory: test_repo_path().display().to_string(),
+            directory: cwd.display().to_string(),
             lifetime: FilesystemApprovalLifetime::Session,
         })
         .expect("filesystem scope");
-    let runtime = runtime(
+    let runtime = PermissionRuntime::new(
+        cwd.clone(),
+        cwd.join(".psychevo"),
         PermissionConfig {
             default_permissions: "local".to_string(),
             profiles,
             ..Default::default()
         },
         PermissionMode::Default,
+        None,
+        None,
     )
     .with_sandbox(crate::sandbox::SandboxPolicy::disabled(), grants);
 

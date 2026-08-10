@@ -938,6 +938,10 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
             .await
             .expect("state runtime"),
         session: None,
+        workspace_id: None,
+        workspace_roots: None,
+        workspace_revision: None,
+        workspace_root_capture: None,
         continue_latest: true,
         source: "tui".to_string(),
         continue_sources: vec!["run".to_string(), "tui".to_string()],

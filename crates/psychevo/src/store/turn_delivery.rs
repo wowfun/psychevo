@@ -14,6 +14,7 @@ use super::{
     store_agents::insert_agent_mission_registration_in_tx,
     store_gateway_activity::record_gateway_turn_start_receipt_in_tx,
     store_runtime_bindings::validate_runtime_binding_input,
+    store_workspaces::bind_thread_workspace_in_tx,
 };
 
 impl StateRuntime {
@@ -87,6 +88,16 @@ impl StateRuntime {
             .bind(now)
             .bind(metadata_json)
             .execute(&mut *tx)
+            .await?;
+            bind_thread_workspace_in_tx(
+                &mut tx,
+                input.thread_id,
+                &cwd,
+                input.workspace_id,
+                input.workspace_roots,
+                input.workspace_revision,
+                now,
+            )
             .await?;
 
             if let Some(binding) = input.runtime_binding {

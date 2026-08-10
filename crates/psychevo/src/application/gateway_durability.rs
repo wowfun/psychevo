@@ -19,6 +19,13 @@ pub use crate::state::{
     GatewaySourceLaneRecord,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayNavigationState {
+    pub revision: i64,
+    pub pinned_thread_ids: Vec<String>,
+    pub pinned_workspace_ids: Vec<String>,
+}
+
 /// Gateway-owned durability issued by an [`Application`].
 ///
 /// This capability deliberately exposes only Gateway-owned persistence. It
@@ -46,6 +53,32 @@ impl Application {
 }
 
 impl GatewayDurability {
+    pub async fn navigation(&self) -> Result<GatewayNavigationState> {
+        self.state.gateway_navigation().await.map(Into::into)
+    }
+
+    pub async fn set_thread_pinned(
+        &self,
+        thread_id: &str,
+        pinned: bool,
+    ) -> Result<GatewayNavigationState> {
+        self.state
+            .set_gateway_thread_pinned(thread_id, pinned)
+            .await
+            .map(Into::into)
+    }
+
+    pub async fn set_workspace_pinned(
+        &self,
+        workspace_id: &str,
+        pinned: bool,
+    ) -> Result<GatewayNavigationState> {
+        self.state
+            .set_gateway_workspace_pinned(workspace_id, pinned)
+            .await
+            .map(Into::into)
+    }
+
     pub async fn gateway_source_lane(
         &self,
         source_key: &str,
@@ -381,5 +414,15 @@ impl GatewayDurability {
         input: AutomationRunFinishInput<'_>,
     ) -> Result<Option<AutomationRunRecord>> {
         self.state.finish_automation_run(input).await
+    }
+}
+
+impl From<crate::store::GatewayNavigationRecord> for GatewayNavigationState {
+    fn from(state: crate::store::GatewayNavigationRecord) -> Self {
+        Self {
+            revision: state.revision,
+            pinned_thread_ids: state.pinned_thread_ids,
+            pinned_workspace_ids: state.pinned_workspace_ids,
+        }
     }
 }
