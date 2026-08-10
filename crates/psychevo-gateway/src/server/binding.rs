@@ -480,12 +480,18 @@ pub(super) struct BrowserSession {
     pub(super) cwd: PathBuf,
     pub(super) source: GatewaySource,
     pub(super) external_action_grants: BTreeSet<PathBuf>,
+    pub(super) workspace_preview_roots: BTreeSet<PathBuf>,
+    pub(super) workspace_preview_workspace_id: Option<String>,
+    pub(super) workspace_preview_workspace_revision: Option<i64>,
 }
 
 impl BrowserSession {
     pub(super) fn with_external_action_grant(cwd: PathBuf, source: GatewaySource) -> Self {
         Self {
             external_action_grants: BTreeSet::from([normalized_native_path(&cwd)]),
+            workspace_preview_roots: BTreeSet::from([normalized_native_path(&cwd)]),
+            workspace_preview_workspace_id: None,
+            workspace_preview_workspace_revision: None,
             cwd,
             source,
         }

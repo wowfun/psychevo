@@ -45,7 +45,10 @@ async fn default_draft_open_returns_one_exact_authoritative_context() {
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({
-                "origin": origin,
+                "origin": {
+                    "source": origin.source,
+                    "location": { "kind": "cwd", "cwd": origin.cwd }
+                },
                 "targetIntent": { "kind": "default" }
             })),
         },
@@ -116,7 +119,10 @@ entrypoints = ["peer"]
             id: Some(json!(2)),
             method: "thread/draft/open".to_string(),
             params: Some(json!({
-                "origin": scope.to_wire_scope(),
+                "origin": {
+                    "source": scope.source,
+                    "location": { "kind": "cwd", "cwd": scope.cwd }
+                },
                 "targetIntent": { "kind": "exact", "targetId": target_id }
             })),
         },

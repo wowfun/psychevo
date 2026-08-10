@@ -377,6 +377,8 @@ mod tests {
             .gateway()
             .send_shell(SendShellRequest {
                 thread_id: None,
+                workspace_id: None,
+                workspace_snapshot: None,
                 source: None,
                 bind_source: None,
                 cwd: temp.path().to_path_buf(),

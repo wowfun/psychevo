@@ -474,6 +474,8 @@ mod history_mutation_tests {
     fn shell_request(fixture: &Fixture) -> SendShellRequest {
         SendShellRequest {
             thread_id: Some(fixture.thread_id.clone()),
+            workspace_id: None,
+            workspace_snapshot: None,
             source: None,
             bind_source: None,
             cwd: fixture._temp.path().join("workspace"),

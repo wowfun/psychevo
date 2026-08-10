@@ -9,7 +9,7 @@ use crate::gateway::activity::GatewayActivity;
 use crate::gateway_now_ms;
 
 use super::super::binding::WebState;
-use super::summary::{session_project_value, session_summary_value};
+use super::summary::session_summary_value;
 
 pub(in super::super) async fn thread_browser_value(
     state: &WebState,
@@ -33,7 +33,10 @@ pub(in super::super) async fn thread_browser_value(
         .filter(|(_, activity)| activity.running || activity.takeover_state.is_some())
         .map(|(thread_id, _)| thread_id.clone())
         .collect::<Vec<_>>();
-    let cursor_cwd = params.cursor.as_ref().map(|cursor| cursor.cwd.clone());
+    let cursor_workspace_id = params
+        .cursor
+        .as_ref()
+        .map(|cursor| cursor.workspace_id.clone());
     let cursor_offset = params
         .cursor
         .as_ref()
@@ -45,7 +48,7 @@ pub(in super::super) async fn thread_browser_value(
         .browse_human_threads(HumanThreadBrowserQuery {
             cwd,
             archived: params.archived.unwrap_or(false),
-            cursor_cwd,
+            cursor_workspace_id,
             cursor_offset,
             limit,
             recent_since_ms,
@@ -57,7 +60,7 @@ pub(in super::super) async fn thread_browser_value(
     let workspaces = workspaces
         .into_iter()
         .map(|workspace| {
-            let cwd = workspace.cwd;
+            let workspace_view = workspace.workspace;
             let sessions = workspace
                 .threads
                 .into_iter()
@@ -72,15 +75,20 @@ pub(in super::super) async fn thread_browser_value(
                     session_summary_value(presentation, activity)
                 })
                 .collect::<Vec<_>>();
+            let workspace_id = workspace_view.id.clone();
             let next_cursor = workspace.next_offset.map(|offset| {
                 json!({
-                    "cwd": cwd,
+                    "workspaceId": workspace_id,
                     "offset": offset,
                 })
             });
             json!({
-                "cwd": cwd,
-                "project": session_project_value(&cwd),
+                "workspace": {
+                    "id": workspace_view.id,
+                    "name": workspace_view.name,
+                    "roots": workspace_view.roots,
+                    "revision": workspace_view.revision,
+                },
                 "sessions": sessions,
                 "hiddenCount": workspace.hidden_count,
                 "nextCursor": next_cursor,

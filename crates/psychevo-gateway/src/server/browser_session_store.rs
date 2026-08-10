@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::gateway_now_ms;
+use psychevo::host_paths::normalized_native_path;
 
 use super::binding::BrowserSession;
 
@@ -25,6 +26,7 @@ struct BrowserSessionEntry {
 #[derive(Debug, Default)]
 pub(super) struct BrowserSessionStore {
     entries: HashMap<String, BrowserSessionEntry>,
+    workspace_preview_generations: HashMap<String, u64>,
 }
 
 impl BrowserSessionStore {
@@ -79,6 +81,53 @@ impl BrowserSessionStore {
         let entry = self.entries.get_mut(session_id)?;
         entry.last_seen_ms = now_ms;
         Some(&mut entry.session)
+    }
+
+    pub(super) fn invalidate_workspace_preview_roots(&mut self, workspace_id: &str) {
+        let now_ms = gateway_now_ms();
+        self.prune(now_ms);
+        let generation = self
+            .workspace_preview_generations
+            .entry(workspace_id.to_string())
+            .or_default();
+        *generation = generation.saturating_add(1);
+        for entry in self.entries.values_mut().filter(|entry| {
+            entry.session.workspace_preview_workspace_id.as_deref() == Some(workspace_id)
+        }) {
+            entry.session.workspace_preview_roots =
+                BTreeSet::from([normalized_native_path(&entry.session.cwd)]);
+            entry.session.workspace_preview_workspace_id = None;
+            entry.session.workspace_preview_workspace_revision = None;
+        }
+    }
+
+    pub(super) fn workspace_preview_generation(&mut self, workspace_id: &str) -> u64 {
+        let now_ms = gateway_now_ms();
+        self.prune(now_ms);
+        *self
+            .workspace_preview_generations
+            .entry(workspace_id.to_string())
+            .or_default()
+    }
+
+    pub(super) fn set_workspace_preview_roots_if_generation(
+        &mut self,
+        session_id: &str,
+        workspace_id: &str,
+        expected_generation: u64,
+        workspace_revision: i64,
+        roots: BTreeSet<std::path::PathBuf>,
+    ) -> bool {
+        if self.workspace_preview_generation(workspace_id) != expected_generation {
+            return false;
+        }
+        let Some(session) = self.get_mut(session_id) else {
+            return false;
+        };
+        session.workspace_preview_roots = roots;
+        session.workspace_preview_workspace_id = Some(workspace_id.to_string());
+        session.workspace_preview_workspace_revision = Some(workspace_revision);
+        true
     }
 
     #[cfg(test)]
@@ -182,6 +231,64 @@ mod tests {
         assert!(store.get("session-0000").is_some());
         assert!(store.get("session-0001").is_none());
         assert!(store.get("new-session").is_some());
+    }
+
+    #[test]
+    fn workspace_preview_invalidation_is_scoped_to_the_edited_workspace() {
+        let mut store = BrowserSessionStore::default();
+        let now_ms = gateway_now_ms();
+        let mut first = session("/first");
+        first.workspace_preview_workspace_id = Some("workspace-a".to_string());
+        first
+            .workspace_preview_roots
+            .insert(PathBuf::from("/shared-a"));
+        let mut second = session("/second");
+        second.workspace_preview_workspace_id = Some("workspace-b".to_string());
+        second
+            .workspace_preview_roots
+            .insert(PathBuf::from("/shared-b"));
+        store.insert_at("first".to_string(), first, now_ms);
+        store.insert_at("second".to_string(), second, now_ms);
+
+        store.invalidate_workspace_preview_roots("workspace-a");
+
+        assert_eq!(
+            store.get("first").expect("first").workspace_preview_roots,
+            BTreeSet::from([normalized_native_path(PathBuf::from("/first").as_path())])
+        );
+        assert!(
+            store
+                .get("second")
+                .expect("second")
+                .workspace_preview_roots
+                .contains(&PathBuf::from("/shared-b"))
+        );
+    }
+
+    #[test]
+    fn stale_workspace_preview_writer_cannot_restore_invalidated_roots() {
+        let mut store = BrowserSessionStore::default();
+        let now_ms = gateway_now_ms();
+        store.insert_at("browser".to_string(), session("/primary"), now_ms);
+        let generation = store.workspace_preview_generation("workspace-a");
+
+        store.invalidate_workspace_preview_roots("workspace-a");
+        let installed = store.set_workspace_preview_roots_if_generation(
+            "browser",
+            "workspace-a",
+            generation,
+            1,
+            BTreeSet::from([PathBuf::from("/primary"), PathBuf::from("/removed")]),
+        );
+
+        assert!(!installed);
+        assert_eq!(
+            store
+                .get("browser")
+                .expect("browser")
+                .workspace_preview_roots,
+            BTreeSet::from([normalized_native_path(PathBuf::from("/primary").as_path())])
+        );
     }
 
     #[test]

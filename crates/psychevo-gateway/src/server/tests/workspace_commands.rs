@@ -311,7 +311,10 @@ async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scop
             id: Some(json!("pivot")),
             method: "thread/draft/open".to_string(),
             params: Some(json!({
-                "origin": scope.clone(),
+                "origin": {
+                    "source": scope.source.clone(),
+                    "location": { "kind": "cwd", "cwd": scope.cwd.clone() }
+                },
                 "targetIntent": { "kind": "default" }
             })),
         },

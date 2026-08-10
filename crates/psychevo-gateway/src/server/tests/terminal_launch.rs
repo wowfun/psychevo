@@ -842,6 +842,85 @@ async fn sandbox_command_reads_the_framework_configuration_without_a_thread() {
 }
 
 #[tokio::test]
+async fn sandbox_command_reports_secondary_thread_workspace_roots() {
+    let (temp, state) = web_state().await;
+    let secondary = temp.path().join("secondary");
+    std::fs::create_dir_all(&secondary).expect("secondary");
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        "[sandbox]\nenabled = true\nmode = \"workspace-write\"\ninclude_tmp = false\ninclude_common_caches = false\n",
+    )
+    .expect("config");
+    let seed = state
+        .inner
+        .framework
+        .start_thread(psychevo::StartThreadRequest::new(&state.inner.cwd))
+        .await
+        .expect("seed Thread");
+    let context = state
+        .inner
+        .framework
+        .thread_workspace_context(seed.id())
+        .await
+        .expect("Workspace context");
+    let workspace = state
+        .inner
+        .framework
+        .workspace(&context.workspace_id)
+        .await
+        .expect("Workspace lookup")
+        .expect("Workspace");
+    let workspace = state
+        .inner
+        .framework
+        .update_workspace(psychevo::WorkspaceUpdate {
+            workspace_id: workspace.id,
+            expected_revision: workspace.revision,
+            name: workspace.name,
+            roots: vec![state.inner.cwd.clone(), secondary.clone()],
+        })
+        .await
+        .expect("multi-root Workspace");
+    let thread = state
+        .inner
+        .framework
+        .start_thread(
+            psychevo::StartThreadRequest::new(&state.inner.cwd).with_workspace_snapshot(workspace),
+        )
+        .await
+        .expect("explicit Workspace Thread");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "command/execute".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "command": "/sandbox",
+                "threadId": thread.id()
+            })),
+        },
+    )
+    .await
+    .expect("command/execute sandbox");
+
+    let message = result["message"].as_str().expect("sandbox status");
+    assert!(
+        message.contains(&secondary.display().to_string()),
+        "{message}"
+    );
+}
+
+#[tokio::test]
 async fn command_execute_unknown_slash_returns_prompt_passthrough() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)

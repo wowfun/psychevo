@@ -1067,6 +1067,8 @@ impl fmt::Debug for SendTurnRequest {
 
 pub struct SendShellRequest {
     pub thread_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_snapshot: Option<psychevo::Workspace>,
     pub source: Option<GatewaySource>,
     pub bind_source: Option<GatewaySource>,
     pub cwd: PathBuf,
@@ -1081,6 +1083,8 @@ impl fmt::Debug for SendShellRequest {
         formatter
             .debug_struct("SendShellRequest")
             .field("thread_id", &self.thread_id)
+            .field("workspace_id", &self.workspace_id)
+            .field("has_workspace_snapshot", &self.workspace_snapshot.is_some())
             .field("source", &self.source)
             .field("bind_source", &self.bind_source)
             .field("cwd", &self.cwd)

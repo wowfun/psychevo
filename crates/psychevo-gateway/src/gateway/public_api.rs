@@ -50,6 +50,16 @@ pub(crate) struct BoundedTranscriptPage {
     pub(crate) next_cursor: Option<String>,
 }
 
+pub(crate) struct PrepareAgentSessionInput {
+    pub(crate) peer: ResolvedPeerTurn,
+    pub(crate) profile: RuntimeProfileConfig,
+    pub(crate) cwd: PathBuf,
+    pub(crate) additional_directories: Vec<PathBuf>,
+    pub(crate) source_key: String,
+    pub(crate) target_id: String,
+    pub(crate) agent_ref: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum TranscriptPositionKind {
@@ -471,21 +481,25 @@ impl Gateway {
 
     pub(crate) async fn prepare_agent_session(
         &self,
-        peer: ResolvedPeerTurn,
-        profile: RuntimeProfileConfig,
-        cwd: PathBuf,
-        source_key: String,
-        target_id: String,
-        agent_ref: Option<String>,
+        input: PrepareAgentSessionInput,
     ) -> psychevo::Result<acp_peer::session_projection::AcpSessionSnapshot> {
+        let PrepareAgentSessionInput {
+            peer,
+            profile,
+            cwd,
+            additional_directories,
+            source_key,
+            target_id,
+            agent_ref,
+        } = input;
         let configuration = self
             .framework_client
             .configuration(ConfigurationQuery::new(&cwd))?;
         let mcp_servers =
             acp_peer::stdio_turn::resolve_peer_mcp_server_handoffs(&peer, &configuration).await?;
         self.agent_sessions
-            .prepare(
-                CapturedAgentSessionTarget::invocation(
+            .prepare(super::agent_session::AgentSessionPrepareInput {
+                captured: CapturedAgentSessionTarget::invocation(
                     format!("draft:{source_key}"),
                     profile,
                     Some(peer),
@@ -494,8 +508,9 @@ impl Gateway {
                 target_id,
                 agent_ref,
                 cwd,
+                additional_directories,
                 mcp_servers,
-            )
+            })
             .await
     }
 
@@ -551,6 +566,15 @@ impl Gateway {
             )));
         }
         let cwd = PathBuf::from(&binding.cwd);
+        let additional_directories = self
+            .framework_client
+            .thread_workspace_context(&local_session_id)
+            .await?
+            .roots
+            .into_iter()
+            .filter(|root| root != &binding.cwd)
+            .map(PathBuf::from)
+            .collect();
         let configuration = self
             .framework_client
             .configuration(ConfigurationQuery::new(&cwd))?;
@@ -565,6 +589,7 @@ impl Gateway {
             .set_control(
                 AgentSessionRef {
                     cwd,
+                    additional_directories,
                     local_session_id,
                     native_session_id,
                     mcp_servers,

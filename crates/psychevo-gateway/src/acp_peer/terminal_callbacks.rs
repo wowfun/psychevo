@@ -47,10 +47,8 @@ struct AcpTerminalState {
 }
 
 impl AcpTerminalRegistry {
-    /// Removes every terminal owned by one ACP session and cooperatively kills
-    /// any child that is still running. Lifecycle cleanup must call this after
-    /// close/delete acknowledgement and during generation teardown.
-    pub(super) fn terminate_session(&self, session_id: &str) -> psychevo::Result<()> {
+    #[cfg(test)]
+    fn terminate_session(&self, session_id: &str) -> psychevo::Result<()> {
         let removed = {
             let mut records = self
                 .records
@@ -72,7 +70,47 @@ impl AcpTerminalRegistry {
         Ok(())
     }
 
-    pub(super) fn terminate_all(&self) -> psychevo::Result<()> {
+    pub(super) async fn terminate_session_and_wait(
+        &self,
+        session_id: &str,
+    ) -> psychevo::Result<()> {
+        let removed = {
+            let mut records = self
+                .records
+                .lock()
+                .map_err(|_| Error::Message("ACP terminal registry lock poisoned".to_string()))?;
+            let terminal_ids = records
+                .iter()
+                .filter(|(_, record)| record.session_id == session_id)
+                .map(|(terminal_id, _)| terminal_id.clone())
+                .collect::<Vec<_>>();
+            terminal_ids
+                .into_iter()
+                .filter_map(|terminal_id| records.remove(&terminal_id))
+                .collect::<Vec<_>>()
+        };
+        for record in &removed {
+            let _ = record.kill.send(true);
+        }
+        for record in removed {
+            loop {
+                let notified = record.completed.notified();
+                if record
+                    .state
+                    .lock()
+                    .map_err(|_| Error::Message("ACP terminal state lock poisoned".to_string()))?
+                    .exit_status
+                    .is_some()
+                {
+                    break;
+                }
+                notified.await;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) async fn terminate_all_and_wait(&self) -> psychevo::Result<()> {
         let removed = {
             let mut records = self
                 .records
@@ -82,10 +120,53 @@ impl AcpTerminalRegistry {
                 .into_values()
                 .collect::<Vec<_>>()
         };
-        for record in removed {
+        for record in &removed {
             let _ = record.kill.send(true);
         }
+        for record in removed {
+            loop {
+                let notified = record.completed.notified();
+                if record
+                    .state
+                    .lock()
+                    .map_err(|_| Error::Message("ACP terminal state lock poisoned".to_string()))?
+                    .exit_status
+                    .is_some()
+                {
+                    break;
+                }
+                notified.await;
+            }
+        }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn insert_test_terminal(
+        &self,
+        terminal_id: &str,
+        session_id: &str,
+    ) -> watch::Receiver<bool> {
+        let (kill, receiver) = watch::channel(false);
+        let state = Arc::new(Mutex::new(AcpTerminalState::new(128)));
+        let completed = Arc::new(tokio::sync::Notify::new());
+        self.records.lock().expect("terminal records").insert(
+            terminal_id.to_string(),
+            AcpTerminalRecord {
+                session_id: session_id.to_string(),
+                state: Arc::clone(&state),
+                kill,
+                completed: Arc::clone(&completed),
+            },
+        );
+        let mut exit = receiver.clone();
+        tokio::spawn(async move {
+            let _ = exit.changed().await;
+            state.lock().expect("terminal state").exit_status =
+                Some(TerminalExitStatus::new().signal(Some("killed".to_string())));
+            completed.notify_waiters();
+        });
+        receiver
     }
 }
 
@@ -122,12 +203,26 @@ pub(super) async fn create_terminal(
     context: Arc<AcpClientContext>,
     request: CreateTerminalRequest,
 ) -> Result<CreateTerminalResponse, agent_client_protocol::Error> {
+    context.attachment.ensure_active()?;
     if !context.terminal {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("terminal callbacks are not allowed for this ACP Agent"));
     }
     validate_acp_terminal_request(&request)?;
-    let cwd = guarded_terminal_cwd(&context.cwd, request.cwd.as_deref())?;
+    let cwd = guarded_terminal_cwd(
+        &context.cwd,
+        &context.workspace_roots,
+        request.cwd.as_deref(),
+    )?;
+    let cwd_handle = context
+        .filesystem_authorizer
+        .as_ref()
+        .ok_or_else(|| {
+            agent_client_protocol::Error::invalid_request()
+                .data("terminal Workspace authorization is unavailable")
+        })?
+        .open_workspace_directory(&cwd)
+        .map_err(|error| agent_client_protocol::Error::invalid_request().data(error))?;
     let mut env = context.terminal_env.clone();
     for variable in &request.env {
         if variable.name.is_empty()
@@ -140,7 +235,8 @@ pub(super) async fn create_terminal(
         env.insert(variable.name.clone(), variable.value.clone());
     }
     approve_acp_terminal_create(&context, &request).await?;
-    let program = resolve_executable_path(
+    context.attachment.ensure_active()?;
+    let resolved_program = resolve_executable_path(
         &request.command,
         &cwd,
         &ExecutableResolveOptions {
@@ -154,6 +250,11 @@ pub(super) async fn create_terminal(
             request.command
         ))
     })?;
+    #[cfg(unix)]
+    let program = executable_from_captured_cwd(&cwd_handle, &cwd, &resolved_program)
+        .map_err(acp_internal_error)?;
+    #[cfg(not(unix))]
+    let program = resolved_program;
     let args = request.args.iter().map(OsString::from).collect::<Vec<_>>();
     let mut command = psychevo::process_env::tokio_host_process_command(
         &program,
@@ -163,7 +264,6 @@ pub(super) async fn create_terminal(
     )
     .map_err(acp_internal_error)?;
     command
-        .current_dir(&cwd)
         .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -174,7 +274,36 @@ pub(super) async fn create_terminal(
         psychevo::process_env::ProcessEnvOptions::new(&[]),
     )
     .map_err(acp_internal_error)?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd as _;
+        use std::os::unix::process::CommandExt as _;
+
+        let cwd_fd = cwd_handle.as_raw_fd();
+        command.as_std_mut().process_group(0);
+        unsafe {
+            command.as_std_mut().pre_exec(move || {
+                if libc::fchdir(cwd_fd) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        drop(cwd_handle);
+        return Err(agent_client_protocol::Error::invalid_request()
+            .data("identity-bound ACP terminal cwd is unsupported on this platform"));
+    }
+    context.attachment.ensure_active()?;
     let mut child = command.spawn().map_err(acp_internal_error)?;
+    if let Err(error) = context.attachment.ensure_active() {
+        psychevo::process_env::terminate_tokio_child_process_group(&mut child).await;
+        let _ = child.wait().await;
+        return Err(error);
+    }
     let stdout = child.stdout.take().ok_or_else(|| {
         agent_client_protocol::Error::internal_error().data("ACP terminal stdout is unavailable")
     })?;
@@ -215,7 +344,8 @@ pub(super) async fn create_terminal(
                 Err(error) => TerminalExitStatus::new().signal(error.to_string()),
             },
             _ = kill_rx.changed() => {
-                psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
+                psychevo::process_env::terminate_tokio_child_process_group(&mut child).await;
+                let _ = child.wait().await;
                 TerminalExitStatus::new().signal("killed".to_string())
             }
         };
@@ -226,6 +356,13 @@ pub(super) async fn create_terminal(
         }
         completed.notify_waiters();
     });
+    if let Err(error) = context.attachment.ensure_active() {
+        registry
+            .terminate_session_and_wait(&request.session_id.to_string())
+            .await
+            .map_err(acp_internal_error)?;
+        return Err(error);
+    }
     Ok(CreateTerminalResponse::new(terminal_id))
 }
 
@@ -401,11 +538,12 @@ fn validate_acp_terminal_request(
 }
 
 fn guarded_terminal_cwd(
-    root: &Path,
+    default_cwd: &Path,
+    workspace_roots: &[PathBuf],
     requested: Option<&Path>,
 ) -> Result<PathBuf, agent_client_protocol::Error> {
-    let root = root.canonicalize().map_err(acp_internal_error)?;
-    let requested = requested.unwrap_or(&root);
+    let default_cwd = default_cwd.canonicalize().map_err(acp_internal_error)?;
+    let requested = requested.unwrap_or(&default_cwd);
     if !requested.is_absolute() {
         return Err(agent_client_protocol::Error::invalid_params()
             .data("ACP terminal cwd must be absolute"));
@@ -413,11 +551,46 @@ fn guarded_terminal_cwd(
     let requested = requested
         .canonicalize()
         .map_err(|error| agent_client_protocol::Error::invalid_request().data(error.to_string()))?;
-    if !requested.starts_with(&root) {
+    let mut allowed = false;
+    for root in workspace_roots {
+        let root = root.canonicalize().map_err(acp_internal_error)?;
+        if requested.starts_with(root) {
+            allowed = true;
+            break;
+        }
+    }
+    if !allowed {
         return Err(agent_client_protocol::Error::invalid_request()
             .data("ACP terminal cwd is outside the captured workspace"));
     }
     Ok(requested)
+}
+
+#[cfg(unix)]
+fn executable_from_captured_cwd(
+    cwd_handle: &std::fs::File,
+    cwd: &Path,
+    resolved_program: &Path,
+) -> std::io::Result<PathBuf> {
+    use std::os::fd::AsRawFd as _;
+
+    let Ok(relative) = resolved_program.strip_prefix(cwd) else {
+        return Ok(resolved_program.to_path_buf());
+    };
+    if relative.as_os_str().is_empty() {
+        return Ok(resolved_program.to_path_buf());
+    }
+    let fd = cwd_handle.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let mut anchored = PathBuf::from(format!("/proc/self/fd/{fd}"));
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let mut anchored = PathBuf::from(format!("/dev/fd/{fd}"));
+    anchored.push(relative);
+    Ok(anchored)
 }
 
 async fn approve_acp_terminal_create(
@@ -460,7 +633,58 @@ mod tests {
 
     use tokio::sync::watch;
 
-    use super::{AcpTerminalRecord, AcpTerminalRegistry, AcpTerminalState};
+    #[cfg(unix)]
+    use super::executable_from_captured_cwd;
+    use super::{AcpTerminalRecord, AcpTerminalRegistry, AcpTerminalState, guarded_terminal_cwd};
+
+    #[test]
+    fn terminal_callbacks_accept_secondary_workspace_roots() {
+        let temp = tempfile::tempdir().expect("temp");
+        let primary = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&primary).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+
+        assert_eq!(
+            guarded_terminal_cwd(
+                &primary,
+                &[primary.clone(), secondary.clone()],
+                Some(&secondary),
+            )
+            .expect("secondary terminal cwd"),
+            secondary.canonicalize().expect("canonical secondary")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_executable_is_resolved_from_the_captured_cwd_object() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("workspace");
+        let old_root = temp.path().join("old-workspace");
+        std::fs::create_dir(&root).expect("root");
+        let original = root.join("script");
+        std::fs::write(&original, "#!/bin/sh\necho original\n").expect("original script");
+        std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o755))
+            .expect("original mode");
+        let cwd_handle = std::fs::File::open(&root).expect("captured cwd");
+        std::fs::rename(&root, &old_root).expect("retain old cwd object");
+        std::fs::create_dir(&root).expect("replacement root");
+        let replacement = root.join("script");
+        std::fs::write(&replacement, "#!/bin/sh\necho replacement\n").expect("replacement script");
+        std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755))
+            .expect("replacement mode");
+
+        let program = executable_from_captured_cwd(&cwd_handle, &root, &replacement)
+            .expect("anchored executable");
+        let output = std::process::Command::new(program)
+            .output()
+            .expect("run anchored executable");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "original");
+    }
 
     #[test]
     fn terminal_cleanup_is_session_scoped() {
@@ -497,5 +721,77 @@ mod tests {
         assert!(*first_kill_rx.borrow());
         assert!(!*second_kill_rx.borrow());
         assert_eq!(registry.records.lock().expect("terminal records").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn terminal_cleanup_waits_for_process_exit() {
+        let registry = AcpTerminalRegistry::default();
+        let state = Arc::new(Mutex::new(AcpTerminalState::new(128)));
+        let completed = Arc::new(tokio::sync::Notify::new());
+        let (kill, kill_rx) = watch::channel(false);
+        registry.records.lock().expect("terminal records").insert(
+            "terminal".to_string(),
+            AcpTerminalRecord {
+                session_id: "session".to_string(),
+                state: Arc::clone(&state),
+                kill,
+                completed: Arc::clone(&completed),
+            },
+        );
+        let terminating = {
+            let registry = registry.clone();
+            tokio::spawn(async move { registry.terminate_session_and_wait("session").await })
+        };
+        tokio::task::yield_now().await;
+
+        assert!(*kill_rx.borrow());
+        assert!(!terminating.is_finished());
+        state.lock().expect("terminal state").exit_status = Some(
+            agent_client_protocol::schema::v1::TerminalExitStatus::new()
+                .signal(Some("killed".to_string())),
+        );
+        completed.notify_waiters();
+
+        terminating
+            .await
+            .expect("termination task")
+            .expect("termination");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminal_process_group_cleanup_kills_background_descendants() {
+        use std::os::unix::process::CommandExt as _;
+
+        let temp = tempfile::tempdir().expect("temp");
+        let pid_file = temp.path().join("background.pid");
+        let mut command = tokio::process::Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("sleep 60 & echo $! > {}; wait", pid_file.display()));
+        command.as_std_mut().process_group(0);
+        let mut child = command.spawn().expect("terminal process group");
+        for _ in 0..100 {
+            if pid_file.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let background_pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .expect("background pid")
+            .trim()
+            .parse()
+            .expect("numeric pid");
+
+        psychevo::process_env::terminate_tokio_child_process_group(&mut child).await;
+        let _ = child.wait().await;
+        for _ in 0..100 {
+            let alive = unsafe { libc::kill(background_pid, 0) } == 0;
+            if !alive {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("background terminal descendant {background_pid} survived process-group cleanup");
     }
 }

@@ -4,6 +4,7 @@ use std::time::{Duration, SystemTime};
 use axum::body::to_bytes;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use psychevo::{StartThreadRequest, WorkspaceUpdate};
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -686,6 +687,206 @@ async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
     .await
     .expect_err("browser scope pivot must be rejected");
     assert!(pivot.to_string().contains("not authorized"));
+}
+
+#[tokio::test]
+async fn browser_preview_accepts_a_secondary_root_of_the_explicit_workspace_draft() {
+    let (temp, state) = web_state().await;
+    let secondary = temp.path().join("secondary");
+    std::fs::create_dir_all(&secondary).expect("secondary root");
+    std::fs::write(secondary.join("notes.txt"), "secondary").expect("secondary file");
+    let thread = state
+        .inner
+        .framework
+        .start_thread(StartThreadRequest::new(&state.inner.cwd))
+        .await
+        .expect("direct Thread");
+    let context = state
+        .inner
+        .framework
+        .thread_workspace_context(thread.id())
+        .await
+        .expect("Workspace context");
+    let workspace = state
+        .inner
+        .framework
+        .workspace(&context.workspace_id)
+        .await
+        .expect("Workspace lookup")
+        .expect("Workspace");
+    let workspace = state
+        .inner
+        .framework
+        .update_workspace(WorkspaceUpdate {
+            workspace_id: workspace.id,
+            expected_revision: workspace.revision,
+            name: "Preview workspace".to_string(),
+            roots: vec![state.inner.cwd.clone(), secondary.clone()],
+        })
+        .await
+        .expect("multi-root Workspace");
+    let browser_session_id = "browser-secondary-preview".to_string();
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .insert(
+            browser_session_id.clone(),
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
+        );
+    let source = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope()
+        .source;
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let draft = handle_rpc(
+        state.clone(),
+        AuthContext::Browser {
+            session_id: browser_session_id.clone(),
+        },
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("workspace-draft")),
+            method: "thread/draft/open".to_string(),
+            params: Some(json!({
+                "origin": {
+                    "source": source,
+                    "location": { "kind": "workspace", "workspaceId": workspace.id }
+                },
+                "targetIntent": { "kind": "default" }
+            })),
+        },
+    )
+    .await
+    .expect("explicit Workspace draft");
+    assert_eq!(draft["workspaceId"], workspace.id);
+    assert_eq!(draft["snapshot"]["workspaceId"], workspace.id);
+    assert_eq!(
+        draft["snapshot"]["workspaceRoots"],
+        json!([
+            state.inner.cwd.display().to_string(),
+            secondary.display().to_string()
+        ])
+    );
+
+    let preview = handle_rpc(
+        state,
+        AuthContext::Browser {
+            session_id: browser_session_id,
+        },
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("secondary-preview")),
+            method: "workspace/file/preview/open".to_string(),
+            params: Some(json!({
+                "scope": { "cwd": secondary, "source": source },
+                "path": "notes.txt"
+            })),
+        },
+    )
+    .await
+    .expect("secondary Workspace preview");
+
+    assert_eq!(preview["path"], "notes.txt");
+}
+
+#[tokio::test]
+async fn browser_preview_rejects_a_grant_stale_in_another_gateway_process() {
+    let (temp, state) = web_state().await;
+    let secondary = temp.path().join("secondary-stale");
+    std::fs::create_dir_all(&secondary).expect("secondary root");
+    std::fs::write(secondary.join("removed.txt"), "removed").expect("secondary file");
+    let thread = state
+        .inner
+        .framework
+        .start_thread(StartThreadRequest::new(&state.inner.cwd))
+        .await
+        .expect("direct Thread");
+    let context = state
+        .inner
+        .framework
+        .thread_workspace_context(thread.id())
+        .await
+        .expect("Workspace context");
+    let workspace = state
+        .inner
+        .framework
+        .workspace(&context.workspace_id)
+        .await
+        .expect("Workspace lookup")
+        .expect("Workspace");
+    let workspace = state
+        .inner
+        .framework
+        .update_workspace(WorkspaceUpdate {
+            workspace_id: workspace.id,
+            expected_revision: workspace.revision,
+            name: "Cross-process preview".to_string(),
+            roots: vec![state.inner.cwd.clone(), secondary.clone()],
+        })
+        .await
+        .expect("multi-root Workspace");
+    let browser_session_id = "browser-stale-preview".to_string();
+    let mut browser = BrowserSession::with_external_action_grant(
+        state.inner.cwd.clone(),
+        state.inner.source.clone(),
+    );
+    browser.workspace_preview_roots = std::collections::BTreeSet::from([
+        psychevo::host_paths::normalized_native_path(&state.inner.cwd),
+        psychevo::host_paths::normalized_native_path(&secondary),
+    ]);
+    browser.workspace_preview_workspace_id = Some(workspace.id.clone());
+    browser.workspace_preview_workspace_revision = Some(workspace.revision);
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .insert(browser_session_id.clone(), browser);
+    state
+        .inner
+        .framework
+        .update_workspace(WorkspaceUpdate {
+            workspace_id: workspace.id,
+            expected_revision: workspace.revision,
+            name: workspace.name,
+            roots: vec![state.inner.cwd.clone()],
+        })
+        .await
+        .expect("edit through another Gateway owner");
+    let source = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope()
+        .source;
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let error = handle_rpc(
+        state,
+        AuthContext::Browser {
+            session_id: browser_session_id,
+        },
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("stale-secondary-preview")),
+            method: "workspace/file/preview/open".to_string(),
+            params: Some(json!({
+                "scope": { "cwd": secondary, "source": source },
+                "path": "removed.txt"
+            })),
+        },
+    )
+    .await
+    .expect_err("durable Workspace revision must revoke stale preview roots");
+
+    assert!(error.to_string().contains("authority changed"), "{error}");
 }
 
 #[tokio::test]

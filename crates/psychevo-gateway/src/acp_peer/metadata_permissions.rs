@@ -96,18 +96,28 @@ pub(super) fn client_capabilities(peer: &ResolvedPeerTurn) -> ClientCapabilities
 }
 
 pub(super) fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
-    peer.backend.client_capabilities.contains("fs.read")
-        && agent_allows_any_tool(&peer.agent, &["read"])
+    platform_callback_enabled(
+        peer.backend.client_capabilities.contains("fs.read"),
+        cfg!(unix),
+    ) && agent_allows_any_tool(&peer.agent, &["read"])
 }
 
 pub(super) fn peer_allows_fs_write(peer: &ResolvedPeerTurn) -> bool {
-    peer.backend.client_capabilities.contains("fs.write")
-        && agent_allows_any_tool(&peer.agent, &["write", "edit"])
+    platform_callback_enabled(
+        peer.backend.client_capabilities.contains("fs.write"),
+        psychevo::IDENTITY_BOUND_FILE_MUTATIONS_SUPPORTED,
+    ) && agent_allows_any_tool(&peer.agent, &["write", "edit"])
 }
 
 pub(super) fn peer_allows_terminal(peer: &ResolvedPeerTurn) -> bool {
-    peer.backend.client_capabilities.contains("terminal")
-        && agent_allows_any_tool(&peer.agent, &["exec_command", "write_stdin"])
+    platform_callback_enabled(
+        peer.backend.client_capabilities.contains("terminal"),
+        cfg!(unix),
+    ) && agent_allows_any_tool(&peer.agent, &["exec_command", "write_stdin"])
+}
+
+fn platform_callback_enabled(configured: bool, identity_backend_supported: bool) -> bool {
+    configured && identity_backend_supported
 }
 
 fn agent_allows_any_tool(agent: &AgentDefinition, tools: &[&str]) -> bool {
@@ -154,11 +164,22 @@ async fn read_text_file_content(
     line: Option<u32>,
     limit: Option<u32>,
 ) -> Result<String, agent_client_protocol::Error> {
+    context.attachment.ensure_active()?;
     if !context.fs_read {
         return Err(agent_client_protocol::Error::invalid_request().data("fs.read is not allowed"));
     }
-    let path = guarded_existing_path(&context.cwd, path)?;
-    let text = tokio::fs::read_to_string(&path)
+    let authorizer = context.filesystem_authorizer.as_ref().ok_or_else(|| {
+        agent_client_protocol::Error::invalid_request().data("filesystem authorization unavailable")
+    })?;
+    let authorized = authorizer
+        .authorize_workspace_read(&format!("acp-read-{}", uuid::Uuid::now_v7()), path)
+        .await
+        .map_err(acp_permission_error)?;
+    context.attachment.ensure_active()?;
+    let mut file =
+        tokio::fs::File::from_std(authorized.into_read_file().map_err(acp_internal_error)?);
+    let mut text = String::new();
+    tokio::io::AsyncReadExt::read_to_string(&mut file, &mut text)
         .await
         .map_err(acp_internal_error)?;
     Ok(apply_line_window(text, line, limit))
@@ -177,35 +198,47 @@ async fn write_text_file_content(
     path: &Path,
     content: String,
 ) -> Result<(), agent_client_protocol::Error> {
+    context.attachment.ensure_active()?;
     if !context.fs_write {
         return Err(agent_client_protocol::Error::invalid_request().data("fs.write is not allowed"));
     }
-    let decision = if let Some(handler) = &context.approval_handler {
-        handler
-            .request_permission(PermissionApprovalRequest {
-                tool_call_id: format!("acp-write-{}", uuid::Uuid::now_v7()),
-                tool_name: "fs/write_text_file".to_string(),
-                summary: format!("Write {}", path.display()),
-                reason: "ACP peer requested a file write".to_string(),
-                matched_rule: None,
-                suggested_rule: None,
-                allow_always: false,
-                filesystem: None,
-                mcp_startup: None,
-                timeout_secs: handler.timeout_secs(),
-            })
-            .await
-    } else {
-        PermissionApprovalDecision::deny()
-    };
-    if matches!(decision.outcome, PermissionApprovalOutcome::Deny) {
-        return Err(agent_client_protocol::Error::invalid_request().data("permission denied"));
-    }
-    let path = guarded_writable_path(&context.cwd, path)?;
-    tokio::fs::write(&path, content)
+    let authorizer = context.filesystem_authorizer.as_ref().ok_or_else(|| {
+        agent_client_protocol::Error::invalid_request().data("filesystem authorization unavailable")
+    })?;
+    let authorized = authorizer
+        .authorize_workspace_write(&format!("acp-write-{}", uuid::Uuid::now_v7()), path)
         .await
-        .map_err(acp_internal_error)?;
+        .map_err(acp_permission_error)?;
+    context.attachment.ensure_active()?;
+    let attachment = context.attachment.clone();
+    tokio::task::spawn_blocking(move || {
+        with_active_attachment(&attachment, || {
+            authorized
+                .write_all(content.as_bytes())
+                .map_err(|error| error.to_string())
+        })
+    })
+    .await
+    .map_err(acp_internal_error)?
+    .map_err(acp_internal_error)?;
     Ok(())
+}
+
+fn with_active_attachment<T>(
+    attachment: &super::turn::AcpAttachmentGuard,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    attachment.ensure_active().map_err(|error| {
+        error
+            .data
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_else(|| "ACP session attachment was revoked".to_string())
+    })?;
+    operation()
+}
+
+fn acp_permission_error(reason: String) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::invalid_request().data(reason)
 }
 
 pub(super) async fn request_permission(
@@ -287,42 +320,6 @@ fn permission_option_id(
         .map(|option| option.option_id.to_string())
 }
 
-fn guarded_existing_path(cwd: &Path, path: &Path) -> Result<PathBuf, agent_client_protocol::Error> {
-    let path = path
-        .canonicalize()
-        .map_err(|err| agent_client_protocol::Error::invalid_request().data(err.to_string()))?;
-    let cwd = cwd
-        .canonicalize()
-        .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))?;
-    if !path.starts_with(&cwd) {
-        return Err(agent_client_protocol::Error::invalid_request()
-            .data("path is outside the ACP peer workspace"));
-    }
-    Ok(path)
-}
-
-fn guarded_writable_path(cwd: &Path, path: &Path) -> Result<PathBuf, agent_client_protocol::Error> {
-    if !path.is_absolute() {
-        return Err(agent_client_protocol::Error::invalid_request()
-            .data("fs/write_text_file path must be absolute"));
-    }
-    let parent = path.parent().ok_or_else(|| {
-        agent_client_protocol::Error::invalid_request()
-            .data("fs/write_text_file path has no parent")
-    })?;
-    let parent = parent
-        .canonicalize()
-        .map_err(|err| agent_client_protocol::Error::invalid_request().data(err.to_string()))?;
-    let cwd = cwd
-        .canonicalize()
-        .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))?;
-    if !parent.starts_with(&cwd) {
-        return Err(agent_client_protocol::Error::invalid_request()
-            .data("path is outside the ACP peer workspace"));
-    }
-    Ok(path.to_path_buf())
-}
-
 fn apply_line_window(text: String, line: Option<u32>, limit: Option<u32>) -> String {
     if line.is_none() && limit.is_none() {
         return text;
@@ -351,4 +348,67 @@ pub(super) fn backend_cwd(value: &str, cwd: &Path) -> PathBuf {
 
 pub(super) fn acp_internal_error(err: impl std::fmt::Display) -> agent_client_protocol::Error {
     agent_client_protocol::Error::internal_error().data(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::{platform_callback_enabled, read_text_file_content};
+    use crate::acp_peer::turn::AcpClientContext;
+
+    #[tokio::test]
+    async fn filesystem_callbacks_fail_closed_without_runtime_authorization() {
+        let temp = tempfile::tempdir().expect("temp");
+        let file = temp.path().join("visible.txt");
+        std::fs::write(&file, "secret").expect("file");
+        let context = Arc::new(AcpClientContext {
+            cwd: temp.path().to_path_buf(),
+            workspace_roots: vec![temp.path().to_path_buf()],
+            fs_read: true,
+            fs_write: true,
+            approval_handler: None,
+            filesystem_authorizer: None,
+            turn_control: None,
+            terminal: false,
+            terminal_env: BTreeMap::new(),
+            attachment: Default::default(),
+        });
+
+        let error = read_text_file_content(context, &file, None, None)
+            .await
+            .expect_err("missing authorization must deny");
+
+        assert_eq!(
+            error.data,
+            Some(serde_json::Value::String(
+                "filesystem authorization unavailable".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn unsupported_platform_callbacks_are_not_advertised() {
+        assert!(!platform_callback_enabled(true, false));
+        assert!(platform_callback_enabled(true, true));
+        assert!(!platform_callback_enabled(false, true));
+    }
+
+    #[test]
+    fn revoked_attachment_cannot_enter_a_queued_write_operation() {
+        let attachment = super::super::turn::AcpAttachmentGuard::default();
+        attachment.revoke();
+        let mutated = AtomicBool::new(false);
+
+        let error = super::with_active_attachment(&attachment, || {
+            mutated.store(true, Ordering::SeqCst);
+            Ok(())
+        })
+        .expect_err("revoked attachment");
+
+        assert!(error.contains("revoked"));
+        assert!(!mutated.load(Ordering::SeqCst));
+    }
 }

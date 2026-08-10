@@ -137,6 +137,7 @@ for raw_line in sys.stdin:
                 "fork": {},
                 "resume": {},
                 "close": {},
+                "additionalDirectories": {},
             }
         if MODE == "no-delete":
             session_capabilities.pop("delete", None)

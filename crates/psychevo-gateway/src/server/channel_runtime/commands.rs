@@ -468,6 +468,24 @@ async fn channel_command_action_from_effect(
         SlashCommandEffect::SandboxShow => {
             let mut query = ConfigurationQuery::new(&context.scope.cwd);
             query.inherited_env = Some(context.state.inner.inherited_env.clone());
+            if let Some(thread_id) = context
+                .state
+                .inner
+                .gateway
+                .resolve_source_thread(context.source)
+                .await?
+            {
+                query.workspace_roots = context
+                    .state
+                    .inner
+                    .framework
+                    .thread_workspace_context(&thread_id)
+                    .await?
+                    .roots
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+            }
             ChannelCommandAction::Reply(
                 context
                     .state

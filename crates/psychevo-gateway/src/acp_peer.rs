@@ -867,6 +867,33 @@ mod tests {
         .expect("initialize fixture")
     }
 
+    #[test]
+    fn multi_root_requests_require_the_advertised_acp_capability() {
+        let mut value =
+            serde_json::to_value(initialized_projection_fixture()).expect("initialize json");
+        value["agentCapabilities"]["sessionCapabilities"]
+            .as_object_mut()
+            .expect("session capabilities")
+            .remove("additionalDirectories");
+        let initialized: InitializeResponse =
+            serde_json::from_value(value).expect("initialize without multi-root capability");
+
+        let error = super::lifecycle::require_acp_additional_directories(
+            &initialized,
+            &[PathBuf::from("/secondary")],
+        )
+        .expect_err("non-empty roots require the capability");
+
+        assert_eq!(
+            error
+                .structured_data()
+                .and_then(|data| data["code"].as_str()),
+            Some("acp_additional_directories_unsupported")
+        );
+        super::lifecycle::require_acp_additional_directories(&initialized, &[])
+            .expect("single-root sessions do not require the capability");
+    }
+
     fn mode_notification(session_id: &str) -> SessionNotification {
         serde_json::from_value(json!({
             "sessionId": session_id,
@@ -905,6 +932,8 @@ mod tests {
             &initialized,
             AcpResidentSessionInput {
                 native_session_id: "native-fixture".to_string(),
+                workspace_roots: Vec::new(),
+                workspace_root_capture: None,
                 modes: None,
                 config_options: Vec::new(),
                 legacy_models: None,
@@ -930,6 +959,8 @@ mod tests {
             &initialized,
             AcpResidentSessionInput {
                 native_session_id: "native-fixture".to_string(),
+                workspace_roots: Vec::new(),
+                workspace_root_capture: None,
                 modes: None,
                 config_options: Vec::new(),
                 legacy_models: None,
@@ -998,6 +1029,7 @@ mod tests {
             pool.inspect(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 "local-fixture".to_string(),
                 "native-fixture".to_string(),
                 Vec::new(),
@@ -1096,6 +1128,7 @@ mod tests {
                     .inspect(
                         peer.clone(),
                         temp.path().to_path_buf(),
+                        Vec::new(),
                         "local-fixture".to_string(),
                         "native-fixture".to_string(),
                         Vec::new(),
@@ -1118,6 +1151,7 @@ mod tests {
             .set_control(AcpSetControlInput {
                 peer,
                 cwd: temp.path().to_path_buf(),
+                additional_directories: Vec::new(),
                 local_session_id: "local-fixture".to_string(),
                 native_session_id: "native-fixture".to_string(),
                 mcp_servers: Vec::new(),
@@ -1206,11 +1240,14 @@ mod tests {
             native_session_id: "native-source".to_string(),
         };
         let mcp = lifecycle_mcp_fixture();
+        let additional_directory = temp.path().join("secondary");
+        std::fs::create_dir_all(&additional_directory).expect("secondary directory");
 
         let resumed = pool
             .resume_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                vec![additional_directory.clone()],
                 source.clone(),
                 vec![mcp],
             )
@@ -1244,6 +1281,7 @@ mod tests {
             .fork_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                vec![additional_directory.clone()],
                 source.clone(),
                 "local-fork".to_string(),
             )
@@ -1300,10 +1338,18 @@ mod tests {
         assert_eq!(resume_requests.len(), 1);
         assert_eq!(resume_requests[0]["params"]["sessionId"], "native-source");
         assert_eq!(resume_requests[0]["params"]["cwd"], json!(temp.path()));
+        assert_eq!(
+            resume_requests[0]["params"]["additionalDirectories"],
+            json!([additional_directory])
+        );
         assert_eq!(resume_requests[0]["params"]["mcpServers"], expected_mcp);
         let fork_requests = lifecycle_requests(&entries, "session/fork");
         assert_eq!(fork_requests.len(), 1);
         assert_eq!(fork_requests[0]["params"]["sessionId"], "native-source");
+        assert_eq!(
+            fork_requests[0]["params"]["additionalDirectories"],
+            resume_requests[0]["params"]["additionalDirectories"]
+        );
         assert_eq!(
             fork_requests[0]["params"]["mcpServers"], resume_requests[0]["params"]["mcpServers"],
             "fork inherits the exact resident MCP declaration set"
@@ -1344,6 +1390,7 @@ mod tests {
             .fork_session(
                 peer,
                 temp.path().to_path_buf(),
+                Vec::new(),
                 source,
                 "local-after-delete".to_string(),
             )
@@ -1358,6 +1405,204 @@ mod tests {
         pool.shutdown(false)
             .await
             .expect("shutdown lifecycle fixture");
+    }
+
+    #[tokio::test]
+    async fn changed_workspace_roots_reload_the_same_resident_native_session() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&cwd).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let (peer, log) = lifecycle_fixture_peer(&temp, "all");
+        let pool = AcpProcessPool::new(Duration::from_secs(30));
+
+        let prepared = pool
+            .prepare_session(
+                peer.clone(),
+                cwd.clone(),
+                Vec::new(),
+                "workspace-thread".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("initial resident session");
+        let reattached = pool
+            .inspect(
+                peer,
+                cwd,
+                vec![secondary.clone()],
+                "workspace-thread".to_string(),
+                prepared.native_session_id.clone(),
+                Vec::new(),
+            )
+            .await
+            .expect("reattach with changed roots");
+
+        assert_eq!(reattached.native_session_id, prepared.native_session_id);
+        pool.shutdown(false).await.expect("shutdown fixture");
+        let entries = read_lifecycle_log(&log);
+        let loads = lifecycle_requests(&entries, "session/load");
+        assert_eq!(loads.len(), 1);
+        assert_eq!(
+            loads[0]["params"]["additionalDirectories"],
+            json!([secondary])
+        );
+    }
+
+    #[tokio::test]
+    async fn changed_roots_do_not_bypass_the_immutable_mcp_binding() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&cwd).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let (peer, log) = lifecycle_fixture_peer(&temp, "all");
+        let pool = AcpProcessPool::new(Duration::from_secs(30));
+
+        let prepared = pool
+            .prepare_session(
+                peer.clone(),
+                cwd.clone(),
+                Vec::new(),
+                "workspace-thread".to_string(),
+                vec![lifecycle_mcp_fixture()],
+            )
+            .await
+            .expect("initial resident session");
+        let native_session_id = prepared.native_session_id.clone();
+        let error = pool
+            .inspect(
+                peer.clone(),
+                cwd.clone(),
+                vec![secondary.clone()],
+                "workspace-thread".to_string(),
+                native_session_id.clone(),
+                Vec::new(),
+            )
+            .await
+            .expect_err("MCP binding must remain immutable during root changes");
+
+        assert_eq!(
+            error
+                .structured_data()
+                .and_then(|data| data["code"].as_str()),
+            Some("acp_mcp_binding_changed")
+        );
+        pool.inspect(
+            peer,
+            cwd,
+            vec![secondary],
+            "workspace-thread".to_string(),
+            native_session_id,
+            vec![lifecycle_mcp_fixture()],
+        )
+        .await
+        .expect("root revocation removes the stale resident attachment");
+        pool.shutdown(false).await.expect("shutdown fixture");
+        assert_eq!(
+            lifecycle_requests(&read_lifecycle_log(&log), "session/load").len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn non_reloadable_root_change_revokes_the_resident_session() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&cwd).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let (peer, _log) = lifecycle_fixture_peer(&temp, "resume-only");
+        let pool = AcpProcessPool::new(Duration::from_secs(30));
+
+        let prepared = pool
+            .prepare_session(
+                peer.clone(),
+                cwd.clone(),
+                vec![secondary],
+                "workspace-thread".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("initial resident session");
+        let error = pool
+            .inspect(
+                peer,
+                cwd,
+                Vec::new(),
+                "workspace-thread".to_string(),
+                prepared.native_session_id.clone(),
+                Vec::new(),
+            )
+            .await
+            .expect_err("changed roots require reload");
+
+        assert_eq!(
+            error
+                .structured_data()
+                .and_then(|data| data["code"].as_str()),
+            Some("acp_workspace_roots_changed_not_reloadable")
+        );
+        assert!(
+            pool.inspect_cached(
+                "workspace-thread".to_string(),
+                prepared.native_session_id.clone(),
+            )
+            .await
+            .expect("cached inspection")
+            .is_none(),
+            "stale resident authority must be removed before rejection"
+        );
+        pool.shutdown(false).await.expect("shutdown fixture");
+    }
+
+    #[tokio::test]
+    async fn unsupported_additional_directories_revokes_stale_resident_authority_first() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("primary");
+        let secondary = temp.path().join("secondary");
+        std::fs::create_dir_all(&cwd).expect("primary");
+        std::fs::create_dir_all(&secondary).expect("secondary");
+        let (peer, _log) = lifecycle_fixture_peer(&temp, "none");
+        let pool = AcpProcessPool::new(Duration::from_secs(30));
+
+        let prepared = pool
+            .prepare_session(
+                peer.clone(),
+                cwd.clone(),
+                Vec::new(),
+                "workspace-thread".to_string(),
+                Vec::new(),
+            )
+            .await
+            .expect("single-root resident session");
+        let error = pool
+            .inspect(
+                peer,
+                cwd,
+                vec![secondary],
+                "workspace-thread".to_string(),
+                prepared.native_session_id.clone(),
+                Vec::new(),
+            )
+            .await
+            .expect_err("unsupported multi-root reattach");
+
+        assert_eq!(
+            error
+                .structured_data()
+                .and_then(|data| data["code"].as_str()),
+            Some("acp_additional_directories_unsupported")
+        );
+        assert!(
+            pool.inspect_cached("workspace-thread".to_string(), prepared.native_session_id,)
+                .await
+                .expect("cached inspection")
+                .is_none(),
+            "capability rejection must not leave stale callback authority resident"
+        );
+        pool.shutdown(false).await.expect("shutdown fixture");
     }
 
     #[tokio::test]
@@ -1377,6 +1622,7 @@ mod tests {
             pool.resume_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 session.clone(),
                 Vec::new(),
             )
@@ -1385,6 +1631,7 @@ mod tests {
             pool.fork_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 session.clone(),
                 "local-fork-gated".to_string(),
             )
@@ -1534,6 +1781,7 @@ mod tests {
             .inspect(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 "local-loaded".to_string(),
                 "native-loaded".to_string(),
                 Vec::new(),
@@ -1552,6 +1800,7 @@ mod tests {
             .set_control(AcpSetControlInput {
                 peer: peer.clone(),
                 cwd: temp.path().to_path_buf(),
+                additional_directories: Vec::new(),
                 local_session_id: "local-loaded".to_string(),
                 native_session_id: "native-loaded".to_string(),
                 mcp_servers: Vec::new(),
@@ -1574,6 +1823,7 @@ mod tests {
             .resume_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 resumed_ref.clone(),
                 Vec::new(),
             )
@@ -1587,6 +1837,7 @@ mod tests {
             .fork_session(
                 peer.clone(),
                 temp.path().to_path_buf(),
+                Vec::new(),
                 resumed_ref,
                 "local-forked".to_string(),
             )
@@ -1615,6 +1866,7 @@ mod tests {
             .inspect(
                 stable_peer.clone(),
                 stable_temp.path().to_path_buf(),
+                Vec::new(),
                 "local-stable".to_string(),
                 "native-stable".to_string(),
                 Vec::new(),
@@ -1626,6 +1878,7 @@ mod tests {
             .set_control(AcpSetControlInput {
                 peer: stable_peer,
                 cwd: stable_temp.path().to_path_buf(),
+                additional_directories: Vec::new(),
                 local_session_id: "local-stable".to_string(),
                 native_session_id: "native-stable".to_string(),
                 mcp_servers: Vec::new(),
@@ -1652,6 +1905,7 @@ mod tests {
             .inspect(
                 error_peer.clone(),
                 error_temp.path().to_path_buf(),
+                Vec::new(),
                 "local-error".to_string(),
                 "native-error".to_string(),
                 Vec::new(),
@@ -1662,6 +1916,7 @@ mod tests {
             .set_control(AcpSetControlInput {
                 peer: error_peer.clone(),
                 cwd: error_temp.path().to_path_buf(),
+                additional_directories: Vec::new(),
                 local_session_id: "local-error".to_string(),
                 native_session_id: "native-error".to_string(),
                 mcp_servers: Vec::new(),
@@ -1680,6 +1935,7 @@ mod tests {
             .inspect(
                 error_peer,
                 error_temp.path().to_path_buf(),
+                Vec::new(),
                 "local-error".to_string(),
                 "native-error".to_string(),
                 Vec::new(),

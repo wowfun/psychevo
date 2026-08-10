@@ -56,8 +56,6 @@ struct GatewayEventIngressInner {
     sender: Mutex<Option<mpsc::Sender<GatewayEventIngressItem>>>,
     supervisor: GatewaySupervisor,
     #[cfg(test)]
-    processed_wakeup: Notify,
-    #[cfg(test)]
     retry_after_commit: AtomicU64,
     #[cfg(test)]
     worker_paused: AtomicBool,
@@ -168,8 +166,6 @@ impl GatewayEventIngress {
                 processed: AtomicU64::new(0),
                 sender: Mutex::new(None),
                 supervisor,
-                #[cfg(test)]
-                processed_wakeup: Notify::new(),
                 #[cfg(test)]
                 retry_after_commit: AtomicU64::new(0),
                 #[cfg(test)]
@@ -457,13 +453,6 @@ impl GatewayEventIngress {
     }
 
     #[cfg(test)]
-    pub(crate) async fn wait_until_processed(&self, expected: u64) {
-        while self.inner.processed.load(Ordering::Acquire) < expected {
-            self.inner.processed_wakeup.notified().await;
-        }
-    }
-
-    #[cfg(test)]
     pub(crate) fn commit_latency_samples_micros(&self) -> Vec<u64> {
         self.inner
             .commit_latencies_micros
@@ -521,7 +510,10 @@ impl GatewayEventIngress {
     #[cfg(test)]
     pub(crate) fn resume_worker(&self) {
         self.inner.worker_paused.store(false, Ordering::Release);
-        self.inner.worker_wakeup.notify_waiters();
+        // The test controller can resume between the worker observing the paused
+        // flag and registering its waiter. A stored permit prevents that race
+        // from stranding the worker indefinitely.
+        self.inner.worker_wakeup.notify_one();
     }
 }
 
@@ -626,7 +618,6 @@ impl GatewayEventIngressWorker {
         self.ingress.inner.processed.fetch_add(1, Ordering::Release);
         #[cfg(test)]
         {
-            self.ingress.inner.processed_wakeup.notify_one();
             while self.ingress.inner.worker_paused.load(Ordering::Acquire) {
                 self.ingress.inner.worker_wakeup.notified().await;
             }

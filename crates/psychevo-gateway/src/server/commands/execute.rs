@@ -266,6 +266,17 @@ async fn command_result_from_effect(
         SlashCommandEffect::SandboxShow => {
             let mut query = psychevo::ConfigurationQuery::new(&scope.cwd);
             query.inherited_env = Some(state.inner.inherited_env.clone());
+            if let Some(thread_id) = thread_id.as_deref() {
+                query.workspace_roots = state
+                    .inner
+                    .framework
+                    .thread_workspace_context(thread_id)
+                    .await?
+                    .roots
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+            }
             let status = state
                 .inner
                 .framework
@@ -310,7 +321,7 @@ async fn record_gateway_mission_metadata(
     team: Option<&str>,
     goal: &str,
 ) -> psychevo::Result<String> {
-    let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)
+    let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id, false)
         .await?
         .0
         .ok_or_else(|| Error::Message("mission requires a thread context".to_string()))?;

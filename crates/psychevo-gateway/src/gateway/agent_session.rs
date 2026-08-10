@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use psychevo::{
@@ -196,6 +196,7 @@ enum AgentSessionTarget {
 #[derive(Clone)]
 pub(super) struct AgentSessionRef {
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
     pub(super) local_session_id: String,
     pub(super) native_session_id: String,
     pub(super) mcp_servers: Vec<psychevo::application::ResolvedMcpServerInput>,
@@ -286,10 +287,29 @@ struct PreparedAgentSession {
     runtime_ref: String,
     profile_fingerprint: String,
     cwd: PathBuf,
+    additional_directories: Vec<PathBuf>,
     local_session_id: String,
     native_session_id: String,
     mcp_servers: Vec<psychevo::application::ResolvedMcpServerInput>,
     peer: ResolvedPeerTurn,
+}
+
+pub(super) struct AgentSessionPrepareInput {
+    pub(super) captured: CapturedAgentSessionTarget,
+    pub(super) source_key: String,
+    pub(super) target_id: String,
+    pub(super) agent_ref: Option<String>,
+    pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
+    pub(super) mcp_servers: Vec<psychevo::application::ResolvedMcpServerInput>,
+}
+
+pub(super) struct PreparedAgentSessionIdentity<'a> {
+    pub(super) agent_ref: Option<&'a str>,
+    pub(super) runtime_ref: &'a str,
+    pub(super) profile_fingerprint: &'a str,
+    pub(super) cwd: &'a Path,
+    pub(super) additional_directories: &'a [PathBuf],
 }
 
 impl fmt::Debug for AgentSessionHost {
@@ -312,13 +332,17 @@ impl AgentSessionHost {
 
     pub(super) async fn prepare(
         &self,
-        captured: CapturedAgentSessionTarget,
-        source_key: String,
-        target_id: String,
-        agent_ref: Option<String>,
-        cwd: PathBuf,
-        mcp_servers: Vec<psychevo::application::ResolvedMcpServerInput>,
+        input: AgentSessionPrepareInput,
     ) -> psychevo::Result<acp_peer::session_projection::AcpSessionSnapshot> {
+        let AgentSessionPrepareInput {
+            captured,
+            source_key,
+            target_id,
+            agent_ref,
+            cwd,
+            additional_directories,
+            mcp_servers,
+        } = input;
         let attached = self.attach(captured)?;
         let (peer, profile) = match &attached.target {
             AgentSessionTarget::Native { profile } => {
@@ -338,6 +362,7 @@ impl AgentSessionHost {
             .filter(|prepared| {
                 prepared.target_id == target_id
                     && prepared.cwd == cwd
+                    && prepared.additional_directories == additional_directories
                     && prepared.profile_fingerprint == profile_fingerprint
             })
             .cloned();
@@ -354,9 +379,14 @@ impl AgentSessionHost {
         }
         self.release_prepared(&source_key).await?;
 
+        let roots_fingerprint = additional_directories
+            .iter()
+            .map(|root| root.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\0");
         let digest = Sha256::digest(
             format!(
-                "{source_key}\0{target_id}\0{}\0{profile_fingerprint}",
+                "{source_key}\0{target_id}\0{}\0{roots_fingerprint}\0{profile_fingerprint}",
                 cwd.display()
             )
             .as_bytes(),
@@ -367,6 +397,7 @@ impl AgentSessionHost {
             .prepare_session(
                 peer.clone(),
                 cwd.clone(),
+                additional_directories.clone(),
                 local_session_id.clone(),
                 mcp_servers.clone(),
             )
@@ -382,6 +413,7 @@ impl AgentSessionHost {
                     runtime_ref: profile.id,
                     profile_fingerprint,
                     cwd,
+                    additional_directories,
                     local_session_id,
                     native_session_id: snapshot.native_session_id.clone(),
                     mcp_servers,
@@ -456,6 +488,7 @@ impl AgentSessionHost {
             .set_control(acp_peer::process_pool::AcpSetControlInput {
                 peer: prepared.peer,
                 cwd: prepared.cwd,
+                additional_directories: prepared.additional_directories,
                 local_session_id: prepared.local_session_id,
                 native_session_id: prepared.native_session_id,
                 mcp_servers: prepared.mcp_servers,
@@ -469,9 +502,7 @@ impl AgentSessionHost {
     pub(super) async fn promote_prepared(
         &self,
         source_key: &str,
-        agent_ref: Option<&str>,
-        runtime_ref: &str,
-        profile_fingerprint: &str,
+        identity: PreparedAgentSessionIdentity<'_>,
         thread_id: &str,
     ) -> psychevo::Result<Option<String>> {
         let prepared = self
@@ -479,15 +510,19 @@ impl AgentSessionHost {
             .lock()
             .expect("prepared Agent Session registry poisoned")
             .get(source_key)
-            .filter(|prepared| {
-                prepared.agent_ref.as_deref() == agent_ref
-                    && prepared.runtime_ref == runtime_ref
-                    && prepared.profile_fingerprint == profile_fingerprint
-            })
             .cloned();
         let Some(prepared) = prepared else {
             return Ok(None);
         };
+        if !(prepared.agent_ref.as_deref() == identity.agent_ref
+            && prepared.runtime_ref == identity.runtime_ref
+            && prepared.profile_fingerprint == identity.profile_fingerprint
+            && prepared.cwd == identity.cwd
+            && prepared.additional_directories == identity.additional_directories)
+        {
+            self.release_prepared(source_key).await?;
+            return Ok(None);
+        }
         self.acp
             .promote_session(
                 prepared.local_session_id,
@@ -754,6 +789,7 @@ impl AttachedAgent {
                 .resume_session(
                     peer.as_ref().clone(),
                     session.cwd,
+                    session.additional_directories,
                     acp_peer::lifecycle::AcpResidentSessionRef {
                         local_session_id: session.local_session_id,
                         native_session_id: session.native_session_id,
@@ -777,6 +813,7 @@ impl AttachedAgent {
                     .load_session(
                         peer.as_ref().clone(),
                         session.cwd,
+                        session.additional_directories,
                         session.local_session_id,
                         session.native_session_id,
                         session.mcp_servers,
@@ -799,6 +836,7 @@ impl AttachedAgent {
                 .fork_session(
                     peer.as_ref().clone(),
                     source.cwd,
+                    source.additional_directories,
                     acp_peer::lifecycle::AcpResidentSessionRef {
                         local_session_id: source.local_session_id,
                         native_session_id: source.native_session_id,
@@ -874,6 +912,7 @@ impl AttachedAgent {
                     .inspect(
                         peer.as_ref().clone(),
                         session.cwd,
+                        session.additional_directories,
                         session.local_session_id,
                         session.native_session_id,
                         session.mcp_servers,
@@ -909,6 +948,7 @@ impl AttachedAgent {
                     .set_control(acp_peer::process_pool::AcpSetControlInput {
                         peer: peer.as_ref().clone(),
                         cwd: session.cwd,
+                        additional_directories: session.additional_directories,
                         local_session_id: session.local_session_id,
                         native_session_id: session.native_session_id,
                         mcp_servers: session.mcp_servers,

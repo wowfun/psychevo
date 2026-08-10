@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use psychevo::application::{
     ImageInput, Message, Outcome, ResolvedMcpServerInput, RunStreamSink, SelectedAgent,
@@ -47,19 +48,53 @@ pub(crate) struct AcpPeerTurnRequest {
     pub(crate) stream: Option<RunStreamSink>,
     pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(crate) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(crate) filesystem_authorizer: psychevo::AgentFilesystemAuthorizer,
     pub(crate) control: psychevo::TurnControl,
     pub(crate) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
+    pub(crate) workspace_root_capture: psychevo::WorkspaceRootCapture,
 }
 
 #[derive(Clone)]
 pub(super) struct AcpClientContext {
     pub(super) cwd: PathBuf,
+    pub(super) workspace_roots: Vec<PathBuf>,
     pub(super) fs_read: bool,
     pub(super) fs_write: bool,
     pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(super) filesystem_authorizer: Option<psychevo::AgentFilesystemAuthorizer>,
     pub(super) turn_control: Option<psychevo::TurnControl>,
     pub(super) terminal: bool,
     pub(super) terminal_env: BTreeMap<String, String>,
+    pub(super) attachment: AcpAttachmentGuard,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct AcpAttachmentGuard(Arc<AtomicBool>);
+
+impl AcpAttachmentGuard {
+    pub(super) fn revoke(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub(super) fn ensure_active(&self) -> Result<(), agent_client_protocol::Error> {
+        if self.0.load(Ordering::SeqCst) {
+            Err(agent_client_protocol::Error::invalid_request()
+                .data("ACP session attachment was revoked"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub(super) fn acp_workspace_roots(cwd: &std::path::Path, additional: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for root in std::iter::once(cwd.to_path_buf()).chain(additional.iter().cloned()) {
+        let root = root.canonicalize().unwrap_or(root);
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
 }
 
 fn acp_message_ids(metadata: Option<&Value>) -> Vec<String> {
@@ -555,9 +590,17 @@ pub(crate) async fn run_acp_peer_turn(
         })
     });
     let cwd = PathBuf::from(&request.thread.cwd);
+    let additional_directories = request
+        .thread
+        .roots
+        .iter()
+        .filter(|root| root.as_str() != request.thread.cwd)
+        .map(PathBuf::from)
+        .collect();
     let home = resolve_skills_home(&peer.env, &cwd)?;
     let acp_context = AcpPeerTurnContext {
         cwd,
+        additional_directories,
         home,
         local_session_id: session_id.clone(),
         native_session_id: existing_native_id,
@@ -575,9 +618,11 @@ pub(crate) async fn run_acp_peer_turn(
         stream: request.stream.clone(),
         workspace_mutations: request.workspace_mutations,
         approval_handler: request.approval_handler,
+        filesystem_authorizer: request.filesystem_authorizer,
         turn_control: request.control,
         before_prompt,
         persistence: request.persistence.clone(),
+        workspace_root_capture: request.workspace_root_capture,
     };
 
     emit_runtime_event(

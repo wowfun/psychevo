@@ -40,6 +40,16 @@ pub(in super::super) async fn thread_snapshot(
     } else {
         None
     };
+    let workspace = match thread_id {
+        Some(thread_id) => Some(
+            state
+                .inner
+                .framework
+                .thread_workspace_context(thread_id)
+                .await?,
+        ),
+        None => None,
+    };
     let selector = thread_id
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
@@ -76,6 +86,12 @@ pub(in super::super) async fn thread_snapshot(
     Ok(json!({
         "source": scope.source,
         "scope": scope.to_wire_scope(),
+        "workspaceId": workspace.as_ref().map(|workspace| workspace.workspace_id.clone()),
+        "workspaceRoots": workspace.as_ref().map(|workspace| workspace.roots.clone()),
+        "workspaceRootSource": workspace.as_ref().map(|workspace| match workspace.root_source {
+            psychevo::application::ThreadWorkspaceRootSource::Direct => "direct",
+            psychevo::application::ThreadWorkspaceRootSource::Workspace => "workspace",
+        }),
         "thread": thread,
         "history": history,
         "entries": history_page.entries,

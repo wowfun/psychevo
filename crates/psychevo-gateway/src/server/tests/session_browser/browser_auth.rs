@@ -176,7 +176,13 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
             jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
-            params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
+            params: Some(json!({
+                "origin": {
+                    "source": scope.source,
+                    "location": { "kind": "cwd", "cwd": scope.cwd }
+                },
+                "targetIntent": { "kind": "default" }
+            })),
         },
     )
     .await

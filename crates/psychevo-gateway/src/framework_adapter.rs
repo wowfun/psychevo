@@ -24,6 +24,15 @@ use psychevo::{
 };
 use psychevo_gateway_protocol::source::{GatewayImageInput, GatewayInputPart};
 
+fn thread_additional_directories(thread: &psychevo::ThreadExecutionContext) -> Vec<PathBuf> {
+    thread
+        .roots
+        .iter()
+        .filter(|root| root.as_str() != thread.cwd)
+        .map(PathBuf::from)
+        .collect()
+}
+
 #[derive(Clone)]
 pub(crate) struct GatewayAgentSessionAdapter {
     agent_sessions: AgentSessionHost,
@@ -224,6 +233,7 @@ impl GatewayAgentSessionAdapter {
             attached
                 .resume_session(AgentSessionRef {
                     cwd: PathBuf::from(&request.source.cwd),
+                    additional_directories: thread_additional_directories(&request.source),
                     local_session_id: request.source.id.clone(),
                     native_session_id: native_session_id.clone(),
                     mcp_servers,
@@ -234,6 +244,7 @@ impl GatewayAgentSessionAdapter {
             .fork_session(
                 AgentSessionRef {
                     cwd: PathBuf::from(&request.source.cwd),
+                    additional_directories: thread_additional_directories(&request.source),
                     local_session_id: request.source.id.clone(),
                     native_session_id,
                     mcp_servers: Vec::new(),
@@ -333,6 +344,7 @@ impl GatewayAgentSessionAdapter {
             ))?
             .load_session(AgentSessionRef {
                 cwd: captured.context.cwd.clone(),
+                additional_directories: thread_additional_directories(thread),
                 local_session_id: thread.id.clone(),
                 native_session_id: captured.native_session_id.clone(),
                 mcp_servers,
@@ -438,6 +450,7 @@ impl GatewayAgentSessionAdapter {
         attached
             .close_session(AgentSessionRef {
                 cwd: PathBuf::from(&thread.cwd),
+                additional_directories: thread_additional_directories(thread),
                 local_session_id: thread.id.clone(),
                 native_session_id,
                 mcp_servers: Vec::new(),
@@ -468,6 +481,7 @@ impl GatewayAgentSessionAdapter {
                 attached
                     .resume_session(AgentSessionRef {
                         cwd: PathBuf::from(&thread.cwd),
+                        additional_directories: thread_additional_directories(thread),
                         local_session_id: thread.id.clone(),
                         native_session_id,
                         mcp_servers,
@@ -511,6 +525,7 @@ impl GatewayAgentSessionAdapter {
                 attached
                     .resume_session(AgentSessionRef {
                         cwd: PathBuf::from(&thread.cwd),
+                        additional_directories: thread_additional_directories(thread),
                         local_session_id: thread.id.clone(),
                         native_session_id: native_session_id.clone(),
                         mcp_servers,
@@ -542,6 +557,7 @@ impl GatewayAgentSessionAdapter {
         attached
             .delete_session(AgentSessionRef {
                 cwd: PathBuf::from(&thread.cwd),
+                additional_directories: thread_additional_directories(thread),
                 local_session_id: thread.id.clone(),
                 native_session_id,
                 mcp_servers: Vec::new(),
@@ -721,6 +737,8 @@ async fn run_prepared_framework_gateway_turn(
     })?;
     let mcp_names = acp_peer::stdio_turn::requested_peer_mcp_server_names(peer)?;
     let mcp_servers = invocation.resolve_mcp_server_handoffs(&mcp_names).await?;
+    let filesystem_authorizer = invocation.filesystem_authorizer();
+    let workspace_root_capture = invocation.workspace_root_capture();
     let psychevo::AgentTurnInvocation {
         thread,
         history,
@@ -771,15 +789,20 @@ async fn run_prepared_framework_gateway_turn(
     persistence.clear_agent_usage_observation().await?;
     let binding_revision = binding.binding_revision;
     let mut native_session_id = binding.native_session_id;
+    let prepared_additional_directories = thread_additional_directories(&thread);
     if native_session_id.is_none()
         && let Some(source_key) = prepared.prepared_source_key.as_deref()
         && let Some(promoted_native_session_id) = prepared
             .agent_sessions
             .promote_prepared(
                 source_key,
-                agent.agent_ref.as_deref(),
-                &profile.id,
-                &profile_fingerprint,
+                super::agent_session::PreparedAgentSessionIdentity {
+                    agent_ref: agent.agent_ref.as_deref(),
+                    runtime_ref: &profile.id,
+                    profile_fingerprint: &profile_fingerprint,
+                    cwd: std::path::Path::new(&thread.cwd),
+                    additional_directories: &prepared_additional_directories,
+                },
                 &receipt.thread_id,
             )
             .await?
@@ -820,8 +843,10 @@ async fn run_prepared_framework_gateway_turn(
                 stream: Some(stream),
                 workspace_mutations: execution.workspace_mutations,
                 approval_handler: execution.approval_handler,
+                filesystem_authorizer,
                 control,
                 persistence,
+                workspace_root_capture,
             },
             session_ready,
         )

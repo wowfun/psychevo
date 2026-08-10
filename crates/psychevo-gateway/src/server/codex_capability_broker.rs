@@ -3780,8 +3780,8 @@ mod tests {
                     method: "thread/draft/open".to_string(),
                     params: Some(json!({
                         "origin": {
-                            "cwd": thread_cwd,
-                            "source": {"kind":"web","rawId":"prewarm-test"}
+                            "source": {"kind":"web","rawId":"prewarm-test"},
+                            "location": {"kind":"cwd","cwd":thread_cwd}
                         },
                         "targetIntent": {"kind":"default"}
                     })),

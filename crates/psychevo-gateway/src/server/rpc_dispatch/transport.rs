@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::task::JoinSet;
+use tokio::task::{AbortHandle, JoinSet};
 use uuid::Uuid;
 
 use crate::gateway_now_ms;
@@ -283,14 +283,23 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     });
     let permits = Arc::new(Semaphore::new(RPC_IN_FLIGHT_LIMIT));
     let mut requests = JoinSet::new();
+    let mut active_requests = HashMap::<String, AbortHandle>::new();
     let mut pending = std::collections::VecDeque::new();
 
     loop {
         let next_input = async {
             if pending.is_empty() {
-                SocketInput::Message(next_socket_message(&mut receiver, &mut requests).await)
+                SocketInput::Message(
+                    next_socket_message(&mut receiver, &mut requests, &mut active_requests).await,
+                )
             } else {
-                next_socket_message_or_permit(&mut receiver, &mut requests, permits.clone()).await
+                next_socket_message_or_permit(
+                    &mut receiver,
+                    &mut requests,
+                    &mut active_requests,
+                    permits.clone(),
+                )
+                .await
             }
         };
         let input = tokio::select! {
@@ -300,6 +309,9 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
         match input {
             SocketInput::Message(Some(Ok(WsMessage::Text(text)))) => {
                 let text = text.to_string();
+                if cancel_rpc_request(&text, &mut pending, &mut active_requests) {
+                    continue;
+                }
                 if pending.len() < RPC_PENDING_LIMIT {
                     pending.push_back(text);
                 } else if let Some(response) = rpc_capacity_error(&text) {
@@ -314,9 +326,19 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
                 let request_auth = auth.clone();
                 let request_out_tx = out_tx.clone();
                 let response_out_tx = out_tx.clone();
-                spawn_bounded_rpc_response(&mut requests, permit, response_out_tx, async move {
-                    handle_rpc_text(&request_state, &request_auth, request_out_tx, &text).await
-                });
+                let request_key = rpc_request_key(&text);
+                let abort = spawn_bounded_rpc_response(
+                    &mut requests,
+                    request_key.clone(),
+                    permit,
+                    response_out_tx,
+                    async move {
+                        handle_rpc_text(&request_state, &request_auth, request_out_tx, &text).await
+                    },
+                );
+                if let Some(request_key) = request_key {
+                    active_requests.insert(request_key, abort);
+                }
             }
             SocketInput::Message(Some(Ok(WsMessage::Close(_))))
             | SocketInput::Message(Some(Err(_)))
@@ -346,7 +368,8 @@ enum SocketInput<T> {
 
 async fn next_socket_message_or_permit<S>(
     receiver: &mut S,
-    requests: &mut JoinSet<()>,
+    requests: &mut JoinSet<Option<String>>,
+    active_requests: &mut HashMap<String, AbortHandle>,
     permits: Arc<Semaphore>,
 ) -> SocketInput<S::Item>
 where
@@ -355,7 +378,7 @@ where
     loop {
         tokio::select! {
             completed = requests.join_next(), if !requests.is_empty() => {
-                let _ = completed;
+                remove_completed_request(completed, active_requests);
             }
             message = receiver.next() => return SocketInput::Message(message),
             permit = permits.clone().acquire_owned() => return SocketInput::Permit(permit.ok()),
@@ -373,14 +396,18 @@ fn rpc_capacity_error(text: &str) -> Option<String> {
     ))
 }
 
-async fn next_socket_message<S>(receiver: &mut S, requests: &mut JoinSet<()>) -> Option<S::Item>
+async fn next_socket_message<S>(
+    receiver: &mut S,
+    requests: &mut JoinSet<Option<String>>,
+    active_requests: &mut HashMap<String, AbortHandle>,
+) -> Option<S::Item>
 where
     S: futures::Stream + Unpin,
 {
     loop {
         tokio::select! {
             completed = requests.join_next(), if !requests.is_empty() => {
-                let _ = completed;
+                remove_completed_request(completed, active_requests);
             }
             message = receiver.next() => return message,
         }
@@ -388,11 +415,13 @@ where
 }
 
 fn spawn_bounded_rpc_response<F, T>(
-    requests: &mut JoinSet<()>,
+    requests: &mut JoinSet<Option<String>>,
+    request_key: Option<String>,
     permit: OwnedSemaphorePermit,
     out_tx: T,
     response: F,
-) where
+) -> AbortHandle
+where
     F: Future<Output = Option<String>> + Send + 'static,
     T: Into<ConnectionSender>,
 {
@@ -402,7 +431,45 @@ fn spawn_bounded_rpc_response<F, T>(
         if let Some(response) = response.await {
             let _ = out_tx.send(response);
         }
-    });
+        request_key
+    })
+}
+
+fn remove_completed_request(
+    completed: Option<Result<Option<String>, tokio::task::JoinError>>,
+    active_requests: &mut HashMap<String, AbortHandle>,
+) {
+    if let Some(Ok(Some(request_key))) = completed {
+        active_requests.remove(&request_key);
+    }
+}
+
+fn rpc_request_key(text: &str) -> Option<String> {
+    let request = serde_json::from_str::<RpcRequest>(text).ok()?;
+    serde_json::to_string(&request.id?).ok()
+}
+
+fn rpc_cancel_key(text: &str) -> Option<String> {
+    let request = serde_json::from_str::<RpcRequest>(text).ok()?;
+    if request.id.is_some() || request.method != "$/cancelRequest" {
+        return None;
+    }
+    serde_json::to_string(request.params.as_ref()?.get("id")?).ok()
+}
+
+fn cancel_rpc_request(
+    text: &str,
+    pending: &mut std::collections::VecDeque<String>,
+    active_requests: &mut HashMap<String, AbortHandle>,
+) -> bool {
+    let Some(cancel_key) = rpc_cancel_key(text) else {
+        return false;
+    };
+    pending.retain(|request| rpc_request_key(request).as_deref() != Some(cancel_key.as_str()));
+    if let Some(request) = active_requests.remove(&cancel_key) {
+        request.abort();
+    }
+    true
 }
 
 pub(in super::super) fn spawn_gateway_live_event_tailer(state: WebState) {
@@ -521,16 +588,22 @@ mod transport_tests {
 
         let first_permit = permits.clone().acquire_owned().await.expect("first permit");
         let first_held = held.clone();
-        spawn_bounded_rpc_response(&mut requests, first_permit, out_tx.clone(), async move {
-            first_held.notified().await;
-            Some("first".to_string())
-        });
+        spawn_bounded_rpc_response(
+            &mut requests,
+            None,
+            first_permit,
+            out_tx.clone(),
+            async move {
+                first_held.notified().await;
+                Some("first".to_string())
+            },
+        );
         let second_permit = permits
             .clone()
             .acquire_owned()
             .await
             .expect("second permit");
-        spawn_bounded_rpc_response(&mut requests, second_permit, out_tx.clone(), async {
+        spawn_bounded_rpc_response(&mut requests, None, second_permit, out_tx.clone(), async {
             Some("second".to_string())
         });
 
@@ -552,7 +625,7 @@ mod transport_tests {
                 .acquire_owned()
                 .await
                 .expect("bounded permit");
-            spawn_bounded_rpc_response(&mut requests, permit, out_tx.clone(), async {
+            spawn_bounded_rpc_response(&mut requests, None, permit, out_tx.clone(), async {
                 std::future::pending::<Option<String>>().await
             });
         }
@@ -567,15 +640,16 @@ mod transport_tests {
     async fn completed_requests_are_reaped_before_the_next_socket_message() {
         let mut requests = JoinSet::new();
         for _ in 0..128 {
-            requests.spawn(async {});
+            requests.spawn(async { None });
         }
+        let mut active = HashMap::new();
         let mut messages = Box::pin(futures::stream::once(async {
             tokio::time::sleep(Duration::from_millis(25)).await;
             "next"
         }));
 
         assert_eq!(
-            next_socket_message(&mut messages, &mut requests).await,
+            next_socket_message(&mut messages, &mut requests, &mut active).await,
             Some("next")
         );
         assert_eq!(requests.len(), 0);
@@ -586,16 +660,63 @@ mod transport_tests {
         let permits = Arc::new(Semaphore::new(1));
         let held_permit = permits.clone().acquire_owned().await.expect("held permit");
         let mut requests = JoinSet::new();
+        let mut active = HashMap::new();
         let mut messages = futures::stream::iter(["close"]);
 
         let input = tokio::time::timeout(
             Duration::from_millis(100),
-            next_socket_message_or_permit(&mut messages, &mut requests, permits),
+            next_socket_message_or_permit(&mut messages, &mut requests, &mut active, permits),
         )
         .await
         .expect("disconnect must not wait for a request permit");
 
         assert!(matches!(input, SocketInput::Message(Some("close"))));
         drop(held_permit);
+    }
+
+    #[tokio::test]
+    async fn cancel_notification_removes_queued_and_aborts_running_requests() {
+        struct Dropped(Arc<std::sync::atomic::AtomicBool>);
+
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+
+        let permits = Arc::new(Semaphore::new(1));
+        let permit = permits.clone().acquire_owned().await.expect("permit");
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+        let mut requests = JoinSet::new();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let drop_probe = Dropped(Arc::clone(&dropped));
+        let abort = spawn_bounded_rpc_response(
+            &mut requests,
+            Some("\"1\"".to_string()),
+            permit,
+            out_tx,
+            async move {
+                let _drop_probe = drop_probe;
+                std::future::pending::<Option<String>>().await
+            },
+        );
+        let mut active = HashMap::from([("\"1\"".to_string(), abort)]);
+        let mut pending = std::collections::VecDeque::from([
+            r#"{"jsonrpc":"2.0","id":"1","method":"completion/list"}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":"2","method":"thread/list"}"#.to_string(),
+        ]);
+
+        assert!(cancel_rpc_request(
+            r#"{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":"1"}}"#,
+            &mut pending,
+            &mut active,
+        ));
+        while requests.join_next().await.is_some() {}
+
+        assert!(dropped.load(std::sync::atomic::Ordering::Acquire));
+        assert!(active.is_empty());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(rpc_request_key(&pending[0]).as_deref(), Some("\"2\""));
+        assert_eq!(permits.available_permits(), 1);
     }
 }

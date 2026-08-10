@@ -25,6 +25,7 @@ mod terminal;
 mod thread_application;
 mod voice;
 mod workspace;
+mod workspace_catalog;
 mod workspace_external;
 mod workspace_preview;
 

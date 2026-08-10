@@ -75,6 +75,7 @@ pub(crate) type AcpSessionReadyCallback =
 pub(crate) struct AcpSetControlInput {
     pub(crate) peer: ResolvedPeerTurn,
     pub(crate) cwd: PathBuf,
+    pub(crate) additional_directories: Vec<PathBuf>,
     pub(crate) local_session_id: String,
     pub(crate) native_session_id: String,
     pub(crate) mcp_servers: Vec<ResolvedMcpServerInput>,
@@ -95,6 +96,7 @@ pub(super) struct AcpProcessGeneration {
     pub(super) notification_ingress: AcpNotificationIngress,
     pub(super) next_session_epoch: Arc<AtomicU64>,
     pub(super) generation: u64,
+    pub(super) force_shutdown: watch::Sender<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -260,6 +262,7 @@ impl AcpProcessPool {
         session_ready: AcpSessionReadyCallback,
     ) -> psychevo::Result<AcpTurnOutput> {
         let handle = self.actor(&peer, &context.cwd)?;
+        let turn_control = context.turn_control.clone();
         self.inner
             .resident_actors
             .lock()
@@ -277,13 +280,22 @@ impl AcpProcessPool {
                 reply: reply_tx,
             })))
             .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
-        let result = match reply_rx.await {
+        let mut result = match reply_rx.await {
             Ok(result) => result,
             Err(_) if delivery.was_sent() => Err(acp_unknown_delivery_error(
                 "ACP connection ended after the prompt request was dispatched; the turn was not retried",
             )),
             Err(_) => Err(acp_startup_or_exit_error(&handle.startup_rx)),
         };
+        if *handle.force_tx.borrow() && !delivery.was_sent() {
+            let mut done_rx = handle.done_rx.clone();
+            while !*done_rx.borrow() && done_rx.changed().await.is_ok() {}
+            if turn_control.is_interrupted() {
+                result = Err(Error::Message(
+                    super::turn::ACP_PEER_ABORT_MESSAGE.to_string(),
+                ));
+            }
+        }
         observe_acp_auth_result(&handle.auth_observation, &result, true);
         result
     }
@@ -292,6 +304,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         local_session_id: String,
         mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
@@ -302,18 +315,27 @@ impl AcpProcessPool {
             .map_err(|_| Error::Message("ACP resident actor registry poisoned".to_string()))?
             .insert(local_session_id.clone(), handle.clone());
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
-        handle
-            .command_tx
-            .send(AcpProcessCommand::Prepare {
-                local_session_id,
-                cwd,
-                mcp_servers,
-                reply: reply_tx,
-            })
-            .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
-        let result = reply_rx.await.map_err(|_| {
-            acp_process_unavailable_error("ACP process ended while preparing a draft session")
-        })?;
+        let send_result = handle.command_tx.send(AcpProcessCommand::Prepare {
+            local_session_id: local_session_id.clone(),
+            cwd,
+            additional_directories,
+            mcp_servers,
+            reply: reply_tx,
+        });
+        let result = match send_result {
+            Ok(()) => reply_rx.await.map_err(|_| {
+                acp_process_unavailable_error("ACP process ended while preparing a draft session")
+            }),
+            Err(_) => Err(acp_process_unavailable_error("ACP process mailbox closed")),
+        }
+        .and_then(|result| result);
+        if result.is_err() {
+            self.inner
+                .resident_actors
+                .lock()
+                .map_err(|_| Error::Message("ACP resident actor registry poisoned".to_string()))?
+                .remove(&local_session_id);
+        }
         observe_acp_auth_result(&handle.auth_observation, &result, false);
         result
     }
@@ -363,6 +385,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         local_session_id: String,
         native_session_id: String,
         mcp_servers: Vec<ResolvedMcpServerInput>,
@@ -375,6 +398,7 @@ impl AcpProcessPool {
                 local_session_id,
                 native_session_id,
                 cwd,
+                additional_directories,
                 mcp_servers,
                 reply: reply_tx,
             })
@@ -390,6 +414,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         local_session_id: String,
         native_session_id: String,
         mcp_servers: Vec<ResolvedMcpServerInput>,
@@ -407,6 +432,7 @@ impl AcpProcessPool {
                 local_session_id,
                 native_session_id,
                 cwd,
+                additional_directories,
                 mcp_servers,
                 reply: reply_tx,
             })
@@ -478,6 +504,7 @@ impl AcpProcessPool {
         let AcpSetControlInput {
             peer: _,
             cwd,
+            additional_directories,
             local_session_id,
             native_session_id,
             mcp_servers,
@@ -491,6 +518,7 @@ impl AcpProcessPool {
                 local_session_id,
                 native_session_id,
                 cwd,
+                additional_directories,
                 mcp_servers,
                 control_id,
                 value,
@@ -532,6 +560,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         session: AcpResidentSessionRef,
         mcp_servers: Vec<ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
@@ -543,6 +572,7 @@ impl AcpProcessPool {
             .send(AcpProcessCommand::ResumeSession {
                 session,
                 cwd,
+                additional_directories,
                 mcp_servers,
                 reply: reply_tx,
             })
@@ -565,6 +595,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         source: AcpResidentSessionRef,
         fork_local_session_id: String,
     ) -> psychevo::Result<AcpSessionSnapshot> {
@@ -577,6 +608,7 @@ impl AcpProcessPool {
                 source,
                 fork_local_session_id,
                 cwd,
+                additional_directories,
                 reply: reply_tx,
             })
             .map_err(|_| acp_process_unavailable_error("ACP process mailbox closed"))?;
@@ -815,6 +847,7 @@ impl AcpProcessPool {
         let idle_timeout = self.inner.idle_timeout;
         let peer = peer.clone();
         let invocation_cwd = key.canonical_cwd.clone();
+        let actor_force_tx = handle.force_tx.clone();
         tokio::spawn(async move {
             run_acp_process_actor(AcpProcessActorInputs {
                 peer,
@@ -823,6 +856,7 @@ impl AcpProcessPool {
                 idle_timeout,
                 command_rx,
                 force_rx,
+                force_tx: actor_force_tx,
                 startup_tx,
                 auth_observation,
             })
@@ -986,6 +1020,7 @@ enum AcpProcessCommand {
     Prepare {
         local_session_id: String,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
@@ -1000,6 +1035,7 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
@@ -1007,6 +1043,7 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionLoadOutput>>,
     },
@@ -1019,6 +1056,7 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         mcp_servers: Vec<ResolvedMcpServerInput>,
         control_id: String,
         value: Value,
@@ -1032,6 +1070,7 @@ enum AcpProcessCommand {
     ResumeSession {
         session: AcpResidentSessionRef,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         mcp_servers: Vec<ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
@@ -1039,6 +1078,7 @@ enum AcpProcessCommand {
         source: AcpResidentSessionRef,
         fork_local_session_id: String,
         cwd: PathBuf,
+        additional_directories: Vec<PathBuf>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     CloseSession {
@@ -1235,6 +1275,7 @@ struct AcpProcessActorInputs {
     idle_timeout: Duration,
     command_rx: tokio_mpsc::UnboundedReceiver<AcpProcessCommand>,
     force_rx: watch::Receiver<bool>,
+    force_tx: watch::Sender<bool>,
     startup_tx: watch::Sender<AcpProcessStartupStatus>,
     auth_observation: Arc<Mutex<AcpObservedAuthState>>,
 }
@@ -1247,6 +1288,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
         idle_timeout,
         command_rx,
         force_rx,
+        force_tx,
         startup_tx,
         auth_observation,
     } = inputs;
@@ -1554,6 +1596,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                 notification_ingress: notification_ingress.clone(),
                 next_session_epoch: Arc::clone(&next_session_epoch),
                 generation,
+                force_shutdown: force_tx.clone(),
             };
             let mut command_rx = command_rx;
             let mut notification_rx = notification_rx;
@@ -1656,7 +1699,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
-                            AcpProcessCommand::Prepare { local_session_id, cwd, mcp_servers, reply } => {
+                            AcpProcessCommand::Prepare { local_session_id, cwd, additional_directories, mcp_servers, reply } => {
                                 let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
                                     Ok(lock) => lock,
                                     Err(error) => {
@@ -1680,6 +1723,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         AcpSessionPrepareInput {
                                             local_session_id,
                                             cwd,
+                                            additional_directories,
                                             mcp_servers,
                                         },
                                     ).await;
@@ -1735,7 +1779,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                 });
                             }
                             #[cfg(test)]
-                            AcpProcessCommand::Inspect { local_session_id, native_session_id, cwd, mcp_servers, reply } => {
+                            AcpProcessCommand::Inspect { local_session_id, native_session_id, cwd, additional_directories, mcp_servers, reply } => {
                                 let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
                                     Ok(lock) => lock,
                                     Err(error) => {
@@ -1762,6 +1806,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                             local_session_id,
                                             native_session_id,
                                             cwd,
+                                            additional_directories,
                                             mcp_servers,
                                         },
                                     ).await;
@@ -1773,7 +1818,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
-                            AcpProcessCommand::LoadSession { local_session_id, native_session_id, cwd, mcp_servers, reply } => {
+                            AcpProcessCommand::LoadSession { local_session_id, native_session_id, cwd, additional_directories, mcp_servers, reply } => {
                                 let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
                                     Ok(lock) => lock,
                                     Err(error) => {
@@ -1800,6 +1845,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                             local_session_id,
                                             native_session_id,
                                             cwd,
+                                            additional_directories,
                                             mcp_servers,
                                         },
                                     ).await;
@@ -1828,7 +1874,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
-                            AcpProcessCommand::SetControl { local_session_id, native_session_id, cwd, mcp_servers, control_id, value, reply } => {
+                            AcpProcessCommand::SetControl { local_session_id, native_session_id, cwd, additional_directories, mcp_servers, control_id, value, reply } => {
                                 let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
                                     Ok(lock) => lock,
                                     Err(error) => {
@@ -1856,6 +1902,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                                 local_session_id,
                                                 native_session_id,
                                                 cwd,
+                                                additional_directories,
                                                 mcp_servers,
                                             },
                                             control_id,
@@ -1905,7 +1952,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
-                            AcpProcessCommand::ResumeSession { session, cwd, mcp_servers, reply } => {
+                            AcpProcessCommand::ResumeSession { session, cwd, additional_directories, mcp_servers, reply } => {
                                 if let Err(error) = require_acp_lifecycle_capability(
                                     &initialized,
                                     AcpLifecycleCapability::Resume,
@@ -1941,6 +1988,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         AcpResumeSessionInput {
                                             session,
                                             cwd,
+                                            additional_directories,
                                             mcp_servers,
                                         },
                                     )
@@ -1954,7 +2002,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
-                            AcpProcessCommand::ForkSession { source, fork_local_session_id, cwd, reply } => {
+                            AcpProcessCommand::ForkSession { source, fork_local_session_id, cwd, additional_directories, reply } => {
                                 if let Err(error) = require_acp_lifecycle_capability(
                                     &initialized,
                                     AcpLifecycleCapability::Fork,
@@ -2003,6 +2051,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         source,
                                         fork_local_session_id,
                                         cwd,
+                                        additional_directories,
                                     };
                                     let result = if source_first {
                                         let _source_guard = source_lock.lock().await;
@@ -2234,9 +2283,12 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
     }
 
     if let Ok(mut contexts) = teardown_contexts.lock() {
+        for context in contexts.values() {
+            context.attachment.revoke();
+        }
         contexts.clear();
     }
-    let _ = teardown_terminals.terminate_all();
+    let _ = teardown_terminals.terminate_all_and_wait().await;
 
     psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
@@ -2334,13 +2386,18 @@ async fn close_resident_acp_sessions(
                 .block_task();
             let _ = tokio::time::timeout(Duration::from_secs(1), close).await;
         }
-        let _ = terminals.terminate_session(native_session_id);
+        let _ = terminals
+            .terminate_session_and_wait(native_session_id)
+            .await;
     }
     sessions.lock().await.clear();
     if let Ok(mut contexts) = contexts.lock() {
+        for context in contexts.values() {
+            context.attachment.revoke();
+        }
         contexts.clear();
     }
-    let _ = terminals.terminate_all();
+    let _ = terminals.terminate_all_and_wait().await;
 }
 
 fn acp_process_unavailable_error(message: impl Into<String>) -> Error {

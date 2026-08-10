@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +22,8 @@ use psychevo_gateway_protocol as wire;
 use super::acp_backend_effective_env;
 use super::capability_packs::project_codex_prompt_quota;
 use super::lifecycle::{
-    acp_agent_not_delivered_error, mcp_declaration_fingerprint, remove_acp_context, safe_acp_error,
+    acp_agent_not_delivered_error, insert_acp_context, mcp_declaration_fingerprint,
+    remove_acp_context, require_acp_additional_directories, safe_acp_error,
 };
 use super::mcp_handoff;
 use super::metadata_permissions::{
@@ -44,11 +46,12 @@ use super::session_projection::{
 use super::stream_state::{
     AcpHistoryReplayProjection, AcpPeerStreamState, AcpSessionLoadOutput, AcpTurnOutput,
 };
-use super::turn::{ACP_PEER_ABORT_MESSAGE, AcpClientContext};
+use super::turn::{ACP_PEER_ABORT_MESSAGE, AcpClientContext, acp_workspace_roots};
 
 #[derive(Clone)]
 pub(super) struct AcpPeerTurnContext {
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
     pub(super) home: PathBuf,
     pub(super) local_session_id: String,
     pub(super) native_session_id: Option<String>,
@@ -64,9 +67,11 @@ pub(super) struct AcpPeerTurnContext {
     pub(super) stream: Option<RunStreamSink>,
     pub(super) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    pub(super) filesystem_authorizer: psychevo::AgentFilesystemAuthorizer,
     pub(super) turn_control: psychevo::TurnControl,
     pub(super) before_prompt: AcpBeforePromptCallback,
     pub(super) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
+    pub(super) workspace_root_capture: psychevo::WorkspaceRootCapture,
 }
 
 pub(super) type AcpBeforePromptCallback = Arc<
@@ -86,12 +91,14 @@ pub(super) struct AcpSessionLoadInput {
     pub(super) local_session_id: String,
     pub(super) native_session_id: String,
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
     pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
 }
 
 pub(super) struct AcpSessionPrepareInput {
     pub(super) local_session_id: String,
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
     pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
 }
 
@@ -105,6 +112,7 @@ struct AcpSessionAttachment<'a> {
     local_session_id: &'a str,
     native_session_id: Option<&'a str>,
     cwd: &'a Path,
+    additional_directories: &'a [PathBuf],
     mcp_servers: &'a [ResolvedMcpServerInput],
 }
 
@@ -112,9 +120,11 @@ struct AcpEnsureSessionInput<'a> {
     peer: &'a ResolvedPeerTurn,
     attachment: AcpSessionAttachment<'a>,
     approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
+    filesystem_authorizer: Option<psychevo::AgentFilesystemAuthorizer>,
     turn_control: Option<psychevo::TurnControl>,
     stream: Option<RunStreamSink>,
     active_state: Option<&'a mut AcpPeerStreamState>,
+    workspace_root_capture: Option<&'a psychevo::WorkspaceRootCapture>,
 }
 
 pub(crate) async fn resolve_peer_mcp_server_handoffs(
@@ -161,6 +171,132 @@ async fn wait_for_optional_abort(control: Option<psychevo::TurnControl>) {
     }
 }
 
+async fn interruptible_before_prompt<T, F>(
+    control: Option<psychevo::TurnControl>,
+    future: F,
+) -> psychevo::Result<T>
+where
+    F: Future<Output = psychevo::Result<T>>,
+{
+    tokio::pin!(future);
+    tokio::select! {
+        biased;
+        _ = wait_for_optional_abort(control) => {
+            Err(Error::Message(ACP_PEER_ABORT_MESSAGE.to_string()))
+        }
+        result = &mut future => result,
+    }
+}
+
+async fn interruptible_acp_request_before_prompt<T, F>(
+    process: &AcpProcessGeneration,
+    control: Option<psychevo::TurnControl>,
+    future: F,
+) -> Option<Result<T, agent_client_protocol::Error>>
+where
+    F: Future<Output = Result<T, agent_client_protocol::Error>>,
+{
+    tokio::pin!(future);
+    tokio::select! {
+        biased;
+        _ = wait_for_optional_abort(control) => {
+            let _ = process.force_shutdown.send(true);
+            None
+        },
+        result = &mut future => Some(result),
+    }
+}
+
+async fn interruptible_mutating_acp_request_before_prompt<T, F>(
+    process: &AcpProcessGeneration,
+    control: Option<psychevo::TurnControl>,
+    future: F,
+) -> psychevo::Result<T>
+where
+    F: Future<Output = psychevo::Result<T>>,
+{
+    fence_mutating_acp_request(
+        &process.force_shutdown,
+        wait_for_optional_abort(control),
+        future,
+    )
+    .await
+}
+
+async fn fence_mutating_acp_request<T, A, F>(
+    force_shutdown: &tokio::sync::watch::Sender<bool>,
+    abort: A,
+    future: F,
+) -> psychevo::Result<T>
+where
+    A: Future<Output = ()>,
+    F: Future<Output = psychevo::Result<T>>,
+{
+    tokio::pin!(abort);
+    tokio::pin!(future);
+    tokio::select! {
+        biased;
+        _ = &mut abort => {
+            // ACP cancellation is cooperative. A dropped mutating request could
+            // otherwise finish after the session lock is released and overwrite
+            // the next Turn's configuration. Reap this generation and let the
+            // process-pool fence its completion before returning.
+            let _ = force_shutdown.send(true);
+            Err(Error::Message(ACP_PEER_ABORT_MESSAGE.to_string()))
+        },
+        result = &mut future => result,
+    }
+}
+
+async fn commit_non_droppable_delivery_intent<T, F>(
+    is_interrupted: impl FnOnce() -> bool,
+    future: F,
+) -> psychevo::Result<T>
+where
+    F: Future<Output = psychevo::Result<T>>,
+{
+    if is_interrupted() {
+        return Err(Error::Message(ACP_PEER_ABORT_MESSAGE.to_string()));
+    }
+    future.await
+}
+
+async fn revoke_failed_acp_attachment(
+    contexts: &std::sync::Arc<
+        std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<AcpClientContext>>>,
+    >,
+    terminals: &super::terminal_callbacks::AcpTerminalRegistry,
+    force_shutdown: &tokio::sync::watch::Sender<bool>,
+    native_session_id: &str,
+) {
+    let _ = remove_acp_context(contexts, native_session_id);
+    if terminals
+        .terminate_session_and_wait(native_session_id)
+        .await
+        .is_err()
+    {
+        let _ = force_shutdown.send(true);
+    }
+}
+
+async fn revoke_failed_acp_turn_attachment(
+    process: &AcpProcessGeneration,
+    turn: &AcpPeerTurnContext,
+    native_session_id: &str,
+) {
+    process.sessions.lock().await.remove(&turn.local_session_id);
+    revoke_failed_acp_attachment(
+        &process.contexts,
+        &process.terminals,
+        &process.force_shutdown,
+        native_session_id,
+    )
+    .await;
+    if let Ok(mut slot) = turn.native_session_slot.lock() {
+        *slot = None;
+    }
+}
+
 pub(super) fn is_acp_peer_abort_error(err: &Error) -> bool {
     err.to_string().contains(ACP_PEER_ABORT_MESSAGE)
 }
@@ -184,12 +320,15 @@ async fn ensure_resident_acp_session(
                 local_session_id,
                 native_session_id: requested_native_session_id,
                 cwd,
+                additional_directories,
                 mcp_servers: resolved_mcp_servers,
             },
         approval_handler,
+        filesystem_authorizer,
         turn_control,
         stream,
         mut active_state,
+        workspace_root_capture,
     } = input;
     let mcp_servers = mcp_handoff::acp_mcp_server_declarations(
         peer,
@@ -198,15 +337,37 @@ async fn ensure_resident_acp_session(
     )
     .map_err(|error| acp_not_delivered_error("acp_mcp_configuration_invalid", error.to_string()))?;
     let mcp_declaration_fingerprint = mcp_declaration_fingerprint(&mcp_servers)?;
+    let requested_workspace_roots = acp_workspace_roots(cwd, additional_directories);
+    let workspace_root_capture = match workspace_root_capture {
+        Some(capture) => {
+            capture.validate_async().await?;
+            let captured = capture.paths();
+            if captured != requested_workspace_roots {
+                return Err(acp_not_delivered_error(
+                    "acp_workspace_capture_mismatch",
+                    "The accepted Workspace root capture does not match ACP dispatch.",
+                ));
+            }
+            capture.clone()
+        }
+        None => {
+            psychevo::WorkspaceRootCapture::capture_async(requested_workspace_roots.clone()).await?
+        }
+    };
+    let workspace_roots = workspace_root_capture.paths();
     let client_context = Arc::new(AcpClientContext {
         cwd: cwd.to_path_buf(),
+        workspace_roots: workspace_roots.clone(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler,
-        turn_control,
+        filesystem_authorizer,
+        turn_control: turn_control.clone(),
         terminal: peer_allows_terminal(peer),
         terminal_env: acp_backend_effective_env(peer),
+        attachment: Default::default(),
     });
+    let mut native_session_id_for_attach = requested_native_session_id.map(ToString::to_string);
     let existing_session = sessions.lock().await.get(local_session_id).cloned();
     if let Some(session) = existing_session {
         if requested_native_session_id
@@ -221,7 +382,21 @@ async fn ensure_resident_acp_session(
                 Some(format!("acp-session:{local_session_id}")),
             ));
         }
+        let workspace_identity_changed = !resident_workspace_identity_matches(
+            &session.workspace_roots,
+            session.workspace_root_capture.as_ref(),
+            &workspace_roots,
+            &workspace_root_capture,
+        );
         if session.mcp_servers != mcp_servers {
+            if workspace_identity_changed {
+                sessions.lock().await.remove(local_session_id);
+                remove_acp_context(contexts, &session.native_session_id)?;
+                process
+                    .terminals
+                    .terminate_session_and_wait(&session.native_session_id)
+                    .await?;
+            }
             return Err(agent_session_error(
                 "acp_mcp_binding_changed",
                 AgentErrorStage::Binding,
@@ -231,36 +406,62 @@ async fn ensure_resident_acp_session(
                 Some(format!("acp-mcp-session:{local_session_id}")),
             ));
         }
-        contexts
-            .lock()
-            .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
-            .insert(session.native_session_id.clone(), client_context);
-        notification_rx.set_native_session_id(session.native_session_id.clone())?;
-        let barrier = notification_ingress.barrier()?;
-        reduce_acp_notifications_through_barrier(
-            notification_rx,
-            AcpBarrierProjection {
-                sessions,
-                generation,
-                barrier_sequence: barrier,
-                replay_native_session_id: None,
-                active_native_session_id: Some(&session.native_session_id),
-                active_state: active_state.as_deref_mut(),
-            },
-        )
-        .await?;
-        return sessions
-            .lock()
-            .await
-            .get(local_session_id)
-            .cloned()
-            .ok_or_else(|| {
-                Error::Message("resident ACP session disappeared during inspection".to_string())
-            });
+        if workspace_identity_changed {
+            if !initialized.agent_capabilities.load_session {
+                sessions.lock().await.remove(local_session_id);
+                remove_acp_context(contexts, &session.native_session_id)?;
+                process
+                    .terminals
+                    .terminate_session_and_wait(&session.native_session_id)
+                    .await?;
+                return Err(agent_session_error(
+                    "acp_workspace_roots_changed_not_reloadable",
+                    AgentErrorStage::Binding,
+                    "user_action",
+                    "not_delivered",
+                    "The Workspace roots changed, but this ACP Agent cannot reload the existing session.",
+                    Some(format!("acp-workspace-session:{local_session_id}")),
+                ));
+            }
+            native_session_id_for_attach = Some(session.native_session_id.clone());
+            sessions.lock().await.remove(local_session_id);
+            remove_acp_context(contexts, &session.native_session_id)?;
+            process
+                .terminals
+                .terminate_session_and_wait(&session.native_session_id)
+                .await?;
+        } else {
+            insert_acp_context(contexts, &session.native_session_id, client_context)?;
+            notification_rx.set_native_session_id(session.native_session_id.clone())?;
+            let barrier = notification_ingress.barrier()?;
+            reduce_acp_notifications_through_barrier(
+                notification_rx,
+                AcpBarrierProjection {
+                    sessions,
+                    generation,
+                    barrier_sequence: barrier,
+                    replay_native_session_id: None,
+                    active_native_session_id: Some(&session.native_session_id),
+                    active_state: active_state.as_deref_mut(),
+                },
+            )
+            .await?;
+            return sessions
+                .lock()
+                .await
+                .get(local_session_id)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::Message("resident ACP session disappeared during inspection".to_string())
+                });
+        }
     }
+    require_acp_additional_directories(initialized, additional_directories)?;
 
-    let loaded_from_agent = requested_native_session_id.is_some();
-    let (session, response_barrier) = if let Some(native_session_id) = requested_native_session_id {
+    let loaded_from_agent = native_session_id_for_attach.is_some();
+    let (session, response_barrier) = if let Some(native_session_id) =
+        native_session_id_for_attach.as_deref()
+    {
         if !initialized.agent_capabilities.load_session {
             return Err(agent_session_error(
                 "acp_session_not_resumable",
@@ -274,27 +475,39 @@ async fn ensure_resident_acp_session(
                 Some(format!("acp-session:{local_session_id}")),
             ));
         }
-        contexts
-            .lock()
-            .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
-            .insert(native_session_id.to_string(), Arc::clone(&client_context));
-        let loaded = acp_session_response_with_legacy_models::<LoadSessionResponse, _>(
-            cx,
-            "session/load",
-            LoadSessionRequest::new(native_session_id.to_string(), cwd)
-                .mcp_servers(mcp_servers.clone()),
-            notification_ingress,
+        insert_acp_context(contexts, native_session_id, Arc::clone(&client_context))?;
+        let loaded = interruptible_acp_request_before_prompt(
+            process,
+            turn_control.clone(),
+            acp_session_response_with_legacy_models::<LoadSessionResponse, _>(
+                cx,
+                "session/load",
+                LoadSessionRequest::new(native_session_id.to_string(), cwd)
+                    .additional_directories(additional_directories.to_vec())
+                    .mcp_servers(mcp_servers.clone()),
+                notification_ingress,
+            ),
         )
         .await;
         let (loaded, legacy_models, response_barrier) = match loaded {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                let _ = remove_acp_context(contexts, native_session_id);
+            Some(Ok(loaded)) => loaded,
+            Some(Err(error)) => {
+                revoke_failed_acp_attachment(
+                    contexts,
+                    &process.terminals,
+                    &process.force_shutdown,
+                    native_session_id,
+                )
+                .await;
                 return Err(acp_agent_not_delivered_error(
                     "acp_session_load_failed",
                     "session/load",
                     &error,
                 ));
+            }
+            None => {
+                let _ = remove_acp_context(contexts, native_session_id);
+                return Err(Error::Message(ACP_PEER_ABORT_MESSAGE.to_string()));
             }
         };
         let modes = loaded.modes;
@@ -304,6 +517,8 @@ async fn ensure_resident_acp_session(
                 initialized,
                 AcpResidentSessionInput {
                     native_session_id: native_session_id.to_string(),
+                    workspace_roots: workspace_roots.clone(),
+                    workspace_root_capture: Some(workspace_root_capture.clone()),
                     modes,
                     config_options,
                     legacy_models,
@@ -316,29 +531,41 @@ async fn ensure_resident_acp_session(
             response_barrier,
         )
     } else {
-        let (created, legacy_models, response_barrier) =
+        let created = interruptible_acp_request_before_prompt(
+            process,
+            turn_control.clone(),
             acp_session_response_with_legacy_models::<NewSessionResponse, _>(
                 cx,
                 "session/new",
-                NewSessionRequest::new(cwd).mcp_servers(mcp_servers.clone()),
+                NewSessionRequest::new(cwd)
+                    .additional_directories(additional_directories.to_vec())
+                    .mcp_servers(mcp_servers.clone()),
                 notification_ingress,
-            )
-            .await
-            .map_err(|error| {
-                acp_agent_not_delivered_error("acp_session_create_failed", "session/new", &error)
-            })?;
+            ),
+        )
+        .await;
+        let (created, legacy_models, response_barrier) = match created {
+            Some(Ok(created)) => created,
+            Some(Err(error)) => {
+                return Err(acp_agent_not_delivered_error(
+                    "acp_session_create_failed",
+                    "session/new",
+                    &error,
+                ));
+            }
+            None => return Err(Error::Message(ACP_PEER_ABORT_MESSAGE.to_string())),
+        };
         let native_session_id = created.session_id.to_string();
         let modes = created.modes;
         let config_options = created.config_options.unwrap_or_default();
-        contexts
-            .lock()
-            .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
-            .insert(native_session_id.clone(), client_context);
+        insert_acp_context(contexts, &native_session_id, client_context)?;
         (
             new_acp_resident_session(
                 initialized,
                 AcpResidentSessionInput {
                     native_session_id,
+                    workspace_roots,
+                    workspace_root_capture: Some(workspace_root_capture),
                     modes,
                     config_options,
                     legacy_models,
@@ -398,6 +625,15 @@ async fn ensure_resident_acp_session(
         })
 }
 
+fn resident_workspace_identity_matches(
+    resident_roots: &[PathBuf],
+    resident_capture: Option<&psychevo::WorkspaceRootCapture>,
+    requested_roots: &[PathBuf],
+    requested_capture: &psychevo::WorkspaceRootCapture,
+) -> bool {
+    resident_roots == requested_roots && resident_capture == Some(requested_capture)
+}
+
 pub(super) async fn execute_resident_acp_turn(
     process: &AcpProcessGeneration,
     notification_rx: &mut AcpNotificationSubscription,
@@ -430,6 +666,7 @@ pub(super) async fn execute_resident_acp_turn(
         turn.workspace_mutations.clone(),
         turn.local_session_id.clone(),
     );
+    let pre_prompt_control = turn.turn_control.clone();
     let mut session = ensure_resident_acp_session(
         process,
         notification_rx,
@@ -439,12 +676,15 @@ pub(super) async fn execute_resident_acp_turn(
                 local_session_id: &turn.local_session_id,
                 native_session_id: turn.native_session_id.as_deref(),
                 cwd: &turn.cwd,
+                additional_directories: &turn.additional_directories,
                 mcp_servers: &turn.mcp_servers,
             },
             approval_handler: turn.approval_handler.clone(),
+            filesystem_authorizer: Some(turn.filesystem_authorizer.clone()),
             turn_control: Some(turn.turn_control.clone()),
             stream: turn.stream.clone(),
             active_state: Some(&mut state),
+            workspace_root_capture: Some(&turn.workspace_root_capture),
         },
     )
     .await?;
@@ -452,73 +692,120 @@ pub(super) async fn execute_resident_acp_turn(
     if let Ok(mut slot) = turn.native_session_slot.lock() {
         *slot = Some(native_session_id.clone());
     }
-    session_ready(native_session_id.clone())
-        .await
-        .map_err(|error| {
-            agent_session_error(
-                "acp_session_binding_failed",
-                AgentErrorStage::Binding,
-                "never",
-                "not_delivered",
-                format!("Failed to persist ACP native session identity before prompt: {error}"),
-                Some(format!("acp-session:{}", turn.local_session_id)),
-            )
-        })?;
-    (turn.before_prompt)(state.history_replay.clone())
-        .await
-        .map_err(|error| {
+    if let Err(error) = interruptible_before_prompt(
+        Some(pre_prompt_control.clone()),
+        session_ready(native_session_id.clone()),
+    )
+    .await
+    {
+        revoke_failed_acp_turn_attachment(process, &turn, &native_session_id).await;
+        let _ = process.force_shutdown.send(true);
+        return Err(agent_session_error(
+            "acp_session_binding_failed",
+            AgentErrorStage::Binding,
+            "never",
+            "not_delivered",
+            format!("Failed to persist ACP native session identity before prompt: {error}"),
+            Some(format!("acp-session:{}", turn.local_session_id)),
+        ));
+    }
+    macro_rules! pre_prompt_or_revoke {
+        ($result:expr) => {{
+            match $result {
+                Ok(value) => value,
+                Err(error) => {
+                    revoke_failed_acp_turn_attachment(process, &turn, &native_session_id).await;
+                    return Err(error);
+                }
+            }
+        }};
+    }
+    pre_prompt_or_revoke!(interruptible_before_prompt(
+        Some(pre_prompt_control.clone()),
+        (turn.before_prompt)(state.history_replay.clone()),
+    )
+    .await
+    .map_err(|error| {
         acp_not_delivered_error(
             "acp_before_prompt_commit_failed",
             format!(
                 "Failed to commit ACP history replay and current user input before prompt delivery: {error}"
             ),
         )
-    })?;
+    }));
 
-    session_controls::apply_acp_v1_config_options(
-        cx,
-        notification_ingress,
-        session_controls::AcpSessionControlState {
-            config_options: &mut session.config_options,
-            legacy_models: &mut session.legacy_models,
-        },
-        &native_session_id,
-        &turn.local_session_id,
-        &turn.stream,
-        session_controls::requested_acp_config_selections(&turn),
-    )
-    .await?;
+    pre_prompt_or_revoke!(
+        interruptible_mutating_acp_request_before_prompt(
+            process,
+            Some(pre_prompt_control.clone()),
+            session_controls::apply_acp_v1_config_options(
+                cx,
+                notification_ingress,
+                session_controls::AcpSessionControlState {
+                    config_options: &mut session.config_options,
+                    legacy_models: &mut session.legacy_models,
+                },
+                &native_session_id,
+                &turn.local_session_id,
+                &turn.stream,
+                session_controls::requested_acp_config_selections(&turn),
+            ),
+        )
+        .await
+    );
     sessions
         .lock()
         .await
         .insert(turn.local_session_id.clone(), session);
-    let config_barrier = notification_ingress.barrier()?;
-    reduce_acp_notifications_through_barrier(
-        notification_rx,
-        AcpBarrierProjection {
-            sessions,
-            generation,
-            barrier_sequence: config_barrier,
-            replay_native_session_id: None,
-            active_native_session_id: Some(&native_session_id),
-            active_state: Some(&mut state),
-        },
-    )
-    .await?;
-
-    let prompt = prompt_input::acp_prompt_blocks(&peer, &turn, &initialized.agent_capabilities)
+    let config_barrier = pre_prompt_or_revoke!(notification_ingress.barrier());
+    pre_prompt_or_revoke!(
+        reduce_acp_notifications_through_barrier(
+            notification_rx,
+            AcpBarrierProjection {
+                sessions,
+                generation,
+                barrier_sequence: config_barrier,
+                replay_native_session_id: None,
+                active_native_session_id: Some(&native_session_id),
+                active_state: Some(&mut state),
+            },
+        )
         .await
-        .map_err(|error| acp_not_delivered_error("acp_input_rejected", error.to_string()))?;
+    );
 
-    turn.persistence
-        .mark_delivery_unknown()
+    let prompt = pre_prompt_or_revoke!(
+        interruptible_before_prompt(
+            Some(pre_prompt_control.clone()),
+            prompt_input::acp_prompt_blocks(&peer, &turn, &initialized.agent_capabilities),
+        )
+        .await
+        .map_err(|error| acp_not_delivered_error("acp_input_rejected", error.to_string()))
+    );
+    pre_prompt_or_revoke!(
+        turn.workspace_root_capture
+            .validate_async()
+            .await
+            .map_err(|error| {
+                acp_not_delivered_error("acp_workspace_identity_changed", error.to_string())
+            })
+    );
+
+    // This is the non-droppable delivery boundary. Once the durable transition
+    // commits, dispatch the prompt even if cancellation arrived while storage
+    // was pending; the prompt loop will immediately send protocol cancellation.
+    pre_prompt_or_revoke!(
+        commit_non_droppable_delivery_intent(
+            || pre_prompt_control.is_interrupted(),
+            turn.persistence.mark_delivery_unknown(),
+        )
         .await
         .map_err(|error| {
             acp_not_delivered_error(
                 "delivery_intent_persistence_failed",
                 format!("Failed to persist ACP delivery intent before dispatch: {error}"),
             )
-        })?;
+        })
+    );
     state.begin_prompt();
     let sent = cx.send_request(PromptRequest::new(native_session_id.clone(), prompt));
     delivery.mark_sent();
@@ -665,6 +952,7 @@ pub(super) async fn inspect_resident_acp_session(
         local_session_id,
         native_session_id,
         cwd,
+        additional_directories,
         mcp_servers,
     } = input;
     let session = ensure_resident_acp_session(
@@ -676,12 +964,15 @@ pub(super) async fn inspect_resident_acp_session(
                 local_session_id: &local_session_id,
                 native_session_id: Some(&native_session_id),
                 cwd: &cwd,
+                additional_directories: &additional_directories,
                 mcp_servers: &mcp_servers,
             },
             approval_handler: None,
+            filesystem_authorizer: None,
             turn_control: None,
             stream: None,
             active_state: None,
+            workspace_root_capture: None,
         },
     )
     .await?;
@@ -697,6 +988,7 @@ pub(super) async fn load_resident_acp_session(
         local_session_id,
         native_session_id,
         cwd,
+        additional_directories,
         mcp_servers,
     } = input;
     let mut state = AcpPeerStreamState::new(None, None, local_session_id.clone());
@@ -709,12 +1001,15 @@ pub(super) async fn load_resident_acp_session(
                 local_session_id: &local_session_id,
                 native_session_id: Some(&native_session_id),
                 cwd: &cwd,
+                additional_directories: &additional_directories,
                 mcp_servers: &mcp_servers,
             },
             approval_handler: None,
+            filesystem_authorizer: None,
             turn_control: None,
             stream: None,
             active_state: Some(&mut state),
+            workspace_root_capture: None,
         },
     )
     .await?;
@@ -733,6 +1028,7 @@ pub(super) async fn prepare_resident_acp_session(
     let AcpSessionPrepareInput {
         local_session_id,
         cwd,
+        additional_directories,
         mcp_servers,
     } = input;
     let session = ensure_resident_acp_session(
@@ -744,12 +1040,15 @@ pub(super) async fn prepare_resident_acp_session(
                 local_session_id: &local_session_id,
                 native_session_id: None,
                 cwd: &cwd,
+                additional_directories: &additional_directories,
                 mcp_servers: &mcp_servers,
             },
             approval_handler: None,
+            filesystem_authorizer: None,
             turn_control: None,
             stream: None,
             active_state: None,
+            workspace_root_capture: None,
         },
     )
     .await?;
@@ -771,6 +1070,7 @@ pub(super) async fn set_resident_acp_control(
                 local_session_id,
                 native_session_id,
                 cwd,
+                additional_directories,
                 mcp_servers,
             },
         control_id,
@@ -785,12 +1085,15 @@ pub(super) async fn set_resident_acp_control(
                 local_session_id: &local_session_id,
                 native_session_id: Some(&native_session_id),
                 cwd: &cwd,
+                additional_directories: &additional_directories,
                 mcp_servers: &mcp_servers,
             },
             approval_handler: None,
+            filesystem_authorizer: None,
             turn_control: None,
             stream: None,
             active_state: None,
+            workspace_root_capture: None,
         },
     )
     .await?;
@@ -959,4 +1262,116 @@ pub(super) fn acp_not_delivered_error(code: &str, message: impl Into<String>) ->
         message,
         Some("acp-process".to_string()),
     )
+}
+
+#[cfg(test)]
+mod cancellation_boundary_tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn cancelled_mutating_request_forces_generation_reaping() {
+        let (force, force_rx) = watch::channel(false);
+        let abort = Arc::new(tokio::sync::Notify::new());
+        let abort_wait = Arc::clone(&abort);
+        let task = tokio::spawn(async move {
+            fence_mutating_acp_request(
+                &force,
+                async move { abort_wait.notified().await },
+                std::future::pending::<psychevo::Result<()>>(),
+            )
+            .await
+        });
+
+        abort.notify_one();
+        let error = task
+            .await
+            .expect("fence task")
+            .expect_err("cancelled request");
+
+        assert!(is_acp_peer_abort_error(&error));
+        assert!(*force_rx.borrow());
+    }
+
+    #[tokio::test]
+    async fn committed_delivery_transition_is_not_dropped_by_late_cancellation() {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let interruption = Arc::clone(&interrupted);
+        let transition_started = Arc::clone(&started);
+        let transition_release = Arc::clone(&release);
+        let task = tokio::spawn(async move {
+            commit_non_droppable_delivery_intent(
+                || interruption.load(Ordering::SeqCst),
+                async move {
+                    transition_started.notify_one();
+                    transition_release.notified().await;
+                    Ok(7_u8)
+                },
+            )
+            .await
+        });
+        started.notified().await;
+        interrupted.store(true, Ordering::SeqCst);
+        release.notify_one();
+
+        assert_eq!(task.await.expect("transition task").expect("commit"), 7);
+    }
+
+    #[tokio::test]
+    async fn failed_reload_revokes_session_terminals() {
+        let contexts = Arc::new(std::sync::Mutex::new(BTreeMap::<
+            String,
+            Arc<AcpClientContext>,
+        >::new()));
+        let attachment = super::super::turn::AcpAttachmentGuard::default();
+        contexts.lock().expect("contexts").insert(
+            "native-session".to_string(),
+            Arc::new(AcpClientContext {
+                cwd: PathBuf::from("/workspace"),
+                workspace_roots: vec![PathBuf::from("/workspace")],
+                fs_read: true,
+                fs_write: true,
+                approval_handler: None,
+                filesystem_authorizer: None,
+                turn_control: None,
+                terminal: true,
+                terminal_env: BTreeMap::new(),
+                attachment: attachment.clone(),
+            }),
+        );
+        let terminals = super::super::terminal_callbacks::AcpTerminalRegistry::default();
+        let kill = terminals.insert_test_terminal("terminal-1", "native-session");
+        let (force, force_rx) = watch::channel(false);
+
+        revoke_failed_acp_attachment(&contexts, &terminals, &force, "native-session").await;
+
+        assert!(*kill.borrow());
+        assert!(!*force_rx.borrow());
+        assert!(attachment.ensure_active().is_err());
+    }
+
+    #[test]
+    fn resident_reuse_rejects_a_replaced_root_at_the_same_path() {
+        let temp = tempfile::tempdir().expect("temp");
+        let root = temp.path().join("workspace");
+        let old_root = temp.path().join("old-workspace");
+        std::fs::create_dir(&root).expect("root");
+        let resident_capture = psychevo::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
+            .expect("resident capture");
+        std::fs::rename(&root, &old_root).expect("retain old object");
+        std::fs::create_dir(&root).expect("replacement root");
+        let requested_capture =
+            psychevo::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
+                .expect("requested capture");
+
+        assert!(!resident_workspace_identity_matches(
+            std::slice::from_ref(&root),
+            Some(&resident_capture),
+            std::slice::from_ref(&root),
+            &requested_capture,
+        ));
+    }
 }

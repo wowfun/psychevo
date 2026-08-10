@@ -320,7 +320,13 @@ async fn draft_open_remains_empty_without_creating_session() {
             jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
             method: "thread/draft/open".to_string(),
-            params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
+            params: Some(json!({
+                "origin": {
+                    "source": scope.source,
+                    "location": { "kind": "cwd", "cwd": scope.cwd }
+                },
+                "targetIntent": { "kind": "default" }
+            })),
         },
     )
     .await

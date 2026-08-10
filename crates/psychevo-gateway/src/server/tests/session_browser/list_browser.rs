@@ -460,3 +460,60 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         })
     );
 }
+
+#[tokio::test]
+async fn thread_browser_cursor_does_not_require_the_obsolete_cwd_to_exist() {
+    let (temp, state) = web_state().await;
+    let obsolete = temp.path().join("obsolete-workspace");
+    std::fs::create_dir_all(&obsolete).expect("obsolete cwd");
+    for _ in 0..25 {
+        start_thread(&state, &obsolete, "web", None).await;
+    }
+    let obsolete_string = obsolete.display().to_string();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let first = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("obsolete-first")),
+            method: "thread/browser".to_string(),
+            params: Some(json!({ "cwd": obsolete_string, "limit": 20 })),
+        },
+    )
+    .await
+    .expect("first page");
+    let cursor = first["workspaces"][0]["nextCursor"].clone();
+    std::fs::remove_dir(&obsolete).expect("remove obsolete cwd");
+
+    let second = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::source::JSONRPC_VERSION.to_string(),
+            id: Some(json!("obsolete-second")),
+            method: "thread/browser".to_string(),
+            params: Some(json!({
+                "cwd": obsolete_string,
+                "cursor": cursor,
+                "limit": 20
+            })),
+        },
+    )
+    .await
+    .expect("cursor page must ignore obsolete cwd");
+
+    assert_eq!(
+        second["workspaces"][0]["sessions"]
+            .as_array()
+            .expect("sessions")
+            .len(),
+        5
+    );
+    assert!(
+        !obsolete.exists(),
+        "cursor pagination must not recreate or inspect the obsolete cwd"
+    );
+}

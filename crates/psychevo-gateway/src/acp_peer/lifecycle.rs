@@ -28,7 +28,7 @@ use super::session_projection::{
     new_acp_resident_session, next_acp_session_epoch, reduce_acp_notifications_through_barrier,
 };
 use super::terminal_callbacks::AcpTerminalRegistry;
-use super::turn::AcpClientContext;
+use super::turn::{AcpClientContext, acp_workspace_roots};
 use super::{acp_backend_effective_env, mcp_handoff};
 
 const ACP_MAX_LISTED_SESSIONS: usize = 512;
@@ -146,6 +146,29 @@ pub(super) fn require_acp_lifecycle_capability(
     ))
 }
 
+pub(super) fn require_acp_additional_directories(
+    initialized: &InitializeResponse,
+    additional_directories: &[PathBuf],
+) -> psychevo::Result<()> {
+    if additional_directories.is_empty()
+        || initialized
+            .agent_capabilities
+            .session_capabilities
+            .additional_directories
+            .is_some()
+    {
+        return Ok(());
+    }
+    Err(agent_session_error(
+        "acp_additional_directories_unsupported",
+        AgentErrorStage::Binding,
+        "user_action",
+        "not_delivered",
+        "ACP Agent did not advertise session.additionalDirectories; no multi-root request was sent.",
+        Some("acp-additional-directories".to_string()),
+    ))
+}
+
 pub(super) fn acp_lifecycle_error(code: &str, message: impl Into<String>) -> Error {
     agent_session_error(
         code,
@@ -157,15 +180,22 @@ pub(super) fn acp_lifecycle_error(code: &str, message: impl Into<String>) -> Err
     )
 }
 
-fn lifecycle_client_context(peer: &ResolvedPeerTurn, cwd: PathBuf) -> Arc<AcpClientContext> {
+fn lifecycle_client_context(
+    peer: &ResolvedPeerTurn,
+    cwd: PathBuf,
+    additional_directories: &[PathBuf],
+) -> Arc<AcpClientContext> {
     Arc::new(AcpClientContext {
+        workspace_roots: acp_workspace_roots(&cwd, additional_directories),
         cwd,
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler: None,
+        filesystem_authorizer: None,
         turn_control: None,
         terminal: peer_allows_terminal(peer),
         terminal_env: acp_backend_effective_env(peer),
+        attachment: Default::default(),
     })
 }
 
@@ -176,15 +206,18 @@ pub(super) fn mcp_declaration_fingerprint(mcp_servers: &[McpServer]) -> psychevo
     ))
 }
 
-fn insert_acp_context(
+pub(super) fn insert_acp_context(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     native_session_id: &str,
     context: Arc<AcpClientContext>,
 ) -> psychevo::Result<()> {
-    contexts
+    if let Some(previous) = contexts
         .lock()
         .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
-        .insert(native_session_id.to_string(), context);
+        .insert(native_session_id.to_string(), context)
+    {
+        previous.attachment.revoke();
+    }
     Ok(())
 }
 
@@ -192,10 +225,13 @@ pub(super) fn remove_acp_context(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     native_session_id: &str,
 ) -> psychevo::Result<()> {
-    contexts
+    if let Some(removed) = contexts
         .lock()
         .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
-        .remove(native_session_id);
+        .remove(native_session_id)
+    {
+        removed.attachment.revoke();
+    }
     Ok(())
 }
 
@@ -265,6 +301,7 @@ pub(super) struct AcpListSessionsInput {
 pub(super) struct AcpResumeSessionInput {
     pub(super) session: AcpResidentSessionRef,
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
     pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
 }
 
@@ -272,6 +309,7 @@ pub(super) struct AcpForkSessionInput {
     pub(super) source: AcpResidentSessionRef,
     pub(super) fork_local_session_id: String,
     pub(super) cwd: PathBuf,
+    pub(super) additional_directories: Vec<PathBuf>,
 }
 
 pub(super) struct AcpCloseSessionInput {
@@ -406,9 +444,11 @@ pub(super) async fn resume_resident_acp_session(
     let AcpResumeSessionInput {
         session: session_ref,
         cwd,
+        additional_directories,
         mcp_servers: resolved_mcp_servers,
     } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Resume)?;
+    require_acp_additional_directories(initialized, &additional_directories)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
             "acp_lifecycle_invalid_cwd",
@@ -439,9 +479,13 @@ pub(super) async fn resume_resident_acp_session(
     insert_acp_context(
         contexts,
         &session_ref.native_session_id,
-        lifecycle_client_context(peer, cwd.clone()),
+        lifecycle_client_context(peer, cwd.clone(), &additional_directories),
     )?;
+    let workspace_roots = acp_workspace_roots(&cwd, &additional_directories);
+    let workspace_root_capture =
+        psychevo::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     let request = ResumeSessionRequest::new(session_ref.native_session_id.clone(), &cwd)
+        .additional_directories(additional_directories.clone())
         .mcp_servers(mcp_servers.clone());
     let response = acp_session_response_with_legacy_models::<ResumeSessionResponse, _>(
         cx,
@@ -464,6 +508,8 @@ pub(super) async fn resume_resident_acp_session(
         initialized,
         AcpResidentSessionInput {
             native_session_id: session_ref.native_session_id.clone(),
+            workspace_roots,
+            workspace_root_capture: Some(workspace_root_capture),
             modes: response.modes,
             config_options: response.config_options.unwrap_or_default(),
             legacy_models,
@@ -527,8 +573,10 @@ pub(super) async fn fork_resident_acp_session(
         source,
         fork_local_session_id,
         cwd,
+        additional_directories,
     } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Fork)?;
+    require_acp_additional_directories(initialized, &additional_directories)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
             "acp_lifecycle_invalid_cwd",
@@ -562,6 +610,7 @@ pub(super) async fn fork_resident_acp_session(
         session
     };
     let request = ForkSessionRequest::new(source.native_session_id.clone(), &cwd)
+        .additional_directories(additional_directories.clone())
         .mcp_servers(source_session.mcp_servers.clone());
     let (response, legacy_models, response_barrier) =
         acp_session_response_with_legacy_models::<ForkSessionResponse, _>(
@@ -588,16 +637,21 @@ pub(super) async fn fork_resident_acp_session(
         }
     }
     let session_epoch = next_acp_session_epoch(next_session_epoch)?;
+    let workspace_roots = acp_workspace_roots(&cwd, &additional_directories);
+    let workspace_root_capture =
+        psychevo::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     insert_acp_context(
         contexts,
         &native_session_id,
-        lifecycle_client_context(peer, cwd),
+        lifecycle_client_context(peer, cwd, &additional_directories),
     )?;
     notification_rx.set_native_session_id(native_session_id.clone())?;
     let mut forked = new_acp_resident_session(
         initialized,
         AcpResidentSessionInput {
             native_session_id: native_session_id.clone(),
+            workspace_roots,
+            workspace_root_capture: Some(workspace_root_capture),
             modes: response.modes,
             config_options: response.config_options.unwrap_or_default(),
             legacy_models,
@@ -680,7 +734,9 @@ pub(super) async fn remove_resident_session_resources(
     };
     debug_assert_eq!(removed.native_session_id, session_ref.native_session_id);
     remove_acp_context(contexts, &session_ref.native_session_id)?;
-    terminals.terminate_session(&session_ref.native_session_id)?;
+    terminals
+        .terminate_session_and_wait(&session_ref.native_session_id)
+        .await?;
     Ok(())
 }
 
@@ -777,7 +833,9 @@ pub(super) async fn delete_acp_session(
         remove_resident_session_resources(contexts, sessions, terminals, &resident).await?;
     } else {
         remove_acp_context(contexts, &native_session_id)?;
-        terminals.terminate_session(&native_session_id)?;
+        terminals
+            .terminate_session_and_wait(&native_session_id)
+            .await?;
     }
     Ok(())
 }

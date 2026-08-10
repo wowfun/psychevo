@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -219,6 +220,8 @@ impl AcpSessionSnapshot {
 #[derive(Clone)]
 pub(super) struct AcpResidentSession {
     pub(super) native_session_id: String,
+    pub(super) workspace_roots: Vec<PathBuf>,
+    pub(super) workspace_root_capture: Option<psychevo::WorkspaceRootCapture>,
     pub(super) agent: Option<AcpAgentIdentitySnapshot>,
     pub(super) capabilities: AcpNegotiatedCapabilitiesSnapshot,
     pub(super) config_options: Vec<SessionConfigOption>,
@@ -261,6 +264,8 @@ pub(super) enum AcpPeerInboundPayload {
 
 pub(super) struct AcpResidentSessionInput {
     pub(super) native_session_id: String,
+    pub(super) workspace_roots: Vec<PathBuf>,
+    pub(super) workspace_root_capture: Option<psychevo::WorkspaceRootCapture>,
     pub(super) modes: Option<SessionModeState>,
     pub(super) config_options: Vec<SessionConfigOption>,
     pub(super) legacy_models: Option<AcpLegacyModelState>,
@@ -636,6 +641,8 @@ pub(super) fn new_acp_resident_session(
     let (current_mode_id, available_modes) = project_session_modes(input.modes);
     AcpResidentSession {
         native_session_id: input.native_session_id,
+        workspace_roots: input.workspace_roots,
+        workspace_root_capture: input.workspace_root_capture,
         agent: acp_agent_identity(initialized),
         config_options: input.config_options,
         available_commands: Vec::new(),

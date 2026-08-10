@@ -942,6 +942,7 @@ async fn conformance_shared_agent_session_transact_seam(runtime: AgentConformanc
         .expect("capture bound Agent session target");
     let session = AgentSessionRef {
         cwd,
+        additional_directories: Vec::new(),
         local_session_id: turn.thread.id.clone(),
         native_session_id: binding
             .native_session_id

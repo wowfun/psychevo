@@ -322,6 +322,8 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
     let fixture_program = fixture.program;
     let fixture_script = fixture.script;
     let (_temp, state) = web_state().await;
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n")
+        .expect("initialize captured ACP policy config");
     let log = state.inner.cwd.join("agent-session-history-review.jsonl");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();

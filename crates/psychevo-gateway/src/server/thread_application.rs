@@ -39,7 +39,8 @@ use super::runtime_profiles::{
     selected_context_target_id, thread_context_read_result_live,
     thread_context_read_result_live_with_catalog_and_configured,
     thread_control_override_string_value, thread_control_set_result, thread_draft_prepare_result,
-    thread_draft_prepare_result_with_work, validate_turn_runnable_target,
+    thread_draft_prepare_result_with_work, validate_draft_workspace_roots,
+    validate_turn_runnable_target,
 };
 use super::scope_session::{
     ResolvedScope, canonical_source_mutation_key, detached_draft_scope, ensure_turn_start_thread,
@@ -148,7 +149,42 @@ pub(super) async fn open_thread_draft(
     auth: &AuthContext,
     params: wire::thread_command_turn::ThreadDraftOpenParams,
 ) -> psychevo::Result<wire::agents_backend_rpc::ThreadDraftOpenResult> {
-    let scope = resolve_start_scope(state, auth, params.origin.clone())?;
+    let (origin, workspace_id, additional_directories) = match params.origin {
+        wire::thread_command_turn::ThreadDraftOrigin {
+            source,
+            location: wire::thread_command_turn::ThreadDraftLocation::Cwd { cwd },
+        } => (
+            wire::source::GatewayRequestScope { cwd, source },
+            None,
+            Vec::new(),
+        ),
+        wire::thread_command_turn::ThreadDraftOrigin {
+            source,
+            location: wire::thread_command_turn::ThreadDraftLocation::Workspace { workspace_id },
+        } => {
+            let workspace = state
+                .inner
+                .framework
+                .workspace(&workspace_id)
+                .await?
+                .ok_or_else(|| {
+                    Error::Message(format!("Workspace `{workspace_id}` was not found"))
+                })?;
+            let cwd = workspace.roots.first().cloned().ok_or_else(|| {
+                Error::Message(format!(
+                    "Workspace `{workspace_id}` has no primary directory"
+                ))
+            })?;
+            let additional_directories =
+                workspace.roots.iter().skip(1).map(PathBuf::from).collect();
+            (
+                wire::source::GatewayRequestScope { cwd, source },
+                Some(workspace_id),
+                additional_directories,
+            )
+        }
+    };
+    let scope = resolve_start_scope(state, auth, origin)?;
     gateway_profile_mark(
         "thread_draft_open_received",
         None,
@@ -177,7 +213,22 @@ pub(super) async fn open_thread_draft(
     prewarm_codex_runtime_inventory(state, scope.cwd.clone());
     let snapshot_scope = detached_draft_scope(&scope, auth);
     update_browser_session_for_draft_scope(state, auth, &snapshot_scope).await?;
-    let snapshot = serde_json::from_value(thread_snapshot(state, &snapshot_scope, None).await?)?;
+    let mut snapshot: wire::events_transcript::ThreadSnapshot =
+        serde_json::from_value(thread_snapshot(state, &snapshot_scope, None).await?)?;
+    if let Some(workspace_id) = workspace_id.as_ref() {
+        snapshot.workspace_id = Some(workspace_id.clone());
+        snapshot.workspace_root_source =
+            Some(wire::events_transcript::ThreadWorkspaceRootSource::Workspace);
+        snapshot.workspace_roots = Some(
+            std::iter::once(snapshot_scope.cwd.display().to_string())
+                .chain(
+                    additional_directories
+                        .iter()
+                        .map(|root| root.display().to_string()),
+                )
+                .collect(),
+        );
+    }
     let target_catalog = RunnableTargetCatalog::load(state, &snapshot_scope)?;
     gateway_profile_mark(
         "thread_draft_catalog_loaded",
@@ -272,6 +323,7 @@ pub(super) async fn open_thread_draft(
         wire::agents_backend_rpc::ThreadDraftPrepareParams {
             scope: snapshot_scope.to_wire_scope(),
             target_id: target.target_id.clone(),
+            workspace_id: workspace_id.clone(),
         },
         ThreadDraftPrepareWork {
             target_catalog,
@@ -279,9 +331,62 @@ pub(super) async fn open_thread_draft(
             context,
             configured,
             source_lane_prepared,
+            additional_directories: additional_directories.clone(),
         },
     )
     .await?;
+    if let Some(workspace_id) = workspace_id.as_deref() {
+        let generation =
+            super::scope_session::browser_workspace_preview_generation(state, auth, workspace_id);
+        let workspace = match validate_draft_workspace_roots(
+            state,
+            &snapshot_scope,
+            Some(workspace_id),
+            &additional_directories,
+        )
+        .await
+        {
+            Ok(Some(workspace)) => workspace,
+            Ok(None) => unreachable!("explicit Workspace validation returned no Workspace"),
+            Err(error) => {
+                state
+                    .inner
+                    .gateway
+                    .release_prepared_agent_session(&scope.source.source_key().0)
+                    .await?;
+                return Err(error);
+            }
+        };
+        if let Some(generation) = generation
+            && !super::scope_session::set_browser_session_workspace_preview_roots_if_generation(
+                state,
+                auth,
+                workspace_id,
+                generation,
+                workspace.revision,
+                std::iter::once(snapshot_scope.cwd.clone())
+                    .chain(additional_directories.iter().cloned()),
+            )
+        {
+            state
+                .inner
+                .gateway
+                .release_prepared_agent_session(&scope.source.source_key().0)
+                .await?;
+            return Err(Error::Message(
+                "Workspace preview authority changed while the draft was opening; reopen the draft."
+                    .to_string(),
+            ));
+        }
+    } else {
+        super::scope_session::set_browser_session_workspace_preview_roots(
+            state,
+            auth,
+            None,
+            None,
+            std::iter::once(snapshot_scope.cwd.clone()),
+        );
+    }
     gateway_profile_mark(
         "thread_draft_prepare_completed",
         None,
@@ -305,6 +410,7 @@ pub(super) async fn open_thread_draft(
     Ok(wire::agents_backend_rpc::ThreadDraftOpenResult {
         snapshot,
         context: prepared.context,
+        workspace_id,
         problem: prepared.problem,
     })
 }
@@ -325,7 +431,25 @@ pub(super) async fn start_thread_turn(
             ..GatewayProfileFields::default()
         },
     );
-    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    if params.thread_id.is_some() && params.workspace_id.is_some() {
+        return Err(Error::Message(
+            "turn/start cannot target both an existing Thread and a Workspace".to_string(),
+        ));
+    }
+    let (scope, workspace_snapshot) = if params.thread_id.is_none() {
+        super::scope_session::resolve_workspace_start_scope(
+            state,
+            auth,
+            params.scope.clone(),
+            params.workspace_id.as_deref(),
+        )
+        .await?
+    } else {
+        (
+            resolve_required_scope(state, auth, params.scope.clone())?,
+            None,
+        )
+    };
     if params.client_turn_id.trim().is_empty() {
         return Err(Error::Message(
             "turn/start requires a non-empty `clientTurnId`".to_string(),
@@ -462,7 +586,13 @@ pub(super) async fn start_thread_turn(
     let (thread_id, creates_thread) = if requested_side_conversation_thread {
         (requested_thread_id, false)
     } else {
-        ensure_turn_start_thread(state, &scope, requested_thread_id).await?
+        ensure_turn_start_thread(
+            state,
+            &scope,
+            requested_thread_id,
+            params.workspace_id.is_some(),
+        )
+        .await?
     };
     let source = (!requested_side_conversation_thread).then(|| scope.source.clone());
     let event_selector = thread_id
@@ -532,7 +662,8 @@ pub(super) async fn start_thread_turn(
         .expect("prepared routed Turn has a Thread identity");
     let submission = prepared.intent.into_framework_request(prepared.caller)?;
     let observers = submission.observers;
-    let accepted = if creates_thread {
+    let codex_lease_id = prepared.codex_lease_id.clone();
+    let accepted_result = if creates_thread {
         let source = prepared.initial_source.and_then(|source| {
             (source.lifetime == GatewaySourceLifetime::Persistent).then(|| {
                 psychevo::InitialThreadSourceAssociation {
@@ -549,6 +680,9 @@ pub(super) async fn start_thread_turn(
             .map(|(key, value)| (key, Value::String(value)))
             .collect();
         let mut start = psychevo::StartThreadRequest::new(&scope.cwd);
+        if let Some(workspace) = workspace_snapshot {
+            start = start.with_workspace_snapshot(workspace);
+        }
         start.source = "web".to_string();
         start.metadata = prepared.lineage;
         state
@@ -560,15 +694,30 @@ pub(super) async fn start_thread_turn(
                     .with_initial_context(thread_id, source, preferences),
                 submission.request,
             )
-            .await?
+            .await
     } else {
-        state
+        match state
             .inner
             .framework
             .resume_thread(&submission.thread_id)
-            .await?
-            .start_turn(submission.request)
-            .await?
+            .await
+        {
+            Ok(thread) => thread.start_turn(submission.request).await,
+            Err(error) => Err(error),
+        }
+    };
+    let accepted = match accepted_result {
+        Ok(accepted) => accepted,
+        Err(error) => {
+            if let Some(lease_id) = codex_lease_id.as_deref() {
+                state
+                    .inner
+                    .codex_capability_broker
+                    .release_turn_lease(lease_id)
+                    .await;
+            }
+            return Err(error);
+        }
     };
     observers.attach(&state.inner.gateway, accepted.clone());
     let response_thread_id = accepted.receipt().thread_id.clone();
@@ -583,7 +732,7 @@ pub(super) async fn start_thread_turn(
             ..GatewayProfileFields::default()
         },
     );
-    if let Some(lease_id) = prepared.codex_lease_id {
+    if let Some(lease_id) = codex_lease_id {
         let lease_state = state.clone();
         let accepted = accepted.clone();
         state.inner.gateway.spawn_background(
@@ -608,6 +757,13 @@ pub(super) async fn start_thread_turn(
             ..GatewayProfileFields::default()
         },
     );
+    let _ = super::scope_session::grant_browser_session_thread_scope(
+        state,
+        auth,
+        &scope,
+        &response_thread_id,
+    )
+    .await;
     Ok(wire::thread_command_turn::TurnStartResult {
         accepted: true,
         thread_id: response_thread_id.clone(),

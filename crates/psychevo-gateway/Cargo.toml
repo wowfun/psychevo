@@ -22,6 +22,7 @@ chrono.workspace = true
 futures.workspace = true
 getrandom.workspace = true
 jsonschema.workspace = true
+libc.workspace = true
 percent-encoding.workspace = true
 portable-pty.workspace = true
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }

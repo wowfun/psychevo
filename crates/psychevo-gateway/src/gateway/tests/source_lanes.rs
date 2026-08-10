@@ -445,6 +445,8 @@ async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
         .gateway
         .send_shell(SendShellRequest {
             thread_id: None,
+            workspace_id: None,
+            workspace_snapshot: None,
             source: Some(source.clone()),
             bind_source: None,
             cwd: harness.cwd.clone(),
@@ -523,6 +525,8 @@ async fn shell_execution_intent_preserves_continuation_model_mode_and_environmen
         .gateway
         .send_shell(SendShellRequest {
             thread_id: None,
+            workspace_id: None,
+            workspace_snapshot: None,
             source: None,
             bind_source: None,
             cwd: harness.cwd.clone(),
@@ -540,6 +544,8 @@ async fn shell_execution_intent_preserves_continuation_model_mode_and_environmen
         .gateway
         .send_shell(SendShellRequest {
             thread_id: None,
+            workspace_id: None,
+            workspace_snapshot: None,
             source: None,
             bind_source: None,
             cwd: harness.cwd.clone(),

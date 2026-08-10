@@ -46,7 +46,9 @@ impl Gateway {
             .map(|source| self.source_generation(source));
         let mut execution = request.execution;
         let explicit_thread = request.thread_id.is_some();
-        let source_thread_id = if let Some(source) = request.source.as_ref() {
+        let source_thread_id = if request.workspace_id.is_none()
+            && let Some(source) = request.source.as_ref()
+        {
             self.lookup_source_thread(source).await.ok().flatten()
         } else {
             None
@@ -67,6 +69,10 @@ impl Gateway {
                 .mode(execution.mode);
         if let Some(thread_id) = active_thread_id.as_ref() {
             framework_request = framework_request.thread(thread_id.clone());
+        } else if let Some(workspace) = request.workspace_snapshot.take() {
+            framework_request = framework_request.workspace_snapshot(workspace);
+        } else if let Some(workspace_id) = request.workspace_id.take() {
+            framework_request = framework_request.workspace(workspace_id);
         } else if execution.continue_latest {
             framework_request =
                 framework_request.continue_latest(execution.continue_sources.clone());

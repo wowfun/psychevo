@@ -119,7 +119,7 @@ use super::workspace_preview::{
 };
 use super::{
     codex_capability_broker, session_application, session_import_application, thread_application,
-    voice,
+    voice, workspace_catalog,
 };
 
 pub(super) fn handle_rpc<T>(
@@ -197,6 +197,30 @@ where
                 let params = request.params::<wire::thread_command_turn::ThreadBrowserParams>()?;
                 Ok(serde_json::to_value(
                     session_application::browse(&state, &auth, params).await?,
+                )?)
+            }
+            "navigation/read" => Ok(serde_json::to_value(
+                workspace_catalog::navigation(&state).await?,
+            )?),
+            "thread/pin/set" => {
+                let params =
+                    request.required_params::<wire::thread_command_turn::ThreadPinSetParams>()?;
+                Ok(serde_json::to_value(
+                    workspace_catalog::set_thread_pinned(&state, &auth, params).await?,
+                )?)
+            }
+            "workspace/pin/set" => {
+                let params = request
+                    .required_params::<wire::thread_command_turn::WorkspacePinSetParams>()?;
+                Ok(serde_json::to_value(
+                    workspace_catalog::set_workspace_pinned(&state, params).await?,
+                )?)
+            }
+            "workspace/catalog/update" => {
+                let params = request
+                    .required_params::<wire::thread_command_turn::WorkspaceCatalogUpdateParams>()?;
+                Ok(serde_json::to_value(
+                    workspace_catalog::update(&state, params).await?,
                 )?)
             }
             "thread/import/list" => {
@@ -488,7 +512,7 @@ where
             }
             "workspace/file/preview/open" => {
                 let params = request.required_params::<wire::settings_workspace_context::WorkspaceFilePreviewOpenParams>()?;
-                let scope = resolve_workspace_preview_scope(&state, &auth, params.scope)?;
+                let scope = resolve_workspace_preview_scope(&state, &auth, params.scope).await?;
                 workspace_file_preview_open_value(&state, &scope, &params.path)
             }
             "workspace/file/preview/release" => {
@@ -1620,7 +1644,26 @@ where
             "shell/start" => {
                 let params =
                     request.required_params::<wire::thread_command_turn::ShellStartParams>()?;
-                let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+                if params.thread_id.is_some() && params.workspace_id.is_some() {
+                    return Err(Error::Message(
+                        "shell/start cannot target both an existing Thread and a Workspace"
+                            .to_string(),
+                    ));
+                }
+                let (scope, workspace_snapshot) = if params.thread_id.is_none() {
+                    super::scope_session::resolve_workspace_start_scope(
+                        &state,
+                        &auth,
+                        params.scope.clone(),
+                        params.workspace_id.as_deref(),
+                    )
+                    .await?
+                } else {
+                    (
+                        resolve_required_scope(&state, &auth, params.scope.clone())?,
+                        None,
+                    )
+                };
                 let command = params.command.trim().to_string();
                 if command.is_empty() {
                     return Ok(serde_json::to_value(
@@ -1639,6 +1682,7 @@ where
                         authorize_thread(&state, &auth, &thread_id).await?;
                         Some(thread_id)
                     }
+                    None if params.workspace_id.is_some() => None,
                     None => {
                         state
                             .inner
@@ -1686,6 +1730,8 @@ where
                     let result = gateway
                         .send_shell(SendShellRequest {
                             thread_id: result_thread_id.clone(),
+                            workspace_id: params.workspace_id.clone(),
+                            workspace_snapshot,
                             source: Some(source),
                             bind_source: Some(bind_source),
                             cwd,

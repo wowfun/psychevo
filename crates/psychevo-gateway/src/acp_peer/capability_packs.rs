@@ -502,6 +502,8 @@ mod capability_pack_tests {
             &initialized,
             AcpResidentSessionInput {
                 native_session_id: "native-pack".to_string(),
+                workspace_roots: Vec::new(),
+                workspace_root_capture: None,
                 modes: None,
                 config_options: Vec::new(),
                 legacy_models: None,

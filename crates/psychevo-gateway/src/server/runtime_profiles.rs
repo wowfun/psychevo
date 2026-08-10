@@ -29,6 +29,7 @@ use crate::gateway::agent_session_binding::{
     runtime_profile_config_fingerprint, runtime_profile_config_revision, runtime_session_handle,
 };
 use crate::gateway::peer_runtime::{PeerResolutionContext, ResolvedPeerTurn, resolve_peer_turn};
+use crate::gateway::public_api::PrepareAgentSessionInput;
 use crate::journey_profile::{GatewayProfileFields, gateway_profile_mark};
 use psychevo_gateway_protocol::source::GatewaySource;
 
@@ -146,6 +147,43 @@ pub(super) struct ThreadDraftPrepareWork {
     pub(super) context: wire::agents_backend_rpc::ThreadContextReadResult,
     pub(super) configured: Vec<psychevo::config::ConfiguredModel>,
     pub(super) source_lane_prepared: bool,
+    pub(super) additional_directories: Vec<PathBuf>,
+}
+
+pub(super) async fn validate_draft_workspace_roots(
+    state: &WebState,
+    scope: &ResolvedScope,
+    workspace_id: Option<&str>,
+    additional_directories: &[PathBuf],
+) -> psychevo::Result<Option<psychevo::Workspace>> {
+    let Some(workspace_id) = workspace_id else {
+        return Ok(None);
+    };
+    let workspace = state
+        .inner
+        .framework
+        .workspace(workspace_id)
+        .await?
+        .ok_or_else(|| Error::Message(format!("Workspace `{workspace_id}` was not found")))?;
+    let expected = std::iter::once(scope.cwd.clone())
+        .chain(additional_directories.iter().cloned())
+        .collect::<Vec<_>>();
+    let current = workspace
+        .roots
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    if current != expected {
+        return Err(agent_session_error(
+            "workspace_draft_roots_changed",
+            AgentErrorStage::Binding,
+            "user_action",
+            "not_delivered",
+            "The Workspace directories changed while the draft was preparing; reopen the draft.",
+            Some(format!("workspace:{workspace_id}")),
+        ));
+    }
+    Ok(Some(workspace))
 }
 
 #[derive(Clone)]
@@ -1345,6 +1383,27 @@ pub(super) async fn thread_draft_prepare_result_with_catalog(
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo::Result<wire::agents_backend_rpc::ThreadDraftPrepareResult> {
     ensure_draft_source_unbound(state, scope).await?;
+    let additional_directories = if let Some(workspace_id) = params.workspace_id.as_deref() {
+        let workspace = state
+            .inner
+            .framework
+            .workspace(workspace_id)
+            .await?
+            .ok_or_else(|| Error::Message(format!("Workspace `{workspace_id}` was not found")))?;
+        let primary = workspace.roots.first().ok_or_else(|| {
+            Error::Message(format!(
+                "Workspace `{workspace_id}` has no primary directory"
+            ))
+        })?;
+        if Path::new(primary) != scope.cwd {
+            return Err(Error::Message(format!(
+                "Workspace `{workspace_id}` primary directory no longer matches this draft"
+            )));
+        }
+        workspace.roots.iter().skip(1).map(PathBuf::from).collect()
+    } else {
+        Vec::new()
+    };
     let target = target_catalog
         .by_id(&params.target_id)
         .cloned()
@@ -1385,6 +1444,7 @@ pub(super) async fn thread_draft_prepare_result_with_catalog(
             context,
             configured,
             source_lane_prepared,
+            additional_directories,
         },
     )
     .await
@@ -1403,6 +1463,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
         mut context,
         configured,
         source_lane_prepared,
+        additional_directories,
     } = work;
     if target.target_id != params.target_id {
         return Err(agent_session_error(
@@ -1467,6 +1528,13 @@ pub(super) async fn thread_draft_prepare_result_with_work(
             },
         );
         let preparation = async {
+            validate_draft_workspace_roots(
+                state,
+                scope,
+                params.workspace_id.as_deref(),
+                &additional_directories,
+            )
+            .await?;
             let peer = resolve_runtime_target_peer_turn_with_catalog(
                 state,
                 scope,
@@ -1486,16 +1554,32 @@ pub(super) async fn thread_draft_prepare_result_with_work(
             let snapshot = state
                 .inner
                 .gateway
-                .prepare_agent_session(
+                .prepare_agent_session(PrepareAgentSessionInput {
                     peer,
-                    profile.clone(),
-                    scope.cwd.clone(),
-                    source_key.0,
-                    target.target_id.clone(),
-                    target.agent_ref.clone(),
-                )
+                    profile: profile.clone(),
+                    cwd: scope.cwd.clone(),
+                    additional_directories: additional_directories.clone(),
+                    source_key: source_key.0.clone(),
+                    target_id: target.target_id.clone(),
+                    agent_ref: target.agent_ref.clone(),
+                })
                 .await?;
-            apply_prepared_acp_profile_defaults(
+            if let Err(error) = validate_draft_workspace_roots(
+                state,
+                scope,
+                params.workspace_id.as_deref(),
+                &additional_directories,
+            )
+            .await
+            {
+                state
+                    .inner
+                    .gateway
+                    .release_prepared_agent_session(&source_key.0)
+                    .await?;
+                return Err(error);
+            }
+            let snapshot = apply_prepared_acp_profile_defaults(
                 state,
                 scope,
                 &target,
@@ -1503,7 +1587,23 @@ pub(super) async fn thread_draft_prepare_result_with_work(
                 &draft_control_values,
                 snapshot,
             )
+            .await?;
+            if let Err(error) = validate_draft_workspace_roots(
+                state,
+                scope,
+                params.workspace_id.as_deref(),
+                &additional_directories,
+            )
             .await
+            {
+                state
+                    .inner
+                    .gateway
+                    .release_prepared_agent_session(&source_key.0)
+                    .await?;
+                return Err(error);
+            }
+            Ok(snapshot)
         }
         .await;
         gateway_profile_mark(

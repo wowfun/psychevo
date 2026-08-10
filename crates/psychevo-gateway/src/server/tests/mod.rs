@@ -11,5 +11,6 @@ mod session_browser;
 mod session_lifecycle;
 mod terminal_launch;
 mod voice_rpc;
+mod workspace_catalog;
 mod workspace_commands;
 mod workspace_preview;

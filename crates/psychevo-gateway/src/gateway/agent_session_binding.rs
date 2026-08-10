@@ -741,6 +741,8 @@ backend_ref = "{backend_ref}"
         let thread = psychevo::ThreadExecutionContext {
             id: "bound-child".to_string(),
             cwd: cwd.display().to_string(),
+            workspace_id: None,
+            roots: vec![cwd.display().to_string()],
             source: "agent".to_string(),
             source_key: None,
         };

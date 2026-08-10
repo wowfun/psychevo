@@ -1509,6 +1509,8 @@ model = "lmstudio/test-model"
         .expect("config");
         SendShellRequest {
             thread_id: None,
+            workspace_id: None,
+            workspace_snapshot: None,
             source: Some(source),
             bind_source: None,
             cwd: cwd.to_path_buf(),
@@ -1864,7 +1866,14 @@ model = "lmstudio/test-model"
             })
             .expect("delta admission");
         }
-        gateway.event_ingress.wait_until_processed(3).await;
+        let wait_started = std::time::Instant::now();
+        while gateway.event_ingress_diagnostics().processed != 3 {
+            assert!(
+                wait_started.elapsed() < Duration::from_secs(2),
+                "coalesced deltas were not processed before the real-time test deadline"
+            );
+            tokio::task::yield_now().await;
+        }
 
         let pending = gateway.event_ingress_diagnostics();
         assert_eq!(pending.processed, 3);

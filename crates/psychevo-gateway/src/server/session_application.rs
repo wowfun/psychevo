@@ -10,7 +10,7 @@ use super::auth_input::authorize_thread;
 use super::binding::{AuthContext, PendingInteractionContext, WebState};
 use super::event_delivery::ConnectionSender;
 use super::scope_session::{
-    bind_source_to_thread, default_resolved_scope, grant_browser_session_scope,
+    bind_source_to_thread, default_resolved_scope, grant_browser_session_thread_scope,
     resolve_optional_scope, resolve_session_cwd_filter, resolved_scope_for_thread,
 };
 use super::session_import_application;
@@ -29,7 +29,7 @@ pub(super) async fn resume(
             authorize_thread(state, auth, &thread_id).await?;
             let scope = resolved_scope_for_thread(state, &thread_id).await?;
             bind_source_to_thread(state, &scope, &thread_id).await?;
-            grant_browser_session_scope(state, auth, &scope);
+            grant_browser_session_thread_scope(state, auth, &scope, &thread_id).await?;
             (Some(thread_id), scope)
         }
         None => {
@@ -128,11 +128,11 @@ pub(super) async fn browse(
     auth: &AuthContext,
     params: wire::thread_command_turn::ThreadBrowserParams,
 ) -> psychevo::Result<wire::thread_command_turn::ThreadBrowserResult> {
-    let requested_cwd = params
-        .cwd
-        .clone()
-        .or_else(|| params.cursor.as_ref().map(|cursor| cursor.cwd.clone()));
-    let cwd = resolve_session_cwd_filter(state, auth, requested_cwd)?;
+    let cwd = if params.cursor.is_some() {
+        None
+    } else {
+        resolve_session_cwd_filter(state, auth, params.cwd.clone())?
+    };
     decode_result(
         thread_browser_value(state, params, cwd).await?,
         "thread/browser",
