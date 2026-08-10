@@ -47,6 +47,7 @@ type SurfaceActionsParams = {
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
   workspaceApplication: WorkspaceApplication;
+  snapshotReadFlights: Map<string, { client: GatewayClient; promise: Promise<void> }>;
   setActiveScope: Dispatch<SetStateAction<GatewayRequestScope | null>>;
   setAgents: Dispatch<SetStateAction<WorkbenchAgent[]>>;
   setBackends: Dispatch<SetStateAction<WorkbenchBackend[]>>;
@@ -81,29 +82,54 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     if (threadId && readOnly) {
-      const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
-      if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
-        return;
-      }
-      params.setSnapshot((current) => {
-        if (!shouldApplyReadOnlySnapshot(
-          current,
-          threadId,
-          params.viewEpochRef.current,
-          expectedEpoch,
-          allowDetachedAdoption
-        )) {
-          return current;
+      const flightKey = `${threadId}:${expectedEpoch ?? params.viewEpochRef.current}`;
+      const existing = params.snapshotReadFlights.get(flightKey);
+      if (existing?.client === nextClient) return existing.promise;
+      const snapshotFlight = (async (): Promise<ThreadSnapshot | null> => {
+        const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
+        if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
+          return null;
         }
-        const next = normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
-        params.selectedThreadIdRef.current = next.thread?.id ?? null;
-        return next;
-      });
-      if ((params.selectedThreadIdRef.current ?? null) !== (nextSnapshot.thread?.id ?? threadId)) {
-        return;
+        params.setSnapshot((current) => {
+          if (!shouldApplyReadOnlySnapshot(
+            current,
+            threadId,
+            params.viewEpochRef.current,
+            expectedEpoch,
+            allowDetachedAdoption
+          )) {
+            return current;
+          }
+          const next = normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
+          params.selectedThreadIdRef.current = next.thread?.id ?? null;
+          return next;
+        });
+        return nextSnapshot;
+      })();
+      const flight = snapshotFlight.then(() => undefined);
+      const registered = { client: nextClient, promise: flight };
+      params.snapshotReadFlights.set(flightKey, registered);
+      let observedSnapshot: ThreadSnapshot | null = null;
+      try {
+        observedSnapshot = await snapshotFlight;
+      } finally {
+        if (params.snapshotReadFlights.get(flightKey) === registered) {
+          params.snapshotReadFlights.delete(flightKey);
+        }
       }
-      await refreshObservability(nextClient, nextSnapshot.scope, nextSnapshot.thread?.id ?? threadId, expectedEpoch);
-      params.onSnapshotAdopted();
+      if (
+        observedSnapshot
+        && (params.selectedThreadIdRef.current ?? null)
+          === (observedSnapshot.thread?.id ?? threadId)
+      ) {
+        await refreshObservability(
+          nextClient,
+          observedSnapshot.scope,
+          observedSnapshot.thread?.id ?? threadId,
+          expectedEpoch
+        );
+        params.onSnapshotAdopted();
+      }
       return;
     }
     const nextScope = scope ?? defaultScope();

@@ -194,6 +194,12 @@ export type TraceState = {
 };
 
 export type SessionBrowserWorkspaceState = {
+  id: string;
+  name: string;
+  roots: string[];
+  sessionIds: string[];
+  revision: number;
+  pinned?: boolean;
   cwd: string;
   displayPath?: string;
   hiddenCount: number;

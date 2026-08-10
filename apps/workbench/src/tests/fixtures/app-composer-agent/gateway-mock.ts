@@ -32,7 +32,10 @@ const gatewayMock = vi.hoisted(() => {
     activity: { running: false, activeTurnId: null as string | null, queuedTurns: 0 },
     turnStartReceipts: [] as Array<{ clientTurnId: string; turnId: string }>,
     pendingActions: [] as Array<Record<string, unknown>>,
-    historyEditing: null as Record<string, unknown> | null
+    historyEditing: null as Record<string, unknown> | null,
+    workspaceId: undefined as string | undefined,
+    workspaceRoots: [] as string[],
+    workspaceRootSource: undefined as "direct" | "workspace" | undefined
   };
   function mergeMockModelOptions(
     current: Array<Record<string, unknown>>,
@@ -69,6 +72,7 @@ const gatewayMock = vi.hoisted(() => {
     threadResume: null as null | ((params: unknown) => unknown | Promise<unknown>),
     draftOpen: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadBrowser: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    navigationRead: null as null | (() => unknown | Promise<unknown>),
     threadHistoryRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadActionRun: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadHistoryDraftRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
@@ -469,6 +473,7 @@ const gatewayMock = vi.hoisted(() => {
       selectedPath: null as string | null
     },
     workspaceFileReadResults: new Map<string, unknown>(),
+    workspaceFiles: null as null | ((params: unknown) => unknown | Promise<unknown>),
     workspaceFilesResult: {
       root: scope.cwd,
       entries: [] as Array<{ path: string; name: string; kind: "file" | "directory"; depth: number }>,

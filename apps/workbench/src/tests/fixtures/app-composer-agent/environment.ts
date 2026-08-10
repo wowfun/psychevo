@@ -205,6 +205,7 @@ afterEach(() => {
   gatewayMock.threadRestore = null;
   gatewayMock.threadHistoryRead = null;
   gatewayMock.threadBrowser = null;
+  gatewayMock.navigationRead = null;
   gatewayMock.draftOpen = null;
   gatewayMock.turnStart = null;
   gatewayMock.threadResume = null;
@@ -455,6 +456,9 @@ afterEach(() => {
   gatewayMock.snapshot.entries = [];
   gatewayMock.snapshot.activity = { running: false, activeTurnId: null, queuedTurns: 0 };
   gatewayMock.snapshot.turnStartReceipts = [];
+  gatewayMock.snapshot.workspaceId = undefined;
+  gatewayMock.snapshot.workspaceRoots = [];
+  gatewayMock.snapshot.workspaceRootSource = undefined;
   gatewayMock.workspaceDiffResult = {
     isGitRepo: true,
     files: [],
@@ -463,6 +467,7 @@ afterEach(() => {
     selectedPath: null
   };
   gatewayMock.workspaceFileReadResults.clear();
+  gatewayMock.workspaceFiles = null;
   gatewayMock.workspaceFilesResult = {
     root: gatewayMock.scope.cwd,
     entries: [],

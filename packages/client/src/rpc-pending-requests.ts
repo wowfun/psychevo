@@ -33,7 +33,8 @@ export class RpcPendingRequests {
   reserve<M extends GatewayMethod>(
     generation: number,
     method: M,
-    options: GatewayRequestOptions
+    options: GatewayRequestOptions,
+    cancelSentRequest?: (id: string) => void
   ): PendingRequestReservation<M> {
     const id = String(this.nextId++);
     const promise = new Promise<GatewayRequestResults[M]>((resolve, reject) => {
@@ -51,6 +52,7 @@ export class RpcPendingRequests {
           if (!this.take(id)) {
             return;
           }
+          cancelSentRequest?.(id);
           reject(
             new GatewayClientError(
               "request_timeout",
@@ -65,6 +67,7 @@ export class RpcPendingRequests {
           if (!this.take(id)) {
             return;
           }
+          cancelSentRequest?.(id);
           reject(
             new GatewayClientError(
               "request_aborted",

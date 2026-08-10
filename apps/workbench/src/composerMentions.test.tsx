@@ -20,6 +20,40 @@ function completionItem(item: Omit<CompletionItem, "group" | "groupLabel" | "sco
 }
 
 describe("Composer completion mentions", () => {
+  it("aborts a superseded completion request instead of only hiding its response", async () => {
+    vi.useFakeTimers();
+    let firstSignal: AbortSignal | undefined;
+    const completionProvider = vi.fn((
+      _text: string,
+      _cursor: number,
+      signal?: AbortSignal
+    ): Promise<CompletionListResult> => {
+      firstSignal ??= signal;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
+          once: true
+        });
+      });
+    });
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+        running={false}
+      />
+    );
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "@a", selectionStart: 2 } });
+    await act(async () => vi.advanceTimersByTimeAsync(125));
+    expect(completionProvider).toHaveBeenCalledOnce();
+
+    fireEvent.change(textarea, { target: { value: "@ab", selectionStart: 3 } });
+
+    expect(firstSignal?.aborted).toBe(true);
+  });
+
   it("keeps ordinary prompt text local instead of requesting completion", async () => {
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
       items: [],

@@ -37,6 +37,153 @@ describe("Workbench command routing", () => {
     });
   }
 
+  it("carries the explicit Workspace identity into first Shell admission", async () => {
+    gatewayMock.snapshot.thread = null as never;
+    gatewayMock.browserWorkspaces = [{
+      cwd: "/tmp/primary",
+      workspace: {
+        id: "workspace-multi",
+        name: "Multi-root",
+        roots: ["/tmp/primary", "/tmp/secondary"],
+        revision: 2
+      },
+      sessions: [],
+      hiddenCount: 0,
+      nextCursor: null
+    }];
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New session in Multi-root" }));
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/draft/open",
+      params: expect.objectContaining({
+        origin: expect.objectContaining({
+          location: { kind: "workspace", workspaceId: "workspace-multi" }
+        })
+      })
+    }));
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.keyDown(textarea, { key: "!" });
+    const shell = screen.getByPlaceholderText("shell command");
+    fireEvent.change(shell, { target: { value: "pwd" } });
+    fireEvent.submit(shell.closest("form")!);
+
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "shell/start",
+      params: expect.objectContaining({
+        threadId: null,
+        workspaceId: "workspace-multi"
+      })
+    }));
+  });
+
+  it("reopens an active explicit Workspace draft after catalog edits", async () => {
+    gatewayMock.snapshot.thread = null as never;
+    gatewayMock.browserWorkspaces = [{
+      cwd: "/tmp/primary",
+      workspace: {
+        id: "workspace-edit",
+        name: "Editable Workspace",
+        roots: ["/tmp/primary", "/tmp/secondary"],
+        revision: 3
+      },
+      sessions: [],
+      hiddenCount: 0,
+      nextCursor: null
+    }];
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New session in Editable Workspace" }));
+    expect(screen.getByRole("main").getAttribute("data-composer-state")).toBe("opening");
+    await waitFor(() => expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/draft/open"
+    ))).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("main").getAttribute("data-composer-state")).toBe("ready"));
+
+    fireEvent.click(screen.getByTitle("Workspace actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make /tmp/secondary primary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "workspace/catalog/update",
+      params: {
+        workspaceId: "workspace-edit",
+        expectedRevision: 3,
+        name: "Editable Workspace",
+        roots: ["/tmp/secondary", "/tmp/primary"]
+      }
+    }));
+    await waitFor(() => expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/draft/open"
+    ))).toHaveLength(3));
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open").at(-1))
+      .toEqual({
+        method: "thread/draft/open",
+        params: expect.objectContaining({
+          origin: expect.objectContaining({
+            location: { kind: "workspace", workspaceId: "workspace-edit" }
+          })
+        })
+      });
+  });
+
+  it("refreshes a durable explicit Workspace Thread after its roots change", async () => {
+    gatewayMock.scope.cwd = "/tmp/primary";
+    gatewayMock.snapshot.workspaceId = "workspace-durable";
+    gatewayMock.snapshot.workspaceRootSource = "workspace";
+    gatewayMock.snapshot.workspaceRoots = ["/tmp/primary", "/tmp/secondary"];
+    gatewayMock.browserWorkspaces = [{
+      cwd: "/tmp/primary",
+      workspace: {
+        id: "workspace-durable",
+        name: "Durable Workspace",
+        roots: ["/tmp/primary", "/tmp/secondary"],
+        revision: 4
+      },
+      sessions: [sessionSummary("thread-1", "Durable Workspace Thread", "/tmp/primary")],
+      hiddenCount: 0,
+      nextCursor: null
+    }];
+    gatewayMock.threadResume = (params) => {
+      const workspace = gatewayMock.browserWorkspaces?.[0]?.workspace as {
+        id: string;
+        roots: string[];
+      };
+      return {
+        ...gatewayMock.snapshot,
+        scope: { ...gatewayMock.scope, cwd: workspace.roots[0] },
+        workspaceId: workspace.id,
+        workspaceRootSource: "workspace",
+        workspaceRoots: workspace.roots,
+        thread: {
+          id: (params as { threadId?: string }).threadId ?? "thread-1",
+          backend: { kind: "native", sessionHandle: "thread-1", runtimeRef: "native" },
+          sourceKey: "source-thread-1",
+          forkedFromThreadId: null
+        }
+      };
+    };
+    render(<App />);
+    fireEvent.click(await screen.findByText("Durable Workspace Thread"));
+    await waitFor(() => expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/resume"
+    ))).toHaveLength(1));
+
+    fireEvent.click(screen.getByTitle("Workspace actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make /tmp/secondary primary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/resume"
+    ))).toHaveLength(2));
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/resume").at(-1))
+      .toEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+  });
+
   it("groups command panel rows by runtime presentation kind", async () => {
     gatewayMock.commandList = [
       commandItem("sessions", "navigate", "history"),
@@ -814,8 +961,10 @@ describe("Workbench command routing", () => {
     const { container } = render(<App />);
 
     await screen.findByText("History export");
-    const menu = container.querySelector(".pevo-sessionMenu") as HTMLDetailsElement | null;
-    const trigger = container.querySelector(".pevo-sessionMenu summary") as HTMLElement | null;
+    const trigger = container.querySelector(
+      '.pevo-sessionMenu summary[aria-label="Session actions"]'
+    ) as HTMLElement | null;
+    const menu = trigger?.closest("details") as HTMLDetailsElement | null;
     expect(trigger).toBeTruthy();
 
     fireEvent.click(trigger!);

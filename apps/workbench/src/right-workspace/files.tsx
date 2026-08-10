@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
+import { useConfirmAction } from "@psychevo/components";
 import type {
   GatewayRequestScope,
   WorkspaceExternalFileAction,
@@ -7,6 +9,7 @@ import type {
   WorkspaceFileExternalActionsResult
 } from "@psychevo/protocol";
 import type { WorkspaceFileTreeItem } from "../types";
+import { usePopoverDismiss } from "../popover-dismiss";
 import { workspaceExternalActionMenuItems } from "./file-external-actions";
 import { WorkspaceFileContextMenu } from "./file-context-menu";
 import { WorkspaceFileSurface } from "./workspace-file-surface";
@@ -19,6 +22,7 @@ export function FilesPanel({
   client,
   files,
   root,
+  roots,
   scope,
   selectedPath,
   tabId,
@@ -27,12 +31,14 @@ export function FilesPanel({
   onDirtyChange,
   onFileTreeOpenChange,
   onOpen,
+  onRootChange,
   htmlExecutionActive,
   fileTreeOpen
 }: {
   client: GatewayClient | null;
   files: WorkspaceFileEntry[];
   root: string;
+  roots: string[];
   scope: GatewayRequestScope | null;
   selectedPath: string | null;
   tabId: string;
@@ -40,6 +46,7 @@ export function FilesPanel({
   onCompare(path: string): void;
   onDirtyChange(tabId: string, dirty: boolean): void;
   onOpen(path: string): void;
+  onRootChange(root: string, beforeCommit?: () => boolean | Promise<boolean>): Promise<boolean>;
   htmlExecutionActive: boolean;
   fileTreeOpen: boolean;
   onFileTreeOpenChange(open: boolean): void;
@@ -47,6 +54,8 @@ export function FilesPanel({
   const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
   const fileMenuRequestRef = useRef(0);
   const [fileMenu, setFileMenu] = useState<WorkspaceFileMenuState | null>(null);
+  const dirtyRef = useRef(false);
+  const confirmAction = useConfirmAction();
   const [treeRevealRequest, setTreeRevealRequest] = useState<{ id: number; path: string } | null>(null);
   const fileMenuScopeKey = workspaceScopeIdentity(scope);
   const fileMenuContextRef = useRef({ client, root, scopeKey: fileMenuScopeKey });
@@ -147,6 +156,22 @@ export function FilesPanel({
     setTreeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path }));
   }
 
+  async function selectRoot(nextRoot: string) {
+    await requestFilesRootChange({
+      currentRoot: root,
+      nextRoot,
+      onRootChange,
+      confirmDirty: async () => (
+        !dirtyRef.current || confirmAction({
+          confirmLabel: "Discard edits",
+          description: "The unsaved file changes will be lost.",
+          title: "Discard unsaved file edits?",
+          tone: "caution"
+        })
+      )
+    });
+  }
+
   return (
     <section className={`filesPanel ${fileTreeOpen ? "has-fileTree" : ""}`} aria-label="Workspace files">
       <WorkspaceFileSurface
@@ -154,6 +179,9 @@ export function FilesPanel({
         fileTree={{
           content: (
             <aside className="filesTreePane" aria-label="Workspace file tree">
+              {roots.length > 1 && (
+                <FilesRootSelector root={root} roots={roots} onSelect={selectRoot} />
+              )}
               <WorkspaceFileTree
                 emptyLabel="No workspace files."
                 filterLabel="Filter workspace files"
@@ -174,7 +202,10 @@ export function FilesPanel({
           open: fileTreeOpen
         }}
         onCompare={onCompare}
-        onDirtyChange={(nextDirty) => onDirtyChange(tabId, nextDirty)}
+        onDirtyChange={(nextDirty) => {
+          dirtyRef.current = nextDirty;
+          onDirtyChange(tabId, nextDirty);
+        }}
         target={scope && selectedPath ? { path: selectedPath, scope } : null}
         textEditing="enabled"
         workspaceRoot={root || scope?.cwd || ""}
@@ -194,6 +225,85 @@ export function FilesPanel({
       )}
     </section>
   );
+}
+
+function FilesRootSelector({
+  root,
+  roots,
+  onSelect
+}: {
+  root: string;
+  roots: string[];
+  onSelect(root: string): Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  usePopoverDismiss(open, rootRef, triggerRef, () => setOpen(false));
+
+  return (
+    <div className="filesRootSelector" ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Workspace directory"
+        className="pevo-fieldControl pevo-fieldControl--compact filesRootSelectorTrigger"
+        onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
+        title={root}
+        type="button"
+      >
+        <span>{workspaceRootOptionLabel(root)}</span>
+        <ChevronDown aria-hidden size={14} />
+      </button>
+      {open ? (
+        <div aria-label="Workspace directory" className="filesRootMenu pevo-controlPopover" role="menu">
+          {roots.map((candidate) => {
+            const selected = candidate === root;
+            return (
+              <button
+                aria-checked={selected}
+                className={selected ? "is-selected" : undefined}
+                key={candidate}
+                onClick={() => {
+                  setOpen(false);
+                  void onSelect(candidate);
+                }}
+                role="menuitemradio"
+                title={candidate}
+                type="button"
+              >
+                <span>{workspaceRootOptionLabel(candidate)}</span>
+                {selected ? <Check aria-hidden size={14} /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function workspaceRootOptionLabel(root: string): string {
+  return root;
+}
+
+export async function requestFilesRootChange({
+  confirmDirty,
+  currentRoot,
+  nextRoot,
+  onRootChange
+}: {
+  confirmDirty(): boolean | Promise<boolean>;
+  currentRoot: string;
+  nextRoot: string;
+  onRootChange(root: string, beforeCommit?: () => boolean | Promise<boolean>): Promise<boolean>;
+}): Promise<void> {
+  if (nextRoot === currentRoot) {
+    await onRootChange(nextRoot);
+    return;
+  }
+  await onRootChange(nextRoot, confirmDirty);
 }
 
 type WorkspaceFileMenuState = {

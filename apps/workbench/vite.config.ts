@@ -7,6 +7,9 @@ import { sharedViteBuildConfig } from "../shared-vite-config";
 
 const configRequire = createRequire(import.meta.url);
 const jszipBrowserEntry = configRequire.resolve("jszip/dist/jszip.min.js");
+const testExecArgv = process.allowedNodeEnvironmentFlags.has("--no-experimental-webstorage")
+  ? ["--no-experimental-webstorage"]
+  : [];
 
 export default defineConfig({
   resolve: {
@@ -36,6 +39,7 @@ export default defineConfig({
     port: 5173
   },
   test: {
+    execArgv: testExecArgv,
     exclude: [...configDefaults.exclude, "e2e/**"]
   }
 });

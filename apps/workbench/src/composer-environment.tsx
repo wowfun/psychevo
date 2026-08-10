@@ -11,6 +11,7 @@ import { usePopoverDismiss } from "./popover-dismiss";
 import { WorkspacePickerDialog } from "./workspace-picker-dialog";
 
 export function ComposerEnvironment({
+  activeWorkspaceId,
   branch,
   branchDisabled,
   controlValues,
@@ -31,6 +32,7 @@ export function ComposerEnvironment({
   onRuntimeControlChange,
   onWorkspaceChange
 }: {
+  activeWorkspaceId?: string | null;
   branch: string | null;
   branchDisabled: boolean;
   controlValues: Record<string, unknown>;
@@ -43,13 +45,13 @@ export function ComposerEnvironment({
   preparing?: boolean;
   profile: InitializeResult["profile"] | null;
   runtimeSafetyLabel?: string | null;
-  workspaces: Array<{ cwd: string; displayPath?: string }>;
+  workspaces: Array<{ id?: string; cwd: string; displayPath?: string }>;
   onBranchChange(branch: string, create: boolean): Promise<WorkspaceGitBranchesResult>;
   onOpenFiles(): void;
   onReadBranches(): Promise<WorkspaceGitBranchesResult | null>;
   onReadFolders(path: string | null): Promise<WorkspaceFolderListResult>;
   onRuntimeControlChange(control: ThreadControlDescriptorView, value: unknown): void;
-  onWorkspaceChange(cwd: string): Promise<unknown>;
+  onWorkspaceChange(cwd: string, workspaceId?: string): Promise<unknown>;
 }) {
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const branchRootRef = useRef<HTMLDivElement | null>(null);
@@ -67,16 +69,33 @@ export function ComposerEnvironment({
   const profileLabel = profile && !profile.default ? profile.name : null;
   const knownWorkspaces = useMemo(
     () => {
-      const byCwd = new Map<string, { cwd: string; displayPath: string }>();
+      const candidates: Array<{
+        key: string;
+        cwd: string;
+        displayPath: string;
+        workspaceId?: string;
+      }> = [];
       for (const workspace of [{ cwd, displayPath: path }, ...workspaces]) {
         const canonicalCwd = workspace.cwd.trim();
         if (!canonicalCwd) continue;
-        byCwd.set(canonicalCwd, {
+        const workspaceId = workspace.id?.trim();
+        candidates.push({
+          key: workspaceId ? `workspace:${workspaceId}` : `direct:${canonicalCwd}`,
           cwd: canonicalCwd,
-          displayPath: workspace.displayPath?.trim() || canonicalCwd
+          displayPath: workspace.displayPath?.trim() || canonicalCwd,
+          ...(workspaceId ? { workspaceId } : {})
         });
       }
-      return Array.from(byCwd.values());
+      const labels = new Map<string, number>();
+      for (const candidate of candidates) {
+        labels.set(candidate.displayPath, (labels.get(candidate.displayPath) ?? 0) + 1);
+      }
+      return candidates.map((candidate) => ({
+        ...candidate,
+        label: (labels.get(candidate.displayPath) ?? 0) > 1
+          ? `${candidate.displayPath} (${candidate.workspaceId ? "Workspace" : "directory"})`
+          : candidate.displayPath
+      }));
     },
     [cwd, path, workspaces]
   );
@@ -128,11 +147,11 @@ export function ComposerEnvironment({
     }
   }
 
-  async function changeWorkspace(cwd: string) {
+  async function changeWorkspace(cwd: string, workspaceId?: string) {
     setMenuError(null);
     setWorkspaceMenuOpen(false);
     try {
-      await onWorkspaceChange(cwd);
+      await onWorkspaceChange(cwd, workspaceId);
     } catch (error) {
       setMenuError(errorMessage(error));
       setWorkspaceMenuOpen(true);
@@ -182,15 +201,21 @@ export function ComposerEnvironment({
             <EnvironmentMenu ariaLabel="Workspace">
               {knownWorkspaces.map((candidate) => (
                 <button
-                  aria-current={candidate.cwd === cwd ? "true" : undefined}
-                  key={candidate.cwd}
-                  onClick={() => void changeWorkspace(candidate.cwd)}
+                  aria-current={candidate.workspaceId
+                    ? candidate.workspaceId === activeWorkspaceId ? "true" : undefined
+                    : !activeWorkspaceId && candidate.cwd === cwd ? "true" : undefined}
+                  key={candidate.key}
+                  onClick={() => void changeWorkspace(candidate.cwd, candidate.workspaceId)}
                   role="menuitem"
                   title={candidate.cwd}
                   type="button"
                 >
-                  <span>{candidate.displayPath}</span>
-                  {candidate.cwd === cwd ? <Check size={13} aria-hidden /> : null}
+                  <span>{candidate.label}</span>
+                  {(candidate.workspaceId
+                    ? candidate.workspaceId === activeWorkspaceId
+                    : !activeWorkspaceId && candidate.cwd === cwd)
+                    ? <Check size={13} aria-hidden />
+                    : null}
                 </button>
               ))}
               {menuError ? <div className="composerEnvironmentMenuState is-error" role="alert">{menuError}</div> : null}

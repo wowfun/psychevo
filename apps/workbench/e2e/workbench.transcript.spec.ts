@@ -15,31 +15,44 @@ test.describe("pevo Web Workbench", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
 
-      const prompt = "Keep this completed message beside the transcript for comparison.";
+      const prompt = "# Pinned review\n\nKeep this completed message beside the transcript for comparison.";
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await composer.fill(prompt);
       await page.getByRole("button", { name: "Send message" }).click();
+      const message = page.locator(".pevo-messageFrame.is-user").filter({
+        hasText: "Keep this completed message beside the transcript for comparison."
+      });
+      await expect(message).toBeVisible();
+      if (!isMobile) {
+        await message.hover();
+      }
+      await expect(message.getByRole("button", { name: "Pin message to side" })).toBeVisible();
+
       await page.getByRole("button", { name: "Interrupt active turn" }).click();
       await expect(page.getByRole("button", { name: "Send message" })).toBeVisible({ timeout: 30_000 });
 
-      const message = page.locator(".pevo-messageFrame.is-user").filter({ hasText: prompt });
       await expect(message).toBeVisible();
+      const edit = message.getByRole("button", { name: /Edit this message/ });
       const pin = message.getByRole("button", { name: "Pin message to side" });
       if (!isMobile) {
         await message.hover();
       }
+      await expect(edit).toBeVisible();
       await expect(pin).toBeVisible();
       await expect(pin).toHaveAttribute("aria-pressed", "false");
       await pin.click();
 
       const pinned = page.getByRole("region", { name: "Pinned message" });
       await expect(pinned).toBeVisible();
-      await expect(pinned).toContainText(prompt);
+      const markdown = pinned.locator(".pinnedMessageBody .pevo-markdown");
+      await expect(markdown.getByRole("heading", { name: "Pinned review" })).toBeVisible();
+      await expect(markdown.getByText("Keep this completed message beside the transcript for comparison.")).toBeVisible();
+      expect(await markdown.locator("p").evaluate((element) => getComputedStyle(element).whiteSpace)).not.toBe("nowrap");
       if (isMobile) {
-        await expect(page.getByRole("button", { name: "Pinned" })).toHaveAttribute("aria-current", "page");
+        await expect(page.getByRole("button", { name: "Pinned", exact: true })).toHaveAttribute("aria-current", "page");
         await page.getByRole("button", { name: "Transcript", exact: true }).click();
         await expect(message.getByRole("button", { name: "Pin message to side" })).toHaveAttribute("aria-pressed", "true");
-        await page.getByRole("button", { name: "Pinned" }).click();
+        await page.getByRole("button", { name: "Pinned", exact: true }).click();
       } else {
         await expect(pin).toHaveAttribute("aria-pressed", "true");
       }
@@ -48,7 +61,7 @@ test.describe("pevo Web Workbench", () => {
       ))).toBeLessThanOrEqual(1);
       await captureWorkbench(page, testInfo, `pinned-message-${isMobile ? "mobile" : "desktop"}`);
 
-      await page.getByRole("button", { name: /^Close You · Keep this completed message/ }).click();
+      await page.getByRole("button", { name: /^Close You · # Pinned review/ }).click();
       await expect(pinned).toHaveCount(0);
     } finally {
       await server.stop();
@@ -166,7 +179,7 @@ test.describe("pevo Web Workbench", () => {
         element.appendChild(running);
       });
       await sessionRow.hover();
-      const sessionList = page.locator(".pevo-sessionList");
+      const sessionList = page.getByRole("region", { name: "Sessions", exact: true }).locator(".pevo-sessionList");
       await expect.poll(() => sessionList.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
       const titleLayout = await sessionRow.evaluate((element) => {
         const title = element.querySelector(".pevo-sessionTitleAnchor")?.getBoundingClientRect();
@@ -176,7 +189,7 @@ test.describe("pevo Web Workbench", () => {
       expect(titleLayout).not.toBeNull();
       expect(titleLayout!.titleRight).toBeLessThanOrEqual(titleLayout!.metaLeft + 1);
       await captureWorkbench(page, testInfo, `history-long-session-${isMobile ? "mobile" : "desktop"}`);
-      const sessionMenu = page.locator(".pevo-sessionMenu").first();
+      const sessionMenu = sessionRow.locator(".pevo-sessionMenu");
       const sessionTrigger = sessionMenu.locator("summary");
       await expect(sessionMenu).toHaveCount(1);
       await sessionTrigger.click();

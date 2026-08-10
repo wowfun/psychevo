@@ -56,7 +56,9 @@ describe("Workbench layout and workspace panels", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/draft/open",
         params: expect.objectContaining({
-          origin: expect.objectContaining({ cwd: canonicalCwd })
+          origin: expect.objectContaining({
+            location: expect.objectContaining({ cwd: canonicalCwd })
+          })
         })
       });
     });
@@ -299,6 +301,9 @@ describe("Workbench layout and workspace panels", () => {
       selectedSkills: []
     });
     turnRunning = false;
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [
+      userTextEntryForTurn("First replacement", turnIds[0]!)
+    ];
     await emitGatewayEvent(completedTurnEvent(
       turnIds[0]!,
       userTextEntryForTurn("First replacement", turnIds[0]!)
@@ -389,7 +394,12 @@ describe("Workbench layout and workspace panels", () => {
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/draft/open",
-        params: expect.objectContaining({ origin: gatewayMock.scope })
+        params: expect.objectContaining({
+          origin: {
+            source: gatewayMock.scope.source,
+            location: { kind: "cwd", cwd: gatewayMock.scope.cwd }
+          }
+        })
       });
     });
     expect(container.querySelectorAll(".pevo-sessionRow.is-draft")).toHaveLength(0);
@@ -447,7 +457,12 @@ describe("Workbench layout and workspace panels", () => {
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open").at(-1))
       .toEqual({
         method: "thread/draft/open",
-        params: expect.objectContaining({ origin: gatewayMock.scope })
+        params: expect.objectContaining({
+          origin: {
+            source: gatewayMock.scope.source,
+            location: { kind: "cwd", cwd: gatewayMock.scope.cwd }
+          }
+        })
       });
     expect({
       agent: screen.getByRole("button", { name: "Agent target" }).textContent,
@@ -534,14 +549,21 @@ describe("Workbench layout and workspace panels", () => {
     const menu = await screen.findByRole("menu", { name: "Workspace" });
     const items = within(menu).getAllByRole("menuitem");
     expect(items.at(-1)?.textContent).toContain("Open workspace...");
-    fireEvent.click(within(menu).getByRole("menuitem", { name: otherDisplayPath }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "a-very-long-workspace" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/draft/open",
-        params: expect.objectContaining({ origin: expect.objectContaining({ cwd: otherCwd }) })
+        params: expect.objectContaining({
+          origin: expect.objectContaining({
+            location: {
+              kind: "workspace",
+              workspaceId: `workspace:${otherCwd}`
+            }
+          })
+        })
       });
       expect(screen.getByRole("button", { name: "Workspace" }).textContent)
-        .toBe(otherDisplayPath);
+        .toBe("a-very-long-workspace");
     });
     expect(screen.getByRole("button", { name: "Workspace" }).getAttribute("title")).toBe(otherCwd);
 
@@ -556,7 +578,11 @@ describe("Workbench layout and workspace panels", () => {
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/draft/open",
-        params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/tmp/manual-project" }) })
+        params: expect.objectContaining({
+          origin: expect.objectContaining({
+            location: expect.objectContaining({ cwd: "/tmp/manual-project" })
+          })
+        })
       });
     });
   });
@@ -585,7 +611,11 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
       method: "thread/draft/open",
-      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/tmp/project/existing-workspace" }) })
+      params: expect.objectContaining({
+        origin: expect.objectContaining({
+          location: expect.objectContaining({ cwd: "/tmp/project/existing-workspace" })
+        })
+      })
     }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
@@ -618,7 +648,11 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
       method: "thread/draft/open",
-      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/srv/direct-open-workspace" }) })
+      params: expect.objectContaining({
+        origin: expect.objectContaining({
+          location: expect.objectContaining({ cwd: "/srv/direct-open-workspace" })
+        })
+      })
     }));
   });
 
@@ -653,7 +687,11 @@ describe("Workbench layout and workspace panels", () => {
 
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
       method: "thread/draft/open",
-      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "D:\\other-workspace" }) })
+      params: expect.objectContaining({
+        origin: expect.objectContaining({
+          location: expect.objectContaining({ cwd: "D:\\other-workspace" })
+        })
+      })
     }));
   });
 
@@ -767,6 +805,94 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(screen.getByRole("button", { name: /Close Assistant · Keep this answer beside the transcript/ }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Pinned message" })).toBeNull());
     expect(pin.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("exposes Edit and Pin from authoritative commits without switching Threads", async () => {
+    const slowObservability = deferred<ReturnType<typeof observabilityResult>>();
+    let holdObservability = false;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Live commit actions")];
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [];
+    gatewayMock.runtimeContextRead = () => nativeHistoryEditingContext(true);
+    gatewayMock.observabilityRead = () => (
+      holdObservability ? slowObservability.promise : observabilityResult("thread-1")
+    );
+    gatewayMock.turnStart = () => {
+      (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [userTextEntry("Fresh prompt")];
+      return {
+        accepted: true,
+        threadId: "thread-1",
+        turnId: "turn:fresh",
+        thread: gatewayMock.snapshot.thread
+      };
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Live commit actions"));
+    const composer = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(composer, { target: { value: "Fresh prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const readsBeforeCompletion = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/read"
+    )).length;
+    holdObservability = true;
+    await emitGatewayEvent({
+      type: "entryCompleted",
+      turnId: "turn:fresh",
+      entry: liveUserTextEntry("Fresh prompt", "turn:fresh")
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/read"))
+        .toHaveLength(readsBeforeCompletion + 1);
+    });
+
+    expect(await screen.findAllByRole("button", { name: "Pin message to side" })).toHaveLength(1);
+
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [
+      userTextEntry("Fresh prompt"),
+      { ...assistantTextEntry("Fresh answer"), turnId: "turn:fresh", messageSeq: 2 }
+    ];
+    await emitGatewayEvent({
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn:fresh",
+      turn: {
+        id: "turn:fresh",
+        threadId: "thread-1",
+        status: "completed",
+        outcome: "normal",
+        error: null,
+        startedAtMs: 1,
+        completedAtMs: 2
+      },
+      committedEntries: [{
+        ...assistantTextEntry("Fresh answer"),
+        id: "live:turn:fresh:assistant:0",
+        turnId: "turn:fresh",
+        messageSeq: null,
+        source: "runtime.stream"
+      }]
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/read"))
+        .toHaveLength(readsBeforeCompletion + 2);
+    });
+    await act(async () => {
+      slowObservability.resolve(observabilityResult("thread-1"));
+      await slowObservability.promise;
+    });
+
+    expect(await screen.findByText("Fresh answer")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Edit this message/ })).toBeTruthy();
+    await waitFor(() => {
+      const promptFrame = screen.getByText("Fresh prompt").closest<HTMLElement>(".pevo-messageFrame");
+      const answerFrame = screen.getByText("Fresh answer").closest<HTMLElement>(".pevo-messageFrame");
+      expect(promptFrame).not.toBeNull();
+      expect(answerFrame).not.toBeNull();
+      expect(within(promptFrame!).getByRole("button", { name: "Pin message to side" })).toBeTruthy();
+      expect(within(answerFrame!).getByRole("button", { name: "Pin message to side" })).toBeTruthy();
+    });
   });
 
   it("opens a reusable preview-only Browser tab with safe URL handling", async () => {
@@ -1187,6 +1313,227 @@ describe("Workbench layout and workspace panels", () => {
         .map((entry) => (entry.params as { path?: string }).path);
       expect(openedPaths).toEqual(["site/index.html"]);
     });
+  });
+
+  it("confirms a dirty editor before a transcript link changes the Files root", async () => {
+    const primary = "/tmp/primary";
+    const secondary = "/tmp/secondary";
+    gatewayMock.scope.cwd = primary;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Root transition", primary)];
+    gatewayMock.snapshot.workspaceRoots = [primary, secondary];
+    gatewayMock.workspaceFiles = (params) => {
+      const root = (params as { scope?: { cwd?: string } }).scope?.cwd ?? primary;
+      return root === secondary
+        ? {
+            root,
+            entries: [{ path: "secondary.md", name: "secondary.md", kind: "file", depth: 0 }],
+            truncated: false
+          }
+        : {
+            root: primary,
+            entries: [{ path: "primary.md", name: "primary.md", kind: "file", depth: 0 }],
+            truncated: false
+          };
+    };
+    gatewayMock.workspaceFileReadResults.set("secondary.md", {
+      path: "secondary.md",
+      content: "secondary saved\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "secondary-r1",
+      sizeBytes: 16,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+    gatewayMock.workspaceFileReadResults.set("primary.md", {
+      path: "primary.md",
+      content: "primary\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "primary-r1",
+      sizeBytes: 8,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [
+      assistantTextEntry("Open primary.md")
+    ];
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Root transition"));
+    await openRightInspector();
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    fireEvent.click(within(files).getByRole("button", { name: "Workspace directory" }));
+    fireEvent.click(within(files).getByRole("menuitemradio", { name: secondary }));
+    const secondaryFile = await within(files).findByRole("treeitem", { name: /secondary\.md/ });
+    fireEvent.click(secondaryFile);
+    fireEvent.click(await within(files).findByLabelText("Edit secondary.md"));
+    const editor = within(files).getByLabelText("Edit secondary.md") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "unsaved secondary draft\n" } });
+    expect(editor.value).toBe("unsaved secondary draft\n");
+    const primaryReadsBeforeLink = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "workspace/files"
+      && (entry.params as { scope?: { cwd?: string } }).scope?.cwd === primary
+    )).length;
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open file primary.md" }));
+    const dialog = await screen.findByRole("dialog", { name: "Discard unsaved file edits?" });
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "workspace/files"
+      && (entry.params as { scope?: { cwd?: string } }).scope?.cwd === primary
+    ))).toHaveLength(primaryReadsBeforeLink + 1);
+    expect(screen.getAllByRole("dialog", { name: "Discard unsaved file edits?" })).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect((within(files).getByLabelText("Edit secondary.md") as HTMLTextAreaElement).value)
+      .toBe("unsaved secondary draft\n");
+    expect(within(files).getByRole("button", { name: "Workspace directory" }).getAttribute("title"))
+      .toBe(secondary);
+  });
+
+  it("rechecks dirty editor state after an asynchronous transcript root read", async () => {
+    const primary = "/tmp/primary";
+    const secondary = "/tmp/secondary";
+    const delayedPrimary = deferred<{
+      root: string;
+      entries: Array<{ path: string; name: string; kind: "file"; depth: number }>;
+      truncated: boolean;
+    }>();
+    let delayPrimary = false;
+    gatewayMock.scope.cwd = primary;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Late dirty transition", primary)];
+    gatewayMock.snapshot.workspaceRoots = [primary, secondary];
+    gatewayMock.workspaceFiles = (params) => {
+      const root = (params as { scope?: { cwd?: string } }).scope?.cwd ?? primary;
+      if (root === primary && delayPrimary) return delayedPrimary.promise;
+      return root === secondary
+        ? {
+            root,
+            entries: [{ path: "secondary.md", name: "secondary.md", kind: "file" as const, depth: 0 }],
+            truncated: false
+          }
+        : {
+            root: primary,
+            entries: [{ path: "primary.md", name: "primary.md", kind: "file" as const, depth: 0 }],
+            truncated: false
+          };
+    };
+    gatewayMock.workspaceFileReadResults.set("secondary.md", {
+      path: "secondary.md",
+      content: "secondary saved\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "secondary-r1",
+      sizeBytes: 16,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [
+      assistantTextEntry("Open primary.md")
+    ];
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Late dirty transition"));
+    await openRightInspector();
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    fireEvent.click(within(files).getByRole("button", { name: "Workspace directory" }));
+    fireEvent.click(within(files).getByRole("menuitemradio", { name: secondary }));
+    fireEvent.click(await within(files).findByRole("treeitem", { name: /secondary\.md/ }));
+    fireEvent.click(await within(files).findByLabelText("Edit secondary.md"));
+    const editor = within(files).getByLabelText("Edit secondary.md") as HTMLTextAreaElement;
+
+    delayPrimary = true;
+    fireEvent.click(await screen.findByRole("button", { name: "Open file primary.md" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/files",
+        params: expect.objectContaining({ scope: expect.objectContaining({ cwd: primary }) })
+      });
+    });
+    fireEvent.change(editor, { target: { value: "typed while primary was loading\n" } });
+    await act(async () => {
+      delayedPrimary.resolve({
+        root: primary,
+        entries: [{ path: "primary.md", name: "primary.md", kind: "file", depth: 0 }],
+        truncated: false
+      });
+      await delayedPrimary.promise;
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "Discard unsaved file edits?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect((within(files).getByLabelText("Edit secondary.md") as HTMLTextAreaElement).value)
+      .toBe("typed while primary was loading\n");
+    expect(within(files).getByRole("button", { name: "Workspace directory" }).getAttribute("title"))
+      .toBe(secondary);
+  });
+
+  it("confirms dirty edits before opening another file in the selected root", async () => {
+    const root = "/tmp/primary";
+    gatewayMock.scope.cwd = root;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Same-root dirty", root)];
+    gatewayMock.snapshot.workspaceRoots = [root];
+    gatewayMock.workspaceFilesResult = {
+      root,
+      entries: [
+        { path: "first.md", name: "first.md", kind: "file", depth: 0 },
+        { path: "second.md", name: "second.md", kind: "file", depth: 0 }
+      ],
+      truncated: false
+    };
+    gatewayMock.workspaceFileReadResults.set("first.md", {
+      path: "first.md",
+      content: "first saved\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "first-r1",
+      sizeBytes: 12,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+    gatewayMock.workspaceFileReadResults.set("second.md", {
+      path: "second.md",
+      content: "second saved\n",
+      binary: false,
+      editable: true,
+      editableReason: null,
+      revision: "second-r1",
+      sizeBytes: 13,
+      lineEnding: "lf",
+      unreadable: null,
+      truncated: false
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Same-root dirty"));
+    await openRightInspector();
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    fireEvent.click(await within(files).findByRole("treeitem", { name: /first\.md/ }));
+    fireEvent.click(await within(files).findByLabelText("Edit first.md"));
+    const editor = within(files).getByLabelText("Edit first.md") as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "unsaved first\n" } });
+
+    fireEvent.click(within(files).getByRole("treeitem", { name: /second\.md/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Discard unsaved file edits?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect((within(files).getByLabelText("Edit first.md") as HTMLTextAreaElement).value)
+      .toBe("unsaved first\n");
+    expect(within(files).queryByText("second saved")).toBeNull();
   });
 
   it.each(["read", "edit", "write"] as const)(
@@ -1750,6 +2097,21 @@ function userTextEntryForTurn(body: string, turnId: string): TranscriptEntry {
     ...entry,
     turnId,
     blocks: entry.blocks.map((block) => ({ ...block, body, detail: body, preview: body }))
+  };
+}
+
+function liveUserTextEntry(body: string, turnId: string): TranscriptEntry {
+  const entry = userTextEntryForTurn(body, turnId);
+  return {
+    ...entry,
+    id: `live:${turnId}:prompt`,
+    messageSeq: null,
+    source: "runtime.live",
+    blocks: entry.blocks.map((block) => ({
+      ...block,
+      id: `live:${turnId}:prompt:${block.order}`,
+      source: "runtime.live"
+    }))
   };
 }
 

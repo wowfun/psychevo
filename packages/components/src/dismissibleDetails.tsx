@@ -28,6 +28,13 @@ export function DismissibleDetails({
   const [open, setOpen] = useState(false);
   const detailsRef = useRef<HTMLDetailsElement | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);
+  const close = () => {
+    if (detailsRef.current) {
+      detailsRef.current.open = false;
+    }
+    setOpen(false);
+    summaryRef.current?.focus();
+  };
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent | PointerEvent) {
@@ -62,13 +69,12 @@ export function DismissibleDetails({
     <details
       {...props}
       ref={detailsRef}
-      open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary {...summaryProps} ref={summaryRef}>
         {summary}
       </summary>
-      {children({ close: () => setOpen(false), open })}
+      {children({ close, open })}
     </details>
   );
 }

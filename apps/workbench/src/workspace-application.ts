@@ -10,13 +10,14 @@ import {
   type WorkspaceGitBranchesResult
 } from "@psychevo/protocol";
 
-export type WorkspaceFacet = "branch" | "changes" | "diff" | "files";
+export type WorkspaceFacet = "branch" | "changes" | "diff" | "files" | "linkFiles";
 
 export type WorkspaceSnapshot = {
   branch: WorkspaceGitBranchesResult | null | undefined;
   changes: WorkspaceChangesResult | null;
   diff: WorkspaceDiffResult | null;
   files: WorkspaceFilesResult | null;
+  linkFiles: WorkspaceFilesResult | null;
   scopeEpoch: number;
 };
 
@@ -32,29 +33,50 @@ export class WorkspaceApplication {
   private client: GatewayClient | null = null;
   private scope: GatewayRequestScope | null = null;
   private scopeKey = "";
+  private selectedFilesRoot: string | null = null;
+  private pendingFilesRoot: string | null = null;
+  private pendingFilesRead: {
+    beforeCommit: (() => boolean | Promise<boolean>) | null;
+    controller: AbortController;
+    promise: Promise<WorkspaceFilesResult | null>;
+    root: string;
+  } | null = null;
+  private filesAuthorityKey = "";
+  private allowedFilesRoots: string[] = [];
   private readonly revisions: Record<WorkspaceFacet, number> = {
     branch: 0,
     changes: 0,
     diff: 0,
-    files: 0
+    files: 0,
+    linkFiles: 0
   };
   private readonly committedEpochs: Record<WorkspaceFacet, number> = {
     branch: -1,
     changes: -1,
     diff: -1,
-    files: -1
+    files: -1,
+    linkFiles: -1
   };
   private readonly flights = new Map<WorkspaceFacet, Promise<unknown>>();
+  private readonly fileInventoryFlights = new Map<string, {
+    owners: Set<WorkspaceFacet>;
+    request: Promise<WorkspaceFilesResult>;
+  }>();
   private readonly listeners = new Set<() => void>();
   private snapshot: WorkspaceSnapshot = {
     branch: undefined,
     changes: null,
     diff: null,
     files: null,
+    linkFiles: null,
     scopeEpoch: 0
   };
 
   getSnapshot = (): WorkspaceSnapshot => this.snapshot;
+
+  currentFilesRoot = (): string | null => this.selectedFilesRoot;
+
+  currentFilesRootIntent = (): string | null => this.pendingFilesRoot ?? this.selectedFilesRoot;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -69,14 +91,22 @@ export class WorkspaceApplication {
     this.client = client;
     this.scope = scope;
     this.scopeKey = nextScopeKey;
+    this.selectedFilesRoot = null;
+    this.pendingFilesRoot = null;
+    this.pendingFilesRead?.controller.abort();
+    this.pendingFilesRead = null;
+    this.filesAuthorityKey = "";
+    this.allowedFilesRoots = [];
     for (const facet of Object.keys(this.revisions) as WorkspaceFacet[]) {
       this.revisions[facet] += 1;
     }
     this.flights.clear();
+    this.fileInventoryFlights.clear();
     this.commitSnapshot({
       changes: null,
       diff: null,
       files: null,
+      linkFiles: null,
       scopeEpoch: this.snapshot.scopeEpoch + 1
     });
   }
@@ -96,6 +126,29 @@ export class WorkspaceApplication {
   setFiles = (update: ValueUpdate<WorkspaceFilesResult | null>): void => {
     this.replaceFacet("files", resolveUpdate(this.snapshot.files, update));
   };
+
+  bindFilesAuthority(authorityKey: string, roots: string[]): void {
+    if (
+      this.filesAuthorityKey === authorityKey
+      && roots.length === this.allowedFilesRoots.length
+      && roots.every((root, index) => root === this.allowedFilesRoots[index])
+    ) return;
+    const authorityChanged = this.filesAuthorityKey !== authorityKey;
+    this.filesAuthorityKey = authorityKey;
+    this.allowedFilesRoots = [...roots];
+    const nextRoot = !authorityChanged && this.selectedFilesRoot && roots.includes(this.selectedFilesRoot)
+      ? this.selectedFilesRoot
+      : roots[0] ?? null;
+    this.selectedFilesRoot = nextRoot;
+    this.pendingFilesRoot = null;
+    this.pendingFilesRead?.controller.abort();
+    this.pendingFilesRead = null;
+    this.revisions.files += 1;
+    this.flights.delete("files");
+    if (this.snapshot.files && this.snapshot.files.root !== nextRoot) {
+      this.commitSnapshot({ files: null });
+    }
+  }
 
   ensure(
     facet: WorkspaceFacet,
@@ -128,6 +181,9 @@ export class WorkspaceApplication {
       return Promise.resolve();
     }
     this.bind(client, scope);
+    if (facet === "files" && this.pendingFilesRead) {
+      return this.pendingFilesRead.promise.then(() => undefined);
+    }
     return this.startFacetRead(facet, client, scope);
   }
 
@@ -222,6 +278,106 @@ export class WorkspaceApplication {
     return null;
   }
 
+  async readFilesRoot(
+    root: string,
+    client: GatewayClient | null = this.client,
+    scope: GatewayRequestScope | null = this.scope,
+    options: {
+      beforeCommit?: () => boolean | Promise<boolean>;
+      force?: boolean;
+    } = {}
+  ): Promise<WorkspaceFilesResult | null> {
+    if (!client || !scope) throw new Error("Workspace is unavailable");
+    this.bind(client, scope);
+    if (this.allowedFilesRoots.length > 0 && !this.allowedFilesRoots.includes(root)) {
+      throw new Error("The selected directory is outside the current Thread Workspace.");
+    }
+    if (options.force !== true && this.pendingFilesRead?.root === root) {
+      if (!this.pendingFilesRead.beforeCommit && options.beforeCommit) {
+        this.pendingFilesRead.beforeCommit = options.beforeCommit;
+      }
+      return this.pendingFilesRead.promise;
+    }
+    if (
+      options.force !== true
+      && this.pendingFilesRead
+      && this.selectedFilesRoot === root
+      && this.snapshot.files?.root === root
+      && this.committedEpochs.files === this.snapshot.scopeEpoch
+    ) {
+      this.revisions.files += 1;
+      this.pendingFilesRoot = null;
+      this.pendingFilesRead.controller.abort();
+      this.pendingFilesRead = null;
+      return this.snapshot.files;
+    }
+    if (
+      options.force !== true
+      && this.pendingFilesRoot === null
+      && this.selectedFilesRoot === root
+      && this.snapshot.files?.root === root
+      && this.committedEpochs.files === this.snapshot.scopeEpoch
+    ) {
+      return this.snapshot.files;
+    }
+    this.pendingFilesRead?.controller.abort();
+    this.pendingFilesRoot = root;
+    const revision = this.revisions.files + 1;
+    this.revisions.files = revision;
+    this.flights.delete("files");
+    const epoch = this.snapshot.scopeEpoch;
+    const controller = new AbortController();
+    const pending = {
+      beforeCommit: options.beforeCommit ?? null,
+      controller,
+      promise: Promise.resolve(null) as Promise<WorkspaceFilesResult | null>,
+      root
+    };
+    const operation = (async (): Promise<WorkspaceFilesResult | null> => {
+      try {
+        const result = await this.readFileInventory(
+          client,
+          { ...scope, cwd: root },
+          "files",
+          controller.signal
+        );
+        if (epoch !== this.snapshot.scopeEpoch || revision !== this.revisions.files) {
+          return null;
+        }
+        if (pending.beforeCommit && !await pending.beforeCommit()) {
+          if (epoch === this.snapshot.scopeEpoch && revision === this.revisions.files) {
+            this.pendingFilesRoot = null;
+          }
+          return null;
+        }
+        if (epoch !== this.snapshot.scopeEpoch || revision !== this.revisions.files) {
+          return null;
+        }
+        this.selectedFilesRoot = root;
+        this.pendingFilesRoot = null;
+        this.commitFacet("files", result);
+        return result;
+      } catch (error) {
+        if (controller.signal.aborted || epoch !== this.snapshot.scopeEpoch || revision !== this.revisions.files) {
+          return null;
+        }
+        if (epoch === this.snapshot.scopeEpoch && revision === this.revisions.files) {
+          this.pendingFilesRoot = null;
+        }
+        throw error;
+      }
+    })();
+    pending.promise = operation;
+    this.pendingFilesRead = pending;
+    try {
+      return await operation;
+    } finally {
+      if (this.pendingFilesRead === pending) {
+        this.pendingFilesRead = null;
+      }
+    }
+  }
+
   private async requestFacet(
     facet: WorkspaceFacet,
     client: GatewayClient,
@@ -229,9 +385,11 @@ export class WorkspaceApplication {
   ): Promise<WorkspaceSnapshot[WorkspaceFacet]> {
     switch (facet) {
       case "files":
-        return WorkspaceFilesResultSchema.parse(
-          await client.request("workspace/files", { scope })
-        );
+        return this.readFileInventory(client, this.selectedFilesRoot
+          ? { ...scope, cwd: this.selectedFilesRoot }
+          : scope, "files");
+      case "linkFiles":
+        return this.readFileInventory(client, scope, "linkFiles");
       case "diff":
         return WorkspaceDiffResultSchema.parse(
           await client.request("workspace/diff", { scope, path: null })
@@ -244,6 +402,36 @@ export class WorkspaceApplication {
         return client.request("workspace/git/branches", { scope });
       }
     }
+  }
+
+  private readFileInventory(
+    client: GatewayClient,
+    scope: GatewayRequestScope,
+    owner: "files" | "linkFiles",
+    signal?: AbortSignal
+  ): Promise<WorkspaceFilesResult> {
+    const key = gatewayScopeKey(scope);
+    const existing = this.fileInventoryFlights.get(key);
+    if (existing && !existing.owners.has(owner)) {
+      existing.owners.add(owner);
+      return existing.request;
+    }
+    const request = client.request(
+      "workspace/files",
+      { scope },
+      signal ? { signal } : {}
+    ).then((value) => (
+      WorkspaceFilesResultSchema.parse(value)
+    ));
+    const flight = { owners: new Set<WorkspaceFacet>([owner]), request };
+    this.fileInventoryFlights.set(key, flight);
+    const clear = () => {
+      if (this.fileInventoryFlights.get(key) === flight) {
+        this.fileInventoryFlights.delete(key);
+      }
+    };
+    request.then(clear, clear);
+    return request;
   }
 
   private replaceFacet(
@@ -260,6 +448,16 @@ export class WorkspaceApplication {
     value: WorkspaceSnapshot[WorkspaceFacet]
   ): void {
     this.committedEpochs[facet] = this.snapshot.scopeEpoch;
+    if (facet === "files" && value) {
+      this.selectedFilesRoot = (value as WorkspaceFilesResult).root;
+      if ((value as WorkspaceFilesResult).root === this.scope?.cwd) {
+        this.revisions.linkFiles += 1;
+        this.flights.delete("linkFiles");
+        this.committedEpochs.linkFiles = this.snapshot.scopeEpoch;
+        this.commitSnapshot({ files: value as WorkspaceFilesResult, linkFiles: value as WorkspaceFilesResult });
+        return;
+      }
+    }
     this.commitSnapshot({ [facet]: value });
   }
 

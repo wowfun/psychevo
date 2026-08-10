@@ -25,5 +25,7 @@ describe("PinnedMessagePanel", () => {
     expect(screen.getByText("Failed")).toBeTruthy();
     expect(screen.getByRole("link", { name: "the reference" }).getAttribute("href")).toBe("https://example.com/reference");
     expect(screen.getByText("src/main.rs").closest("a")).toBeNull();
+    expect(screen.getByText("src/main.rs").closest("article")?.className)
+      .toContain("pevo-message is-assistant");
   });
 });

@@ -12,7 +12,7 @@ import {
 } from "./workbench.support";
 
 test.describe("pevo Web Workbench", () => {
-  test("submits a real provider turn through the composer @live", async ({ page, isMobile }) => {
+  test("submits a real provider turn through the composer @live", async ({ page, isMobile }, testInfo) => {
     const context = liveContextFor("web-composer-live");
     if (!context) {
       test.skip(true, "run through cargo xtask live");
@@ -47,6 +47,20 @@ test.describe("pevo Web Workbench", () => {
       await expect(answer.or(failure).first()).toBeVisible({ timeout: 240_000 });
       await expect(failure, "the live turn must not terminate with a Workbench error").toHaveCount(0);
       await expect(answer).toBeVisible();
+      await expect(page.getByRole("button", { name: "Send message" })).toBeVisible({ timeout: 30_000 });
+
+      const userMessage = page.locator(".pevo-messageFrame.is-user").filter({
+        hasText: "Reply with exactly this text and nothing else"
+      });
+      const assistantMessage = page.locator(".pevo-messageFrame.is-assistant").filter({
+        hasText: /psychevo web live ok/i
+      });
+      await userMessage.hover();
+      await expect(userMessage.getByRole("button", { name: /Edit this message/ })).toBeVisible();
+      await expect(userMessage.getByRole("button", { name: "Pin message to side" })).toBeVisible();
+      await assistantMessage.hover({ force: true });
+      await expect(assistantMessage.getByRole("button", { name: "Pin message to side" })).toBeVisible();
+      await captureWorkbench(page, testInfo, "live-message-actions");
     } finally {
       await server.stop();
     }

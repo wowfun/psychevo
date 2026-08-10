@@ -197,34 +197,27 @@ test.describe("pevo Web Workbench", () => {
       await page.goto(server.url);
       await expect(page.getByPlaceholder("Ask Psychevo...")).toBeVisible();
 
-      await page.locator(".leftPinnedPanel").evaluate((panel) => {
-        panel.querySelector("p")?.remove();
-        const list = document.createElement("div");
-        list.className = "pinnedSessionList";
+      await page.locator(".pevo-history.is-pinned").evaluate((panel) => {
+        const list = panel.querySelector(".pevo-sessionList");
+        if (!list) throw new Error("Pinned session list was not rendered");
+        list.replaceChildren();
         for (let index = 0; index < 12; index += 1) {
-          const row = document.createElement("div");
-          row.className = "pinnedSessionRow";
+          const row = document.createElement("article");
+          row.className = "pevo-sessionRow";
 
           const openButton = document.createElement("button");
           openButton.type = "button";
+          openButton.className = "pevo-sessionMain";
           const title = document.createElement("span");
+          title.className = "pevo-sessionTitle";
           title.textContent = `Pinned regression session ${index + 1}`;
-          const cwd = document.createElement("small");
-          cwd.textContent = "/tmp/project";
-          openButton.append(title, cwd);
-
-          const unpinButton = document.createElement("button");
-          unpinButton.type = "button";
-          unpinButton.setAttribute("aria-label", "Unpin session");
-          unpinButton.textContent = "x";
-
-          row.append(openButton, unpinButton);
+          openButton.append(title);
+          row.append(openButton);
           list.append(row);
         }
-        panel.append(list);
       });
 
-      const pinnedMetrics = await page.locator(".pinnedSessionList").evaluate((element) => ({
+      const pinnedMetrics = await page.locator(".pevo-history.is-pinned .pevo-sessionList").evaluate((element) => ({
         clientHeight: element.clientHeight,
         scrollHeight: element.scrollHeight
       }));

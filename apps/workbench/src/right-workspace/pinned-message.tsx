@@ -27,7 +27,9 @@ export function PinnedMessagePanel({ message }: { message: RightWorkspacePinnedM
         </div>
       </header>
       <div className="pinnedMessageBody">
-        <MarkdownText text={message.text} />
+        <article className="pevo-message is-assistant">
+          <MarkdownText text={message.text} />
+        </article>
       </div>
     </section>
   );

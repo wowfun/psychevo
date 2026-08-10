@@ -753,28 +753,88 @@ vi.mock("@psychevo/client", async () => {
         if (gatewayMock.threadBrowser) {
           return gatewayMock.threadBrowser(params);
         }
-        return {
-          workspaces: gatewayMock.browserWorkspaces ?? [
-            {
+        const browserWorkspaces = gatewayMock.browserWorkspaces ?? [
+          {
+            cwd: gatewayMock.scope.cwd,
+            project: {
               cwd: gatewayMock.scope.cwd,
-              project: {
-                cwd: gatewayMock.scope.cwd,
-                label: "project",
-                displayPath: "/tmp/project"
-              },
-              sessions: gatewayMock.sessionSummaries,
-              hiddenCount: 0,
-              nextCursor: null
-            }
-          ]
+              label: "project",
+              displayPath: "/tmp/project"
+            },
+            sessions: gatewayMock.sessionSummaries,
+            hiddenCount: 0,
+            nextCursor: null
+          }
+        ];
+        return {
+          workspaces: browserWorkspaces.map((workspace) => workspace.workspace
+            ? workspace
+            : {
+                workspace: {
+                  id: `workspace:${String(workspace.cwd)}`,
+                  name: String((workspace.project as { label?: string } | undefined)?.label ?? "project"),
+                  roots: [String(workspace.cwd)],
+                  revision: 0
+                },
+                sessions: workspace.sessions,
+                hiddenCount: workspace.hiddenCount ?? 0,
+                nextCursor: workspace.nextCursor
+              })
         };
+      }
+      if (method === "shell/start") {
+        return { accepted: true, threadId: null, message: null };
+      }
+      if (method === "navigation/read") {
+        if (gatewayMock.navigationRead) return gatewayMock.navigationRead();
+        return { revision: 0, pinnedThreadIds: [], pinnedWorkspaceIds: [] };
+      }
+      if (method === "thread/pin/set") {
+        const record = params as { pinned: boolean; threadId: string };
+        return {
+          revision: 1,
+          pinnedThreadIds: record.pinned ? [record.threadId] : [],
+          pinnedWorkspaceIds: []
+        };
+      }
+      if (method === "workspace/pin/set") {
+        const record = params as { pinned: boolean; workspaceId: string };
+        return {
+          revision: 1,
+          pinnedThreadIds: [],
+          pinnedWorkspaceIds: record.pinned ? [record.workspaceId] : []
+        };
+      }
+      if (method === "workspace/catalog/update") {
+        const record = params as {
+          expectedRevision: number;
+          name: string;
+          roots: string[];
+          workspaceId: string;
+        };
+        const workspace = {
+          id: record.workspaceId,
+          name: record.name,
+          roots: record.roots,
+          revision: record.expectedRevision + 1
+        };
+        gatewayMock.browserWorkspaces = gatewayMock.browserWorkspaces?.map((candidate) => {
+          const current = candidate.workspace as { id?: string } | undefined;
+          return current?.id === record.workspaceId
+            ? { ...candidate, cwd: record.roots[0], workspace }
+            : candidate;
+        }) ?? null;
+        return { workspace };
       }
       if (method === "thread/draft/open") {
         if (gatewayMock.draftOpen) {
           return gatewayMock.draftOpen(params);
         }
         const record = params as {
-          origin?: unknown;
+          origin?: {
+            source?: unknown;
+            location?: { kind?: string; cwd?: string; workspaceId?: string };
+          };
           targetIntent?: { kind?: string; targetId?: string };
         };
         const targets = compatibleRuntimeTargets();
@@ -784,9 +844,27 @@ vi.mock("@psychevo/client", async () => {
             ?? targets.find((target) => target.ready)
             ?? targets[0];
         if (!selectedTarget) throw new Error("No default Agent target is available.");
+        const location = record.origin?.location;
+        const workspaceCwd = location?.kind === "workspace"
+          ? gatewayMock.browserWorkspaces?.find((candidate) => {
+              const workspace = candidate.workspace as { id?: string } | undefined;
+              return (workspace?.id ?? `workspace:${String(candidate.cwd)}`) === location.workspaceId;
+            })
+          : undefined;
+        const originCwd = location?.kind === "cwd"
+          ? location.cwd
+          : workspaceCwd
+            ? String(
+                (workspaceCwd.workspace as { roots?: string[] } | undefined)?.roots?.[0]
+                ?? workspaceCwd.cwd
+              )
+            : gatewayMock.scope.cwd;
         const draftSnapshot = {
           ...gatewayMock.snapshot,
-          scope: record.origin ?? gatewayMock.snapshot.scope,
+          scope: {
+            cwd: originCwd ?? gatewayMock.scope.cwd,
+            source: record.origin?.source ?? gatewayMock.scope.source
+          },
           thread: null,
           entries: [],
           activity: { ...gatewayMock.snapshot.activity }
@@ -809,7 +887,12 @@ vi.mock("@psychevo/client", async () => {
             gatewayMock.requestLog.splice(retainedContextLogIndex, 1);
           }
         }
-        return { snapshot: draftSnapshot, context, problem: null };
+        return {
+          snapshot: draftSnapshot,
+          context,
+          problem: null,
+          workspaceId: location?.kind === "workspace" ? location.workspaceId ?? null : null
+        };
       }
       if (method === "settings/read") {
         if (gatewayMock.settingsRead) {
@@ -2529,6 +2612,9 @@ vi.mock("@psychevo/client", async () => {
         return gatewayMock.commandExecute(record.command ?? "");
       }
       if (method === "workspace/files") {
+        if (gatewayMock.workspaceFiles) {
+          return gatewayMock.workspaceFiles(params);
+        }
         return gatewayMock.workspaceFilesResult;
       }
       if (method === "workspace/file/externalActions") {

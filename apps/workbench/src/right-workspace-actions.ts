@@ -56,7 +56,19 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     params.setMobilePanel("status");
   }
 
-  async function openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch: Partial<RightWorkspaceTab> = {}, forceNew = false) {
+  async function confirmFilesTransition(path: string, rootChanged = false): Promise<boolean> {
+    const tab = params.rightTabs.find((candidate) => candidate.kind === "files") ?? null;
+    if (!tab || !params.dirtyRightTabs[tab.id]) return true;
+    if (!rootChanged && (tab.path ?? null) === path) return true;
+    return confirmDiscardedEdits();
+  }
+
+  async function openRightWorkspaceTab(
+    kind: RightWorkspaceTabKind,
+    patch: Partial<RightWorkspaceTab> = {},
+    forceNew = false,
+    dirtyTransitionConfirmed = false
+  ) {
     if (kind === "debug" && !params.debugEnabled) {
       return;
     }
@@ -76,6 +88,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       : null;
     if (
       replacedFileTab
+      && !dirtyTransitionConfirmed
       && params.dirtyRightTabs[nextId]
       && patch.path !== undefined
       && (replacedFileTab.path ?? null) !== (patch.path ?? null)
@@ -239,6 +252,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     beginRightResize,
     clearRightWorkspaceTabPendingPrompt,
     closeRightWorkspaceTab,
+    confirmFilesTransition,
     openAgentSessionTab,
     openReviewTab,
     openRightWorkspaceTab,

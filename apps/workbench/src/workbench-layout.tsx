@@ -47,6 +47,7 @@ import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerSubmitControls } from "./composer-controls";
 import { ComposerEnvironment } from "./composer-environment";
 import { WorkspacePickerDialog } from "./workspace-picker-dialog";
+import { WorkspaceEditorDialog } from "./workspace-editor-dialog";
 import { ComposerRuntimeControls } from "./runtime-controls";
 import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
 import { rightWorkspaceTabLabel } from "./right-workspace-model";
@@ -171,6 +172,7 @@ export type ThreadViewModel = {
 export type HistoryViewModel = {
   archivedSessions: SessionSummary[];
   createWorkspace: AppActions["createWorkspace"];
+  draftWorkspaceId: string | null;
   endpoint: GatewayEndpoint | null;
   historyLoading: boolean;
   host: PsychevoHost | null;
@@ -178,6 +180,7 @@ export type HistoryViewModel = {
   loadingOlderCwd: string | null;
   loadOlderSessions(cwd: string): Promise<void>;
   pinnedSessionIds: string[];
+  pinnedWorkspaceIds: string[];
   pinnedSessions: SessionSummary[];
   refreshHistory: SurfaceActions["refreshHistory"];
   sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
@@ -187,6 +190,7 @@ export type HistoryViewModel = {
   startNewThread: AppActions["startNewThread"];
   switchMainView(value: MainView): void;
   togglePinnedSession(threadId: string): void;
+  togglePinnedWorkspace(workspaceId: string): void;
   workspaceDialogOpen: boolean;
   setWorkspaceDialogOpen: SetState<boolean>;
 };
@@ -198,6 +202,7 @@ export type WorkspaceViewModel = {
   beginRightResize: RightActions["beginRightResize"];
   clearRightWorkspaceTabPendingPrompt: RightActions["clearRightWorkspaceTabPendingPrompt"];
   closeRightWorkspaceTab: RightActions["closeRightWorkspaceTab"];
+  confirmFilesTransition: RightActions["confirmFilesTransition"];
   copyText: AppActions["copyText"];
   debugEnabled: boolean;
   debugEvents: DebugEvent[];
@@ -236,6 +241,12 @@ export type WorkspaceViewModel = {
   workspaceChanges: WorkspaceChangesResult | null;
   workspaceDiff: WorkspaceDiffResult | null;
   workspaceFiles: WorkspaceFilesResult | null;
+  workspaceFileRoots: string[];
+  workspaceLinkFiles: WorkspaceFilesResult | null;
+  selectWorkspaceFileRoot(
+    root: string,
+    beforeCommit?: () => boolean | Promise<boolean>
+  ): Promise<boolean>;
 };
 
 export type CapabilityViewModel = {
@@ -326,6 +337,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     changeRunnableTarget,
     clearRightWorkspaceTabPendingPrompt,
     closeRightWorkspaceTab,
+    confirmFilesTransition,
     channelDoctor,
     client,
     commandFeedback,
@@ -348,6 +360,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     doctorBackend,
     doctorChannel,
     doctorChannels,
+    draftWorkspaceId,
     draftAutomation,
     endpoint,
     error,
@@ -384,6 +397,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     pendingPermissionActions,
     patchComposerDraft,
     pinnedSessionIds,
+    pinnedWorkspaceIds,
     pinnedSessions,
     pinnedMessageKeys,
     pauseAutomation,
@@ -423,6 +437,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     contextMatchesTarget,
     sessionBrowserWorkspaces,
     sessionUsage,
+    selectWorkspaceFileRoot,
     sessions,
     setActiveRightTabId,
     setAppearance,
@@ -454,6 +469,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     switchMainView,
     terminalEvents,
     togglePinnedSession,
+    togglePinnedWorkspace,
     traceState,
     transcriptEntries,
     togglePinnedMessage,
@@ -471,6 +487,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     workspaceDialogOpen,
     workspaceDiff,
     workspaceFiles,
+    workspaceFileRoots,
+    workspaceLinkFiles,
     acceptWorkspaceChange,
     clearCommandTransientUi,
     onReadAloudText,
@@ -481,11 +499,14 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     onComposerRetry
   } = groupedProps;
 
-  const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceFiles
+  const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceLinkFiles
     ? {
-        entries: workspaceFiles.entries,
-        onOpen: (path) => runAction(async () => openFilePreview(path, { hideFileTree: true })),
-        root: workspaceFiles.root
+        entries: workspaceLinkFiles.entries,
+        onOpen: (path) => runAction(async () => openFilePreview(path, {
+          hideFileTree: true,
+          root: workspaceLinkFiles.root
+        })),
+        root: workspaceLinkFiles.root
       }
     : undefined;
   const selectedRuntimeRef = runtimeContext?.compatibleTargets?.find((target) => (
@@ -537,6 +558,19 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
   const [sessionArchiveView, setSessionArchiveView] = useState(false);
   const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionSummary | null>(null);
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
+  const [editingWorkspace, setEditingWorkspace] = useState<SessionBrowserWorkspaceState | null>(null);
+  const pinnedWorkspaceSessionIds = new Set(sessionBrowserWorkspaces
+    .filter((workspace) => pinnedWorkspaceIds.includes(workspace.id))
+    .flatMap((workspace) => workspace.sessionIds));
+  const pinnedDisplaySessions = [
+    ...pinnedSessions,
+    ...sessions.filter((session) => (
+      !pinnedSessionIds.includes(session.id) && pinnedWorkspaceSessionIds.has(session.id)
+    ))
+  ];
+  const ordinarySessions = sessions.filter((session) => (
+    !pinnedSessionIds.includes(session.id) && !pinnedWorkspaceSessionIds.has(session.id)
+  ));
   const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
   const draftSession = showSessionChrome && !currentThreadId;
   const composerInteractionDisabled = disabled || !composerPresentationReady;
@@ -599,6 +633,50 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
           }}
           onReadFolders={readWorkspaceFolders}
           title="Open workspace"
+        />
+      )}
+      {editingWorkspace && client && (
+        <WorkspaceEditorDialog
+          disabled={disabled}
+          onCancel={() => setEditingWorkspace(null)}
+          onSave={async (name, roots, expectedRevision) => {
+            const rootsChanged = roots.length !== editingWorkspace.roots.length
+              || roots.some((root, index) => root !== editingWorkspace.roots[index]);
+            const rebindsActiveDraft = rootsChanged
+              && !currentThreadId
+              && draftWorkspaceId === editingWorkspace.id;
+            const refreshesActiveThread = rootsChanged
+              && Boolean(currentThreadId)
+              && snapshot.workspaceRootSource === "workspace"
+              && snapshot.workspaceId === editingWorkspace.id;
+            if (
+              (rebindsActiveDraft || refreshesActiveThread)
+              && !await confirmFilesTransition("", true)
+            ) return false;
+            const result = await client.request("workspace/catalog/update", {
+              workspaceId: editingWorkspace.id,
+              expectedRevision,
+              name,
+              roots
+            });
+            setEditingWorkspace((current) => (
+              current?.id === result.workspace.id
+                ? { ...current, ...result.workspace }
+                : current
+            ));
+            if (rebindsActiveDraft && draftWorkspaceId === result.workspace.id) {
+              await startNewThread(result.workspace.roots[0], {
+                workspaceId: result.workspace.id,
+                targetId: selectedTargetId
+              });
+            } else if (refreshesActiveThread && currentThreadId) {
+              await refreshSnapshot(client, currentThreadId);
+            }
+            await refreshHistory(client);
+            setEditingWorkspace(null);
+            return true;
+          }}
+          workspace={editingWorkspace}
         />
       )}
       {pendingDeleteSession && (
@@ -674,9 +752,39 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 <PinnedPanel
                   currentThreadId={currentThreadId}
                   disabled={disabled}
-                  sessions={pinnedSessions}
+                  loadingOlderCwd={loadingOlderCwd}
+                  pinnedSessionIds={pinnedSessionIds}
+                  pinnedWorkspaces={pinnedWorkspaceIds
+                    .map((id) => sessionBrowserWorkspaces.find((workspace) => workspace.id === id))
+                    .filter((workspace): workspace is SessionBrowserWorkspaceState => Boolean(workspace))}
+                  sessions={pinnedDisplaySessions}
+                  onArchive={(threadId) => void runAction(async () => workbenchIntents.archiveSession(threadId))}
+                  onDelete={(threadId) => void runAction(async () => {
+                    const session = [...sessions, ...archivedSessions]
+                      .find((candidate) => candidate.id === threadId);
+                    if (session) setPendingDeleteSession(session);
+                  })}
+                  onExport={(threadId) => {
+                    if (endpoint) void host?.open.downloadSession(endpoint, threadId, "export");
+                  }}
+                  onFork={(threadId) => void runAction(async () => workbenchIntents.forkSession(threadId))}
+                  onNew={() => void runAction(async () => startNewThread())}
+                  onNewInWorkspace={(workspace) => void runAction(async () => startNewThread(
+                    workspace.cwd,
+                    { workspaceId: workspace.id }
+                  ))}
+                  onLoadOlderSessions={(cwd) => void runAction(async () => loadOlderSessions(cwd))}
+                  onRename={(threadId, title) => void runAction(async () => workbenchIntents.renameSession(threadId, title))}
+                  onRestore={(threadId) => void runAction(async () => workbenchIntents.restoreSession(threadId))}
                   onResume={(threadId) => void runAction(async () => workbenchIntents.openThread(threadId))}
-                  onUnpin={togglePinnedSession}
+                  onShare={(threadId) => {
+                    if (endpoint) void host?.open.downloadSession(endpoint, threadId, "share");
+                  }}
+                  onTogglePinned={togglePinnedSession}
+                  onToggleWorkspacePinned={togglePinnedWorkspace}
+                  onEditWorkspace={(workspace) => setEditingWorkspace(
+                    sessionBrowserWorkspaces.find((candidate) => candidate.id === workspace.id) ?? null
+                  )}
                 />
                 {sessionArchiveView ? (
                   <SessionArchivePanel
@@ -703,10 +811,12 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   disabled={disabled}
                   draftSession={null}
                   pinnedSessionIds={pinnedSessionIds}
-                  browserWorkspaces={sessionBrowserWorkspaces}
+                  browserWorkspaces={sessionBrowserWorkspaces.filter((workspace) => (
+                    !pinnedWorkspaceIds.includes(workspace.id)
+                  ))}
                   loadingOlderCwd={loadingOlderCwd}
                   loading={historyLoading}
-                  sessions={sessions}
+                  sessions={ordinarySessions}
                   onArchive={(threadId) => void runAction(async () => workbenchIntents.archiveSession(threadId))}
                   onDelete={(threadId) => void runAction(async () => {
                     const session = [...sessions, ...archivedSessions]
@@ -727,8 +837,16 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   onNewInCwd={(cwd) => void runAction(async () => {
                     await startNewThread(cwd);
                   })}
+                  onNewInWorkspace={(workspace) => void runAction(async () => startNewThread(
+                    workspace.cwd,
+                    { workspaceId: workspace.id }
+                  ))}
                   onLoadOlderSessions={(cwd) => void runAction(async () => loadOlderSessions(cwd))}
                   onTogglePinned={togglePinnedSession}
+                  onToggleWorkspacePinned={togglePinnedWorkspace}
+                  onEditWorkspace={(workspace) => setEditingWorkspace(
+                    sessionBrowserWorkspaces.find((candidate) => candidate.id === workspace.id) ?? null
+                  )}
                   onRename={(threadId, title) => void runAction(async () => workbenchIntents.renameSession(threadId, title))}
                   onRestore={(threadId) => void runAction(async () => workbenchIntents.restoreSession(threadId))}
                   onResumeDraft={() => {
@@ -1026,6 +1144,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               ).then((accepted: unknown) => accepted === true)}
             />
             <ComposerEnvironment
+              activeWorkspaceId={draftWorkspaceId}
               branch={workspaceBranch !== undefined
                 ? workspaceBranch
                 : settings?.project?.branch ?? null}
@@ -1051,7 +1170,10 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               onReadBranches={() => readWorkspaceGitBranches()}
               onReadFolders={(folderPath) => readWorkspaceFolders(folderPath)}
               onRuntimeControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
-              onWorkspaceChange={(cwd) => startNewThread(cwd)}
+              onWorkspaceChange={(cwd, workspaceId) => startNewThread(
+                cwd,
+                workspaceId ? { workspaceId } : {}
+              )}
             />
           </div>}
         </section>
@@ -1081,6 +1203,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 hostKind={host?.platform?.kind ?? "browser"}
                 latestGatewayEvent={latestGatewayEvent}
                 root={workspaceFiles?.root ?? settings?.cwd ?? ""}
+                roots={workspaceFileRoots}
                 scope={activeScope ?? init?.scope ?? null}
                 sessionId={snapshot.thread?.id ?? null}
                 status={status}
@@ -1140,8 +1263,11 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   await refreshAgentSurface();
                   await refreshWorkspaceSurface();
                 })}
+                onRootChange={selectWorkspaceFileRoot}
                 onRefreshTrace={() => void refreshTrace()}
-                onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
+                onSaveFile={(root, path, content, expectedRevision, force) => (
+                  saveFileFromEditor(path, content, expectedRevision, force, root)
+                )}
                 onShowHome={() => revealRightWorkspace(null)}
                 pinnedMessageKeys={pinnedMessageKeys}
               />

@@ -9,6 +9,57 @@ import { App } from "./App";
 afterEach(() => vi.restoreAllMocks());
 
 describe("Workbench public Thread Application interactions", () => {
+  it("hydrates persisted pins on the first bound browser epoch", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-persisted-pin", "Persisted pin")];
+    gatewayMock.navigationRead = () => ({
+      revision: 4,
+      pinnedThreadIds: ["thread-persisted-pin"],
+      pinnedWorkspaceIds: []
+    });
+
+    render(<App />);
+
+    const pinned = await screen.findByRole("region", { name: "Pinned sessions" });
+    expect(within(pinned).getByText("Persisted pin")).toBeTruthy();
+    const browserRequests = gatewayMock.requestLog.filter((entry) => entry.method === "thread/browser");
+    expect(browserRequests).toHaveLength(1);
+    expect(browserRequests[0]).toEqual({
+      method: "thread/browser",
+      params: expect.objectContaining({ includeSessionIds: ["thread-persisted-pin"] })
+    });
+  });
+
+  it("does not widen a direct-cwd Thread from its implicit Workspace binding", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-direct", "Direct Thread")];
+    gatewayMock.snapshot.workspaceId = "workspace-implicit";
+    gatewayMock.snapshot.workspaceRoots = [gatewayMock.scope.cwd];
+    gatewayMock.snapshot.workspaceRootSource = "direct";
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Direct Thread"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => (
+        entry.method === "thread/resume"
+        && (entry.params as { threadId?: string }).threadId === "thread-direct"
+      ))).toBe(true);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open").length)
+        .toBeGreaterThan(1);
+    });
+
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open").at(-1))
+      .toEqual({
+        method: "thread/draft/open",
+        params: expect.objectContaining({
+          origin: expect.objectContaining({
+            location: { kind: "cwd", cwd: gatewayMock.scope.cwd }
+          })
+        })
+      });
+  });
+
   it("keeps an atomic New Session open authoritative without a redundant context read", async () => {
     gatewayMock.draftOpen = () => draftOpenResult();
     render(<App />);
@@ -327,6 +378,8 @@ describe("Workbench public Thread Application interactions", () => {
     const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: "keep this draft" } });
+    const navigationReadsBefore = gatewayMock.requestLog
+      .filter((entry) => entry.method === "navigation/read").length;
 
     act(() => {
       gatewayMock.connectionState = "reconnecting";
@@ -348,6 +401,8 @@ describe("Workbench public Thread Application interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/resume")).toBe(true);
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "navigation/read"))
+        .toHaveLength(navigationReadsBefore + 1);
       expect(screen.queryByText("Connection interrupted. Reconnecting…")).toBeNull();
     });
     expect(input.value).toBe("keep this draft");

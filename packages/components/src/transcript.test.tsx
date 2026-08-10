@@ -201,6 +201,54 @@ describe("TranscriptPanel message pinning", () => {
     expect(screen.queryByRole("button", { name: "Pin message to side" })).toBeNull();
   });
 
+  it("keeps an accepted optimistic user Pin stable after durable reconciliation", () => {
+    const onPinnedMessageChange = vi.fn();
+    const block = transcriptBlock({
+      body: "/daily",
+      kind: "text",
+      metadata: null,
+      status: "completed"
+    });
+    const optimistic = {
+      ...transcriptEntry([block]),
+      id: "optimistic:prompt",
+      messageSeq: null,
+      role: "user" as const,
+      source: "client.optimistic",
+      turnId: "turn-1",
+      metadata: {
+        pinIdentityText: "  $x-daily latest  ",
+        projection: "optimistic_prompt"
+      }
+    } satisfies TranscriptEntry;
+    const key = JSON.stringify([optimistic.threadId, "turn-1", "user", "$x-daily latest"]);
+    const view = render(
+      <TranscriptPanel
+        entries={[optimistic]}
+        onPinnedMessageChange={onPinnedMessageChange}
+        pinnedMessageKeys={new Set([key])}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Pin message to side" }).getAttribute("aria-pressed")).toBe("true");
+
+    view.rerender(
+      <TranscriptPanel
+        entries={[{
+          ...optimistic,
+          blocks: [{ ...block, body: "$x-daily latest" }],
+          id: "message:1",
+          messageSeq: 1,
+          metadata: null,
+          source: "runtime.message"
+        }]}
+        onPinnedMessageChange={onPinnedMessageChange}
+        pinnedMessageKeys={new Set([key])}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Pin message to side" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("keeps identical text blocks independently addressable", () => {
     const onPinnedMessageChange = vi.fn();
     const entries = ["message:1", "message:2"].map((id, index) => ({

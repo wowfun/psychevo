@@ -228,7 +228,8 @@ function compareDecimalRevisions(left: string, right: string): number {
 export function appendOptimisticPrompt(
   snapshot: ThreadSnapshot,
   text: string,
-  now = Date.now()
+  now = Date.now(),
+  identityText?: string | null
 ): ThreadSnapshot {
   const body = text.trim();
   if (!body) {
@@ -260,7 +261,11 @@ export function appendOptimisticPrompt(
     status: "completed",
     source: OPTIMISTIC_SOURCE,
     blocks: [block],
-    metadata: { projection: "optimistic_prompt", liveOrder: OPTIMISTIC_LIVE_ORDER },
+    metadata: {
+      projection: "optimistic_prompt",
+      liveOrder: OPTIMISTIC_LIVE_ORDER,
+      ...(identityText?.trim() ? { pinIdentityText: identityText.trim() } : {})
+    },
     usage: null,
     accounting: null,
     createdAtMs: now,

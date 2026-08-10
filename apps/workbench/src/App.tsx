@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActionReceiptProvider,
   ConfirmActionProvider,
@@ -60,10 +60,7 @@ import {
   parseThreadContext,
   shouldRetainFirstTurnDraftContext
 } from "./runtime-context";
-import {
-  readPinnedSessionIds,
-  readWorkbenchPrefs
-} from "./storage";
+import { readWorkbenchPrefs } from "./storage";
 import { createRightWorkspaceActions } from "./right-workspace-actions";
 import {
   EMPTY_GATEWAY_EVENT_FEED,
@@ -100,6 +97,7 @@ import type {
   WorkbenchChannelDoctor,
   WorkbenchCommand
 } from "./types";
+import { resolveWorkspaceFileRoots } from "./workspace-file-roots";
 import {
   createHistoryDraftSession,
   visibleHistoryDraftSession,
@@ -129,10 +127,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const confirmAction = useConfirmAction();
   const threadSession = useMemo(() => new ThreadSession({ snapshot: EMPTY_SNAPSHOT }), []);
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
-  const sessionBrowserApplication = useMemo(
-    () => new SessionBrowserApplication(readPinnedSessionIds()),
-    []
-  );
+  const sessionBrowserApplication = useMemo(() => new SessionBrowserApplication(), []);
   const workspaceApplication = useMemo(() => new WorkspaceApplication(), []);
   const threadSessionViewStore = useMemo(() => ({
     getSnapshot: () => threadSession.getView(),
@@ -165,6 +160,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     archivedSessions,
     loadingOlderCwd,
     pinnedSessionIds,
+    pinnedWorkspaceIds,
     sessions,
     workspaces: sessionBrowserWorkspaces
   } = sessionBrowserView;
@@ -172,7 +168,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     branch: workspaceBranchState,
     changes: workspaceChanges,
     diff: workspaceDiff,
-    files: workspaceFiles
+    files: workspaceFiles,
+    linkFiles: workspaceLinkFiles
   } = workspaceView;
   const workspaceBranch = workspaceBranchState === undefined
     ? undefined
@@ -249,15 +246,23 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [error, setError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"history" | "transcript" | "status">("transcript");
   const [fallbackCwd, setFallbackCwd] = useState(browserFallbackCwd);
+  const [draftWorkspaceId, setDraftWorkspaceId] = useState<string | null>(null);
   const viewEpochRef = useRef(0);
+  const snapshotReadFlightsRef = useRef(new Map<string, {
+    client: GatewayClient;
+    promise: Promise<void>;
+  }>());
   const mainViewRef = useRef<MainView>("transcript");
   const selectedThreadIdRef = useRef<string | null>(null);
   const scopeRef = useRef<GatewayRequestScope | null>(null);
   const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
+  const confirmFilesTransitionRef = useRef<(
+    path: string,
+    rootChanged?: boolean
+  ) => Promise<boolean>>(async () => true);
   const firstTurnContextRefreshPendingRef = useRef(false);
-  const skipNextPinnedPersistRef = useRef(false);
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
   const voiceAutoSpeakKeyRef = useRef<string | null>(null);
   const pendingTargetSelectionRef = useRef<string | null>(null);
@@ -304,6 +309,23 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     ),
     [liveTranscriptEntries, transcriptEntries]
   );
+  const workspaceFileRoots = useMemo(() => resolveWorkspaceFileRoots({
+    draftWorkspaceId,
+    scopeCwd: snapshot.scope.cwd,
+    threadId: snapshot.thread?.id ?? null,
+    threadWorkspaceRoots: snapshot.workspaceRoots,
+    workspaces: sessionBrowserWorkspaces
+  }), [draftWorkspaceId, sessionBrowserWorkspaces, snapshot.scope.cwd, snapshot.thread?.id, snapshot.workspaceRoots]);
+  const workspaceFilesAuthorityKey = useMemo(
+    () => JSON.stringify([snapshot.thread?.id ?? null, draftWorkspaceId, workspaceFileRoots]),
+    [draftWorkspaceId, snapshot.thread?.id, workspaceFileRoots]
+  );
+  useLayoutEffect(() => {
+    workspaceApplication.bindFilesAuthority(
+      workspaceFilesAuthorityKey,
+      workspaceFileRoots
+    );
+  }, [workspaceApplication, workspaceFileRoots, workspaceFilesAuthorityKey]);
   const pendingActions = Array.isArray(snapshot.pendingActions) ? snapshot.pendingActions : [];
   const pendingClarifyActions = pendingActions.filter((action) => action.kind === "clarify");
   const pendingPermissionActions = pendingActions.filter((action) => action.kind === "permission");
@@ -502,6 +524,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     snapshot,
     viewEpochRef,
     workspaceApplication,
+    snapshotReadFlights: snapshotReadFlightsRef.current,
     setActiveScope,
     setAgents,
     setBackends,
@@ -540,18 +563,18 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       || !client
       || !activeScope
       || !workspaceFileLinkDemand
-      || workspaceFiles?.root === activeScope.cwd
+      || workspaceLinkFiles?.root === activeScope.cwd
     ) {
       return;
     }
-    void workspaceApplication.ensure("files", client, activeScope);
+    void workspaceApplication.ensure("linkFiles", client, activeScope);
   }, [
     startupStable,
     client,
     activeScope,
     workspaceFileLinkDemand,
     workspaceApplication,
-    workspaceFiles?.root
+    workspaceLinkFiles?.root
   ]);
 
   async function refreshAgentSurfaceAndRuntimeContext(
@@ -678,7 +701,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     mobilePanel,
     pendingDetachedShellRef,
     firstTurnContextRefreshPendingRef,
-    pinnedSessionIds,
     rightTabs,
     rightWorkspaceOpen: showSessionChrome && !rightCollapsed,
     rightWidthPx,
@@ -688,12 +710,15 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     settingsSection,
     fallbackCwd,
     showSessionChrome,
-    skipNextPinnedPersistRef,
     snapshot,
     startupStable,
     threadSession,
     viewEpochRef,
     workspaceApplication,
+    workspaceFilesAuthorityKey,
+    bindSessionBrowser: (runtimeClient) => {
+      sessionBrowserApplication.bind(runtimeClient, activeScope ?? init?.scope ?? null);
+    },
     adoptSnapshotScope,
     applyGatewayEvent,
     patchSessionEvent: (event: GatewayEvent) => {
@@ -705,6 +730,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
     refreshCommands,
     refreshHistory,
+    refreshNavigation: (runtimeClient) => sessionBrowserApplication.refreshNavigation(runtimeClient),
     refreshObservability,
     refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
     refreshSettings,
@@ -726,7 +752,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setHistoryLoading,
     setInit,
     setMobilePanel,
-    setPinnedSessionIds: sessionBrowserApplication.setPinnedSessionIds,
     setRightCollapsed,
     setRightTabs,
     setRuntimeContext,
@@ -753,6 +778,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     pendingDetachedShellRef.current = null;
     clearCommandTransientUi();
     setDraftSession(null);
+    setDraftWorkspaceId(null);
     selectedThreadIdRef.current = null;
     setObservability(null);
     setContextUsage(null);
@@ -760,7 +786,32 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   }
 
   function togglePinnedSession(threadId: string) {
-    sessionBrowserApplication.togglePinnedSession(threadId);
+    void sessionBrowserApplication.togglePinnedSession(threadId).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    });
+  }
+
+  function togglePinnedWorkspace(workspaceId: string) {
+    void sessionBrowserApplication.togglePinnedWorkspace(workspaceId).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    });
+  }
+
+  async function selectWorkspaceFileRoot(
+    root: string,
+    beforeCommit?: () => boolean | Promise<boolean>
+  ): Promise<boolean> {
+    try {
+      return Boolean(await workspaceApplication.readFilesRoot(
+        root,
+        client,
+        activeScope ?? init?.scope ?? null,
+        beforeCommit ? { beforeCommit } : {}
+      ));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    }
   }
 
   function patchComposerDraft(text: string, inputParts?: ThreadEditableInputPart[]) {
@@ -835,12 +886,14 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     beginRightResize,
     clearRightWorkspaceTabPendingPrompt,
     closeRightWorkspaceTab,
+    confirmFilesTransition,
     openAgentSessionTab,
     openReviewTab,
     openRightWorkspaceTab,
     revealRightWorkspace,
     togglePinnedMessage
   } = rightWorkspaceActions;
+  confirmFilesTransitionRef.current = confirmFilesTransition;
 
   const appActions = createAppActions({
     activeScope,
@@ -861,12 +914,16 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     selectedThreadIdRef,
     settings,
     snapshot,
+    draftWorkspaceId,
     viewEpochRef,
     workspaceApplication,
     turnBlockReason,
     adoptSnapshotScope,
     beginExplicitViewSwitch,
     clearCommandTransientUi,
+    confirmFilesTransition: (path, rootChanged) => (
+      confirmFilesTransitionRef.current(path, rootChanged)
+    ),
     openReviewTab,
     openRightWorkspaceTab,
     refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
@@ -881,6 +938,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setCommandFeedback,
     setContextUsage,
     setDraftSession,
+    setDraftWorkspaceId,
     setError,
     setMobilePanel,
     setObservability,
@@ -996,7 +1054,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         return;
       }
       const preparationToken = composerSessionCoordinator.beginDraftPrepare(viewEpochRef.current);
-      const result = await client.request("thread/draft/prepare", { scope, targetId });
+      const result = await client.request("thread/draft/prepare", {
+        scope,
+        targetId,
+        ...(draftWorkspaceId ? { workspaceId: draftWorkspaceId } : {})
+      });
       if (!canApplyTransition()) {
         return;
       }
@@ -1129,6 +1191,10 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       controls: turnControls,
       input,
       mentions,
+      optimisticIdentityText: input
+        .filter((part): part is Extract<ThreadEditableInputPart, { type: "text" }> => part.type === "text")
+        .map((part) => part.text)
+        .join("\n"),
       optimisticText,
       scope: targetScope,
       threadId
@@ -1368,7 +1434,9 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     beginExplicitViewSwitch,
     clearCommandTransientUi,
     client,
+    composerSessionCoordinator,
     currentThreadId: currentThreadId ?? null,
+    draftWorkspaceId,
     fallbackCwd,
     importScope,
     initScope: init?.scope ?? null,
@@ -1462,6 +1530,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       history={{
         archivedSessions,
         createWorkspace,
+        draftWorkspaceId,
         endpoint,
         historyLoading,
         host,
@@ -1469,6 +1538,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         loadingOlderCwd,
         loadOlderSessions,
         pinnedSessionIds,
+        pinnedWorkspaceIds,
         pinnedSessions,
         refreshHistory,
         sessionBrowserWorkspaces,
@@ -1479,6 +1549,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         startNewThread,
         switchMainView,
         togglePinnedSession,
+        togglePinnedWorkspace,
         workspaceDialogOpen
       }}
       workspace={{
@@ -1489,6 +1560,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         checkoutWorkspaceGitBranch,
         clearRightWorkspaceTabPendingPrompt,
         closeRightWorkspaceTab,
+        confirmFilesTransition,
         copyText,
         debugEnabled,
         debugEvents,
@@ -1522,7 +1594,10 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         workspaceIsGitRepo,
         workspaceChanges,
         workspaceDiff,
-        workspaceFiles
+        workspaceFiles,
+        workspaceFileRoots,
+        workspaceLinkFiles,
+        selectWorkspaceFileRoot
       }}
       capabilities={{
         appearance,

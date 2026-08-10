@@ -199,10 +199,11 @@ export function ensureLiveAutomationCwd(contextCwd: string | undefined): string 
 export async function assertLeftNavigationSectionAlignment(page: Page) {
   const actionIcon = page.locator(".leftActions button").first().locator("svg");
   const actionLabel = page.locator(".leftActions button").first().locator(".pevo-actionButtonLabel");
-  const pinnedIcon = page.locator(".leftPinnedPanel header svg");
-  const pinnedLabel = page.locator(".leftPinnedPanel header span");
-  const sessionsIcon = page.locator(".pevo-sessionsHeader .pevo-titleLine svg");
-  const sessionsLabel = page.locator(".pevo-sessionsHeader h2");
+  const pinnedIcon = page.locator('.pevo-history.is-pinned > header svg');
+  const pinnedLabel = page.locator('.pevo-history.is-pinned > header h2');
+  const sessionsPanel = page.getByRole("region", { name: "Sessions", exact: true });
+  const sessionsIcon = sessionsPanel.locator(".pevo-sessionsHeader .pevo-titleLine svg");
+  const sessionsLabel = sessionsPanel.locator(".pevo-sessionsHeader h2");
   const [actionIconBox, actionLabelBox, pinnedIconBox, pinnedLabelBox, sessionsIconBox, sessionsLabelBox] =
     await Promise.all([
       actionIcon.boundingBox(),

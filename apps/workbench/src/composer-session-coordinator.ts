@@ -1,3 +1,5 @@
+import type { GatewayRequestScope } from "@psychevo/protocol";
+
 export type DraftOpenToken = {
   epoch: number;
   id: number;
@@ -6,6 +8,7 @@ export type DraftOpenToken = {
 type ReadinessKind = "draftOpen" | "draftPrepare";
 
 type ActiveReadiness = DraftOpenToken & {
+  completionTarget: { scope: GatewayRequestScope; workspaceId: string | null } | null;
   kind: ReadinessKind;
   promise: Promise<boolean>;
   settle(ready: boolean): void;
@@ -18,21 +21,29 @@ export class ComposerSessionCoordinator {
   private activeReadiness: ActiveReadiness | null = null;
   private pendingSubmissionReadinessId: number | null = null;
 
-  beginDraftOpen(epoch: number): DraftOpenToken {
-    return this.beginReadiness(epoch, "draftOpen");
+  beginDraftOpen(
+    epoch: number,
+    completionTarget: { scope: GatewayRequestScope; workspaceId: string | null } | null = null
+  ): DraftOpenToken {
+    return this.beginReadiness(epoch, "draftOpen", completionTarget);
   }
 
   beginDraftPrepare(epoch: number): DraftOpenToken {
-    return this.beginReadiness(epoch, "draftPrepare");
+    return this.beginReadiness(epoch, "draftPrepare", null);
   }
 
-  private beginReadiness(epoch: number, kind: ReadinessKind): DraftOpenToken {
+  private beginReadiness(
+    epoch: number,
+    kind: ReadinessKind,
+    completionTarget: ActiveReadiness["completionTarget"]
+  ): DraftOpenToken {
     this.cancelPending();
     let settlePromise!: (ready: boolean) => void;
     const token: DraftOpenToken = { epoch, id: this.nextId + 1 };
     this.nextId = token.id;
     this.activeReadiness = {
       ...token,
+      completionTarget,
       kind,
       promise: new Promise<boolean>((resolve) => {
         settlePromise = resolve;
@@ -80,6 +91,13 @@ export class ComposerSessionCoordinator {
 
   isReadinessPending(epoch: number): boolean {
     return this.activeReadiness?.epoch === epoch && !this.activeReadiness.settled;
+  }
+
+  pendingCompletionTarget(
+    epoch: number
+  ): { scope: GatewayRequestScope; workspaceId: string | null } | null {
+    const active = this.activeReadiness;
+    return active?.epoch === epoch && !active.settled ? active.completionTarget : null;
   }
 
   async waitToSubmit(epoch: number, isInputCurrent: () => boolean): Promise<boolean> {

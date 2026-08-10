@@ -488,99 +488,56 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   white-space: nowrap;
 }
 
-.leftPinnedPanel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-  max-height: min(168px, 32dvh);
-  gap: 6px;
+.workspaceEditorDialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
   overflow: hidden;
-  padding: 4px 2px;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
 }
 
-.leftPinnedPanel header {
+.workspaceEditorBody {
   display: grid;
-  grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr);
-  align-items: center;
-  gap: var(--left-nav-gap, 7px);
-  min-height: 32px;
-  padding: 0 var(--left-nav-x, 6px);
-  color: var(--pevo-nav-text);
-  font-size: var(--left-nav-font-size, var(--pevo-font-size-chrome));
-  font-weight: 600;
+  gap: 18px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
 }
 
-.leftPinnedPanel header > svg {
-  justify-self: center;
+.workspaceEditorBody > label,
+.workspaceEditorBody fieldset {
+  display: grid;
+  gap: 8px;
 }
 
-.leftPinnedPanel p {
+.workspaceEditorBody fieldset {
+  border: 0;
   margin: 0;
-  color: var(--pevo-nav-muted);
-  font-size: var(--pevo-font-size-small);
+  padding: 0;
 }
 
-.pinnedSessionList {
-  display: grid;
-  align-content: start;
-  gap: 4px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.pinnedSessionRow {
+.workspaceEditorRoot {
   align-items: center;
   display: grid;
-  gap: 4px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
-.pinnedSessionRow > button {
-  min-width: 0;
+.workspaceEditorPrimary {
+  color: var(--pevo-text-muted);
+  font-size: 12px;
+  padding-inline: 4px;
 }
 
-.pinnedSessionRow > button:first-child {
-  align-items: start;
-  background: transparent;
-  border: 0;
-  color: var(--pevo-nav-text);
-  display: grid;
-  gap: 2px;
-  padding: 4px 2px;
-  text-align: left;
-}
-
-.pinnedSessionRow > button:first-child span,
-.pinnedSessionRow > button:first-child small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pinnedSessionRow > button:first-child small {
-  color: var(--pevo-nav-muted);
-  font-size: var(--pevo-font-size-xsmall);
-}
-
-.pinnedSessionRow > button:last-child {
+.workspaceEditorRoot button,
+.workspaceEditorAdd {
   align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--pevo-nav-muted);
   display: inline-flex;
-  height: 24px;
+  gap: 6px;
   justify-content: center;
-  width: 24px;
 }
 
-.pinnedSessionRow.is-active > button:first-child {
-  color: var(--pevo-ink);
+.workspaceEditorAdd {
+  justify-self: start;
 }
 
 .historyColumn.is-collapsed .leftChrome {
@@ -622,7 +579,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 }
 
 .historyColumn.is-collapsed .leftUtilityRail span,
-.historyColumn.is-collapsed .leftPinnedPanel,
 .historyColumn.is-collapsed .pevo-history {
   display: none;
 }
@@ -642,6 +598,10 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
+}
+
+.historyColumn .pevo-history.is-pinned {
+  max-height: min(168px, 32dvh);
 }
 
 .historyColumn .pevo-sessionsHeader {

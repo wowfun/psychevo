@@ -354,6 +354,11 @@
   transition: opacity 80ms ease;
 }
 
+.pevo-sessionGroupHeader .pevo-sessionMenu {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (hover: none), (pointer: coarse) {
   .pevo-sessionMenu {
     opacity: 1;

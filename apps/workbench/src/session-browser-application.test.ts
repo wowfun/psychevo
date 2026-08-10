@@ -29,11 +29,10 @@ const browserResult = (
   offset: number | null
 ): ThreadBrowserResult => ({
   workspaces: [{
-    cwd,
-    project: { cwd, label: cwd, displayPath: cwd },
+    workspace: { id: `workspace:${cwd}`, name: cwd, roots: [cwd], revision: 0 },
     sessions,
     hiddenCount: 0,
-    nextCursor: offset === null ? null : { cwd, offset }
+    nextCursor: offset === null ? null : { workspaceId: `workspace:${cwd}`, offset }
   }]
 });
 
@@ -46,6 +45,85 @@ function deferred<T>() {
 }
 
 describe("SessionBrowserApplication", () => {
+  it("uses Gateway mutations for independent Thread and Workspace pin lists", async () => {
+    let pinnedThreadIds: string[] = [];
+    let pinnedWorkspaceIds: string[] = [];
+    const request = vi.fn((method: string, params: unknown) => {
+      if (method === "thread/browser") {
+        return Promise.resolve(browserResult("/repo", [session("active", "/repo", 2)], null));
+      }
+      if (method === "navigation/read") {
+        return Promise.resolve({ revision: 0, pinnedThreadIds, pinnedWorkspaceIds });
+      }
+      if (method === "thread/pin/set") {
+        const input = params as { pinned: boolean; threadId: string };
+        pinnedThreadIds = input.pinned ? [input.threadId] : [];
+      } else if (method === "workspace/pin/set") {
+        const input = params as { pinned: boolean; workspaceId: string };
+        pinnedWorkspaceIds = input.pinned ? [input.workspaceId] : [];
+      } else {
+        throw new Error(`Unexpected request ${method}`);
+      }
+      return Promise.resolve({ revision: 1, pinnedThreadIds, pinnedWorkspaceIds });
+    });
+    const client = { request } as unknown as GatewayClient;
+    const application = new SessionBrowserApplication();
+
+    await application.refreshHistory(client, {
+      activeScope: scope("/repo"),
+      currentThreadId: "active"
+    });
+    await application.refreshNavigation(client);
+    await application.togglePinnedWorkspace("workspace:/repo");
+    await application.togglePinnedSession("active");
+
+    expect(application.getSnapshot()).toMatchObject({
+      pinnedSessionIds: ["active"],
+      pinnedWorkspaceIds: ["workspace:/repo"]
+    });
+    expect(request).toHaveBeenCalledWith("workspace/pin/set", {
+      workspaceId: "workspace:/repo",
+      pinned: true
+    });
+    expect(request).toHaveBeenCalledWith("thread/pin/set", {
+      threadId: "active",
+      pinned: true
+    });
+  });
+
+  it("rejects an older navigation read that arrives after a newer pin mutation", async () => {
+    const staleRead = deferred<{
+      revision: number;
+      pinnedThreadIds: string[];
+      pinnedWorkspaceIds: string[];
+    }>();
+    const request = vi.fn((method: string) => {
+      if (method === "navigation/read") return staleRead.promise;
+      if (method === "thread/pin/set") {
+        return Promise.resolve({
+          revision: 2,
+          pinnedThreadIds: ["thread-new"],
+          pinnedWorkspaceIds: []
+        });
+      }
+      throw new Error(`Unexpected request ${method}`);
+    });
+    const client = { request } as unknown as GatewayClient;
+    const application = new SessionBrowserApplication();
+    application.bind(client, scope("/repo"));
+
+    const read = application.refreshNavigation(client);
+    await application.togglePinnedSession("thread-new");
+    staleRead.resolve({
+      revision: 1,
+      pinnedThreadIds: [],
+      pinnedWorkspaceIds: []
+    });
+    await read;
+
+    expect(application.getSnapshot().pinnedSessionIds).toEqual(["thread-new"]);
+  });
+
   it("rebases a delayed idle browse with a newer turn start", async () => {
     const delayed = deferred<ThreadBrowserResult>();
     let requestCount = 0;
@@ -319,7 +397,10 @@ describe("SessionBrowserApplication", () => {
   });
 
   it("owns pagination merge, loading state, and pin updates", async () => {
-    const request = vi.fn(async (_method: string, params: unknown) => {
+    const request = vi.fn(async (method: string, params: unknown) => {
+      if (method === "thread/pin/set") {
+        return { revision: 1, pinnedThreadIds: ["newer"], pinnedWorkspaceIds: [] };
+      }
       const cursor = (params as { cursor?: { offset: number } | null }).cursor;
       return cursor
         ? browserResult("/repo", [session("older", "/repo", 1)], null)
@@ -327,7 +408,8 @@ describe("SessionBrowserApplication", () => {
     });
     const client = { request } as unknown as GatewayClient;
     const application = new SessionBrowserApplication();
-    application.togglePinnedSession("newer");
+    application.bind(client, scope("/repo"));
+    await application.togglePinnedSession("newer");
 
     await application.refreshHistory(client, {
       activeScope: scope("/repo"),
@@ -347,6 +429,37 @@ describe("SessionBrowserApplication", () => {
     ]);
     expect(application.getSnapshot().loadingOlderCwd).toBeNull();
     expect(application.getSnapshot().pinnedSessionIds).toEqual(["newer"]);
+  });
+
+  it("preserves Workspace pin projection while merging an older page", async () => {
+    const request = vi.fn(async (method: string, params: unknown) => {
+      if (method === "workspace/pin/set") {
+        return {
+          revision: 1,
+          pinnedThreadIds: [],
+          pinnedWorkspaceIds: ["workspace:/repo"]
+        };
+      }
+      const cursor = (params as { cursor?: { offset: number } | null }).cursor;
+      return cursor
+        ? browserResult("/repo", [session("older", "/repo", 1)], null)
+        : browserResult("/repo", [session("newer", "/repo", 2)], 20);
+    });
+    const client = { request } as unknown as GatewayClient;
+    const application = new SessionBrowserApplication();
+
+    await application.refreshHistory(client, {
+      activeScope: scope("/repo"),
+      currentThreadId: null
+    });
+    await application.togglePinnedWorkspace("workspace:/repo");
+    await application.loadOlder(client, {
+      activeScope: scope("/repo"),
+      currentThreadId: null,
+      cwd: "/repo"
+    });
+
+    expect(application.getSnapshot().workspaces[0]?.pinned).toBe(true);
   });
 
   it("rebases a delayed pagination page with newer session activity", async () => {

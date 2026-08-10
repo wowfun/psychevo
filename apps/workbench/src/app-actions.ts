@@ -74,6 +74,7 @@ type StartNewThreadOptions = {
   rejectProblem?: boolean;
   refreshHistory?: boolean;
   targetId?: string;
+  workspaceId?: string;
 };
 
 type RefreshSnapshot = (
@@ -112,6 +113,7 @@ type AppActionsParams = {
   selectedThreadIdRef: MutableRefObject<string | null>;
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
+  draftWorkspaceId: string | null;
   threadSession: ThreadSession;
   viewEpochRef: MutableRefObject<number>;
   workspaceApplication: WorkspaceApplication;
@@ -119,7 +121,13 @@ type AppActionsParams = {
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
   openReviewTab(diff: WorkspaceDiffResult, path?: string | null): void;
-  openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch?: Partial<RightWorkspaceTab>, forceNew?: boolean): void;
+  confirmFilesTransition(path: string, rootChanged?: boolean): Promise<boolean>;
+  openRightWorkspaceTab(
+    kind: RightWorkspaceTabKind,
+    patch?: Partial<RightWorkspaceTab>,
+    forceNew?: boolean,
+    dirtyTransitionConfirmed?: boolean
+  ): Promise<void>;
   refreshAgentSurface(nextClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshHistory(nextClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<unknown>;
   refreshRuntimeContext(): void;
@@ -132,6 +140,7 @@ type AppActionsParams = {
   setCommandFeedback: Dispatch<SetStateAction<CommandFeedback>>;
   setContextUsage: Dispatch<SetStateAction<ContextReadResult | null>>;
   setDraftSession: Dispatch<SetStateAction<ReturnType<typeof createHistoryDraftSession> | null>>;
+  setDraftWorkspaceId: Dispatch<SetStateAction<string | null>>;
   setError: Dispatch<SetStateAction<string | null>>;
   setMobilePanel: Dispatch<SetStateAction<"history" | "transcript" | "status">>;
   setObservability: Dispatch<SetStateAction<ObservabilityReadResult | null>>;
@@ -173,8 +182,14 @@ export function createAppActions(params: AppActionsParams) {
     if (!params.client) {
       return;
     }
-    const epoch = params.beginExplicitViewSwitch();
     const previousScope = scope();
+    const authoritativeWorkspaceId = options.workspaceId
+      ?? (cwd == null
+        ? (params.threadSession.getSnapshot()?.workspaceRootSource === "workspace"
+          ? params.threadSession.getSnapshot()?.workspaceId ?? null
+          : params.draftWorkspaceId)
+        : null);
+    const epoch = params.beginExplicitViewSwitch();
     const nextScope = cwd == null || cwd === previousScope.cwd
       ? previousScope
       : scopeForCwd(cwd);
@@ -198,21 +213,24 @@ export function createAppActions(params: AppActionsParams) {
     params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
     params.setRuntimeOptionsLoading(true);
     params.setRuntimeOptionsError(null);
-    const openToken = params.composerSessionCoordinator.beginDraftOpen(epoch);
+    const openToken = params.composerSessionCoordinator.beginDraftOpen(epoch, {
+      scope: nextScope,
+      workspaceId: authoritativeWorkspaceId
+    });
     const draftOpenRequest = params.client.request("thread/draft/open", {
-      origin: nextScope,
+      origin: {
+        source: nextScope.source,
+        location: authoritativeWorkspaceId
+          ? { kind: "workspace", workspaceId: authoritativeWorkspaceId }
+          : { kind: "cwd", cwd: nextScope.cwd }
+      },
       targetIntent: inheritedTargetId
         ? { kind: "exact", targetId: inheritedTargetId }
         : { kind: "default" }
     });
-    const branchRequest = params.workspaceApplication
-      .refresh("branch", params.client, nextScope)
-      .then(() => params.workspaceApplication.getSnapshot().branch ?? null)
-      .catch(() => null);
     let opened;
-    let workspaceBranch: WorkspaceGitBranchesResult | null;
     try {
-      [opened, workspaceBranch] = await Promise.all([draftOpenRequest, branchRequest]);
+      opened = await draftOpenRequest;
     } catch (error) {
       params.composerSessionCoordinator.failDraftOpen(openToken);
       if (params.viewEpochRef.current === epoch) {
@@ -223,7 +241,14 @@ export function createAppActions(params: AppActionsParams) {
     const nextSnapshot = parseThreadSnapshot(opened.snapshot);
     const nextContext = parseThreadContext(opened.context);
     const normalized = normalizeSnapshot(nextSnapshot);
+    const workspaceBranch: WorkspaceGitBranchesResult | null = params.viewEpochRef.current === epoch
+      ? await params.workspaceApplication
+          .refresh("branch", params.client, nextSnapshot.scope)
+          .then(() => params.workspaceApplication.getSnapshot().branch ?? null)
+          .catch(() => null)
+      : null;
     if (params.viewEpochRef.current === epoch) {
+      params.setDraftWorkspaceId(opened.workspaceId ?? null);
       await params.adoptSnapshotScope(params.client, nextSnapshot);
     }
     if (params.viewEpochRef.current === epoch) {
@@ -401,10 +426,17 @@ export function createAppActions(params: AppActionsParams) {
         controls: turnControls,
         input: nextInput,
         mentions,
+        optimisticIdentityText: nextInput
+          .filter((part): part is Extract<GatewayInputPart, { type: "text" }> => part.type === "text")
+          .map((part) => part.text)
+          .join("\n"),
         optimisticText,
         scope: liveSnapshot.scope,
         startedAtMs: submittedAtMs,
-        threadId: liveSnapshot.thread?.id ?? null
+        threadId: liveSnapshot.thread?.id ?? null,
+        workspaceId: selectedThreadId
+          ? null
+          : liveSnapshot.workspaceId ?? params.draftWorkspaceId
       },
       {
         deliveryUnknown: () => params.setCommandFeedback({
@@ -438,6 +470,23 @@ export function createAppActions(params: AppActionsParams) {
       });
       return false;
     }
+    const completedUserEntryNeedsCommitRefresh = outcome.status === "accepted"
+      && !outcome.detached
+      && params.threadSession.getView().liveEntries.some((entry) => (
+        entry.role === "user"
+        && entry.status === "completed"
+        && entry.messageSeq == null
+        && entry.turnId === outcome.turnId
+      ));
+    if (completedUserEntryNeedsCommitRefresh) {
+      void params.refreshSnapshot(
+        params.client,
+        outcome.threadId,
+        undefined,
+        true,
+        turnEpoch
+      );
+    }
     if (outcome.status === "accepted" && outcome.detached) {
       if (selectedThreadId === null) {
         await params.refreshHistory();
@@ -452,11 +501,17 @@ export function createAppActions(params: AppActionsParams) {
   }
 
   async function startShell(command: string) {
+    const shellEpoch = params.viewEpochRef.current;
+    if (params.composerSessionCoordinator.isReadinessPending(shellEpoch)) {
+      const ready = await params.composerSessionCoordinator.waitToSubmit(shellEpoch, () => true);
+      if (!ready) return;
+    }
+    const liveSnapshot = params.threadSession.getSnapshot() ?? params.snapshot;
     params.clearCommandTransientUi();
-    const pendingShell = params.snapshot.thread?.id
+    const pendingShell = liveSnapshot.thread?.id
       ? null
       : {
-          epoch: params.viewEpochRef.current,
+          epoch: shellEpoch,
           token: params.detachedShellTokenRef.current + 1
         };
     if (pendingShell) {
@@ -465,8 +520,11 @@ export function createAppActions(params: AppActionsParams) {
     }
     const result = await params.client?.request("shell/start", {
       command,
-      scope: scope(),
-      threadId: params.snapshot.thread?.id ?? null
+      scope: liveSnapshot.scope,
+      threadId: liveSnapshot.thread?.id ?? null,
+      workspaceId: liveSnapshot.thread?.id
+        ? null
+        : liveSnapshot.workspaceId ?? params.draftWorkspaceId
     });
     const record = asRecord(result);
     if (record.accepted !== true) {
@@ -500,24 +558,41 @@ export function createAppActions(params: AppActionsParams) {
     await params.refreshHistory();
   }
 
-  async function openFilePreview(path: string, options: { hideFileTree?: boolean } = {}) {
+  async function openFilePreview(
+    path: string,
+    options: { hideFileTree?: boolean; root?: string } = {}
+  ) {
+    let dirtyTransitionConfirmed = false;
+    const rootChanged = options.root !== undefined
+      && options.root !== params.workspaceApplication.currentFilesRoot();
+    if (options.root && params.client && rootChanged) {
+      const selected = await params.workspaceApplication.readFilesRoot(
+        options.root,
+        params.client,
+        scope(),
+        { beforeCommit: () => params.confirmFilesTransition(path, true) }
+      );
+      if (!selected) return;
+      dirtyTransitionConfirmed = true;
+    }
     const layoutPatch: Partial<RightWorkspaceTab> = options.hideFileTree
       ? { fileTreeOpen: false }
       : {};
-    params.openRightWorkspaceTab("files", {
+    await params.openRightWorkspaceTab("files", {
       ...layoutPatch,
       path,
       title: fileBasename(path)
-    });
+    }, false, dirtyTransitionConfirmed);
   }
 
   async function saveFileFromEditor(
     path: string,
     content: string,
     expectedRevision: string | null,
-    force: boolean
+    force: boolean,
+    root?: string
   ): Promise<WorkspaceFileWriteResult> {
-    const nextScope = scope();
+    const nextScope = root ? { ...scope(), cwd: root } : scope();
     const result = WorkspaceFileWriteResultSchema.parse(await params.client?.request("workspace/file/write", {
       scope: nextScope,
       path,
@@ -525,12 +600,29 @@ export function createAppActions(params: AppActionsParams) {
       expectedRevision,
       force
     }));
-    params.setRightTabs((current) => current.map((tab) => (
-      tab.kind === "files" && tab.path === result.path
-        ? { ...tab, message: null, title: fileBasename(result.path) }
-        : tab
-    )));
-    await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);
+    if (root) {
+      if (params.workspaceApplication.currentFilesRootIntent() !== root) {
+        return result;
+      }
+      params.setRightTabs((current) => current.map((tab) => (
+        tab.kind === "files" && tab.path === result.path
+          ? { ...tab, message: null, title: fileBasename(result.path) }
+          : tab
+      )));
+      await params.workspaceApplication.readFilesRoot(
+        root,
+        params.client,
+        scope(),
+        { force: true }
+      );
+    } else {
+      params.setRightTabs((current) => current.map((tab) => (
+        tab.kind === "files" && tab.path === result.path
+          ? { ...tab, message: null, title: fileBasename(result.path) }
+          : tab
+      )));
+      await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);
+    }
     return result;
   }
 

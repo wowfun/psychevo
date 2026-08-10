@@ -132,6 +132,28 @@ describe("right workspace file actions", () => {
     expect(setRightTabs).toHaveBeenCalledOnce();
   });
 
+  it("confirms a Files root transition before the caller mutates root state", async () => {
+    const declined = createFilesActionHarness(false);
+    await expect(
+      declined.actions.confirmFilesTransition("notes.md", true)
+    ).resolves.toBe(false);
+    expect(declined.confirmAction).toHaveBeenCalledOnce();
+    expect(declined.setRightTabs).not.toHaveBeenCalled();
+
+    const accepted = createFilesActionHarness(true);
+    await expect(
+      accepted.actions.confirmFilesTransition("report.pdf", true)
+    ).resolves.toBe(true);
+    await accepted.actions.openRightWorkspaceTab(
+      "files",
+      { path: "report.pdf", title: "report.pdf" },
+      false,
+      true
+    );
+    expect(accepted.confirmAction).toHaveBeenCalledOnce();
+    expect(accepted.setRightTabs).toHaveBeenCalledOnce();
+  });
+
   it("keeps or closes a dirty Files tab through product confirmation", async () => {
     const declined = createFilesActionHarness(false);
     await declined.actions.closeRightWorkspaceTab("files:existing");

@@ -17,21 +17,21 @@
   min-width: 0;
 }
 
-.pinnedMessagePanel h2,
-.pinnedMessagePanel p {
+.pinnedMessagePanel > header h2,
+.pinnedMessagePanel > header p {
   overflow: hidden;
   margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pinnedMessagePanel h2 {
+.pinnedMessagePanel > header h2 {
   color: var(--pevo-ink);
   font-size: var(--pevo-font-size-small);
   font-weight: 650;
 }
 
-.pinnedMessagePanel p,
+.pinnedMessagePanel > header p,
 .pinnedMessageMeta {
   color: var(--pevo-muted);
   font-family: var(--pevo-mono);
@@ -68,7 +68,8 @@
   color: var(--pevo-ink);
 }
 
-.pinnedMessageBody > .pevo-markdown {
+.pinnedMessageBody > .pevo-message {
+  width: 100%;
   max-width: 760px;
   margin: 0;
 }

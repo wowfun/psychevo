@@ -412,6 +412,11 @@ describe("GatewayClient transport", () => {
     });
     await vi.advanceTimersByTimeAsync(50);
     await timeoutExpectation;
+    expect(JSON.parse(transport.sent[1] ?? "{}")).toEqual({
+      jsonrpc: "2.0",
+      method: "$/cancelRequest",
+      params: { id: "1" }
+    });
 
     const abort = new AbortController();
     const aborted = client.request("thread/list", {}, { signal: abort.signal, timeoutMs: 0 });
@@ -421,7 +426,12 @@ describe("GatewayClient transport", () => {
     });
     abort.abort();
     await abortExpectation;
-    expect(transport.sent).toHaveLength(2);
+    expect(transport.sent).toHaveLength(4);
+    expect(JSON.parse(transport.sent[3] ?? "{}")).toEqual({
+      jsonrpc: "2.0",
+      method: "$/cancelRequest",
+      params: { id: "2" }
+    });
     client.close();
   });
 

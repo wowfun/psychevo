@@ -24,10 +24,12 @@ import { IconButton } from "./primitives";
 
 export interface HistoryPanelProps {
   archived: boolean;
+  pinned?: boolean;
   currentThreadId?: string | undefined;
   disabled?: boolean;
   draftSession?: HistoryDraftSession | null;
   pinnedSessionIds?: string[];
+  pinnedWorkspaces?: HistoryBrowserWorkspace[];
   browserWorkspaces?: HistoryBrowserWorkspace[];
   loading?: boolean;
   loadingOlderCwd?: string | null;
@@ -41,7 +43,10 @@ export interface HistoryPanelProps {
   onCreateWorkspace?(): void;
   onLoadOlderSessions?(cwd: string): void;
   onNewInCwd?(cwd: string): void;
+  onNewInWorkspace?(workspace: HistoryBrowserWorkspace): void;
   onTogglePinned?(sessionId: string): void;
+  onToggleWorkspacePinned?(workspaceId: string): void;
+  onEditWorkspace?(workspace: HistoryBrowserWorkspace): void;
   onRename(sessionId: string, title: string): void;
   onRestore(sessionId: string): void;
   onResume(sessionId: string): void;
@@ -57,8 +62,14 @@ export interface HistoryDraftSession {
 }
 
 export interface HistoryBrowserWorkspace {
+  id: string;
+  name: string;
+  roots: string[];
+  sessionIds?: string[];
+  revision: number;
   cwd: string;
   hiddenCount: number;
+  pinned?: boolean;
 }
 
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
@@ -72,14 +83,29 @@ export function HistoryPanel(props: HistoryPanelProps) {
   const draftSession = props.archived ? null : props.draftSession ?? null;
   const pinnedSessionIds = new Set(props.pinnedSessionIds ?? []);
   const browserByCwd = useMemo(
-    () => new Map((props.browserWorkspaces ?? []).map((workspace) => [workspace.cwd, workspace])),
+    () => new Map((props.browserWorkspaces ?? []).flatMap((workspace) =>
+      workspace.roots.map((root) => [root, workspace] as const)
+    )),
     [props.browserWorkspaces]
   );
   const groupedSessions = useMemo(
-    () => groupSessionsByProject(sessions, draftSession),
-    [draftSession, sessions]
+    () => props.pinned
+      ? groupPinnedSessions(
+          sessions,
+          props.pinnedSessionIds ?? [],
+          props.pinnedWorkspaces ?? []
+        )
+      : groupSessionsByProject(sessions, draftSession, props.browserWorkspaces ?? []),
+    [
+      draftSession,
+      props.browserWorkspaces,
+      props.pinned,
+      props.pinnedSessionIds,
+      props.pinnedWorkspaces,
+      sessions
+    ]
   );
-  const groupSignature = groupedSessions.map((group) => group.cwd).join("\n");
+  const groupSignature = groupedSessions.map((group) => group.key).join("\n");
   const hasCollapsedProjects = groupedSessions.some((group) => collapsedProjects.has(group.cwd));
 
   useEffect(() => {
@@ -98,7 +124,11 @@ export function HistoryPanel(props: HistoryPanelProps) {
     return () => window.clearInterval(timer);
   }, [sessions]);
 
-  function startProjectSession(cwd: string) {
+  function startProjectSession(cwd: string, workspace?: HistoryBrowserWorkspace) {
+    if (workspace && props.onNewInWorkspace) {
+      props.onNewInWorkspace(workspace);
+      return;
+    }
     if (props.onNewInCwd) {
       props.onNewInCwd(cwd);
       return;
@@ -127,15 +157,15 @@ export function HistoryPanel(props: HistoryPanelProps) {
   return (
     <section
       aria-busy={props.loading || undefined}
-      aria-label={props.archived ? "Archived sessions" : "Sessions"}
-      className="pevo-panel pevo-history"
+      aria-label={props.pinned ? "Pinned sessions" : props.archived ? "Archived sessions" : "Sessions"}
+      className={`pevo-panel pevo-history ${props.pinned ? "is-pinned" : ""}`}
     >
       <header className="pevo-panelHeader pevo-sessionsHeader">
         <div className="pevo-titleLine">
-          <History size={17} aria-hidden />
-          <h2>Sessions</h2>
+          {props.pinned ? <Pin size={16} aria-hidden /> : <History size={17} aria-hidden />}
+          <h2>{props.pinned ? "Pinned" : "Sessions"}</h2>
         </div>
-        <div className="pevo-iconRow">
+        {!props.pinned && <div className="pevo-iconRow">
           {props.onCreateWorkspace && (
             <IconButton
               disabled={props.disabled}
@@ -160,26 +190,28 @@ export function HistoryPanel(props: HistoryPanelProps) {
             label={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"}
             onClick={toggleAllProjects}
           />
-        </div>
+        </div>}
       </header>
       <div className="pevo-sessionList">
         {groupedSessions.length === 0 && !props.loading ? (
-          <div className="pevo-empty">No sessions</div>
+          <div className="pevo-empty">{props.pinned ? "No pinned sessions" : "No sessions"}</div>
         ) : groupedSessions.length > 0 ? (
           groupedSessions.map((group) => {
             const collapsed = collapsedProjects.has(group.cwd);
-            const groupDraftSession = draftSession?.cwd === group.cwd ? draftSession : null;
-            const browser = browserByCwd.get(group.cwd);
+            const groupDraftSession = group.draftSession ?? null;
+            const browser = group.workspace ?? browserByCwd.get(group.cwd);
             return (
-              <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.cwd}>
-                <header className="pevo-sessionGroupHeader">
+              <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.key}>
+                {(!props.pinned || group.workspace) && <header className="pevo-sessionGroupHeader">
                   <button
                     aria-expanded={!collapsed}
                     className="pevo-sessionGroupToggle"
                     onClick={() => toggleProject(group.cwd)}
                     type="button"
                   >
-                    {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+                    {collapsed
+                      ? <ChevronRight size={14} aria-hidden />
+                      : <ChevronDown size={14} aria-hidden />}
                     <span>{group.label}</span>
                   </button>
                   <IconButton
@@ -187,10 +219,18 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     disabled={props.disabled}
                     icon={<Plus size={15} />}
                     label={`New session in ${group.label}`}
-                    onClick={() => startProjectSession(group.cwd)}
+                    onClick={() => startProjectSession(group.cwd, browser)}
                     size="compact"
                   />
-                </header>
+                  {browser && (
+                    <WorkspaceMenu
+                      disabled={props.disabled}
+                      onEdit={props.onEditWorkspace}
+                      onTogglePinned={props.onToggleWorkspacePinned}
+                      workspace={browser}
+                    />
+                  )}
+                </header>}
                 {!collapsed && groupDraftSession && (
                   <article className="pevo-sessionRow is-active is-draft" key={groupDraftSession.id}>
                     <button
@@ -422,45 +462,129 @@ export function HistoryPanel(props: HistoryPanelProps) {
 }
 
 type SessionProjectGroup = {
+  key: string;
   cwd: string;
   label: string;
   latestAt: number;
   sessions: SessionSummary[];
+  draftSession?: HistoryDraftSession;
+  workspace?: HistoryBrowserWorkspace;
 };
+
+function groupPinnedSessions(
+  sessions: SessionSummary[],
+  pinnedSessionIds: string[],
+  workspaces: HistoryBrowserWorkspace[]
+): SessionProjectGroup[] {
+  const pinnedIds = new Set(pinnedSessionIds);
+  const groups: SessionProjectGroup[] = [];
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const orderedIndependentSessions = pinnedSessionIds
+    .map((id) => sessionById.get(id))
+    .filter((session): session is SessionSummary => Boolean(session));
+  if (orderedIndependentSessions.length > 0) {
+    groups.push({
+      key: "__pinned_threads__",
+      cwd: "__pinned_threads__",
+      label: "Pinned",
+      latestAt: Math.max(...orderedIndependentSessions.map(sessionTime)),
+      sessions: orderedIndependentSessions
+    });
+  }
+  const workspaceBySessionId = new Map<string, string>();
+  const workspaceSessions = new Map<string, SessionSummary[]>();
+  for (const workspace of workspaces) {
+    workspaceSessions.set(workspace.id, []);
+    for (const sessionId of workspace.sessionIds ?? []) {
+      if (!workspaceBySessionId.has(sessionId)) workspaceBySessionId.set(sessionId, workspace.id);
+    }
+  }
+  for (const session of sessions) {
+    if (pinnedIds.has(session.id)) continue;
+    const workspaceId = workspaceBySessionId.get(session.id);
+    if (workspaceId) workspaceSessions.get(workspaceId)?.push(session);
+  }
+  for (const workspace of workspaces) {
+    const grouped = workspaceSessions.get(workspace.id) ?? [];
+    grouped.sort((left, right) => sessionTime(right) - sessionTime(left) || left.id.localeCompare(right.id));
+    groups.push({
+      key: `workspace:${workspace.id}`,
+      cwd: workspace.cwd,
+      label: workspace.name,
+      latestAt: grouped[0] ? sessionTime(grouped[0]) : 0,
+      sessions: grouped,
+      workspace
+    });
+  }
+  return groups;
+}
 
 function groupSessionsByProject(
   sessions: SessionSummary[],
-  draftSession: HistoryDraftSession | null
+  draftSession: HistoryDraftSession | null,
+  workspaces: HistoryBrowserWorkspace[]
 ): SessionProjectGroup[] {
   const groups = new Map<string, SessionProjectGroup>();
+  const workspaceBySessionId = new Map<string, HistoryBrowserWorkspace>();
+  const workspaceRoots: Array<{ root: string; workspace: HistoryBrowserWorkspace }> = [];
+  for (const workspace of workspaces) {
+    const groupKey = `workspace:${workspace.id}`;
+    for (const sessionId of workspace.sessionIds ?? []) {
+      workspaceBySessionId.set(sessionId, workspace);
+    }
+    for (const root of workspace.roots) workspaceRoots.push({ root, workspace });
+    groups.set(groupKey, {
+      key: `workspace:${workspace.id}`,
+      cwd: workspace.cwd,
+      label: workspace.name,
+      latestAt: 0,
+      sessions: [],
+      workspace
+    });
+  }
+  workspaceRoots.sort((left, right) => normalizedPath(right.root).length - normalizedPath(left.root).length);
+  const workspaceForCwd = (cwd: string) => workspaceRoots.find(({ root }) => (
+    pathContains(root, cwd)
+  ))?.workspace;
   for (const session of sessions) {
-    const cwd = session.project?.cwd ?? session.cwd;
-    const label = session.project?.label || projectLabelFromCwd(cwd);
+    const sessionCwd = session.project?.cwd ?? session.cwd;
+    const workspace = workspaceBySessionId.get(session.id) ?? workspaceForCwd(sessionCwd);
+    const cwd = workspace?.cwd ?? sessionCwd;
+    const groupKey = workspace ? `workspace:${workspace.id}` : `cwd:${cwd}`;
+    const label = workspace?.name || session.project?.label || projectLabelFromCwd(cwd);
     const updatedAt = session.updatedAtMs ?? session.startedAtMs ?? 0;
-    const existing = groups.get(cwd);
+    const existing = groups.get(groupKey);
     if (existing) {
       existing.sessions.push(session);
       existing.latestAt = Math.max(existing.latestAt, updatedAt);
     } else {
-      groups.set(cwd, {
+      groups.set(groupKey, {
+        key: groupKey,
         cwd,
         label,
         latestAt: updatedAt,
-        sessions: [session]
+        sessions: [session],
+        ...(workspace ? { workspace } : {})
       });
     }
   }
   if (draftSession) {
     const cwd = draftSession.cwd;
-    const existing = groups.get(cwd);
+    const workspace = workspaceForCwd(cwd);
+    const groupKey = workspace ? `workspace:${workspace.id}` : `cwd:${cwd}`;
+    const existing = groups.get(groupKey);
     if (existing) {
       existing.latestAt = Math.max(existing.latestAt, draftSession.createdAtMs);
+      existing.draftSession = draftSession;
     } else {
-      groups.set(cwd, {
+      groups.set(groupKey, {
+        key: groupKey,
         cwd,
-        label: projectLabelFromCwd(cwd),
+        label: workspace?.name ?? projectLabelFromCwd(cwd),
         latestAt: draftSession.createdAtMs,
-        sessions: []
+        sessions: [],
+        draftSession,
+        ...(workspace ? { workspace } : {})
       });
     }
   }
@@ -470,6 +594,68 @@ function groupSessionsByProject(
   return Array.from(groups.values()).sort((a, b) => {
     return b.latestAt - a.latestAt || a.label.localeCompare(b.label);
   });
+}
+
+function normalizedPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized;
+}
+
+function pathContains(root: string, target: string): boolean {
+  const normalizedRoot = normalizedPath(root);
+  const normalizedTarget = normalizedPath(target);
+  return normalizedTarget === normalizedRoot
+    || (normalizedRoot === "/" && normalizedTarget.startsWith("/"))
+    || normalizedTarget.startsWith(`${normalizedRoot}/`);
+}
+
+function WorkspaceMenu({
+  disabled,
+  onEdit,
+  onTogglePinned,
+  workspace
+}: {
+  disabled?: boolean | undefined;
+  onEdit?: ((workspace: HistoryBrowserWorkspace) => void) | undefined;
+  onTogglePinned?: ((workspaceId: string) => void) | undefined;
+  workspace: HistoryBrowserWorkspace;
+}) {
+  return (
+    <DismissibleDetails
+      className="pevo-sessionMenu"
+      summary={<MoreHorizontal size={16} aria-hidden />}
+      summaryProps={{ "aria-label": "Workspace actions", title: "Workspace actions" }}
+    >
+      {({ close }) => (
+        <div className="pevo-sessionMenuPopover pevo-controlPopover" role="menu" aria-label="Workspace actions">
+          <button
+            disabled={disabled || !onTogglePinned}
+            onClick={() => {
+              close();
+              onTogglePinned?.(workspace.id);
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Pin size={15} fill={workspace.pinned ? "currentColor" : "none"} aria-hidden />
+            <span>{workspace.pinned ? "Unpin" : "Pin"}</span>
+          </button>
+          <button
+            disabled={disabled || !onEdit}
+            onClick={() => {
+              close();
+              onEdit?.(workspace);
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <Pencil size={15} aria-hidden />
+            <span>Edit workspace</span>
+          </button>
+        </div>
+      )}
+    </DismissibleDetails>
+  );
 }
 
 function sessionTime(session: SessionSummary): number {

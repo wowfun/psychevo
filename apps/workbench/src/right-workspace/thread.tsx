@@ -310,16 +310,18 @@ export function ThreadPanel({
     }
   }
 
-  async function completionProvider(text: string, cursor: number): Promise<CompletionListResult> {
+  async function completionProvider(
+    text: string,
+    cursor: number,
+    signal?: AbortSignal
+  ): Promise<CompletionListResult> {
     if (!client || !scope || !threadId) {
       return { items: [], replacement: null };
     }
-    return client.request("completion/list", {
-      cursor,
-      scope,
-      text,
-      threadId
-    });
+    const params = { cursor, scope, text, threadId };
+    return signal
+      ? client.request("completion/list", params, { signal })
+      : client.request("completion/list", params);
   }
 
   return (

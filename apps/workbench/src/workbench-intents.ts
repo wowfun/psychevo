@@ -20,6 +20,7 @@ import type {
 import type { HistoryDraftSession } from "@psychevo/components";
 import type { ReturnTypeOfAppActions } from "./app-actions";
 import type { ReturnTypeOfSurfaceActions } from "./surface-actions";
+import type { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import type { CommandFeedback, MainView, PendingAttachment } from "./types";
 import {
   runThreadInterrupt,
@@ -39,7 +40,9 @@ export type WorkbenchIntentOwnerParams = {
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
   client: GatewayClient | null;
+  composerSessionCoordinator: ComposerSessionCoordinator;
   currentThreadId: string | null;
+  draftWorkspaceId: string | null;
   fallbackCwd: string;
   importScope: GatewayRequestScope;
   initScope: GatewayRequestScope | null;
@@ -254,18 +257,32 @@ export function createWorkbenchIntentOwner(params: WorkbenchIntentOwnerParams) {
     );
   }
 
-  async function completion(text: string, cursor: number): Promise<CompletionListResult> {
+  async function completion(
+    text: string,
+    cursor: number,
+    signal?: AbortSignal
+  ): Promise<CompletionListResult> {
     const client = params.client;
     if (!client) return { items: [], replacement: null };
-    const scope = params.activeScope
+    const pendingTarget = params.composerSessionCoordinator
+      .pendingCompletionTarget(params.viewEpochRef.current);
+    const scope = pendingTarget?.scope
+      ?? params.activeScope
       ?? params.initScope
       ?? scopeForCwd(params.settings?.cwd ?? params.fallbackCwd);
-    const result = await client.request("completion/list", {
+    const threadId = pendingTarget ? null : params.snapshot.thread?.id ?? null;
+    const workspaceId = pendingTarget?.workspaceId
+      ?? (!params.snapshot.thread ? params.draftWorkspaceId : null);
+    const request = {
       cursor,
       scope,
       text,
-      threadId: params.snapshot.thread?.id ?? null
-    });
+      threadId,
+      ...(workspaceId ? { workspaceId } : {})
+    };
+    const result = signal
+      ? await client.request("completion/list", request, { signal })
+      : await client.request("completion/list", request);
     return {
       ...result,
       items: result.items.filter((item) => (

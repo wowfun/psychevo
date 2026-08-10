@@ -220,7 +220,18 @@ export class GatewayClient {
       );
     }
     const generation = this.connection.generation();
-    const reservation = this.pending.reserve(generation, method, options);
+    const reservation = this.pending.reserve(generation, method, options, (id) => {
+      try {
+        this.transport.send(JSON.stringify({
+          jsonrpc: "2.0",
+          method: "$/cancelRequest",
+          params: { id }
+        }));
+      } catch {
+        // The local request has already been rejected. Connection state owns
+        // any transport failure and will fence the outstanding generation.
+      }
+    });
     const payload =
       params === undefined
         ? { jsonrpc: "2.0", id: reservation.id, method }

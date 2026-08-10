@@ -50,9 +50,11 @@ export interface ThreadTurnStartInput {
   input: GatewayInputPart[];
   mentions?: GatewayMention[];
   optimisticText: string;
+  optimisticIdentityText?: string | null;
   scope: GatewayRequestScope;
   startedAtMs?: number;
   threadId?: string | null;
+  workspaceId?: string | null;
 }
 
 export interface ThreadTurnStartPlan {
@@ -290,7 +292,8 @@ export class ThreadController {
       input.optimisticText,
       requestedThreadId,
       input.startedAtMs ?? Date.now(),
-      clientTurnId
+      clientTurnId,
+      input.optimisticIdentityText
     );
     this.activeThreadId = requestedThreadId;
     this.activeTurnId = prepared.snapshot.activity.activeTurnId ?? null;
@@ -306,6 +309,7 @@ export class ThreadController {
         mentions: input.mentions,
         scope: input.scope,
         threadId: prepared.requestedThreadId,
+        ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
         clientTurnId
       }),
       prepared,
@@ -637,9 +641,10 @@ export function prepareThreadTurn(
   prompt: string,
   requestedThreadId: string | null = snapshot.thread?.id ?? null,
   now = Date.now(),
-  clientTurnId = createClientTurnId()
+  clientTurnId = createClientTurnId(),
+  optimisticIdentityText?: string | null
 ): ThreadTurnPreparation {
-  const optimistic = appendOptimisticPrompt(snapshot, prompt, now);
+  const optimistic = appendOptimisticPrompt(snapshot, prompt, now, optimisticIdentityText);
   return {
     clientTurnId,
     previousSnapshot: snapshot,
@@ -663,6 +668,7 @@ export function threadTurnStartParams({
   mentions,
   scope,
   threadId,
+  workspaceId,
   clientTurnId = createClientTurnId()
 }: {
   controls?: ThreadTurnControls | undefined;
@@ -671,6 +677,7 @@ export function threadTurnStartParams({
   mentions?: GatewayMention[] | undefined;
   scope: GatewayRequestScope;
   threadId: string | null;
+  workspaceId?: string | null;
   clientTurnId?: string;
 }): TurnStartParams {
   const target = controls && !controls.omitTarget
@@ -684,6 +691,7 @@ export function threadTurnStartParams({
     input,
     mentions: mentions ?? [],
     scope,
+    ...(workspaceId ? { workspaceId } : {}),
     target: target ? {
       agentRef: target.agentRef ?? null,
       runtimeProfileRef: target.runtimeProfileRef

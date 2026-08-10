@@ -2,6 +2,7 @@ import type { GatewayClient } from "@psychevo/client";
 import type { GatewayRequestScope, ThreadSnapshot } from "@psychevo/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkbenchIntentOwnerParams } from "./workbench-intents";
+import { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import { createWorkbenchIntentOwner } from "./workbench-intents";
 
 const scope: GatewayRequestScope = {
@@ -88,6 +89,27 @@ describe("Workbench intent owner", () => {
     });
   });
 
+  it("addresses completion to a destination Workspace while its draft is opening", async () => {
+    const request = vi.fn(async () => ({ items: [], replacement: null }));
+    const params = intentParams(request);
+    const destination = { ...scope, cwd: "/destination" };
+    params.composerSessionCoordinator.beginDraftOpen(0, {
+      scope: destination,
+      workspaceId: "workspace-destination"
+    });
+    const owner = createWorkbenchIntentOwner(params);
+
+    await owner.completion("@read", 5);
+
+    expect(request).toHaveBeenCalledWith("completion/list", {
+      cursor: 5,
+      scope: destination,
+      text: "@read",
+      threadId: null,
+      workspaceId: "workspace-destination"
+    });
+  });
+
   it("routes an interaction only through the active Thread identity and refreshes its snapshot", async () => {
     const request = vi.fn(async () => ({ accepted: true }));
     const params = intentParams(request);
@@ -132,7 +154,9 @@ function intentParams(
     beginExplicitViewSwitch: vi.fn(() => 1),
     clearCommandTransientUi: vi.fn(),
     client,
+    composerSessionCoordinator: new ComposerSessionCoordinator(),
     currentThreadId: "thread-1",
+    draftWorkspaceId: null,
     fallbackCwd: "/workspace",
     importScope: scope,
     initScope: scope,

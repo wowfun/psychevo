@@ -4,6 +4,7 @@ import {
   ThreadListResultSchema,
   type GatewayEvent,
   type GatewayRequestScope,
+  type NavigationStateView,
   type SessionSummary,
   type ThreadBrowserResult
 } from "@psychevo/protocol";
@@ -19,6 +20,7 @@ export type SessionBrowserSnapshot = {
   archivedSessions: SessionSummary[];
   loadingOlderCwd: string | null;
   pinnedSessionIds: string[];
+  pinnedWorkspaceIds: string[];
   scopeEpoch: number;
   sessions: SessionSummary[];
   workspaces: SessionBrowserWorkspaceState[];
@@ -65,11 +67,24 @@ function mergeBrowserWorkspaces(
   current: SessionBrowserWorkspaceState[],
   incoming: SessionBrowserWorkspaceState[]
 ): SessionBrowserWorkspaceState[] {
-  const byCwd = new Map(current.map((workspace) => [workspace.cwd, workspace]));
+  const byId = new Map(current.map((workspace) => [workspace.id, workspace]));
   for (const workspace of incoming) {
-    byCwd.set(workspace.cwd, workspace);
+    const existing = byId.get(workspace.id);
+    const pinned = existing?.pinned ?? workspace.pinned;
+    byId.set(workspace.id, {
+      ...workspace,
+      ...(pinned === undefined ? {} : { pinned }),
+      sessionIds: Array.from(new Set([
+        ...(existing?.sessionIds ?? []),
+        ...workspace.sessionIds
+      ]))
+    });
   }
-  return Array.from(byCwd.values());
+  return Array.from(byId.values());
+}
+
+function sameOrderedIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 export class SessionBrowserApplication {
@@ -79,6 +94,7 @@ export class SessionBrowserApplication {
   private recentRevision = 0;
   private archiveRevision = 0;
   private browseRevision = 0;
+  private navigationRevision = -1;
   private olderFlight: OlderFlight | null = null;
   private readonly flights = new Map<string, Promise<unknown>>();
   private readonly listeners = new Set<() => void>();
@@ -90,6 +106,7 @@ export class SessionBrowserApplication {
       archivedSessions: [],
       loadingOlderCwd: null,
       pinnedSessionIds: [...pinnedSessionIds],
+      pinnedWorkspaceIds: [],
       scopeEpoch: 0,
       sessions: [],
       workspaces: []
@@ -115,6 +132,7 @@ export class SessionBrowserApplication {
     this.olderFlight = null;
     if (clientChanged) {
       this.clientEpoch += 1;
+      this.navigationRevision = -1;
       this.recentRevision += 1;
       this.archiveRevision += 1;
       this.flights.clear();
@@ -125,23 +143,49 @@ export class SessionBrowserApplication {
     });
   }
 
-  setPinnedSessionIds = (pinnedSessionIds: string[]): void => {
-    const unique = Array.from(new Set(pinnedSessionIds));
-    if (
-      unique.length === this.snapshot.pinnedSessionIds.length
-      && unique.every((id, index) => id === this.snapshot.pinnedSessionIds[index])
-    ) {
-      return;
-    }
-    this.update({ pinnedSessionIds: unique });
-  };
+  async refreshNavigation(client: GatewayClient | null = this.client): Promise<boolean> {
+    if (!client) return false;
+    const epoch = this.clientEpoch;
+    const navigation = await client.request("navigation/read", {});
+    return this.applyNavigation(navigation, epoch);
+  }
 
-  togglePinnedSession(threadId: string): void {
-    this.setPinnedSessionIds(
-      this.snapshot.pinnedSessionIds.includes(threadId)
-        ? this.snapshot.pinnedSessionIds.filter((id) => id !== threadId)
-        : [threadId, ...this.snapshot.pinnedSessionIds]
-    );
+  async togglePinnedSession(threadId: string): Promise<void> {
+    if (!this.client) return;
+    const epoch = this.clientEpoch;
+    const navigation = await this.client.request("thread/pin/set", {
+      threadId,
+      pinned: !this.snapshot.pinnedSessionIds.includes(threadId)
+    });
+    this.applyNavigation(navigation, epoch);
+  }
+
+  async togglePinnedWorkspace(workspaceId: string): Promise<void> {
+    if (!this.client) return;
+    const epoch = this.clientEpoch;
+    const navigation = await this.client.request("workspace/pin/set", {
+      workspaceId,
+      pinned: !this.snapshot.pinnedWorkspaceIds.includes(workspaceId)
+    });
+    this.applyNavigation(navigation, epoch);
+  }
+
+  private applyNavigation(navigation: NavigationStateView, epoch: number): boolean {
+    if (epoch !== this.clientEpoch || navigation.revision < this.navigationRevision) {
+      return false;
+    }
+    const changed = !sameOrderedIds(this.snapshot.pinnedSessionIds, navigation.pinnedThreadIds)
+      || !sameOrderedIds(this.snapshot.pinnedWorkspaceIds, navigation.pinnedWorkspaceIds);
+    this.navigationRevision = navigation.revision;
+    this.update({
+      pinnedSessionIds: navigation.pinnedThreadIds,
+      pinnedWorkspaceIds: navigation.pinnedWorkspaceIds,
+      workspaces: this.snapshot.workspaces.map((workspace) => ({
+        ...workspace,
+        pinned: navigation.pinnedWorkspaceIds.includes(workspace.id)
+      }))
+    });
+    return changed;
   }
 
   patchGatewayEvent(event: GatewayEvent): void {
@@ -215,7 +259,10 @@ export class SessionBrowserApplication {
       if (epoch === this.clientEpoch && revision === this.recentRevision) {
         this.update({
           sessions,
-          workspaces: workspacesFromThreadBrowser(result)
+          workspaces: workspacesFromThreadBrowser(result).map((workspace) => ({
+            ...workspace,
+            pinned: this.snapshot.pinnedWorkspaceIds.includes(workspace.id)
+          }))
         });
       }
       return sessions;
@@ -356,8 +403,13 @@ export function workspacesFromThreadBrowser(
   result: ThreadBrowserResult
 ): SessionBrowserWorkspaceState[] {
   return result.workspaces.map((workspace) => ({
-    cwd: workspace.cwd,
-    displayPath: workspace.project.displayPath,
+    id: workspace.workspace.id,
+    name: workspace.workspace.name,
+    roots: workspace.workspace.roots,
+    sessionIds: workspace.sessions.map((session) => session.id),
+    revision: workspace.workspace.revision,
+    cwd: workspace.workspace.roots[0] ?? "",
+    displayPath: workspace.workspace.name,
     hiddenCount: workspace.hiddenCount ?? 0,
     nextCursor: workspace.nextCursor ?? null
   }));

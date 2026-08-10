@@ -54,6 +54,7 @@ export function RightWorkspace({
   hostKind,
   latestGatewayEvent,
   root,
+  roots,
   scope,
   sessionId,
   status,
@@ -83,6 +84,7 @@ export function RightWorkspace({
   onConsumePendingPrompt,
   onRejectChange,
   onRefresh,
+  onRootChange,
   onRefreshTrace,
   onSaveFile,
   onShowHome,
@@ -99,6 +101,7 @@ export function RightWorkspace({
   hostKind: string;
   latestGatewayEvent: GatewayThreadEventFeed;
   root: string;
+  roots: string[];
   scope: GatewayRequestScope | null;
   sessionId: string | null;
   status: string;
@@ -128,14 +131,16 @@ export function RightWorkspace({
   onConsumePendingPrompt(tabId: string): void;
   onRejectChange(turnId: string, path: string): void;
   onRefresh(): void;
+  onRootChange(root: string, beforeCommit?: () => boolean | Promise<boolean>): Promise<boolean>;
   onRefreshTrace(): void;
-  onSaveFile(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
+  onSaveFile(root: string, path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
   onShowHome(): void;
   pinnedMessageKeys: ReadonlySet<string>;
 }) {
   const visibleTabs = tabs.filter((tab) => rightWorkspaceTabVisibleForSession(tab, sessionId));
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? null;
   const visibleActiveTabId = activeTab?.id ?? null;
+  const fileScope = scope && root ? { ...scope, cwd: root } : scope;
   return (
     <section className="rightWorkspace" aria-label="Right workspace">
       {visibleTabs.length > 0 && (
@@ -190,13 +195,16 @@ export function RightWorkspace({
                   path,
                   title: path.split(/[\\/]/).pop() || "HTML preview"
                 })}
-                onSave={onSaveFile}
+                onSave={(path, content, expectedRevision, force) => (
+                  onSaveFile(root, path, content, expectedRevision, force)
+                )}
               >
                 <FilesPanel
                   client={client}
                   files={files}
                   root={root}
-                  scope={scope}
+                  roots={roots}
+                  scope={fileScope}
                   selectedPath={tab.path ?? null}
                   tabId={tab.id}
                   truncated={truncated}
@@ -206,6 +214,7 @@ export function RightWorkspace({
                   htmlExecutionActive={tab.id === activeTab?.id}
                   onFileTreeOpenChange={(open) => onFileTreeOpenChange(tab.id, open)}
                   onOpen={onOpenFile}
+                  onRootChange={onRootChange}
                 />
               </WorkspaceFileGatewayAdapterProvider>
             )}

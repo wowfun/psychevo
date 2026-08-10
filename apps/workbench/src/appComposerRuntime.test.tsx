@@ -54,7 +54,7 @@ describe("Workbench first-class Agent runtime controls", () => {
     gatewayMock.workspaceGitBranches = () => branches.promise;
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "/tmp/other-project" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "other-project" }));
 
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
@@ -64,7 +64,12 @@ describe("Workbench first-class Agent runtime controls", () => {
       .toEqual({
         method: "thread/draft/open",
         params: expect.objectContaining({
-          origin: expect.objectContaining({ cwd: "/tmp/other-project" }),
+          origin: expect.objectContaining({
+            location: {
+              kind: "workspace",
+              workspaceId: "workspace:/tmp/other-project"
+            }
+          }),
           targetIntent: { kind: "default" }
         })
       });
@@ -594,6 +599,12 @@ describe("Workbench first-class Agent runtime controls", () => {
   });
 
   it("changes a bound Agent/Profile target through exactly one new thread", async () => {
+    gatewayMock.threadResume = () => ({
+      ...gatewayMock.snapshot,
+      workspaceId: "workspace-multi",
+      workspaceRoots: ["/tmp/project", "/tmp/secondary"],
+      workspaceRootSource: "workspace"
+    });
     const preparedScope = {
       cwd: "/tmp/project",
       source: {
@@ -666,12 +677,15 @@ describe("Workbench first-class Agent runtime controls", () => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "thread/draft/open",
         params: expect.objectContaining({
+          origin: expect.objectContaining({
+            location: { kind: "workspace", workspaceId: "workspace-multi" }
+          }),
           targetIntent: { kind: "exact", targetId: "target:opencode:opencode" }
         })
       });
     });
     const switchMethods = gatewayMock.requestLog.slice(requestsBefore).map((entry) => entry.method);
-    expect(switchMethods).toEqual(["thread/draft/open", "workspace/git/branches"]);
+    expect(switchMethods).toEqual(["thread/draft/open"]);
 
     await act(async () => {
       exactOpen.resolve({
@@ -695,6 +709,10 @@ describe("Workbench first-class Agent runtime controls", () => {
     });
     expect(gatewayMock.requestLog.slice(requestsBefore).map((entry) => entry.method))
       .toEqual(["thread/draft/open", "workspace/git/branches"]);
+    expect(gatewayMock.requestLog.slice(requestsBefore).at(-1)).toEqual({
+      method: "workspace/git/branches",
+      params: { scope: preparedScope }
+    });
   });
 
   it("refreshes Agent-owned authoritative Thread history and context after a completed turn", async () => {
@@ -797,7 +815,7 @@ describe("Workbench first-class Agent runtime controls", () => {
     });
   });
 
-  it("does not fan out hidden reads after a bound Native completion", async () => {
+  it("refreshes only the missing durable transcript after a bound Native completion", async () => {
     gatewayMock.runtimeContextRead = () => firstClassContext("native", {
       binding: {
         threadId: "thread-1",
@@ -851,15 +869,15 @@ describe("Workbench first-class Agent runtime controls", () => {
     const forbidden = new Set([
       "thread/browser",
       "thread/context/read",
-      "thread/read",
       "workspace/files",
       "workspace/diff",
-      "workspace/changes",
-      "observability/read"
+      "workspace/changes"
     ]);
     expect(gatewayMock.requestLog.slice(before)
       .map((entry) => entry.method)
       .filter((method) => forbidden.has(method))).toEqual([]);
+    expect(gatewayMock.requestLog.slice(before).map((entry) => entry.method))
+      .toEqual(["thread/read", "observability/read"]);
   });
 
   it("keeps accepted first-turn controls when the pre-binding context is not yet effective", async () => {

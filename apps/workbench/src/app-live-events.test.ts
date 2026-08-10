@@ -74,6 +74,23 @@ describe("useGatewayLiveEvents", () => {
 
     expect(selectedThreadIdRef.current).toBe("thread-b");
   });
+
+  it("projects an accepted first-Turn identity instead of the committed snapshot identity", () => {
+    const session = new ThreadSession({
+      snapshot: emptyThreadSnapshot(scope(), null)
+    });
+    const selectedThreadIdRef = { current: null as string | null };
+    renderHook(() => useGatewayLiveEvents({
+      selectedThreadIdRef,
+      setLatestGatewayEvent: vi.fn(),
+      threadSession: session
+    }));
+    vi.spyOn(session, "getActiveThreadId").mockReturnValue("thread-accepted");
+
+    act(() => session.reset(emptyThreadSnapshot(scope(), "thread-committed")));
+
+    expect(selectedThreadIdRef.current).toBe("thread-accepted");
+  });
 });
 
 function scope() {

@@ -181,6 +181,10 @@ export class ThreadSession {
     return this.view.context;
   }
 
+  getActiveThreadId(): string | null {
+    return this.controller.threadId();
+  }
+
   getView(): ThreadSessionView {
     return this.view;
   }

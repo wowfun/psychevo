@@ -149,3 +149,67 @@
   border-left: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
   border-radius: 0;
 }
+
+.filesTreePane {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.filesRootSelector {
+  position: relative;
+  margin: 6px;
+  width: calc(100% - 12px);
+  min-width: 0;
+  max-width: calc(100% - 12px);
+}
+
+.filesRootSelectorTrigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+}
+
+.filesRootSelectorTrigger > span,
+.filesRootMenu > button > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesRootSelectorTrigger > svg,
+.filesRootMenu > button > svg {
+  flex: 0 0 auto;
+}
+
+.filesRootMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 48;
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(320px, calc(100vh - 96px));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.filesRootMenu > button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+}

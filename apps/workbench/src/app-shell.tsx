@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { CalendarClock, Pin, Settings, Wrench, X } from "lucide-react";
+import { CalendarClock, Settings, Wrench } from "lucide-react";
+import { HistoryPanel, type HistoryPanelProps } from "@psychevo/components";
 import type {
   GatewayClient,
 } from "@psychevo/client";
@@ -16,7 +17,6 @@ import type {
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
-import { shortSessionId } from "./session-utils";
 import type {
   Appearance,
   BackendDraft,
@@ -83,43 +83,12 @@ export function LeftUtilityRail({
 }
 
 export function PinnedPanel({
-  currentThreadId,
-  disabled,
   sessions,
-  onResume,
-  onUnpin
-}: {
-  currentThreadId: string | undefined;
-  disabled: boolean;
+  ...props
+}: Omit<HistoryPanelProps, "archived" | "pinned" | "sessions"> & {
   sessions: SessionSummary[];
-  onResume(threadId: string): void;
-  onUnpin(threadId: string): void;
 }) {
-  return (
-    <section className="leftPinnedPanel" aria-label="Pinned sessions">
-      <header>
-        <Pin size={16} />
-        <span>Pinned</span>
-      </header>
-      {sessions.length === 0 ? (
-        <p>No pinned sessions</p>
-      ) : (
-        <div className="pinnedSessionList">
-          {sessions.map((session) => (
-            <div className={`pinnedSessionRow ${session.id === currentThreadId ? "is-active" : ""}`} key={session.id}>
-              <button disabled={disabled} onClick={() => onResume(session.id)} type="button">
-                <span>{session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id)}</span>
-                <small>{session.project?.label ?? "workspace"}</small>
-              </button>
-              <button aria-label="Unpin session" disabled={disabled} onClick={() => onUnpin(session.id)} title="Unpin" type="button">
-                <X size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
+  return <HistoryPanel {...props} archived={false} pinned sessions={sessions} />;
 }
 
 export function MainSurface({

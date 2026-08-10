@@ -10,6 +10,9 @@ const workbenchRequire = createRequire(
   new URL("../workbench/package.json", import.meta.url)
 );
 const jszipBrowserEntry = workbenchRequire.resolve("jszip/dist/jszip.min.js");
+const testExecArgv = process.allowedNodeEnvironmentFlags.has("--no-experimental-webstorage")
+  ? ["--no-experimental-webstorage"]
+  : [];
 
 export default defineConfig({
   clearScreen: false,
@@ -44,6 +47,7 @@ export default defineConfig({
     }
   },
   test: {
+    execArgv: testExecArgv,
     exclude: [...configDefaults.exclude, "src-tauri/**", "wdio/**"]
   }
 });

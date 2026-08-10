@@ -7,7 +7,7 @@ export interface ComposerProps {
   addMenuOptions?: ReactNode;
   attachmentUnavailableReason?: string | null;
   attachments?: ComposerAttachmentView[] | undefined;
-  completionProvider?: (text: string, cursor: number) => Promise<CompletionListResult>;
+  completionProvider?: (text: string, cursor: number, signal?: AbortSignal) => Promise<CompletionListResult>;
   disabled?: boolean;
   draftPatch?: ComposerDraftPatch | undefined;
   leftControls?: ReactNode;
@@ -103,6 +103,7 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const completionOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const completionTimer = useRef<number | null>(null);
+  const completionAbort = useRef<AbortController | null>(null);
   const completionSequence = useRef(0);
   const attachMenuRef = useRef<HTMLDivElement | null>(null);
   const draftRevisionRef = useRef(0);
@@ -161,6 +162,7 @@ export function Composer({
     if (completionTimer.current !== null) {
       window.clearTimeout(completionTimer.current);
     }
+    completionAbort.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -275,6 +277,8 @@ export function Composer({
 
   function cancelCompletion() {
     completionSequence.current += 1;
+    completionAbort.current?.abort();
+    completionAbort.current = null;
     if (completionTimer.current !== null) {
       window.clearTimeout(completionTimer.current);
       completionTimer.current = null;
@@ -294,10 +298,14 @@ export function Composer({
     if (completionTimer.current !== null) {
       window.clearTimeout(completionTimer.current);
     }
+    completionAbort.current?.abort();
+    completionAbort.current = null;
     completionTimer.current = window.setTimeout(() => {
       const sequence = completionSequence.current + 1;
       completionSequence.current = sequence;
-      void completionProvider(text, cursor)
+      const controller = new AbortController();
+      completionAbort.current = controller;
+      void completionProvider(text, cursor, controller.signal)
         .then((result) => {
           if (sequence !== completionSequence.current) {
             return;
@@ -309,6 +317,11 @@ export function Composer({
         .catch(() => {
           if (sequence === completionSequence.current) {
             setCompletion(null);
+          }
+        })
+        .finally(() => {
+          if (completionAbort.current === controller) {
+            completionAbort.current = null;
           }
         });
     }, 120);

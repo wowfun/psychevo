@@ -1851,8 +1851,11 @@ function transcriptPinnedMessage(
   block: TranscriptBlock,
   text: string
 ): TranscriptPinnedMessage | null {
+  const acceptedOptimisticUser = entry.role === "user"
+    && entry.source === "client.optimistic"
+    && Boolean(entry.threadId && entry.turnId);
   if (
-    entry.messageSeq == null
+    (entry.messageSeq == null && !acceptedOptimisticUser)
     || (entry.role !== "user" && entry.role !== "assistant")
     || block.kind !== "text"
     || !text.trim()
@@ -1860,11 +1863,19 @@ function transcriptPinnedMessage(
   ) {
     return null;
   }
+  const entryMetadata = asRecord(entry.metadata);
+  const pinIdentityText = entry.source === "client.optimistic"
+    && typeof entryMetadata.pinIdentityText === "string"
+    ? entryMetadata.pinIdentityText.trim()
+    : text.trim();
+  const key = entry.role === "user" && entry.turnId
+    ? JSON.stringify([entry.threadId, entry.turnId, entry.role, pinIdentityText])
+    : JSON.stringify([entry.threadId, entry.id, block.id]);
   return {
     blockId: block.id,
     createdAtMs: block.createdAtMs,
     entryId: entry.id,
-    key: JSON.stringify([entry.threadId, entry.id, block.id]),
+    key,
     role: entry.role,
     status: block.status,
     text,
