@@ -34,4 +34,3 @@ tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tiktoken.workspace = true

@@ -16,3 +16,4 @@ psychevo-channel-adapters = { path = "../psychevo-channel-adapters" }
 psychevo-extension-protocol = { path = "../psychevo-extension-protocol" }
 serde_json.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true

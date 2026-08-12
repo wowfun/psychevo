@@ -22,10 +22,7 @@ native-keyring = ["dep:keyring"]
 
 [dependencies]
 base64.workspace = true
-chardetng.workspace = true
 chrono.workspace = true
-encoding_rs.workspace = true
-encoding_rs2.workspace = true
 flate2.workspace = true
 futures.workspace = true
 html2text.workspace = true
@@ -57,6 +54,8 @@ tree-sitter-bash.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+chardetng.workspace = true
+encoding_rs.workspace = true
 pretty_assertions.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
@@ -69,6 +68,8 @@ landlock.workspace = true
 keyring = { workspace = true, features = ["apple-native"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
+chardetng.workspace = true
+encoding_rs.workspace = true
 keyring = { workspace = true, features = ["windows-native"], optional = true }
 windows-sys.workspace = true
 
