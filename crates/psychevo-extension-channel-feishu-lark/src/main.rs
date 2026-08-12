@@ -67,3 +67,35 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 async fn main() -> Result<()> {
     run("psychevo.channel.feishu-lark", Arc::new(FeishuLarkFactory)).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn shipped_factory_advertises_aliases_and_validates_config_offline() {
+        let factory = FeishuLarkFactory;
+        let descriptors = factory.descriptors();
+        assert_eq!(
+            descriptors
+                .iter()
+                .map(|value| value.channel.as_str())
+                .collect::<Vec<_>>(),
+            ["feishu", "lark"]
+        );
+        assert!(
+            descriptors
+                .iter()
+                .all(|value| { value.delivery_capabilities == ["push", "text"] })
+        );
+
+        let result = factory
+            .build("connection".into(), "feishu".into(), Value::Null)
+            .await;
+        let error = match result {
+            Ok(_) => panic!("missing secret must fail before network access"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("requires `appSecret`"));
+    }
+}

@@ -2,7 +2,9 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::{Configuration, CreateCustomProviderRequest, config::ConfigScope};
+use psychevo::{
+    application::Configuration, application::CreateCustomProviderRequest, config::ConfigScope,
+};
 use serde_json::Value;
 
 use crate::args::{AuthArgs, AuthCommand, AuthSetArgs, AuthSetupArgs, AuthStatusArgs};

@@ -2,7 +2,10 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::{Application, ThreadListQuery, context_usage::format_context_snapshot_text};
+use psychevo::{
+    application::Application, application::ThreadListQuery,
+    context_usage::format_context_snapshot_text,
+};
 
 use crate::args::ContextArgs;
 use crate::env::{

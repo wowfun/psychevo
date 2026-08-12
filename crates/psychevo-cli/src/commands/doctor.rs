@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::{Configuration, config::ConfigScope};
+use psychevo::{application::Configuration, config::ConfigScope};
 use serde_json::{Value, json};
 
 use crate::args::DoctorArgs;

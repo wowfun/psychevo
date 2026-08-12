@@ -38,7 +38,6 @@ impl TuiApp {
         let mut terminal_guard = FullscreenTerminalGuard::enter(&mut stdout)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
-        terminal.clear()?;
         let result = self
             .run_fullscreen_loop_inner(&mut terminal, &mut terminal_guard, initial_prompt)
             .await;

@@ -6,8 +6,9 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    Application, PermissionMode, ProjectContextInstructionMode, RunMode, StartThreadRequest,
-    TurnOutcome, TurnRequest,
+    application::Application, application::PermissionMode,
+    application::ProjectContextInstructionMode, application::RunMode,
+    application::StartThreadRequest, application::TurnOutcome, application::TurnRequest,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -59,7 +60,7 @@ struct PsychevoMcpTurnResult {
 struct CliMcpRunner {
     args: McpServeArgs,
     application: Application,
-    client: psychevo::Client,
+    client: psychevo::application::Client,
     env_map: std::collections::BTreeMap<String, String>,
     process_cwd: PathBuf,
     config_path: Option<PathBuf>,

@@ -8,7 +8,7 @@ use psychevo::extensions::protocol::{
 };
 use psychevo::extensions::{ExtensionHostMode, ExtensionLease, ExtensionRuntime, ExtensionStore};
 use psychevo::{
-    Configuration,
+    application::Configuration,
     config::{
         ChannelSetupInput, set_channel_enabled, setup_channel_connection, upsert_channel_connection,
     },

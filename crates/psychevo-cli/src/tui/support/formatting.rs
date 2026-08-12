@@ -1,7 +1,7 @@
 #[cfg(test)]
 use anyhow::{Result, anyhow};
 #[cfg(test)]
-use psychevo::ThreadSummary;
+use psychevo::application::ThreadSummary;
 use psychevo::config::ConfiguredModel;
 
 pub(crate) fn increment_row_index(value: &mut Option<usize>, inserted_at: usize) {

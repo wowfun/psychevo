@@ -6,7 +6,10 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    Application, ApprovalHandler, Configuration, ConfigurationQuery,
+    application::Application,
+    application::ApprovalHandler,
+    application::Configuration,
+    application::ConfigurationQuery,
     application::{PermissionApprovalDecision, PermissionApprovalRequest},
 };
 use serde_json::json;

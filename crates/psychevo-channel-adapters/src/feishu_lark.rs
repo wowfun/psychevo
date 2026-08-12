@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Error, Result, anyhow};
 use futures::future::BoxFuture;
@@ -8,6 +9,8 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::im::{ImAdapter, ImIdentity, ImInboundMessage, ImOutboundMessage};
+
+const FEISHU_POLL_IDLE_TIMEOUT: Duration = Duration::from_secs(35);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeishuLarkDomain {
@@ -141,6 +144,21 @@ impl FeishuLarkLongConnectionAdapter {
         Ok(())
     }
 
+    async fn receive_inbound(&self) -> Result<Vec<ImInboundMessage>> {
+        let mut receiver = self.inbound_rx.lock().await;
+        let first = match tokio::time::timeout(FEISHU_POLL_IDLE_TIMEOUT, receiver.recv()).await {
+            Ok(Some(message)) => message,
+            Ok(None) => return Err(anyhow!("Feishu/Lark ingress stream closed")),
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut messages = vec![first];
+        while let Ok(message) = receiver.try_recv() {
+            messages.push(message);
+        }
+        Ok(messages)
+    }
+
+    #[cfg(test)]
     async fn drain_inbound(&self) -> Vec<ImInboundMessage> {
         let mut receiver = self.inbound_rx.lock().await;
         let mut messages = Vec::new();
@@ -171,7 +189,7 @@ impl ImAdapter for FeishuLarkLongConnectionAdapter {
 
     fn poll(&self) -> BoxFuture<'static, Result<Vec<ImInboundMessage>>> {
         let adapter = self.clone();
-        Box::pin(async move { Ok(adapter.drain_inbound().await) })
+        Box::pin(async move { adapter.receive_inbound().await })
     }
 
     fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, Result<()>> {
@@ -395,6 +413,56 @@ mod tests {
         assert_eq!(adapter.drain_inbound().await.len(), FEISHU_INGRESS_CAPACITY);
         blocked.await.expect("blocked sender");
         assert_eq!(adapter.drain_inbound().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn poll_waits_for_the_first_event_and_drains_an_available_batch() {
+        let adapter = adapter();
+        let polling = {
+            let adapter = adapter.clone();
+            tokio::spawn(async move { adapter.poll().await.expect("poll") })
+        };
+        tokio::task::yield_now().await;
+        assert!(
+            !polling.is_finished(),
+            "idle poll must not spin through the sidecar"
+        );
+
+        adapter
+            .inbound_tx
+            .send(inbound(1))
+            .await
+            .expect("first event");
+        let messages = polling.await.expect("poll task");
+        assert_eq!(messages[0].message_id, "message-1");
+
+        adapter
+            .inbound_tx
+            .send(inbound(2))
+            .await
+            .expect("second event");
+        adapter
+            .inbound_tx
+            .send(inbound(3))
+            .await
+            .expect("third event");
+        let messages = adapter.poll().await.expect("batched poll");
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.message_id.as_str())
+                .collect::<Vec<_>>(),
+            ["message-2", "message-3"]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_poll_returns_an_empty_batch_before_the_host_deadline() {
+        let polling = tokio::spawn(async { adapter().poll().await.expect("idle poll") });
+        tokio::task::yield_now().await;
+        tokio::time::advance(FEISHU_POLL_IDLE_TIMEOUT).await;
+        let messages = polling.await.expect("poll task");
+        assert!(messages.is_empty());
     }
 
     struct Dropped(Arc<AtomicBool>);

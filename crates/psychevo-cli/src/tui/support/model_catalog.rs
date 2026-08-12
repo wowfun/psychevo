@@ -1,6 +1,6 @@
 use psychevo::{
-    ThreadSummary,
     application::ModelMetadataCacheTarget,
+    application::ThreadSummary,
     config::{ConfiguredModel, ModelCatalogEntry, ModelCatalogProvider},
 };
 use std::{collections::BTreeMap, io, sync::Arc};

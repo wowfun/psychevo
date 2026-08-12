@@ -184,7 +184,7 @@ impl TuiApp {
         };
         match running.control.update_pending_user_message(id, message) {
             Ok(()) => {}
-            Err(psychevo::ControlInputError::UnknownInput { .. }) => {
+            Err(psychevo::application::ControlInputError::UnknownInput { .. }) => {
                 return Ok(PendingSteerUpdate::Stale);
             }
             Err(error) => {

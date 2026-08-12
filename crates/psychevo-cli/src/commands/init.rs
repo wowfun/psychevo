@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
-use psychevo::Application;
+use psychevo::application::Application;
 
 use crate::args::InitArgs;
 #[cfg(feature = "gateway")]

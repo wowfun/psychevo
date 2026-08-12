@@ -1,11 +1,21 @@
 use futures::FutureExt;
 #[cfg(test)]
-use psychevo::{Application, TurnRequest};
+use psychevo::{application::Application, application::TurnRequest};
 use psychevo::{
-    ApprovalHandler, ImageInput, InteractionResponse, PromptAttachmentDisplay,
-    PromptDisplayMetadata, ShellCommandControl, ShellCommandEvent, ShellCommandRequest,
-    ShellCommandResult, TurnAdmissionCancellation, TurnEvent, TurnEventStream, TurnHandle,
-    TurnResult,
+    application::ApprovalHandler,
+    application::ImageInput,
+    application::InteractionResponse,
+    application::PromptAttachmentDisplay,
+    application::PromptDisplayMetadata,
+    application::ShellCommandControl,
+    application::ShellCommandEvent,
+    application::ShellCommandRequest,
+    application::ShellCommandResult,
+    application::TurnAdmissionCancellation,
+    application::TurnEvent,
+    application::TurnEventStream,
+    application::TurnHandle,
+    application::TurnResult,
     application::{
         ClarifyResult, PermissionApprovalDecision, PermissionApprovalRequest, QueuedSteerId,
         StoredEditableInputEnvelope, StoredEditableInputPart,
@@ -13,7 +23,7 @@ use psychevo::{
 };
 #[cfg(test)]
 use psychevo::{
-    StartThreadRequest,
+    application::StartThreadRequest,
     application::{ClarifyAnswer, ClarifyResponse},
 };
 use psychevo_gateway_protocol::events_transcript::GatewayEvent;
@@ -123,10 +133,10 @@ impl RunningTurnControl {
     pub(crate) fn steer_user_message(
         &self,
         message: psychevo::application::Message,
-    ) -> std::result::Result<QueuedSteerId, psychevo::ControlInputError> {
+    ) -> std::result::Result<QueuedSteerId, psychevo::application::ControlInputError> {
         match self {
             Self::Agent(handle) => handle.queue_steer_message(message),
-            Self::Shell(_) => Err(psychevo::ControlInputError::Closed),
+            Self::Shell(_) => Err(psychevo::application::ControlInputError::Closed),
         }
     }
 
@@ -134,10 +144,10 @@ impl RunningTurnControl {
         &self,
         id: QueuedSteerId,
         message: psychevo::application::Message,
-    ) -> std::result::Result<(), psychevo::ControlInputError> {
+    ) -> std::result::Result<(), psychevo::application::ControlInputError> {
         match self {
             Self::Agent(handle) => handle.update_queued_steer(id, message),
-            Self::Shell(_) => Err(psychevo::ControlInputError::Closed),
+            Self::Shell(_) => Err(psychevo::application::ControlInputError::Closed),
         }
     }
 
@@ -535,27 +545,29 @@ mod semantic_control_tests {
         outcome: Arc<Mutex<Option<psychevo::application::ClarifyInteractionOutcome>>>,
     }
 
-    impl psychevo::AgentSessionAdapter for InterruptibleAdapter {
+    impl psychevo::application::AgentSessionAdapter for InterruptibleAdapter {
         fn prepare_turn(
             self: Arc<Self>,
-            _request: psychevo::AgentTurnPreparation,
+            _request: psychevo::application::AgentTurnPreparation,
         ) -> futures::future::BoxFuture<
             'static,
-            psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>,
+            psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>,
         > {
             Box::pin(async move {
                 Ok(Box::new(PreparedInterruptibleTurn {
                     started: self.started.clone(),
-                }) as Box<dyn psychevo::PreparedAgentTurn>)
+                })
+                    as Box<dyn psychevo::application::PreparedAgentTurn>)
             })
         }
     }
 
-    impl psychevo::PreparedAgentTurn for PreparedInterruptibleTurn {
+    impl psychevo::application::PreparedAgentTurn for PreparedInterruptibleTurn {
         fn invoke(
             self: Box<Self>,
-            invocation: psychevo::AgentTurnInvocation,
-        ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::TurnResult>> {
+            invocation: psychevo::application::AgentTurnInvocation,
+        ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>>
+        {
             Box::pin(async move {
                 invocation.events.emit(TurnEvent::MessageDelta {
                     text: "semantic live event".to_string(),
@@ -570,28 +582,30 @@ mod semantic_control_tests {
         }
     }
 
-    impl psychevo::AgentSessionAdapter for ClarifyAdapter {
+    impl psychevo::application::AgentSessionAdapter for ClarifyAdapter {
         fn prepare_turn(
             self: Arc<Self>,
-            _request: psychevo::AgentTurnPreparation,
+            _request: psychevo::application::AgentTurnPreparation,
         ) -> futures::future::BoxFuture<
             'static,
-            psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>,
+            psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>,
         > {
             Box::pin(async move {
                 Ok(Box::new(PreparedClarifyTurn {
                     started: self.started.clone(),
                     outcome: self.outcome.clone(),
-                }) as Box<dyn psychevo::PreparedAgentTurn>)
+                })
+                    as Box<dyn psychevo::application::PreparedAgentTurn>)
             })
         }
     }
 
-    impl psychevo::PreparedAgentTurn for PreparedClarifyTurn {
+    impl psychevo::application::PreparedAgentTurn for PreparedClarifyTurn {
         fn invoke(
             self: Box<Self>,
-            invocation: psychevo::AgentTurnInvocation,
-        ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::TurnResult>> {
+            invocation: psychevo::application::AgentTurnInvocation,
+        ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>>
+        {
             Box::pin(async move {
                 let thread_id = invocation.receipt.thread_id.clone();
                 self.started.notify_one();
@@ -611,9 +625,9 @@ mod semantic_control_tests {
                     .await;
                 drop(invocation);
                 *self.outcome.lock().expect("clarify outcome poisoned") = Some(outcome);
-                Ok(psychevo::TurnResult {
+                Ok(psychevo::application::TurnResult {
                     thread_id,
-                    outcome: psychevo::TurnOutcome::Completed,
+                    outcome: psychevo::application::TurnOutcome::Completed,
                     final_answer: "clarified".to_string(),
                     provider: "fake".to_string(),
                     model: "fake".to_string(),

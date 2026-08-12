@@ -17,7 +17,7 @@ pub(crate) use crossterm::event::{
     MouseEvent, MouseEventKind,
 };
 #[cfg(test)]
-pub(crate) use psychevo::TurnRequest;
+pub(crate) use psychevo::application::TurnRequest;
 pub(crate) use psychevo::application::{
     AgentMissionRegistration, AgentTeamRegistration, ClarifyAnswer, ClarifyQuestion,
     ClarifyRequestEvent, ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse,
@@ -25,23 +25,29 @@ pub(crate) use psychevo::application::{
     TerminalReason, ToolDisplaySpec,
 };
 pub(crate) use psychevo::{
-    AgentRelationship, AgentRelationshipStatus, AutoCompactionRequest, Client as FrameworkClient,
-    CompactThreadRequest, ConfigurationQuery, ConfigureProviderRequest,
-    CreateCustomProviderRequest, ImageInput, PermissionMode, PromptAttachmentDisplay,
-    RefreshThreadContextResult, RunMode, SetThreadMainAgentSelection, ShellCommandEvent,
-    ShellCommandOutcome, SideConversationSurface, StartSideConversationRequest, StartThreadRequest,
-    ThreadItem, ThreadListQuery, ThreadMainAgentSelection, ThreadModelSelection, ThreadSummary,
-    ThreadUsageSummary, TurnAdmissionCancellation, TurnEvent, TurnOutcome, UsageQuery,
-    UserShellDisplay, agents::AgentCatalog, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
-    agents::AgentRunStatus, agents::AgentSource, agents::MAX_AGENT_SPAWN_DEPTH_CAP,
+    agents::AgentCatalog, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
+    agents::AgentRunStatus, agents::MAX_AGENT_SPAWN_DEPTH_CAP,
     agents::MAX_TEAM_PARALLEL_AGENTS_CAP, agents::discover_agent_teams_with_catalog,
     agents::discover_agents, agents::resolve_agent_definition,
-    agents::resolve_agent_team_definition, application::PermissionApprovalDecision,
+    agents::resolve_agent_team_definition, application::AgentRelationship,
+    application::AgentRelationshipStatus, application::AgentSource,
+    application::AutoCompactionRequest, application::Client as FrameworkClient,
+    application::CompactThreadRequest, application::ConfigurationQuery,
+    application::ConfigureProviderRequest, application::CreateCustomProviderRequest,
+    application::ImageInput, application::PermissionApprovalDecision,
     application::PermissionApprovalOutcome, application::PermissionApprovalRequest,
-    compaction::CompactionReason, compaction::CompactionResult, config::ConfigScope,
-    config::ConfiguredModel, config::custom_provider_api_key_env,
-    context_usage::ContextFormatOptions, context_usage::ContextSnapshot,
-    context_usage::format_context_snapshot_text_with_options,
+    application::PermissionMode, application::PromptAttachmentDisplay,
+    application::RefreshThreadContextResult, application::RunMode,
+    application::SetThreadMainAgentSelection, application::ShellCommandEvent,
+    application::ShellCommandOutcome, application::SideConversationSurface,
+    application::StartSideConversationRequest, application::StartThreadRequest,
+    application::ThreadItem, application::ThreadListQuery, application::ThreadMainAgentSelection,
+    application::ThreadModelSelection, application::ThreadSummary, application::ThreadUsageSummary,
+    application::TurnAdmissionCancellation, application::TurnEvent, application::TurnOutcome,
+    application::UsageQuery, application::UserShellDisplay, compaction::CompactionReason,
+    compaction::CompactionResult, config::ConfigScope, config::ConfiguredModel,
+    config::custom_provider_api_key_env, context_usage::ContextFormatOptions,
+    context_usage::ContextSnapshot, context_usage::format_context_snapshot_text_with_options,
     context_usage::format_context_total_value, context_usage::format_context_total_value_parts,
     context_usage::normalize_context_bar_width, model_state::ModelState,
     model_state::normalize_reasoning_effort, paths::canonicalize_cwd,
@@ -62,7 +68,9 @@ pub(crate) use psychevo::{
     workspace_diff::collect_workspace_diff,
 };
 #[cfg(test)]
-pub(crate) use psychevo::{ShellCommandResult, TurnResult, config::ModelCatalogEntry};
+pub(crate) use psychevo::{
+    application::ShellCommandResult, application::TurnResult, config::ModelCatalogEntry,
+};
 pub(crate) use psychevo_gateway::composition::GatewayApplication;
 pub(crate) use psychevo_gateway::gateway::activity::GatewayActivity;
 pub(crate) use psychevo_gateway::gateway::live_projection::{
@@ -247,7 +255,7 @@ pub(crate) async fn run_tui_command(
         side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq,
-        gateway_live_snapshot_revisions: BTreeMap::new(),
+        last_gateway_live_snapshot_version: 0,
         session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
         side_delete_tasks: Vec::new(),

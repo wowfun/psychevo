@@ -72,13 +72,13 @@ pub(crate) async fn cli_agent_wait_zero_timeout_reports_timeout_without_pending_
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("repo");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let application = psychevo::Application::builder()
+    let application = psychevo::application::Application::builder()
         .home(&psychevo_home)
         .database_path(&db)
         .build()
         .await
         .expect("Application");
-    let mut request = psychevo::StartThreadRequest::new(&cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(&cwd);
     request.source = "run".to_string();
     application
         .client()

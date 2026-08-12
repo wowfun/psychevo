@@ -3,14 +3,17 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
+use futures::StreamExt;
 use psychevo::{
-    Application, Client as FrameworkClient, RefreshThreadContextRequest, Thread, ThreadListQuery,
-    ThreadSummary, paths::canonicalize_cwd, session_export::SessionArtifactKind,
+    application::Application, application::Client as FrameworkClient,
+    application::RefreshThreadContextRequest, application::Thread, application::ThreadListQuery,
+    application::ThreadSummary, paths::canonicalize_cwd, session_export::SessionArtifactKind,
     session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
     session_export::SessionExportOptions, session_export::SessionExportWriteResult,
     session_export::default_session_export_filename,
 };
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 
 use crate::args::{
     SessionArgs, SessionCommand, SessionExportArgs, SessionExportFormatArg, SessionIdArgs,
@@ -205,8 +208,12 @@ pub(crate) async fn export_session(
         let result = thread.write_export(output, options).await?;
         println!("exported: {}", result.path.display());
     } else {
-        let artifact = thread.render_export(options).await?;
-        print!("{}", artifact.content);
+        let mut stream = thread.stream_export(options).await?;
+        let mut stdout = tokio::io::stdout();
+        while let Some(chunk) = stream.next().await {
+            stdout.write_all(&chunk?).await?;
+        }
+        stdout.flush().await?;
     }
     Ok(())
 }

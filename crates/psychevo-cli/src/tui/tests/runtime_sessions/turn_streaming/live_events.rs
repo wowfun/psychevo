@@ -22,7 +22,7 @@ fn install_test_turn_admission(
     let optimistic_start = ui.transcript.len();
     ui.push_user(display_prompt.to_string());
     ui.mark_optimistic_rows_from(optimistic_start);
-    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    let cancellation = psychevo::application::TurnAdmissionCancellation::new();
     ui.starting_turn = Some(StartingTurn {
         session_id: app.current_session.clone(),
         queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),

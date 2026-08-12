@@ -9,7 +9,7 @@ use crate::tui::{
     RunningTurn, RunningTurnControl, RunningTurnEvents, StartThreadRequest, TranscriptKind, TuiApp,
     TuiApprovalHandler, TurnEvent, TurnRequest, TurnResult,
 };
-use psychevo::{Application, ApprovalHandler};
+use psychevo::{application::Application, application::ApprovalHandler};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -118,24 +118,28 @@ struct PreparedClarifyFixture {
     outcome: Option<oneshot::Sender<psychevo::application::ClarifyInteractionOutcome>>,
 }
 
-impl psychevo::AgentSessionAdapter for ClarifyFixtureAdapter {
+impl psychevo::application::AgentSessionAdapter for ClarifyFixtureAdapter {
     fn prepare_turn(
         self: Arc<Self>,
-        _request: psychevo::AgentTurnPreparation,
-    ) -> futures::future::BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>>
-    {
+        _request: psychevo::application::AgentTurnPreparation,
+    ) -> futures::future::BoxFuture<
+        'static,
+        psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>,
+    > {
         let prepared = PreparedClarifyFixture {
             request: self.request.clone(),
             outcome: self.outcome.lock().expect("clarify outcome lock").take(),
         };
-        Box::pin(async move { Ok(Box::new(prepared) as Box<dyn psychevo::PreparedAgentTurn>) })
+        Box::pin(async move {
+            Ok(Box::new(prepared) as Box<dyn psychevo::application::PreparedAgentTurn>)
+        })
     }
 }
 
-impl psychevo::PreparedAgentTurn for PreparedClarifyFixture {
+impl psychevo::application::PreparedAgentTurn for PreparedClarifyFixture {
     fn invoke(
         mut self: Box<Self>,
-        invocation: psychevo::AgentTurnInvocation,
+        invocation: psychevo::application::AgentTurnInvocation,
     ) -> futures::future::BoxFuture<'static, psychevo::Result<TurnResult>> {
         Box::pin(async move {
             let thread_id = invocation.receipt.thread_id.clone();

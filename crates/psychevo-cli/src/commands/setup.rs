@@ -8,7 +8,8 @@ use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use psychevo::{
-    Configuration, ConfigureProviderRequest, config::ConfigScope, config::ModelCatalogEntry,
+    application::Configuration, application::ConfigureProviderRequest, config::ConfigScope,
+    config::ModelCatalogEntry,
 };
 
 use crate::args::{DoctorArgs, InitArgs, SetupArgs};

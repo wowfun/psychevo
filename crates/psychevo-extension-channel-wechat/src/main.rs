@@ -150,3 +150,33 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 async fn main() -> Result<()> {
     run("psychevo.channel.wechat", Arc::new(WechatFactory)).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn shipped_factory_advertises_and_validates_wechat_offline() {
+        let factory = WechatFactory;
+        let descriptors = factory.descriptors();
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].channel, "wechat");
+        assert_eq!(
+            descriptors[0].delivery_capabilities,
+            ["poll", "text", "image", "file", "qr_setup"]
+        );
+
+        let result = factory
+            .build("connection".into(), "unsupported".into(), Value::Null)
+            .await;
+        let error = match result {
+            Ok(_) => panic!("unsupported alias must fail before filesystem or network access"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported WeChat Channel alias")
+        );
+    }
+}

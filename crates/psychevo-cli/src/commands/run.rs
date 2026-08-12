@@ -6,8 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    Application, PermissionMode, ProjectContextInstructionMode, RunMode, StartThreadRequest,
-    ThreadListQuery, TurnEvent, TurnOutcome, TurnRequest,
+    application::Application, application::PermissionMode,
+    application::ProjectContextInstructionMode, application::RunMode,
+    application::StartThreadRequest, application::ThreadListQuery, application::TurnEvent,
+    application::TurnOutcome, application::TurnRequest,
 };
 use psychevo_gateway::gateway_event_from_turn_event;
 use psychevo_gateway_protocol::events_transcript::{
@@ -255,14 +257,17 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     })
 }
 
-fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<serde_json::Value> {
+fn json_turn_event(
+    receipt: &psychevo::application::TurnReceipt,
+    event: TurnEvent,
+) -> Option<serde_json::Value> {
     match event {
         TurnEvent::Scoped {
             thread_id,
             turn_id,
             event,
         } => json_turn_event(
-            &psychevo::TurnReceipt {
+            &psychevo::application::TurnReceipt {
                 accepted: true,
                 thread_id,
                 turn_id,
@@ -275,13 +280,13 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
                 gateway_event_from_turn_event(&receipt.turn_id, &TurnEvent::Runtime { data })?;
             match projected {
                 GatewayEvent::EntryStarted { entry, .. } => {
-                    typed_item_event(receipt, psychevo::ItemStage::Started, entry)
+                    typed_item_event(receipt, psychevo::application::ItemStage::Started, entry)
                 }
                 GatewayEvent::EntryUpdated { entry, .. } => {
-                    typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+                    typed_item_event(receipt, psychevo::application::ItemStage::Updated, entry)
                 }
                 GatewayEvent::EntryCompleted { entry, .. } => {
-                    typed_item_event(receipt, psychevo::ItemStage::Completed, entry)
+                    typed_item_event(receipt, psychevo::application::ItemStage::Completed, entry)
                 }
                 _ => None,
             }
@@ -310,7 +315,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
         }
         TurnEvent::MessageDelta { text } => {
             let entry = projected_entry(&receipt.turn_id, &TurnEvent::MessageDelta { text })?;
-            typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+            typed_item_event(receipt, psychevo::application::ItemStage::Updated, entry)
         }
         TurnEvent::Tool { stage, data } => {
             let entry = projected_entry(&receipt.turn_id, &TurnEvent::Tool { stage, data })?;
@@ -318,7 +323,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
         }
         TurnEvent::ReasoningDelta { text } => {
             let entry = projected_entry(&receipt.turn_id, &TurnEvent::ReasoningDelta { text })?;
-            typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+            typed_item_event(receipt, psychevo::application::ItemStage::Updated, entry)
         }
         TurnEvent::ReasoningCompleted { text } => {
             let mut entry = projected_entry(
@@ -331,7 +336,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             for block in &mut entry.blocks {
                 block.status = TranscriptBlockStatus::Completed;
             }
-            typed_item_event(receipt, psychevo::ItemStage::Completed, entry)
+            typed_item_event(receipt, psychevo::application::ItemStage::Completed, entry)
         }
         TurnEvent::InteractionRequested {
             interaction_id,
@@ -339,7 +344,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             payload,
         } => typed_item_event(
             receipt,
-            psychevo::ItemStage::Started,
+            psychevo::application::ItemStage::Started,
             diagnostic_entry(
                 receipt,
                 format!("interaction:{interaction_id}"),
@@ -360,7 +365,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             reason,
         } => typed_item_event(
             receipt,
-            psychevo::ItemStage::Completed,
+            psychevo::application::ItemStage::Completed,
             diagnostic_entry(
                 receipt,
                 format!("interaction:{interaction_id}"),
@@ -386,7 +391,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
                 .unwrap_or("runtime warning");
             typed_item_event(
                 receipt,
-                psychevo::ItemStage::Completed,
+                psychevo::application::ItemStage::Completed,
                 diagnostic_entry(
                     receipt,
                     format!("warning:{:016x}", stable_hash_json(&data)),
@@ -423,8 +428,8 @@ fn projected_entry(turn_id: &str, event: &TurnEvent) -> Option<TranscriptEntry> 
 }
 
 fn typed_item_event(
-    receipt: &psychevo::TurnReceipt,
-    stage: psychevo::ItemStage,
+    receipt: &psychevo::application::TurnReceipt,
+    stage: psychevo::application::ItemStage,
     mut entry: TranscriptEntry,
 ) -> Option<serde_json::Value> {
     entry.thread_id.clone_from(&receipt.thread_id);
@@ -440,7 +445,7 @@ fn typed_item_event(
 
 #[allow(clippy::too_many_arguments)]
 fn diagnostic_entry(
-    receipt: &psychevo::TurnReceipt,
+    receipt: &psychevo::application::TurnReceipt,
     id_suffix: String,
     kind: TranscriptBlockKind,
     status: TranscriptBlockStatus,
@@ -590,11 +595,11 @@ fn now_ms() -> i64 {
         .unwrap_or_default()
 }
 
-fn item_stage_name(stage: psychevo::ItemStage) -> &'static str {
+fn item_stage_name(stage: psychevo::application::ItemStage) -> &'static str {
     match stage {
-        psychevo::ItemStage::Started => "started",
-        psychevo::ItemStage::Updated => "updated",
-        psychevo::ItemStage::Completed => "completed",
+        psychevo::application::ItemStage::Started => "started",
+        psychevo::application::ItemStage::Updated => "updated",
+        psychevo::application::ItemStage::Completed => "completed",
     }
 }
 
@@ -628,8 +633,8 @@ pub(crate) fn read_prompt(message: &[String]) -> Result<String> {
 mod json_transcript_tests {
     use super::*;
 
-    fn receipt() -> psychevo::TurnReceipt {
-        psychevo::TurnReceipt {
+    fn receipt() -> psychevo::application::TurnReceipt {
+        psychevo::application::TurnReceipt {
             accepted: true,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
@@ -642,7 +647,7 @@ mod json_transcript_tests {
         let started = json_turn_event(
             &receipt(),
             TurnEvent::Message {
-                stage: psychevo::ItemStage::Started,
+                stage: psychevo::application::ItemStage::Started,
                 message: serde_json::json!({
                     "role": "assistant",
                     "content": "hello",
@@ -656,7 +661,7 @@ mod json_transcript_tests {
         let completed = json_turn_event(
             &receipt(),
             TurnEvent::Message {
-                stage: psychevo::ItemStage::Completed,
+                stage: psychevo::application::ItemStage::Completed,
                 message: serde_json::json!({
                     "role": "assistant",
                     "content": "hello",
@@ -706,7 +711,7 @@ mod json_transcript_tests {
         let projected = json_turn_event(
             &receipt(),
             TurnEvent::Tool {
-                stage: psychevo::ItemStage::Completed,
+                stage: psychevo::application::ItemStage::Completed,
                 data: serde_json::json!({
                     "type": "tool_execution_end",
                     "tool_call_id": "call-1",

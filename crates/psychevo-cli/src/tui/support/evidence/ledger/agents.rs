@@ -1,4 +1,6 @@
-use psychevo::{AgentRelationship, accounting::effective_usage_total, agents::AgentCatalog};
+use psychevo::{
+    accounting::effective_usage_total, agents::AgentCatalog, application::AgentRelationship,
+};
 use serde_json::Value;
 
 use crate::tui::{

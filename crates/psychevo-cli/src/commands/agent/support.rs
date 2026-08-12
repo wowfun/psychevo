@@ -3,11 +3,11 @@ use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 
 use anyhow::Result;
-use psychevo::AgentMailboxWaitOutcome;
-use psychevo::Application;
 use psychevo::agents::{
     AgentBackendConfig, AgentCatalog, AgentDiscoveryOptions, AgentRunRecord, discover_agents,
 };
+use psychevo::application::AgentMailboxWaitOutcome;
+use psychevo::application::Application;
 use serde_json::{Value, json};
 
 use crate::env::{

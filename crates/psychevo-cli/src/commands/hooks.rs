@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::CommandFactory;
-use psychevo::Configuration;
+use psychevo::application::Configuration;
 use serde_json::Value;
 
 use crate::args::{HookKeyArgs, HooksArgs, HooksCommand, HooksListArgs};

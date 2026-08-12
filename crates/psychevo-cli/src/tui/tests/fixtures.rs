@@ -8,7 +8,7 @@ use crate::tui::{
     TuiJourneyProfileProbe, TuiRenderer, TuiState, TurnEvent, TurnMetaProjection, TurnOutcome,
     TurnRequest, TurnResult, turn_meta_text,
 };
-use psychevo::Application;
+use psychevo::application::Application;
 use psychevo::context_usage::{
     ContextCategory, ContextScope, ContextSnapshot, ContextTokenizer, ContextTotal,
 };
@@ -171,7 +171,7 @@ pub(crate) fn install_pending_turn_admission(
     let optimistic_start = ui.transcript.len();
     ui.push_user(display_prompt.to_string());
     ui.mark_optimistic_rows_from(optimistic_start);
-    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    let cancellation = psychevo::application::TurnAdmissionCancellation::new();
     ui.starting_turn = Some(StartingTurn {
         session_id: app.current_session.clone(),
         queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),
@@ -265,7 +265,7 @@ pub(crate) async fn install_accepted_turn_admission(
     let optimistic_start = ui.transcript.len();
     ui.push_user(display_prompt.to_string());
     ui.mark_optimistic_rows_from(optimistic_start);
-    let cancellation = psychevo::TurnAdmissionCancellation::new();
+    let cancellation = psychevo::application::TurnAdmissionCancellation::new();
     ui.starting_turn = Some(StartingTurn {
         session_id: app.current_session.clone(),
         queue_owner_id: format!("starting:{}", uuid::Uuid::now_v7()),
@@ -370,7 +370,7 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         side_conversation: None,
         last_live_agent_reload_check: None,
         last_gateway_live_event_seq: 0,
-        gateway_live_snapshot_revisions: BTreeMap::new(),
+        last_gateway_live_snapshot_version: 0,
         session_browser_limits: BTreeMap::new(),
         side_cleanup_task: None,
         side_delete_tasks: Vec::new(),
@@ -1056,23 +1056,27 @@ pub(crate) fn attach_no_steer_running(app: &TuiApp, ui: &mut FullscreenUi<'_>) {
 #[derive(Debug)]
 struct PendingAgentAdapter;
 
-impl psychevo::AgentSessionAdapter for PendingAgentAdapter {
+impl psychevo::application::AgentSessionAdapter for PendingAgentAdapter {
     fn prepare_turn(
         self: Arc<Self>,
-        _request: psychevo::AgentTurnPreparation,
-    ) -> futures::future::BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>>
-    {
-        Box::pin(async { Ok(Box::new(PendingAgentTurn) as Box<dyn psychevo::PreparedAgentTurn>) })
+        _request: psychevo::application::AgentTurnPreparation,
+    ) -> futures::future::BoxFuture<
+        'static,
+        psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>,
+    > {
+        Box::pin(async {
+            Ok(Box::new(PendingAgentTurn) as Box<dyn psychevo::application::PreparedAgentTurn>)
+        })
     }
 }
 
 #[derive(Debug)]
 struct PendingAgentTurn;
 
-impl psychevo::PreparedAgentTurn for PendingAgentTurn {
+impl psychevo::application::PreparedAgentTurn for PendingAgentTurn {
     fn invoke(
         self: Box<Self>,
-        invocation: psychevo::AgentTurnInvocation,
+        invocation: psychevo::application::AgentTurnInvocation,
     ) -> futures::future::BoxFuture<'static, psychevo::Result<TurnResult>> {
         Box::pin(async move {
             invocation.control.wait_for_interrupt().await;

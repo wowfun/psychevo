@@ -4,7 +4,8 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    Configuration, CreateCustomProviderRequest,
+    application::Configuration,
+    application::CreateCustomProviderRequest,
     config::ConfigScope,
     extensions::{ExtensionScope, ExtensionStore},
     paths::canonicalize_cwd,

@@ -17,7 +17,8 @@ use crate::tui::{
     visible_transcript_message_count, wall_now_ms,
 };
 use psychevo::{
-    Application, ApprovalHandler,
+    application::Application,
+    application::ApprovalHandler,
     application::{PermissionApprovalDecision, PermissionApprovalRequest},
 };
 use std::collections::VecDeque;

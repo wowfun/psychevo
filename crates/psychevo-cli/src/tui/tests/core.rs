@@ -144,7 +144,7 @@ pub(crate) async fn turn_printer_preserves_bash_command_title_until_tool_end() {
     printer
         .render_event(
             &TurnEvent::Tool {
-                stage: psychevo::ItemStage::Started,
+                stage: psychevo::application::ItemStage::Started,
                 data: serde_json::json!({
                     "tool_call_id": "call_bash",
                     "tool_name": "exec_command",
@@ -157,7 +157,7 @@ pub(crate) async fn turn_printer_preserves_bash_command_title_until_tool_end() {
     printer
         .render_event(
             &TurnEvent::Tool {
-                stage: psychevo::ItemStage::Completed,
+                stage: psychevo::application::ItemStage::Completed,
                 data: serde_json::json!({
                     "tool_call_id": "call_bash",
                     "tool_name": "exec_command",

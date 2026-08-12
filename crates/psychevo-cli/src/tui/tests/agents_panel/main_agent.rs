@@ -12,7 +12,7 @@ use crate::tui::{
     ThreadMainAgentSelection, TranscriptKind, TranscriptRow, agent_editor_markdown,
     bottom_status_context_for_width, textarea_with_text,
 };
-use psychevo::AgentRelationshipAgent;
+use psychevo::application::AgentRelationshipAgent;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::sync::mpsc;

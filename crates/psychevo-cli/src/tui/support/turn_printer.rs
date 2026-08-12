@@ -11,7 +11,10 @@ use crate::tui::{
     ui_fullscreen::shell_outcome_label,
     ui_types::TranscriptKind,
 };
-use psychevo::{ShellCommandEvent, ShellCommandOutcome, TurnEvent, application::ToolDisplaySpec};
+use psychevo::{
+    application::ShellCommandEvent, application::ShellCommandOutcome, application::ToolDisplaySpec,
+    application::TurnEvent,
+};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,

@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
-use psychevo::config::custom_provider_api_key_env;
+use anyhow::Result;
+use psychevo::config::{
+    custom_provider_api_key_env, valid_env_name, validate_custom_provider_id,
+    validate_provider_base_url,
+};
 
 #[cfg(feature = "gateway")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,12 +170,7 @@ pub(crate) fn default_provider_setup_api_key_env(
 }
 
 pub(crate) fn validate_base_url(value: &str) -> Result<String> {
-    let value = value.trim().trim_end_matches('/').to_string();
-    if value.starts_with("http://") || value.starts_with("https://") {
-        Ok(value)
-    } else {
-        Err(anyhow!("base url must start with http:// or https://"))
-    }
+    Ok(validate_provider_base_url(value)?)
 }
 
 pub(crate) fn validate_api_key_env(value: &str) -> Result<String> {
@@ -180,29 +178,15 @@ pub(crate) fn validate_api_key_env(value: &str) -> Result<String> {
     if valid_env_name(value) {
         Ok(value.to_string())
     } else {
-        Err(anyhow!(
-            "api_key_env must be a valid environment variable name"
-        ))
+        Err(psychevo::Error::Config(
+            "api_key_env must be a valid environment variable name".to_string(),
+        )
+        .into())
     }
 }
 
 pub(crate) fn validate_custom_setup_provider_id(provider_id: &str) -> Result<()> {
-    if !valid_provider_id(provider_id) {
-        return Err(anyhow!(
-            "must use lowercase letters, numbers, hyphens, or underscores"
-        ));
-    }
-    let normalized = normalize_setup_provider_id(provider_id);
-    if normalized != provider_id || SETUP_BUILT_IN_PROVIDER_IDS.contains(&provider_id) {
-        return Err(anyhow!("collides with a built-in provider or alias"));
-    }
-    Ok(())
-}
-
-pub(crate) fn valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some('A'..='Z' | 'a'..='z' | '_'))
-        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_'))
+    Ok(validate_custom_provider_id(provider_id)?)
 }
 
 pub(crate) fn looks_like_api_key(value: &str) -> bool {
@@ -243,33 +227,3 @@ pub(crate) fn is_loopback_base_url(value: &str) -> bool {
         || value.starts_with("http://localhost")
         || value.starts_with("http://[::1]")
 }
-
-fn valid_provider_id(provider_id: &str) -> bool {
-    let mut chars = provider_id.chars();
-    matches!(chars.next(), Some('a'..='z' | '0'..='9'))
-        && chars.all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '-' | '_'))
-}
-
-fn normalize_setup_provider_id(provider: &str) -> String {
-    match provider.trim().to_lowercase().as_str() {
-        "z.ai" | "z-ai" | "glm" => "zai".to_string(),
-        "alibaba" | "qwen" => "dashscope".to_string(),
-        "mimo" => "xiaomi".to_string(),
-        "x-ai" | "x.ai" | "grok" => "xai".to_string(),
-        "lm-studio" | "lm_studio" => "lmstudio".to_string(),
-        other => other.to_string(),
-    }
-}
-
-const SETUP_BUILT_IN_PROVIDER_IDS: &[&str] = &[
-    "openrouter",
-    "openai",
-    "xai",
-    "zai",
-    "deepseek",
-    "dashscope",
-    "xiaomi",
-    "xiaomi-token-plan",
-    "lmstudio",
-    "custom",
-];

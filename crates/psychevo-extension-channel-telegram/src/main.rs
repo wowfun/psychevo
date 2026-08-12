@@ -59,3 +59,30 @@ fn optional_string(value: &Value, key: &str) -> Option<String> {
 async fn main() -> Result<()> {
     run("psychevo.channel.telegram", Arc::new(TelegramFactory)).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn shipped_factory_advertises_and_validates_telegram_offline() {
+        let factory = TelegramFactory;
+        let descriptors = factory.descriptors();
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].channel, "telegram");
+        assert_eq!(descriptors[0].delivery_capabilities, ["poll", "text"]);
+
+        let result = factory
+            .build("connection".into(), "unsupported".into(), Value::Null)
+            .await;
+        let error = match result {
+            Ok(_) => panic!("unsupported alias must fail before network access"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported Telegram Channel alias")
+        );
+    }
+}

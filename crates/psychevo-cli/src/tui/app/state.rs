@@ -61,7 +61,7 @@ pub(crate) struct TuiApp {
     pub(crate) side_conversation: Option<SideConversationState>,
     pub(crate) last_live_agent_reload_check: Option<Instant>,
     pub(crate) last_gateway_live_event_seq: i64,
-    pub(crate) gateway_live_snapshot_revisions: BTreeMap<String, i64>,
+    pub(crate) last_gateway_live_snapshot_version: i64,
     pub(crate) session_browser_limits: BTreeMap<String, usize>,
     pub(crate) side_cleanup_task: Option<SideCleanupTask>,
     pub(crate) side_delete_tasks: Vec<SideDeleteTask>,

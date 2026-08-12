@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::{Application, UsageQuery};
+use psychevo::{application::Application, application::UsageQuery};
 use serde_json::Value;
 
 use crate::args::StatsArgs;

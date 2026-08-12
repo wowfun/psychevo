@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use psychevo::{
-    PermissionMode, ProjectContextInstructionMode, RunMode, session_export::SessionArtifactKind,
-    session_export::SessionExportIncludeSet,
+    application::PermissionMode, application::ProjectContextInstructionMode, application::RunMode,
+    session_export::SessionArtifactKind, session_export::SessionExportIncludeSet,
 };
 
 #[derive(Debug, Parser)]

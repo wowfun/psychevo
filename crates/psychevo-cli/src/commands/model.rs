@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    Configuration, config::ConfigScope, config::ConfiguredModel, config::ModelCatalogEntry,
-    config::ModelCatalogProvider,
+    application::Configuration, config::ConfigScope, config::ConfiguredModel,
+    config::ModelCatalogEntry, config::ModelCatalogProvider,
 };
 use serde_json::{Value, json};
 

@@ -6,8 +6,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
-use psychevo::ItemStage;
-use psychevo::TurnEvent;
+use psychevo::application::ItemStage;
+use psychevo::application::TurnEvent;
 use serde::Serialize;
 use serde_json::Value;
 

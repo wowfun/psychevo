@@ -1,7 +1,8 @@
 use anyhow::Result;
 use psychevo::{
-    ConfigurationQuery, ImageInput, RefreshThreadContextRequest, ShellCommandRequest, TurnRequest,
-    config::ConfigScope,
+    application::ConfigurationQuery, application::ImageInput,
+    application::RefreshThreadContextRequest, application::ShellCommandRequest,
+    application::TurnRequest, config::ConfigScope,
 };
 use serde_json::Value;
 
@@ -31,7 +32,7 @@ impl TuiApp {
             .with_skills(self.skill_inputs.clone())
     }
 
-    pub(crate) fn configuration(&self) -> Result<psychevo::Configuration> {
+    pub(crate) fn configuration(&self) -> Result<psychevo::application::Configuration> {
         let mut query = ConfigurationQuery::new(&self.cwd);
         query.model = self.current_model.clone();
         query.reasoning_effort = self.current_variant.clone();

@@ -10,7 +10,7 @@ use crate::tui::{
     presented_shell_event_channel, prompt_display_metadata, resolve_agent_team_definition,
 };
 use anyhow::anyhow;
-use psychevo::{Thread, ThreadListQuery};
+use psychevo::{application::Thread, application::ThreadListQuery};
 use std::{
     collections::BTreeMap,
     io,
@@ -37,8 +37,8 @@ impl TuiTurnAdmissionTarget {
     pub(crate) async fn start(
         self,
         client: &FrameworkClient,
-        request: psychevo::TurnRequest,
-    ) -> psychevo::Result<psychevo::TurnHandle> {
+        request: psychevo::application::TurnRequest,
+    ) -> psychevo::Result<psychevo::application::TurnHandle> {
         match self {
             Self::Existing(thread) => thread.start_turn(request).await,
             Self::New { request: start, .. } => {

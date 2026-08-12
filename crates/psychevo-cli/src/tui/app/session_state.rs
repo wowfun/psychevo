@@ -722,7 +722,7 @@ impl TuiApp {
         Ok(title)
     }
 
-    pub(crate) async fn current_framework_thread(&self) -> Result<psychevo::Thread> {
+    pub(crate) async fn current_framework_thread(&self) -> Result<psychevo::application::Thread> {
         let Some(session_id) = self.current_session.as_ref() else {
             return Err(anyhow!("no current session to undo"));
         };

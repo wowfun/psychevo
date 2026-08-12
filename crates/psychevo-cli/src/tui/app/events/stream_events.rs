@@ -317,16 +317,28 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
     ) -> Result<bool> {
-        let snapshots = self
-            .runtime
-            .gateway()
-            .foreign_live_snapshots(Some(session_id), 1000)
-            .await?;
         let mut changed = false;
-        for snapshot in snapshots {
-            changed |= self
-                .apply_foreign_gateway_live_snapshot(ui, snapshot, Some(session_id))
+        let mut after_version = 0;
+        let mut through_version = None;
+        loop {
+            let page = self
+                .runtime
+                .gateway()
+                .foreign_live_snapshots_for_thread(session_id, after_version, through_version, 1000)
                 .await?;
+            through_version = Some(page.high_watermark);
+            after_version = page.next_version;
+            for snapshot in page.snapshots {
+                changed |= self
+                    .apply_foreign_gateway_live_snapshot(ui, snapshot, Some(session_id))
+                    .await?;
+            }
+            if after_version >= page.high_watermark {
+                self.last_gateway_live_snapshot_version = self
+                    .last_gateway_live_snapshot_version
+                    .max(page.high_watermark);
+                break;
+            }
         }
         Ok(changed)
     }
@@ -335,13 +347,14 @@ impl TuiApp {
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
-        let snapshots = self
+        let page = self
             .runtime
             .gateway()
-            .foreign_live_snapshots(None, 1000)
+            .foreign_live_snapshot_changes(self.last_gateway_live_snapshot_version, 1000)
             .await?;
+        self.last_gateway_live_snapshot_version = page.next_version;
         let mut changed = false;
-        for snapshot in snapshots {
+        for snapshot in page.snapshots {
             changed |= self
                 .apply_foreign_gateway_live_snapshot(ui, snapshot, None)
                 .await?;
@@ -355,13 +368,6 @@ impl TuiApp {
         snapshot: GatewayLiveSnapshotObservation,
         expected_session: Option<&str>,
     ) -> Result<bool> {
-        if self
-            .gateway_live_snapshot_revisions
-            .get(&snapshot.snapshot_key)
-            .is_some_and(|revision| *revision >= snapshot.revision)
-        {
-            return Ok(false);
-        }
         let Some(session_id) = snapshot.context.thread_id else {
             return Ok(false);
         };
@@ -373,8 +379,6 @@ impl TuiApp {
         {
             return Ok(false);
         }
-        self.gateway_live_snapshot_revisions
-            .insert(snapshot.snapshot_key, snapshot.revision);
         self.apply_foreign_gateway_live_event(ui, &session_id, snapshot.event)
             .await
     }
