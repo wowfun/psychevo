@@ -1,4 +1,4 @@
-use psychevo::{Error, HumanThreadListQuery};
+use psychevo::{Error, application::HumanThreadListQuery};
 use psychevo_gateway_protocol as wire;
 use serde::de::DeserializeOwned;
 use serde_json::Value;

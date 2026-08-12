@@ -32,23 +32,23 @@ pub(crate) struct PreparedGatewayAgentTurn {
 }
 
 pub(crate) struct GatewayAgentTurnPreparation<'a> {
-    pub(crate) thread: &'a psychevo::ThreadExecutionContext,
-    pub(crate) binding: Option<&'a psychevo::AgentBindingSnapshot>,
-    pub(crate) target: &'a psychevo::AgentTargetSelection,
+    pub(crate) thread: &'a psychevo::application::ThreadExecutionContext,
+    pub(crate) binding: Option<&'a psychevo::application::AgentBindingSnapshot>,
+    pub(crate) target: &'a psychevo::application::AgentTargetSelection,
     pub(crate) inherited_env: &'a BTreeMap<String, String>,
-    pub(crate) purpose: psychevo::AgentTurnPurpose,
+    pub(crate) purpose: psychevo::application::AgentTurnPurpose,
 }
 
 impl PreparedGatewayAgentTurn {
     pub(crate) fn initial_binding(
         &self,
         thread_id: &str,
-    ) -> psychevo::Result<psychevo::InitialAgentBinding> {
+    ) -> psychevo::Result<psychevo::application::InitialAgentBinding> {
         let backend_kind = match self.profile.runtime {
             RuntimeProfileKind::Native => "native",
             RuntimeProfileKind::Acp => "acp",
         };
-        Ok(psychevo::InitialAgentBinding {
+        Ok(psychevo::application::InitialAgentBinding {
             agent_ref: self.agent.agent_ref.clone(),
             agent_fingerprint: self.agent.fingerprint.clone(),
             agent_definition_json: self.agent.definition_json.clone(),
@@ -198,8 +198,8 @@ pub(crate) fn prepare_framework_gateway_agent_turn(
         request.target.agent_ref.as_deref(),
         &profile,
         match request.purpose {
-            psychevo::AgentTurnPurpose::Peer => AgentEntrypoint::Peer,
-            psychevo::AgentTurnPurpose::Child => AgentEntrypoint::Subagent,
+            psychevo::application::AgentTurnPurpose::Peer => AgentEntrypoint::Peer,
+            psychevo::application::AgentTurnPurpose::Child => AgentEntrypoint::Subagent,
         },
     )?;
     let peer = resolve_captured_agent_peer_at(CapturedAgentPeerInput {
@@ -228,11 +228,11 @@ fn validate_bound_child_target_against_current_profile(
     thread_id: &str,
     cwd: &Path,
     inherited_env: &BTreeMap<String, String>,
-    purpose: psychevo::AgentTurnPurpose,
-    target: &psychevo::AgentTargetSelection,
+    purpose: psychevo::application::AgentTurnPurpose,
+    target: &psychevo::application::AgentTargetSelection,
     bound_runtime_ref: &str,
 ) -> psychevo::Result<()> {
-    if purpose != psychevo::AgentTurnPurpose::Child
+    if purpose != psychevo::application::AgentTurnPurpose::Child
         || (target.expected_profile_revision.is_none() && target.expected_backend_ref.is_none())
     {
         return Ok(());
@@ -250,8 +250,8 @@ fn validate_bound_child_target_against_current_profile(
 
 fn validate_captured_child_target(
     thread_id: &str,
-    purpose: psychevo::AgentTurnPurpose,
-    target: &psychevo::AgentTargetSelection,
+    purpose: psychevo::application::AgentTurnPurpose,
+    target: &psychevo::application::AgentTargetSelection,
     profile: &RuntimeProfileConfig,
     profile_revision: u64,
 ) -> psychevo::Result<()> {
@@ -274,7 +274,7 @@ fn validate_captured_child_target(
             Some(format!("agent-binding:{thread_id}")),
         ));
     }
-    if purpose == psychevo::AgentTurnPurpose::Child
+    if purpose == psychevo::application::AgentTurnPurpose::Child
         && target.expected_backend_ref.is_some()
         && target.expected_backend_ref.as_deref() != profile.backend_ref.as_deref()
     {
@@ -633,8 +633,8 @@ mod tests {
         }
     }
 
-    fn child_target() -> psychevo::AgentTargetSelection {
-        psychevo::AgentTargetSelection {
+    fn child_target() -> psychevo::application::AgentTargetSelection {
+        psychevo::application::AgentTargetSelection {
             agent_ref: Some("researcher".to_string()),
             runtime_profile_ref: Some("team-profile".to_string()),
             runtime_options: BTreeMap::new(),
@@ -648,7 +648,7 @@ mod tests {
     fn child_profile_revision_is_revalidated_before_delivery() {
         let error = validate_captured_child_target(
             "child-thread",
-            psychevo::AgentTurnPurpose::Child,
+            psychevo::application::AgentTurnPurpose::Child,
             &child_target(),
             &acp_profile("captured-backend"),
             42,
@@ -664,7 +664,7 @@ mod tests {
     fn child_backend_is_revalidated_before_delivery() {
         let error = validate_captured_child_target(
             "child-thread",
-            psychevo::AgentTurnPurpose::Child,
+            psychevo::application::AgentTurnPurpose::Child,
             &child_target(),
             &acp_profile("current-backend"),
             41,
@@ -682,7 +682,7 @@ mod tests {
         target.expected_backend_ref = None;
         validate_captured_child_target(
             "peer-thread",
-            psychevo::AgentTurnPurpose::Peer,
+            psychevo::application::AgentTurnPurpose::Peer,
             &target,
             &acp_profile("current-backend"),
             99,
@@ -697,7 +697,7 @@ mod tests {
         target.expected_backend_ref = None;
         validate_captured_child_target(
             "ordinary-child",
-            psychevo::AgentTurnPurpose::Child,
+            psychevo::application::AgentTurnPurpose::Child,
             &target,
             &acp_profile("current-backend"),
             99,
@@ -738,7 +738,7 @@ backend_ref = "{backend_ref}"
                 .expect("captured profile");
         let mut target = child_target();
         target.expected_profile_revision = Some(captured_revision);
-        let thread = psychevo::ThreadExecutionContext {
+        let thread = psychevo::application::ThreadExecutionContext {
             id: "bound-child".to_string(),
             cwd: cwd.display().to_string(),
             workspace_id: None,
@@ -747,7 +747,7 @@ backend_ref = "{backend_ref}"
             source_key: None,
         };
         let definition_json = r#"{"name":"researcher"}"#;
-        let binding = psychevo::AgentBindingSnapshot {
+        let binding = psychevo::application::AgentBindingSnapshot {
             thread_id: thread.id.clone(),
             agent_ref: Some("researcher".to_string()),
             agent_fingerprint: gateway_agent_definition_fingerprint(definition_json),
@@ -777,7 +777,7 @@ backend_ref = "{backend_ref}"
             binding: Some(&binding),
             target: &target,
             inherited_env: &env,
-            purpose: psychevo::AgentTurnPurpose::Child,
+            purpose: psychevo::application::AgentTurnPurpose::Child,
         })
         .expect_err("bound Team child cannot validate against its stale snapshot");
         assert_eq!(
@@ -791,7 +791,7 @@ backend_ref = "{backend_ref}"
             binding: Some(&binding),
             target: &target,
             inherited_env: &env,
-            purpose: psychevo::AgentTurnPurpose::Child,
+            purpose: psychevo::application::AgentTurnPurpose::Child,
         })
         .expect_err("bound Team child must compare the captured backend to current config");
         assert_eq!(

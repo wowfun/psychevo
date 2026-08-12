@@ -30,12 +30,12 @@ pub(super) const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
 
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
-    pub(crate) turn: psychevo::TurnResult,
+    pub(crate) turn: psychevo::application::TurnResult,
 }
 
 pub(crate) struct AcpPeerTurnRequest {
-    pub(crate) thread: psychevo::ThreadExecutionContext,
-    pub(crate) history: psychevo::HistoryReader,
+    pub(crate) thread: psychevo::application::ThreadExecutionContext,
+    pub(crate) history: psychevo::application::HistoryReader,
     pub(crate) turn_id: String,
     pub(crate) native_session_id: Option<String>,
     pub(crate) input: Vec<wire::source::GatewayInputPart>,
@@ -47,11 +47,11 @@ pub(crate) struct AcpPeerTurnRequest {
     pub(crate) mcp_servers: Vec<ResolvedMcpServerInput>,
     pub(crate) stream: Option<RunStreamSink>,
     pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
-    pub(crate) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
-    pub(crate) filesystem_authorizer: psychevo::AgentFilesystemAuthorizer,
-    pub(crate) control: psychevo::TurnControl,
-    pub(crate) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
-    pub(crate) workspace_root_capture: psychevo::WorkspaceRootCapture,
+    pub(crate) approval_handler: Option<Arc<dyn psychevo::application::ApprovalHandler>>,
+    pub(crate) filesystem_authorizer: psychevo::application::AgentFilesystemAuthorizer,
+    pub(crate) control: psychevo::application::TurnControl,
+    pub(crate) persistence: Arc<dyn psychevo::application::AgentTurnPersistence>,
+    pub(crate) workspace_root_capture: psychevo::application::WorkspaceRootCapture,
 }
 
 #[derive(Clone)]
@@ -60,9 +60,9 @@ pub(super) struct AcpClientContext {
     pub(super) workspace_roots: Vec<PathBuf>,
     pub(super) fs_read: bool,
     pub(super) fs_write: bool,
-    pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
-    pub(super) filesystem_authorizer: Option<psychevo::AgentFilesystemAuthorizer>,
-    pub(super) turn_control: Option<psychevo::TurnControl>,
+    pub(super) approval_handler: Option<Arc<dyn psychevo::application::ApprovalHandler>>,
+    pub(super) filesystem_authorizer: Option<psychevo::application::AgentFilesystemAuthorizer>,
+    pub(super) turn_control: Option<psychevo::application::TurnControl>,
     pub(super) terminal: bool,
     pub(super) terminal_env: BTreeMap<String, String>,
     pub(super) attachment: AcpAttachmentGuard,
@@ -168,8 +168,8 @@ struct PreviousAcpPromptUsage {
 
 #[derive(Clone)]
 struct AcpHistoryJournal {
-    history: psychevo::HistoryReader,
-    persistence: Arc<dyn psychevo::AgentTurnPersistence>,
+    history: psychevo::application::HistoryReader,
+    persistence: Arc<dyn psychevo::application::AgentTurnPersistence>,
 }
 
 impl AcpHistoryJournal {
@@ -355,7 +355,7 @@ struct ProjectedAcpHistoryEntry {
     replay_id: String,
     delivery_message_ids: Vec<String>,
     reconciles_delivery: bool,
-    messages: Vec<psychevo::AgentImportedMessage>,
+    messages: Vec<psychevo::application::AgentImportedMessage>,
 }
 
 fn project_acp_history_replay(
@@ -378,7 +378,7 @@ fn project_acp_history_replay(
                     }
                     (
                         false,
-                        vec![psychevo::AgentImportedMessage {
+                        vec![psychevo::application::AgentImportedMessage {
                             message: Message::User {
                                 content: vec![UserContentBlock::text(text.clone())],
                                 timestamp_ms,
@@ -403,7 +403,7 @@ fn project_acp_history_replay(
                     if content.is_empty() && plan.is_none() {
                         return None;
                     }
-                    let mut messages = vec![psychevo::AgentImportedMessage {
+                    let mut messages = vec![psychevo::application::AgentImportedMessage {
                         message: Message::Assistant {
                             content,
                             timestamp_ms,
@@ -423,7 +423,7 @@ fn project_acp_history_replay(
                     messages.extend(
                         persisted_tool_result_messages_at(content_slots, tools, timestamp_ms)
                             .into_iter()
-                            .map(|message| psychevo::AgentImportedMessage {
+                            .map(|message| psychevo::application::AgentImportedMessage {
                                 message,
                                 usage: None,
                                 metadata: None,
@@ -445,7 +445,7 @@ fn project_acp_history_replay(
 pub(crate) fn project_imported_acp_replay(
     peer: &ResolvedPeerTurn,
     replay: &AcpHistoryReplayProjection,
-) -> Vec<psychevo::AgentImportedMessage> {
+) -> Vec<psychevo::application::AgentImportedMessage> {
     project_acp_history_replay(peer, replay, gateway_now_ms(), None)
         .into_iter()
         .flat_map(|entry| entry.messages)
@@ -648,9 +648,9 @@ pub(crate) async fn run_acp_peer_turn(
                     "outcome": "aborted",
                 }),
             );
-            let turn = psychevo::TurnResult {
+            let turn = psychevo::application::TurnResult {
                 thread_id: session_id.clone(),
-                outcome: psychevo::TurnOutcome::Interrupted,
+                outcome: psychevo::application::TurnOutcome::Interrupted,
                 terminal_reason: None,
                 final_answer: String::new(),
                 provider: format!("acp:{}", peer.backend.id),
@@ -766,9 +766,9 @@ pub(crate) async fn run_acp_peer_turn(
         }),
     );
 
-    let turn = psychevo::TurnResult {
+    let turn = psychevo::application::TurnResult {
         thread_id: session_id.clone(),
-        outcome: psychevo::TurnOutcome::Completed,
+        outcome: psychevo::application::TurnOutcome::Completed,
         terminal_reason: None,
         final_answer: acp.final_answer,
         provider: format!("acp:{}", peer.backend.id),

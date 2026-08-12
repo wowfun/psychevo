@@ -122,10 +122,10 @@ impl ImAdapter for ExtensionChannelAdapter {
         let lease = Arc::clone(&self.lease);
         let connection_id = self.connection_id.clone();
         Box::pin(async move {
-            let lease = lease.read().await;
-            let lease = lease
-                .as_ref()
-                .ok_or_else(|| Error::Message("Channel Extension lease is closed".to_string()))?;
+            let lease =
+                lease.read().await.as_ref().cloned().ok_or_else(|| {
+                    Error::Message("Channel Extension lease is closed".to_string())
+                })?;
             let result = lease
                 .channel_poll(ChannelConnectionParams { connection_id })
                 .await?;
@@ -137,10 +137,10 @@ impl ImAdapter for ExtensionChannelAdapter {
         let lease = Arc::clone(&self.lease);
         let connection_id = self.connection_id.clone();
         Box::pin(async move {
-            let lease = lease.read().await;
-            let lease = lease
-                .as_ref()
-                .ok_or_else(|| Error::Message("Channel Extension lease is closed".to_string()))?;
+            let lease =
+                lease.read().await.as_ref().cloned().ok_or_else(|| {
+                    Error::Message("Channel Extension lease is closed".to_string())
+                })?;
             lease
                 .channel_send(ChannelSendParams {
                     connection_id,
@@ -338,6 +338,62 @@ mod tests {
         assert_eq!(polled.expect("poll").len(), 1);
         sent.expect("send");
         adapter.shutdown().await.expect("shutdown");
+        runtime.shutdown().await.expect("runtime shutdown");
+    }
+
+    #[tokio::test]
+    async fn gateway_adapter_shutdown_revokes_a_pending_long_poll() {
+        let profile = TempDir::new().expect("profile");
+        let source = TempDir::new().expect("source");
+        write_channel_extension(source.path());
+        let store = ExtensionStore::new(profile.path(), source.path());
+        let record = store
+            .install_local(source.path(), ExtensionScope::Profile)
+            .expect("install");
+        let manifest = load_extension_manifest(source.path()).expect("manifest");
+        let runtime = ExtensionRuntime::with_capabilities(
+            record,
+            manifest,
+            BTreeMap::new(),
+            ExtensionHostMode::Leased {
+                idle_timeout: Duration::from_secs(300),
+            },
+            HostCapabilities {
+                channels: true,
+                ..HostCapabilities::default()
+            },
+        )
+        .expect("runtime");
+        let lease = runtime.acquire().await.expect("lease");
+        lease
+            .channel_start(ChannelStartParams {
+                connection_id: "test".to_string(),
+                channel: "test".to_string(),
+                configuration: json!({ "blockPollUntilSend": true }),
+            })
+            .await
+            .expect("start");
+        let adapter = Arc::new(ExtensionChannelAdapter {
+            platform: "test".to_string(),
+            connection_id: "test".to_string(),
+            lease: Arc::new(RwLock::new(Some(lease))),
+            _activity: test_activity_guard(),
+        });
+
+        let polling = {
+            let adapter = Arc::clone(&adapter);
+            tokio::spawn(async move { adapter.poll().await })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::timeout(Duration::from_secs(1), adapter.shutdown())
+            .await
+            .expect("shutdown must not wait for the poll timeout")
+            .expect("shutdown");
+        tokio::time::timeout(Duration::from_secs(1), polling)
+            .await
+            .expect("poll settles after stop")
+            .expect("poll task")
+            .expect("poll response");
         runtime.shutdown().await.expect("runtime shutdown");
     }
 

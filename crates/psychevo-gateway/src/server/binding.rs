@@ -9,9 +9,9 @@ use axum::Router;
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
 use axum::routing::{get, post};
-use psychevo::Client as FrameworkClient;
-use psychevo::PermissionMode;
+use psychevo::application::Client as FrameworkClient;
 use psychevo::application::GatewayDurability;
+use psychevo::application::PermissionMode;
 use psychevo::config::McpOAuthCredentialStore;
 #[cfg(not(test))]
 use psychevo::config::SystemMcpOAuthCredentialStore;

@@ -1,4 +1,6 @@
-use psychevo::{ShellCommandOutcome, ShellCommandResult, TurnResult};
+use psychevo::{
+    application::ShellCommandOutcome, application::ShellCommandResult, application::TurnResult,
+};
 use psychevo_gateway_protocol::events_transcript::TranscriptEntry;
 use psychevo_gateway_protocol::source::{GatewayThread, GatewayTurn};
 

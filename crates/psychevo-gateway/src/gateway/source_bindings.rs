@@ -62,7 +62,7 @@ impl Gateway {
                 }
             }
         }
-        self.bump_source_generation_key(&source_key);
+        self.invalidate_source_epoch(&source_key);
         Ok(())
     }
 
@@ -90,7 +90,7 @@ impl Gateway {
                 previous
             }
         };
-        self.bump_source_generation_key(&source_key);
+        self.invalidate_source_epoch(&source_key);
         Ok(previous)
     }
 
@@ -127,7 +127,7 @@ impl Gateway {
 
             rotated += 1;
             let source_key = SourceKey(binding.source_key.clone());
-            self.bump_source_generation_key(&source_key);
+            self.invalidate_source_epoch(&source_key);
             self.register_active_queue_alias(
                 &source_key_key(&source_key),
                 &thread_key(&binding.thread_id),
@@ -177,7 +177,7 @@ impl Gateway {
                     .await?;
             }
         }
-        self.bump_source_generation_key(&source_key);
+        self.invalidate_source_epoch(&source_key);
         Ok(())
     }
 

@@ -5,7 +5,7 @@ use futures::future::BoxFuture;
 use psychevo::application::{
     GatewayChannelOutboxInput, GatewayChannelOutboxRecord, GatewayChannelOutboxStatus,
 };
-use psychevo::{Error, PermissionMode, config::ChannelRuntimeConnection};
+use psychevo::{Error, application::PermissionMode, config::ChannelRuntimeConnection};
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

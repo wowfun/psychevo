@@ -124,12 +124,12 @@ async fn render_download(
         Some(value) => SessionExportIncludeSet::parse(value, artifact_kind)?,
         None => SessionExportIncludeSet::default_for(artifact_kind),
     };
-    let artifact = state
+    let stream = state
         .inner
         .framework
         .resume_thread(session_id)
         .await?
-        .render_export(SessionExportOptions {
+        .stream_export(SessionExportOptions {
             format,
             include,
             artifact_kind,
@@ -138,12 +138,12 @@ async fn render_download(
     let filename = query
         .filename
         .as_deref()
-        .and_then(|filename| sanitize_download_filename(filename, artifact.format))
-        .unwrap_or_else(|| format!("{kind}-{session_id}.{}", artifact.format.extension()));
-    let mut response = Response::new(Body::from(artifact.content));
+        .and_then(|filename| sanitize_download_filename(filename, format))
+        .unwrap_or_else(|| format!("{kind}-{session_id}.{}", format.extension()));
+    let mut response = Response::new(Body::from_stream(stream));
     response.headers_mut().insert(
         CONTENT_TYPE,
-        HeaderValue::from_static(content_type_for_export_format(artifact.format)),
+        HeaderValue::from_static(content_type_for_export_format(format)),
     );
     response.headers_mut().insert(
         CONTENT_DISPOSITION,

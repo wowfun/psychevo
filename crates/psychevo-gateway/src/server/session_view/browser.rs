@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use psychevo::HumanThreadBrowserQuery;
+use psychevo::application::HumanThreadBrowserQuery;
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 

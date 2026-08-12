@@ -23,8 +23,8 @@ async fn start_thread(
     cwd: &Path,
     source: &str,
     metadata: Option<Value>,
-) -> psychevo::Thread {
-    let mut request = psychevo::StartThreadRequest::new(cwd);
+) -> psychevo::application::Thread {
+    let mut request = psychevo::application::StartThreadRequest::new(cwd);
     request.source = source.to_string();
     request.metadata = metadata;
     state
@@ -75,7 +75,9 @@ async fn thread_trace_reads_through_the_framework_thread_owner() {
     let thread_id = state
         .inner
         .framework
-        .start_thread(psychevo::StartThreadRequest::new(&state.inner.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(
+            &state.inner.cwd,
+        ))
         .await
         .expect("thread")
         .id()
@@ -118,7 +120,9 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
     let top_level_thread = start_thread(&state, &other_cwd, "web", None).await;
     let top_level = top_level_thread.id().to_string();
     top_level_thread
-        .start_turn(psychevo::TurnRequest::new("seed fallback title"))
+        .start_turn(psychevo::application::TurnRequest::new(
+            "seed fallback title",
+        ))
         .await
         .expect("fallback title turn")
         .wait()

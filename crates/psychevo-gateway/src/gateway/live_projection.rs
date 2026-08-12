@@ -40,9 +40,20 @@ pub struct GatewayLiveSnapshotObservation {
     pub event: GatewayEvent,
 }
 
+#[derive(Clone, Debug)]
+pub struct GatewayLiveSnapshotPage {
+    pub high_watermark: i64,
+    pub next_version: i64,
+    pub snapshots: Vec<GatewayLiveSnapshotObservation>,
+}
+
 impl Gateway {
     pub async fn latest_live_event_seq(&self) -> psychevo::Result<i64> {
         self.durability.latest_gateway_live_event_seq().await
+    }
+
+    pub async fn latest_live_snapshot_version(&self) -> psychevo::Result<i64> {
+        self.durability.latest_gateway_live_snapshot_version().await
     }
 
     pub async fn cleanup_retained_live_projection(&self, before_ms: i64) -> psychevo::Result<()> {
@@ -109,12 +120,50 @@ impl Gateway {
         })
     }
 
-    pub async fn foreign_live_snapshots(
+    pub async fn foreign_live_snapshot_changes(
         &self,
-        thread_id: Option<&str>,
+        after_version: i64,
         limit: usize,
-    ) -> psychevo::Result<Vec<GatewayLiveSnapshotObservation>> {
-        self.live_snapshots(thread_id, None, limit, true).await
+    ) -> psychevo::Result<GatewayLiveSnapshotPage> {
+        let page = self
+            .durability
+            .list_gateway_live_snapshot_changes(after_version, self.owner_id(), limit)
+            .await?;
+        let snapshots = self
+            .project_live_snapshots(page.snapshots, None, true)
+            .await?;
+        Ok(GatewayLiveSnapshotPage {
+            high_watermark: page.high_watermark,
+            next_version: page.next_version,
+            snapshots,
+        })
+    }
+
+    pub async fn foreign_live_snapshots_for_thread(
+        &self,
+        thread_id: &str,
+        after_version: i64,
+        through_version: Option<i64>,
+        limit: usize,
+    ) -> psychevo::Result<GatewayLiveSnapshotPage> {
+        let page = self
+            .durability
+            .list_gateway_live_snapshot_changes_for_thread(
+                after_version,
+                through_version,
+                Some(self.owner_id()),
+                thread_id,
+                limit,
+            )
+            .await?;
+        let snapshots = self
+            .project_live_snapshots(page.snapshots, Some(thread_id), true)
+            .await?;
+        Ok(GatewayLiveSnapshotPage {
+            high_watermark: page.high_watermark,
+            next_version: page.next_version,
+            snapshots,
+        })
     }
 
     pub(crate) async fn live_snapshots_for_thread(
@@ -123,25 +172,41 @@ impl Gateway {
         turn_id: &str,
         limit: usize,
     ) -> psychevo::Result<Vec<GatewayLiveSnapshotObservation>> {
-        self.live_snapshots(Some(thread_id), Some(turn_id), limit, false)
-            .await
+        let mut after_version = 0;
+        let mut through_version = None;
+        let mut snapshots = Vec::new();
+        loop {
+            let page = self
+                .durability
+                .list_gateway_live_snapshot_changes_for_thread(
+                    after_version,
+                    through_version,
+                    None,
+                    thread_id,
+                    limit,
+                )
+                .await?;
+            through_version = Some(page.high_watermark);
+            after_version = page.next_version;
+            snapshots.extend(
+                self.project_live_snapshots(page.snapshots, Some(thread_id), false)
+                    .await?
+                    .into_iter()
+                    .filter(|snapshot| snapshot.context.turn_id.as_deref() == Some(turn_id)),
+            );
+            if after_version >= page.high_watermark {
+                break;
+            }
+        }
+        Ok(snapshots)
     }
 
-    async fn live_snapshots(
+    async fn project_live_snapshots(
         &self,
+        records: Vec<psychevo::application::GatewayLiveSnapshotRecord>,
         thread_id: Option<&str>,
-        turn_id: Option<&str>,
-        limit: usize,
         foreign_only: bool,
     ) -> psychevo::Result<Vec<GatewayLiveSnapshotObservation>> {
-        let records = match thread_id {
-            Some(thread_id) => {
-                self.durability
-                    .list_gateway_live_snapshots_for_thread(thread_id, turn_id, limit)
-                    .await?
-            }
-            None => self.durability.list_gateway_live_snapshots(limit).await?,
-        };
         let activities = self
             .activities_for_live_records(
                 records
@@ -449,10 +514,11 @@ mod tests {
             .await
             .expect("local snapshot");
 
-        let snapshots = gateway
-            .foreign_live_snapshots(None, 1000)
+        let snapshot_page = gateway
+            .foreign_live_snapshot_changes(0, 1000)
             .await
             .expect("snapshots");
+        let snapshots = snapshot_page.snapshots;
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].snapshot_key, "snapshot-live");
         assert_eq!(
@@ -467,6 +533,66 @@ mod tests {
                 .expect("live activity")
                 .map(|activity| activity.lease_expires_at_ms)
         );
+        runtime.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn all_owner_thread_hydration_reads_past_one_snapshot_page() {
+        let temp = tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let runtime =
+            GatewayApplication::open(home, temp.path().join("state.db"), None, Default::default())
+                .await
+                .expect("test composition");
+        let gateway = runtime.gateway().clone();
+        let durability = runtime.application().gateway_durability();
+        let thread_id = runtime
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread")
+            .id()
+            .to_string();
+        let keys = (0..1001)
+            .map(|index| format!("snapshot-{index:04}"))
+            .collect::<Vec<_>>();
+        let events = keys
+            .iter()
+            .map(|key| {
+                serde_json::to_value(GatewayEvent::Warning {
+                    kind: "test".to_string(),
+                    message: key.clone(),
+                    source_path: None,
+                    suggestion: None,
+                })
+                .expect("event")
+            })
+            .collect::<Vec<_>>();
+        let inputs = keys
+            .iter()
+            .zip(&events)
+            .map(|(key, event)| GatewayLiveSnapshotInput {
+                snapshot_key: key,
+                activity_id: None,
+                owner_id: Some(gateway.owner_id()),
+                thread_id: Some(&thread_id),
+                turn_id: Some("turn-live"),
+                event_kind: "warning",
+                event: event.clone(),
+            })
+            .collect::<Vec<_>>();
+        durability
+            .upsert_gateway_live_snapshots(&inputs)
+            .await
+            .expect("snapshots");
+
+        let snapshots = gateway
+            .live_snapshots_for_thread(&thread_id, "turn-live", 1000)
+            .await
+            .expect("hydration");
+
+        assert_eq!(snapshots.len(), 1001);
         runtime.shutdown().await.expect("shutdown");
     }
 }

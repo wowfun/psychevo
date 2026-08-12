@@ -1,5 +1,5 @@
-use psychevo::RunWarning;
 use psychevo::application::ClarifyResolvedReason;
+use psychevo::application::RunWarning;
 use serde_json::{Value, json};
 
 use psychevo_gateway_protocol::events_transcript::{

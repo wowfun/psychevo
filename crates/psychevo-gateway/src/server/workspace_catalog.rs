@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use psychevo::{GatewayNavigationState, Workspace, WorkspaceUpdate};
+use psychevo::{
+    application::GatewayNavigationState, application::Workspace, application::WorkspaceUpdate,
+};
 use psychevo_gateway_protocol as wire;
 
 use super::auth_input::authorize_thread;

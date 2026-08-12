@@ -35,8 +35,8 @@ impl ChannelTurnProbe {
 
     async fn execute(
         &self,
-        invocation: psychevo::AgentTurnInvocation,
-    ) -> psychevo::Result<psychevo::TurnResult> {
+        invocation: psychevo::application::AgentTurnInvocation,
+    ) -> psychevo::Result<psychevo::application::TurnResult> {
         invocation.persistence.confirm_delivery().await?;
         let run_number = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
         if self.request_permission.load(Ordering::SeqCst) {
@@ -65,9 +65,9 @@ impl ChannelTurnProbe {
             .lock()
             .expect("prompts poisoned")
             .push(invocation.input.prompt);
-        Ok(psychevo::TurnResult {
+        Ok(psychevo::application::TurnResult {
             thread_id: invocation.receipt.thread_id,
-            outcome: psychevo::TurnOutcome::Completed,
+            outcome: psychevo::application::TurnOutcome::Completed,
             terminal_reason: None,
             final_answer: format!("answer {run_number}"),
             provider: "fake-provider".to_string(),
@@ -306,7 +306,7 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let connection = ready_wechat_connection(None);
     let message = wechat_message("original prompt must not rerun", "wx-outbox");
     let source = gateway_source_for_im(&message);
-    let mut start = psychevo::StartThreadRequest::new(&cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&cwd);
     start.source = "channel".to_string();
     let thread_id = state
         .inner

@@ -987,10 +987,10 @@ pub(super) async fn agent_status_result(
 }
 
 pub(super) async fn team_status_result(
-    thread: Option<&psychevo::Thread>,
+    thread: Option<&psychevo::application::Thread>,
     control: &AgentControl,
 ) -> psychevo::Result<wire::agents_backend_rpc::TeamStatusResult> {
-    let parent_thread_id = thread.map(psychevo::Thread::id);
+    let parent_thread_id = thread.map(psychevo::application::Thread::id);
     let coordination = match thread {
         Some(thread) => Some(thread.agent_coordination_status().await?),
         None => None,
@@ -1126,7 +1126,9 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::agents_backend_rpc::AgentRun
     }
 }
 
-fn team_run_view(record: &psychevo::AgentTeamRunStatus) -> wire::agents_backend_rpc::TeamRunView {
+fn team_run_view(
+    record: &psychevo::application::AgentTeamRunStatus,
+) -> wire::agents_backend_rpc::TeamRunView {
     wire::agents_backend_rpc::TeamRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_thread_id.clone(),
@@ -1145,7 +1147,7 @@ fn team_run_view(record: &psychevo::AgentTeamRunStatus) -> wire::agents_backend_
 }
 
 fn mission_run_view(
-    record: &psychevo::AgentMissionRunStatus,
+    record: &psychevo::application::AgentMissionRunStatus,
 ) -> wire::agents_backend_rpc::MissionRunView {
     wire::agents_backend_rpc::MissionRunView {
         id: record.id.clone(),

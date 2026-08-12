@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use psychevo::RunMode;
-use psychevo::ThreadAgentBinding;
+use psychevo::application::RunMode;
+use psychevo::application::ThreadAgentBinding;
 use psychevo::application::{
     GatewayActivityClaimInput, GatewayActivityKind, GatewayControlCommandKind,
 };
@@ -949,10 +949,10 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
         state
             .inner
             .framework
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(state.inner.cwd.clone()),
                 limit: 1,
-                ..psychevo::ThreadListQuery::default()
+                ..psychevo::application::ThreadListQuery::default()
             })
             .await
             .expect("Threads")
@@ -1042,10 +1042,10 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
         state
             .inner
             .framework
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(state.inner.cwd.clone()),
                 limit: 1,
-                ..psychevo::ThreadListQuery::default()
+                ..psychevo::application::ThreadListQuery::default()
             })
             .await
             .expect("Threads")

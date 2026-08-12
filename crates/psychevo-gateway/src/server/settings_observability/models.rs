@@ -7,7 +7,10 @@ use psychevo::config::{
     set_default_model_with_reasoning, set_provider_model_config,
 };
 use psychevo::model_state::{ModelState, normalize_reasoning_effort};
-use psychevo::{Configuration, ConfigurationQuery, Error, ThreadModelSelection};
+use psychevo::{
+    Error, application::Configuration, application::ConfigurationQuery,
+    application::ThreadModelSelection,
+};
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 

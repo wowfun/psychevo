@@ -125,9 +125,9 @@ pub(in super::super) async fn snapshot_activity(
 async fn snapshot_activity_for_thread(
     state: &WebState,
     source: &GatewaySource,
-    thread: Option<&psychevo::Thread>,
+    thread: Option<&psychevo::application::Thread>,
 ) -> psychevo::Result<GatewayActivity> {
-    let thread_id = thread.map(psychevo::Thread::id);
+    let thread_id = thread.map(psychevo::application::Thread::id);
     let activity = state.activity(source, thread_id).await;
     let Some(thread) = thread else {
         return Ok(activity);

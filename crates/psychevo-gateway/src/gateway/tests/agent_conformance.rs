@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use psychevo::application::PermissionApprovalDecision;
-use psychevo::{Application, ConfigurationQuery, PermissionMode, RunMode, ThreadAgentBinding};
+use psychevo::{
+    application::Application, application::ConfigurationQuery, application::PermissionMode,
+    application::RunMode, application::ThreadAgentBinding,
+};
 use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -683,7 +686,10 @@ async fn conformance_cancel_produces_one_interrupted_terminal(runtime: AgentConf
         .unwrap_or_else(|_| panic!("{} Agent ignored cancel", runtime.label()))
         .expect("cancel task")
         .expect("cancel result");
-    assert_eq!(result.result.outcome, psychevo::TurnOutcome::Interrupted);
+    assert_eq!(
+        result.result.outcome,
+        psychevo::application::TurnOutcome::Interrupted
+    );
     assert_eq!(result.turn.status, GatewayTurnStatus::Interrupted);
     assert_eq!(completion_turn_ids(&events), vec![result.turn.id.clone()]);
     harness
@@ -790,7 +796,7 @@ async fn conformance_permission_interaction_is_accepted_once(runtime: AgentConfo
         interaction_thread
             .respond(
                 &action_id,
-                psychevo::InteractionResponse::Permission(
+                psychevo::application::InteractionResponse::Permission(
                     PermissionApprovalDecision::allow_once(),
                 ),
             )
@@ -802,7 +808,7 @@ async fn conformance_permission_interaction_is_accepted_once(runtime: AgentConfo
         !interaction_thread
             .respond(
                 &action_id,
-                psychevo::InteractionResponse::Permission(
+                psychevo::application::InteractionResponse::Permission(
                     PermissionApprovalDecision::allow_once(),
                 ),
             )
@@ -1123,7 +1129,7 @@ async fn thread_application_run_turn_lowers_typed_caller_intent() {
     let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text {
         text: "typed application input".to_string(),
     }]);
-    let mut start = psychevo::StartThreadRequest::new(&harness.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&harness.cwd);
     start.source = "application-conformance".to_string();
     let thread = harness
         ._application

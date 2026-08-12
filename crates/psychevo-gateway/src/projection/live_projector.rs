@@ -126,9 +126,9 @@ impl GatewayLiveProjector {
                 let value = framework_runtime_event_value(
                     data,
                     match stage {
-                        psychevo::ItemStage::Started => "tool_execution_start",
-                        psychevo::ItemStage::Updated => "tool_execution_update",
-                        psychevo::ItemStage::Completed => "tool_execution_end",
+                        psychevo::application::ItemStage::Started => "tool_execution_start",
+                        psychevo::application::ItemStage::Updated => "tool_execution_update",
+                        psychevo::application::ItemStage::Completed => "tool_execution_end",
                     },
                 );
                 self.project_framework_runtime_event(turn_id, value.as_ref(), false)?
@@ -329,16 +329,16 @@ impl GatewayLiveProjector {
 }
 
 pub(super) fn framework_message_event_value(
-    stage: psychevo::ItemStage,
+    stage: psychevo::application::ItemStage,
     message: &Value,
     usage: Option<&Value>,
     metadata: Option<&Value>,
     accounting: Option<&Value>,
 ) -> Value {
     let event_type = match stage {
-        psychevo::ItemStage::Started => "message_start",
-        psychevo::ItemStage::Updated => "message_update",
-        psychevo::ItemStage::Completed => "message_end",
+        psychevo::application::ItemStage::Started => "message_start",
+        psychevo::application::ItemStage::Updated => "message_update",
+        psychevo::application::ItemStage::Completed => "message_end",
     };
     let mut value = json!({ "type": event_type, "message": message });
     let object = value

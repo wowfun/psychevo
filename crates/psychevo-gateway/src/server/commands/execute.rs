@@ -16,7 +16,7 @@ use psychevo::command_registry::{
     parse_slash_command_line, slash_command_spec, slash_invocation_effect,
 };
 use psychevo::session_export::{SessionArtifactKind, SessionExportFormat};
-use psychevo::{Error, PermissionMode, RunMode};
+use psychevo::{Error, application::PermissionMode, application::RunMode};
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -264,7 +264,7 @@ async fn command_result_from_effect(
             command_side_conversation_start(state, scope, raw, action, thread_id, prompt).await
         }
         SlashCommandEffect::SandboxShow => {
-            let mut query = psychevo::ConfigurationQuery::new(&scope.cwd);
+            let mut query = psychevo::application::ConfigurationQuery::new(&scope.cwd);
             query.inherited_env = Some(state.inner.inherited_env.clone());
             if let Some(thread_id) = thread_id.as_deref() {
                 query.workspace_roots = state
@@ -616,7 +616,7 @@ async fn command_session_thread(
     scope: &ResolvedScope,
     thread_id: Option<String>,
     verb: &str,
-) -> std::result::Result<psychevo::Thread, String> {
+) -> std::result::Result<psychevo::application::Thread, String> {
     let Some(thread_id) = thread_id else {
         return Err(format!("no current session to {verb}"));
     };

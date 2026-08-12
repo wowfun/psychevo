@@ -24,6 +24,7 @@ use sha2::Digest as _;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot as tokio_oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use crate::active_keyed::{ActiveKeyedMutex, ActiveKeyedMutexReservation};
 use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
 use crate::gateway::peer_runtime::ResolvedPeerTurn;
 
@@ -1097,36 +1098,13 @@ enum AcpProcessCommand {
     Shutdown,
 }
 
-type AcpSessionLocks = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
+type AcpSessionLocks = ActiveKeyedMutex;
 
 fn acp_session_lock(
     session_locks: &AcpSessionLocks,
     local_session_id: &str,
-) -> psychevo::Result<Arc<tokio::sync::Mutex<()>>> {
-    let mut locks = session_locks
-        .lock()
-        .map_err(|_| Error::Message("ACP session lock registry poisoned".to_string()))?;
-    Ok(Arc::clone(
-        locks
-            .entry(local_session_id.to_string())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-    ))
-}
-
-fn remove_acp_session_lock(
-    session_locks: &AcpSessionLocks,
-    local_session_id: &str,
-    expected: &Arc<tokio::sync::Mutex<()>>,
-) {
-    let Ok(mut locks) = session_locks.lock() else {
-        return;
-    };
-    if locks
-        .get(local_session_id)
-        .is_some_and(|current| Arc::ptr_eq(current, expected))
-    {
-        locks.remove(local_session_id);
-    }
+) -> psychevo::Result<ActiveKeyedMutexReservation> {
+    Ok(session_locks.reserve(local_session_id))
 }
 
 struct AcpProtocolObservingTransport<T> {
@@ -1584,7 +1562,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
             let sessions: AcpResidentSessions =
                 Arc::new(tokio::sync::Mutex::new(BTreeMap::new()));
             let notification_router = AcpNotificationRouter::default();
-            let session_locks: AcpSessionLocks = Arc::new(Mutex::new(HashMap::new()));
+            let session_locks = AcpSessionLocks::default();
             let next_session_epoch = Arc::new(AtomicU64::new(1));
             let process_generation = AcpProcessGeneration {
                 cx: cx.clone(),
@@ -2095,7 +2073,6 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                 let contexts = Arc::clone(&contexts);
                                 let sessions = Arc::clone(&sessions);
                                 let terminals = terminals.clone();
-                                let session_locks = Arc::clone(&session_locks);
                                 tasks.spawn(async move {
                                     let _session_guard = session_lock.lock().await;
                                     let result = remove_resident_session_resources(
@@ -2104,13 +2081,6 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         &terminals,
                                         &session,
                                     ).await;
-                                    if result.is_ok() {
-                                        remove_acp_session_lock(
-                                            &session_locks,
-                                            &session.local_session_id,
-                                            &session_lock,
-                                        );
-                                    }
                                     let _ = reply.send(result);
                                 });
                             }
@@ -2142,9 +2112,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     }
                                 };
                                 let process = process_generation.clone();
-                                let session_locks = Arc::clone(&session_locks);
                                 tasks.spawn(async move {
-                                    let result = match validate_resident_session_ref(
+                                    let admission = validate_resident_session_ref(
                                         &process.sessions,
                                         &session,
                                     )
@@ -2154,18 +2123,20 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                             &process.cx,
                                             &session.native_session_id,
                                         )
-                                    }) {
-                                        Err(error) => Err(error),
+                                    });
+                                    let (result, _session_guard) = match admission {
+                                        Err(error) => (Err(error), None),
                                         Ok(()) => {
-                                            let _session_guard = session_lock.lock().await;
-                                            close_resident_acp_session(
+                                            let session_guard = session_lock.lock().await;
+                                            let result = close_resident_acp_session(
                                                 &process,
                                                 &mut subscription,
                                                 AcpCloseSessionInput {
                                                     session: session.clone(),
                                                 },
                                             )
-                                            .await
+                                            .await;
+                                            (result, Some(session_guard))
                                         }
                                     };
                                     drain_acp_notification_subscription(
@@ -2174,13 +2145,6 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         process.generation,
                                     )
                                     .await;
-                                    if result.is_ok() {
-                                        remove_acp_session_lock(
-                                            &session_locks,
-                                            &session.local_session_id,
-                                            &session_lock,
-                                        );
-                                    }
                                     let _ = reply.send(result);
                                 });
                             }
@@ -2213,9 +2177,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     }
                                 };
                                 let process = process_generation.clone();
-                                let session_locks = Arc::clone(&session_locks);
                                 tasks.spawn(async move {
-                                    let result = match validate_delete_session_ref(
+                                    let admission = validate_delete_session_ref(
                                         &process.sessions,
                                         &native_session_id,
                                         resident.as_ref(),
@@ -2226,11 +2189,12 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                             &process.cx,
                                             &native_session_id,
                                         )
-                                    }) {
-                                        Err(error) => Err(error),
+                                    });
+                                    let (result, _session_guard) = match admission {
+                                        Err(error) => (Err(error), None),
                                         Ok(()) => {
-                                            let _session_guard = session_lock.lock().await;
-                                            delete_acp_session(
+                                            let session_guard = session_lock.lock().await;
+                                            let result = delete_acp_session(
                                                 &process,
                                                 &mut subscription,
                                                 AcpDeleteSessionInput {
@@ -2238,7 +2202,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                                     resident,
                                                 },
                                             )
-                                            .await
+                                            .await;
+                                            (result, Some(session_guard))
                                         }
                                     };
                                     drain_acp_notification_subscription(
@@ -2247,13 +2212,6 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                         process.generation,
                                     )
                                     .await;
-                                    if result.is_ok() {
-                                        remove_acp_session_lock(
-                                            &session_locks,
-                                            &lock_id,
-                                            &session_lock,
-                                        );
-                                    }
                                     let _ = reply.send(result);
                                 });
                             }
@@ -2438,4 +2396,21 @@ pub(super) fn acp_unknown_delivery_error(message: impl Into<String>) -> Error {
         message,
         Some("acp-process".to_string()),
     )
+}
+
+#[cfg(test)]
+mod keyed_session_lock_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn session_lane_reservations_share_and_reclaim_one_entry() {
+        let locks = AcpSessionLocks::default();
+        let current = acp_session_lock(&locks, "session").expect("current lane");
+        let queued = acp_session_lock(&locks, "session").expect("queued lane");
+        assert_eq!(locks.active_keys(), 1);
+        let current_guard = current.lock().await;
+        drop(current_guard);
+        drop(queued.lock().await);
+        assert_eq!(locks.active_keys(), 0);
+    }
 }

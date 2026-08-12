@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use psychevo::ThreadItem;
 use psychevo::application::Message;
+use psychevo::application::ThreadItem;
 use psychevo::tool_argument_display::{
     write_argument_preview_from_args, write_argument_preview_from_json,
 };

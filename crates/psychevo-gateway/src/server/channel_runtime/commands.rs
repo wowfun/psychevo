@@ -6,8 +6,8 @@ use psychevo::command_registry::{
     parse_slash_command_line, slash_invocation_effect,
 };
 use psychevo::{
-    ConfigurationQuery, Error, RunMode, StartThreadRequest, agents::AgentEntrypoint,
-    config::ChannelRuntimeConnection,
+    Error, agents::AgentEntrypoint, application::ConfigurationQuery, application::RunMode,
+    application::StartThreadRequest, config::ChannelRuntimeConnection,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;

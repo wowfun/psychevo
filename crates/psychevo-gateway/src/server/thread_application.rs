@@ -666,7 +666,7 @@ pub(super) async fn start_thread_turn(
     let accepted_result = if creates_thread {
         let source = prepared.initial_source.and_then(|source| {
             (source.lifetime == GatewaySourceLifetime::Persistent).then(|| {
-                psychevo::InitialThreadSourceAssociation {
+                psychevo::application::InitialThreadSourceAssociation {
                     source_key: source.source_key().0,
                     source_kind: source.kind,
                     raw_identity: source.raw_identity.unwrap_or(Value::Null),
@@ -679,7 +679,7 @@ pub(super) async fn start_thread_turn(
             .into_iter()
             .map(|(key, value)| (key, Value::String(value)))
             .collect();
-        let mut start = psychevo::StartThreadRequest::new(&scope.cwd);
+        let mut start = psychevo::application::StartThreadRequest::new(&scope.cwd);
         if let Some(workspace) = workspace_snapshot {
             start = start.with_workspace_snapshot(workspace);
         }
@@ -846,7 +846,7 @@ pub(super) async fn run_routed_turn(
     let handle = if creates_thread {
         let durable_source = initial_source.as_ref().and_then(|source| {
             (source.lifetime == GatewaySourceLifetime::Persistent).then(|| {
-                psychevo::InitialThreadSourceAssociation {
+                psychevo::application::InitialThreadSourceAssociation {
                     source_key: source.source_key().0,
                     source_kind: source.kind.clone(),
                     raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
@@ -859,7 +859,7 @@ pub(super) async fn run_routed_turn(
             .into_iter()
             .map(|(key, value)| (key, Value::String(value)))
             .collect();
-        let mut start = psychevo::StartThreadRequest::new(&scope.cwd);
+        let mut start = psychevo::application::StartThreadRequest::new(&scope.cwd);
         start.source = submission.request.source().to_string();
         start.metadata = prepared.lineage.clone();
         state
@@ -918,23 +918,23 @@ pub(super) async fn run_routed_turn(
 }
 
 pub(super) fn framework_gateway_turn_result(
-    receipt: psychevo::TurnReceipt,
-    result: psychevo::TurnResult,
+    receipt: psychevo::application::TurnReceipt,
+    result: psychevo::application::TurnResult,
 ) -> GatewayTurnResult {
     let (outcome, status) = match result.outcome {
-        psychevo::TurnOutcome::Completed => (
+        psychevo::application::TurnOutcome::Completed => (
             psychevo::application::Outcome::Normal,
             GatewayTurnStatus::Completed,
         ),
-        psychevo::TurnOutcome::Stopped => (
+        psychevo::application::TurnOutcome::Stopped => (
             psychevo::application::Outcome::Stopped,
             GatewayTurnStatus::Interrupted,
         ),
-        psychevo::TurnOutcome::Failed => (
+        psychevo::application::TurnOutcome::Failed => (
             psychevo::application::Outcome::Failed,
             GatewayTurnStatus::Failed,
         ),
-        psychevo::TurnOutcome::Interrupted => (
+        psychevo::application::TurnOutcome::Interrupted => (
             psychevo::application::Outcome::Aborted,
             GatewayTurnStatus::Interrupted,
         ),
@@ -1309,9 +1309,17 @@ pub(super) async fn authoritative_history_projection(
         .gateway
         .thread_transcript_page(thread_id, None, 100)
         .await?;
-    if let Some((turn_id, first_committed_seq)) =
-        active_turn_projection_window(state, thread_id, &activity).await?
-    {
+    let active_window = active_turn_projection_window(state, thread_id, &activity).await?;
+    transcript::settle_committed_running_blocks(
+        &mut page.entries,
+        activity.running.then(|| {
+            active_window
+                .as_ref()
+                .map(|(_, first_committed_seq)| *first_committed_seq)
+                .unwrap_or(i64::MIN)
+        }),
+    );
+    if let Some((turn_id, first_committed_seq)) = active_window {
         transcript::stamp_committed_entries_for_turn_window(
             &mut page.entries,
             transcript::TurnProjectionWindow {
@@ -1361,9 +1369,18 @@ pub(super) async fn read_history(
         .await?;
     if before.is_none() {
         let activity = snapshot_activity(state, &scope.source, Some(&params.thread_id)).await?;
-        if let Some((turn_id, first_committed_seq)) =
-            active_turn_projection_window(state, &params.thread_id, &activity).await?
-        {
+        let active_window =
+            active_turn_projection_window(state, &params.thread_id, &activity).await?;
+        transcript::settle_committed_running_blocks(
+            &mut page.entries,
+            activity.running.then(|| {
+                active_window
+                    .as_ref()
+                    .map(|(_, first_committed_seq)| *first_committed_seq)
+                    .unwrap_or(i64::MIN)
+            }),
+        );
+        if let Some((turn_id, first_committed_seq)) = active_window {
             transcript::stamp_committed_entries_for_turn_window(
                 &mut page.entries,
                 transcript::TurnProjectionWindow {
@@ -1379,6 +1396,8 @@ pub(super) async fn read_history(
             &mut page.entries,
         )
         .await?;
+    } else {
+        transcript::settle_committed_running_blocks(&mut page.entries, None);
     }
     let next_cursor = page.next_cursor;
     let mut history = context.history;
@@ -1570,7 +1589,7 @@ pub(super) async fn run_routed_action(
                         .steer(&expected_turn_id, text)
                     {
                         Ok(accepted) => accepted,
-                        Err(psychevo::ControlInputError::Closed) => false,
+                        Err(psychevo::application::ControlInputError::Closed) => false,
                         Err(error) => return Err(control_input_application_error(error)),
                     }
                 }
@@ -1679,14 +1698,16 @@ pub(super) async fn run_routed_action(
     }
 }
 
-fn control_input_application_error(error: psychevo::ControlInputError) -> psychevo::Error {
+fn control_input_application_error(
+    error: psychevo::application::ControlInputError,
+) -> psychevo::Error {
     let data = match &error {
-        psychevo::ControlInputError::CountLimit { limit } => json!({
+        psychevo::application::ControlInputError::CountLimit { limit } => json!({
             "kind": "control_input_overload",
             "resource": "count",
             "limit": limit,
         }),
-        psychevo::ControlInputError::ByteLimit { limit } => json!({
+        psychevo::application::ControlInputError::ByteLimit { limit } => json!({
             "kind": "control_input_overload",
             "resource": "bytes",
             "limit": limit,
@@ -1888,15 +1909,15 @@ pub(super) async fn respond_to_routed_interaction_for_selector(
             wire::thread_command_turn::ThreadInteractionResponse::Permission {
                 decision,
                 directory,
-            } => psychevo::InteractionResponse::Permission(permission_decision(
+            } => psychevo::application::InteractionResponse::Permission(permission_decision(
                 *decision,
                 directory.clone(),
             )),
             wire::thread_command_turn::ThreadInteractionResponse::Clarify { answers } => {
-                psychevo::InteractionResponse::Clarify(answers.clone())
+                psychevo::application::InteractionResponse::Clarify(answers.clone())
             }
             wire::thread_command_turn::ThreadInteractionResponse::CancelClarify => {
-                psychevo::InteractionResponse::Cancel
+                psychevo::application::InteractionResponse::Cancel
             }
         };
         if thread

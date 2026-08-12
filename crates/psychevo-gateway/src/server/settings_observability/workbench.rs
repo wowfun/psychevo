@@ -5,8 +5,9 @@ use psychevo::agents::resolve_agent_definition;
 use psychevo::config::REASONING_EFFORT_VALUES;
 use psychevo::model_state::ModelState;
 use psychevo::{
-    Configuration, ConfigurationQuery, PermissionMode, RunMode, SetThreadMainAgentSelection,
-    ThreadMainAgentSelection,
+    application::Configuration, application::ConfigurationQuery, application::PermissionMode,
+    application::RunMode, application::SetThreadMainAgentSelection,
+    application::ThreadMainAgentSelection,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};

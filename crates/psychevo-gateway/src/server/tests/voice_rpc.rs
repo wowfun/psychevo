@@ -213,7 +213,7 @@ async fn voice_fake_realtime_starts_and_stops_session() {
     let thread_id = state
         .inner
         .framework
-        .start_thread(psychevo::StartThreadRequest::new(&scope.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&scope.cwd))
         .await
         .expect("Thread")
         .id()

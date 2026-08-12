@@ -8,9 +8,11 @@ use axum::body::Body;
 use axum::http::Response;
 use axum::response::Json;
 use axum::routing::post;
-use psychevo::ConfigurationQuery;
+use psychevo::application::ConfigurationQuery;
 use psychevo::application::{AutomationRunStatus, AutomationTaskRecord};
-use psychevo::{Error, PermissionMode, RunMode, RunSandboxOverride};
+use psychevo::{
+    Error, application::PermissionMode, application::RunMode, application::RunSandboxOverride,
+};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
@@ -225,7 +227,7 @@ pub(in crate::server::tests) struct AutomationTurnProbe {
     pub(in crate::server::tests) model_tool_args: Mutex<Option<Value>>,
     pub(in crate::server::tests) model_tool_results: Arc<Mutex<Vec<Value>>>,
     pub(in crate::server::tests) model_tool_errors: Arc<Mutex<Vec<String>>>,
-    pub(in crate::server::tests) outcomes: Mutex<VecDeque<psychevo::TurnOutcome>>,
+    pub(in crate::server::tests) outcomes: Mutex<VecDeque<psychevo::application::TurnOutcome>>,
     web_state: Mutex<Option<WebState>>,
     pub(in crate::server::tests) notify: tokio::sync::Notify,
 }
@@ -249,8 +251,8 @@ impl AutomationTurnProbe {
 
     async fn execute(
         &self,
-        invocation: psychevo::AgentTurnInvocation,
-    ) -> psychevo::Result<psychevo::TurnResult> {
+        invocation: psychevo::application::AgentTurnInvocation,
+    ) -> psychevo::Result<psychevo::application::TurnResult> {
         invocation.persistence.confirm_delivery().await?;
         self.dispatch_times
             .lock()
@@ -305,8 +307,8 @@ impl AutomationTurnProbe {
             .lock()
             .expect("automation outcomes")
             .pop_front()
-            .unwrap_or(psychevo::TurnOutcome::Completed);
-        let terminal_error = (outcome == psychevo::TurnOutcome::Failed).then(|| {
+            .unwrap_or(psychevo::application::TurnOutcome::Completed);
+        let terminal_error = (outcome == psychevo::application::TurnOutcome::Failed).then(|| {
             psychevo::application::RunTerminalError {
                 code: "fake_automation_failure".to_string(),
                 stage: "turn".to_string(),
@@ -315,7 +317,7 @@ impl AutomationTurnProbe {
                 diagnostic_ref: "diag-fake-automation".to_string(),
             }
         });
-        Ok(psychevo::TurnResult {
+        Ok(psychevo::application::TurnResult {
             thread_id: invocation.receipt.thread_id,
             outcome,
             terminal_reason: None,

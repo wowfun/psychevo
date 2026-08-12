@@ -7,7 +7,7 @@ use psychevo::application::{
     AutomationTaskRecord,
 };
 use psychevo::automations::latest_due_at_ms;
-use psychevo::{PermissionMode, RunSandboxOverride};
+use psychevo::{application::PermissionMode, application::RunSandboxOverride};
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
 use uuid::Uuid;
@@ -164,14 +164,16 @@ async fn execute_automation_run(
             let next = next_run_after_now(&task).unwrap_or(None);
             let thread_id = turn_result.result.thread_id.clone();
             let (status, outcome) = match turn_result.result.outcome {
-                psychevo::TurnOutcome::Completed => {
+                psychevo::application::TurnOutcome::Completed => {
                     (AutomationRunTerminalStatus::Completed, "normal")
                 }
-                psychevo::TurnOutcome::Failed => (AutomationRunTerminalStatus::Failed, "failed"),
-                psychevo::TurnOutcome::Stopped => {
+                psychevo::application::TurnOutcome::Failed => {
+                    (AutomationRunTerminalStatus::Failed, "failed")
+                }
+                psychevo::application::TurnOutcome::Stopped => {
                     (AutomationRunTerminalStatus::Interrupted, "stopped")
                 }
-                psychevo::TurnOutcome::Interrupted => {
+                psychevo::application::TurnOutcome::Interrupted => {
                     (AutomationRunTerminalStatus::Interrupted, "aborted")
                 }
             };
@@ -243,7 +245,7 @@ async fn send_automation_turn(
         }
     };
     if thread_id.is_none() {
-        let mut start = psychevo::StartThreadRequest::new(&cwd);
+        let mut start = psychevo::application::StartThreadRequest::new(&cwd);
         start.source = "automation".to_string();
         start.metadata = Some(json!({"automationId": task.id}));
         let thread = state.inner.framework.start_thread(start).await?;

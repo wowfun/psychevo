@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use psychevo::{StartThreadRequest, WorkspaceUpdate};
+use psychevo::{application::StartThreadRequest, application::WorkspaceUpdate};
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -187,9 +187,9 @@ async fn first_workspace_turn_resolves_current_primary_before_native_preparation
         *observed_executor.lock().expect("observed invocation") = Some(invocation.thread.clone());
         Box::pin(async move {
             invocation.persistence.confirm_delivery().await?;
-            Ok(psychevo::TurnResult {
+            Ok(psychevo::application::TurnResult {
                 thread_id: invocation.receipt.thread_id,
-                outcome: psychevo::TurnOutcome::Completed,
+                outcome: psychevo::application::TurnOutcome::Completed,
                 final_answer: String::new(),
                 provider: "fixture".to_string(),
                 model: "fixture".to_string(),
@@ -433,9 +433,9 @@ async fn catalog_updates_revoke_preview_roots_until_turn_admission_refreshes_the
     let executor: crate::FrameworkNativeTestExecutor = Arc::new(|invocation| {
         Box::pin(async move {
             invocation.persistence.confirm_delivery().await?;
-            Ok(psychevo::TurnResult {
+            Ok(psychevo::application::TurnResult {
                 thread_id: invocation.receipt.thread_id,
-                outcome: psychevo::TurnOutcome::Completed,
+                outcome: psychevo::application::TurnOutcome::Completed,
                 final_answer: String::new(),
                 provider: "fixture".to_string(),
                 model: "fixture".to_string(),

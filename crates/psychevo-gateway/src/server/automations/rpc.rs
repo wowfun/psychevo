@@ -5,7 +5,9 @@ use psychevo::application::AutomationTaskInput;
 use psychevo::automations::next_run_at_ms;
 use psychevo::model_state::normalize_reasoning_effort;
 use psychevo::paths::canonicalize_cwd;
-use psychevo::{PermissionMode, RunMode, RunSandboxOverride};
+use psychevo::{
+    application::PermissionMode, application::RunMode, application::RunSandboxOverride,
+};
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 use uuid::Uuid;
@@ -96,7 +98,7 @@ pub(in crate::server) async fn automation_draft_result(
     inherited_env
         .entry("PSYCHEVO_HOME".to_string())
         .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
-    let turn = psychevo::TurnRequest::new(prompt)
+    let turn = psychevo::application::TurnRequest::new(prompt)
         .with_identity("automation-draft", None)
         .with_execution_policy(
             RunMode::Default,
@@ -117,7 +119,7 @@ pub(in crate::server) async fn automation_draft_result(
             Vec::new(),
             None,
         );
-    let mut start = psychevo::StartThreadRequest::new(&cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&cwd);
     start.source = "automation-draft".to_string();
     let result = state
         .inner

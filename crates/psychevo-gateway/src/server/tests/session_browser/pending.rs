@@ -21,7 +21,7 @@ use psychevo_gateway_protocol::source::{
 };
 
 async fn start_web_thread(state: &crate::server::binding::WebState) -> String {
-    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     request.source = "web".to_string();
     state
         .inner

@@ -1,4 +1,4 @@
-use psychevo::ThreadItem;
+use psychevo::application::ThreadItem;
 use psychevo::application::{
     AssistantBlock, AssistantSource, Message, TUI_DISPLAY_METADATA_KEY, USER_SHELL_METADATA_KEY,
     UserContentBlock,

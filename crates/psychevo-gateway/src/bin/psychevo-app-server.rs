@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use psychevo::Application;
+use psychevo::application::Application;
 
 #[tokio::main]
 async fn main() {

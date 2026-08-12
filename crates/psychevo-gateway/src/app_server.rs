@@ -19,9 +19,11 @@ use psychevo::application::{
     ToolOutput,
 };
 use psychevo::{
-    Application, ApprovalHandler, Client, CompactThreadRequest, ForkThreadRequest,
-    InteractionResponse, ItemStage, StartThreadRequest, Thread, ThreadListQuery, TurnEvent,
-    TurnHandle, TurnOutcome, TurnRequest,
+    application::Application, application::ApprovalHandler, application::Client,
+    application::CompactThreadRequest, application::ForkThreadRequest,
+    application::InteractionResponse, application::ItemStage, application::StartThreadRequest,
+    application::Thread, application::ThreadListQuery, application::TurnEvent,
+    application::TurnHandle, application::TurnOutcome, application::TurnRequest,
 };
 use psychevo_gateway_protocol as wire;
 use serde::Deserialize;
@@ -288,14 +290,14 @@ impl RpcError {
         }
     }
 
-    fn control_input(error: psychevo::ControlInputError) -> Self {
+    fn control_input(error: psychevo::application::ControlInputError) -> Self {
         let data = match &error {
-            psychevo::ControlInputError::CountLimit { limit } => Some(json!({
+            psychevo::application::ControlInputError::CountLimit { limit } => Some(json!({
                 "kind": "control_input_overload",
                 "resource": "count",
                 "limit": limit,
             })),
-            psychevo::ControlInputError::ByteLimit { limit } => Some(json!({
+            psychevo::application::ControlInputError::ByteLimit { limit } => Some(json!({
                 "kind": "control_input_overload",
                 "resource": "bytes",
                 "limit": limit,
@@ -615,7 +617,7 @@ impl ApprovalHandler for RemoteApprovalHandler {
                         server: value.server,
                         source: value.source,
                         target: match value.target {
-                            psychevo::McpStartupApprovalTarget::Stdio {
+                            psychevo::application::McpStartupApprovalTarget::Stdio {
                                 command,
                                 args,
                                 cwd,
@@ -626,7 +628,7 @@ impl ApprovalHandler for RemoteApprovalHandler {
                                 cwd,
                                 env_names,
                             },
-                            psychevo::McpStartupApprovalTarget::Http {
+                            psychevo::application::McpStartupApprovalTarget::Http {
                                 url,
                                 header_names,
                                 credential_names,
@@ -1030,7 +1032,7 @@ impl AppServerConnection {
                     required_params::<wire::app_server::AppTurnSteerParams>(request.params)?;
                 let accepted = match self.turn(&params.turn_id).await?.steer(params.input) {
                     Ok(()) => true,
-                    Err(psychevo::ControlInputError::Closed) => false,
+                    Err(psychevo::application::ControlInputError::Closed) => false,
                     Err(error) => return Err(RpcError::control_input(error)),
                 };
                 Ok(json!({ "accepted": accepted, "turnId": params.turn_id }))
@@ -1614,9 +1616,9 @@ pub async fn bind_websocket(
 }
 
 fn app_thread_compact_result(
-    result: psychevo::CompactionResult,
+    result: psychevo::compaction::CompactionResult,
 ) -> wire::app_server::AppThreadCompactResult {
-    let psychevo::CompactionResult {
+    let psychevo::compaction::CompactionResult {
         session_id,
         compacted,
         reason,
@@ -1761,8 +1763,9 @@ mod tests {
     use super::*;
     use futures::future::BoxFuture;
     use psychevo::{
-        AgentSessionAdapter, AgentTurnInvocation, AgentTurnPreparation, PreparedAgentTurn,
-        TurnOutcome, TurnResult,
+        application::AgentSessionAdapter, application::AgentTurnInvocation,
+        application::AgentTurnPreparation, application::PreparedAgentTurn,
+        application::TurnOutcome, application::TurnResult,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -2042,7 +2045,7 @@ mod tests {
         for event in [
             TurnEvent::ActivityChanged {
                 thread_id: "thread-1".to_string(),
-                activity: psychevo::ThreadActivitySnapshot {
+                activity: psychevo::application::ThreadActivitySnapshot {
                     revision: 1,
                     running: true,
                     active_turn_id: Some("turn-1".to_string()),

@@ -4,7 +4,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use psychevo::application::WorkspaceMutationSink;
-use psychevo::{ApprovalHandler, Error, ImageInput, PermissionMode, RunMode, ShellCommandControl};
+use psychevo::{
+    Error, application::ApprovalHandler, application::ImageInput, application::PermissionMode,
+    application::RunMode, application::ShellCommandControl,
+};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
@@ -149,11 +152,11 @@ pub struct ThreadTurnPolicy {
     pub snapshot_root: Option<PathBuf>,
     pub continue_latest: bool,
     pub extract_prompt_image_sources: bool,
-    pub prompt_display: Option<psychevo::PromptDisplayMetadata>,
+    pub prompt_display: Option<psychevo::application::PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
-    pub project_context_override: Option<psychevo::ProjectContextInstructionMode>,
-    pub sandbox_override: Option<psychevo::RunSandboxOverride>,
+    pub project_context_override: Option<psychevo::application::ProjectContextInstructionMode>,
+    pub sandbox_override: Option<psychevo::application::RunSandboxOverride>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub runtime_profile_ref: Option<String>,
@@ -170,7 +173,7 @@ pub struct ThreadTurnPolicy {
     pub no_skills: bool,
     pub selected_capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<psychevo::McpServerInput>,
+    pub mcp_servers: Vec<psychevo::application::McpServerInput>,
 }
 
 impl fmt::Debug for ThreadTurnPolicy {
@@ -247,7 +250,7 @@ pub enum ThreadSurface {
     Other(String),
 }
 
-pub(crate) type TurnEventObserver = Arc<dyn Fn(psychevo::TurnEvent) + Send + Sync>;
+pub(crate) type TurnEventObserver = Arc<dyn Fn(psychevo::application::TurnEvent) + Send + Sync>;
 
 /// Immutable host facts and observation/control ports supplied by one caller.
 /// Callback construction is owned here so Adapters do not assemble Gateway
@@ -279,7 +282,7 @@ impl ThreadCallerContext {
 
     pub fn observe_turn_events(
         &mut self,
-        observer: impl Fn(psychevo::TurnEvent) + Send + Sync + 'static,
+        observer: impl Fn(psychevo::application::TurnEvent) + Send + Sync + 'static,
     ) {
         self.turn_event_observer = Some(Arc::new(observer));
     }
@@ -347,7 +350,7 @@ pub struct ThreadTurnIntent {
     pub policy: ThreadTurnPolicy,
     pub client_turn_id: Option<String>,
     pub turn_id: Option<String>,
-    pub(crate) agent_preparation: Option<psychevo::AgentPreparationToken>,
+    pub(crate) agent_preparation: Option<psychevo::application::AgentPreparationToken>,
 }
 
 impl ThreadTurnIntent {
@@ -394,7 +397,7 @@ impl ThreadTurnIntent {
             (observer, None) => observer,
         };
         let policy = self.policy;
-        let mut request = psychevo::TurnRequest::new(prompt)
+        let mut request = psychevo::application::TurnRequest::new(prompt)
             .with_prompt_images(image_inputs, policy.extract_prompt_image_sources)
             .with_prompt_display(policy.prompt_display.or(Some(prompt_display)))
             .with_identity(caller.runtime_source, self.client_turn_id)
@@ -437,12 +440,14 @@ impl ThreadTurnIntent {
     }
 }
 
-fn framework_agent_input_parts(input: Vec<GatewayInputPart>) -> Vec<psychevo::AgentInputPart> {
+fn framework_agent_input_parts(
+    input: Vec<GatewayInputPart>,
+) -> Vec<psychevo::application::AgentInputPart> {
     input
         .into_iter()
         .map(|part| match part {
-            GatewayInputPart::Text { text } => psychevo::AgentInputPart::Text { text },
-            GatewayInputPart::Image { input } => psychevo::AgentInputPart::Image {
+            GatewayInputPart::Text { text } => psychevo::application::AgentInputPart::Text { text },
+            GatewayInputPart::Image { input } => psychevo::application::AgentInputPart::Image {
                 input: match input {
                     GatewayImageInput::LocalPath { path } => {
                         ImageInput::LocalPath(PathBuf::from(path))
@@ -454,7 +459,7 @@ fn framework_agent_input_parts(input: Vec<GatewayInputPart>) -> Vec<psychevo::Ag
                 label,
                 text,
                 visible_to_model,
-            } => psychevo::AgentInputPart::Context {
+            } => psychevo::application::AgentInputPart::Context {
                 label,
                 text,
                 visible_to_model,
@@ -464,7 +469,7 @@ fn framework_agent_input_parts(input: Vec<GatewayInputPart>) -> Vec<psychevo::Ag
                 mime_type,
                 text,
                 blob,
-            } => psychevo::AgentInputPart::Resource {
+            } => psychevo::application::AgentInputPart::Resource {
                 uri,
                 mime_type,
                 text,
@@ -476,7 +481,7 @@ fn framework_agent_input_parts(input: Vec<GatewayInputPart>) -> Vec<psychevo::Ag
                 description,
                 mime_type,
                 size,
-            } => psychevo::AgentInputPart::ResourceLink {
+            } => psychevo::application::AgentInputPart::ResourceLink {
                 name,
                 uri,
                 description,
@@ -496,7 +501,7 @@ fn framework_turn_event_observer(
     let projector = Arc::new(Mutex::new(GatewayLiveProjector::new(Some(
         thread_id.clone(),
     ))));
-    Arc::new(move |event: psychevo::TurnEvent| {
+    Arc::new(move |event: psychevo::application::TurnEvent| {
         let lifecycle = gateway_event_from_framework_turn(&event, &thread_id, Some(&turn_id));
         let live = projector
             .lock()
@@ -534,17 +539,17 @@ fn emit_framework_gateway_event(
 }
 
 fn gateway_event_from_framework_turn(
-    event: &psychevo::TurnEvent,
+    event: &psychevo::application::TurnEvent,
     fallback_thread_id: &str,
     fallback_turn_id: Option<&str>,
 ) -> Option<GatewayEvent> {
     match event {
-        psychevo::TurnEvent::Scoped {
+        psychevo::application::TurnEvent::Scoped {
             thread_id,
             turn_id,
             event,
         } => gateway_event_from_framework_turn(event, thread_id, Some(turn_id)),
-        psychevo::TurnEvent::ActivityChanged {
+        psychevo::application::TurnEvent::ActivityChanged {
             thread_id,
             activity,
         } => Some(GatewayEvent::ActivityChanged {
@@ -557,7 +562,7 @@ fn gateway_event_from_framework_turn(
                 ..GatewayActivityView::default()
             },
         }),
-        psychevo::TurnEvent::Accepted {
+        psychevo::application::TurnEvent::Accepted {
             receipt,
             queue_position: Some(queue_position),
         } => Some(GatewayEvent::TurnQueued {
@@ -565,21 +570,29 @@ fn gateway_event_from_framework_turn(
             turn_id: receipt.turn_id.clone(),
             queue_position: *queue_position,
         }),
-        psychevo::TurnEvent::Started { thread_id, turn_id } => Some(GatewayEvent::TurnStarted {
-            thread_id: Some(thread_id.clone()),
-            turn_id: turn_id.clone(),
-            selected_skills: Vec::new(),
-        }),
-        psychevo::TurnEvent::Completed {
+        psychevo::application::TurnEvent::Started { thread_id, turn_id } => {
+            Some(GatewayEvent::TurnStarted {
+                thread_id: Some(thread_id.clone()),
+                turn_id: turn_id.clone(),
+                selected_skills: Vec::new(),
+            })
+        }
+        psychevo::application::TurnEvent::Completed {
             thread_id,
             turn_id,
             outcome,
         } => {
             let (status, outcome) = match outcome {
-                psychevo::TurnOutcome::Completed => (GatewayTurnStatus::Completed, "normal"),
-                psychevo::TurnOutcome::Stopped => (GatewayTurnStatus::Interrupted, "stopped"),
-                psychevo::TurnOutcome::Failed => (GatewayTurnStatus::Failed, "failed"),
-                psychevo::TurnOutcome::Interrupted => (GatewayTurnStatus::Interrupted, "aborted"),
+                psychevo::application::TurnOutcome::Completed => {
+                    (GatewayTurnStatus::Completed, "normal")
+                }
+                psychevo::application::TurnOutcome::Stopped => {
+                    (GatewayTurnStatus::Interrupted, "stopped")
+                }
+                psychevo::application::TurnOutcome::Failed => (GatewayTurnStatus::Failed, "failed"),
+                psychevo::application::TurnOutcome::Interrupted => {
+                    (GatewayTurnStatus::Interrupted, "aborted")
+                }
             };
             let turn = GatewayTurn {
                 id: turn_id.clone(),
@@ -597,7 +610,7 @@ fn gateway_event_from_framework_turn(
                 committed_entries: Vec::new(),
             })
         }
-        psychevo::TurnEvent::Failed {
+        psychevo::application::TurnEvent::Failed {
             thread_id,
             turn_id,
             message,
@@ -618,7 +631,7 @@ fn gateway_event_from_framework_turn(
                 committed_entries: Vec::new(),
             })
         }
-        psychevo::TurnEvent::InteractionRequested {
+        psychevo::application::TurnEvent::InteractionRequested {
             interaction_id,
             kind,
             payload,
@@ -656,7 +669,7 @@ fn gateway_event_from_framework_turn(
                 },
             })
         }
-        psychevo::TurnEvent::InteractionResolved {
+        psychevo::application::TurnEvent::InteractionResolved {
             interaction_id,
             kind,
             reason,
@@ -698,8 +711,8 @@ mod framework_projection_tests {
     #[test]
     fn framework_queued_acceptance_projects_public_turn_queued() {
         let event = gateway_event_from_framework_turn(
-            &psychevo::TurnEvent::Accepted {
-                receipt: psychevo::TurnReceipt {
+            &psychevo::application::TurnEvent::Accepted {
+                receipt: psychevo::application::TurnReceipt {
                     accepted: true,
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-2".to_string(),
@@ -725,9 +738,9 @@ mod framework_projection_tests {
     #[test]
     fn framework_activity_projects_complete_revisioned_state() {
         let event = gateway_event_from_framework_turn(
-            &psychevo::TurnEvent::ActivityChanged {
+            &psychevo::application::TurnEvent::ActivityChanged {
                 thread_id: "thread-1".to_string(),
-                activity: psychevo::ThreadActivitySnapshot {
+                activity: psychevo::application::ThreadActivitySnapshot {
                     revision: 42,
                     running: true,
                     active_turn_id: Some("turn-1".to_string()),
@@ -770,7 +783,7 @@ mod framework_projection_tests {
             }),
         );
 
-        observer(psychevo::TurnEvent::Runtime {
+        observer(psychevo::application::TurnEvent::Runtime {
             data: json!({
                 "type": "acp_peer_plan",
                 "body": "- [~] Project through the common application path",
@@ -821,7 +834,7 @@ mod framework_projection_tests {
             }),
         );
 
-        observer(psychevo::TurnEvent::Runtime {
+        observer(psychevo::application::TurnEvent::Runtime {
             data: json!({
                 "type": "action_requested",
                 "action_id": "clarify-1",
@@ -849,8 +862,8 @@ mod framework_projection_tests {
         let tool = projector
             .project_turn_event(
                 "turn-1",
-                &psychevo::TurnEvent::Tool {
-                    stage: psychevo::ItemStage::Started,
+                &psychevo::application::TurnEvent::Tool {
+                    stage: psychevo::application::ItemStage::Started,
                     data: json!({
                         "type": "tool_call_pending",
                         "tool_name": "exec_command",
@@ -870,7 +883,7 @@ mod framework_projection_tests {
         let warning = projector
             .project_turn_event(
                 "turn-1",
-                &psychevo::TurnEvent::Warning {
+                &psychevo::application::TurnEvent::Warning {
                     data: json!({
                         "type": "warning",
                         "kind": "bounded_warning",
@@ -901,8 +914,8 @@ mod framework_projection_tests {
         });
         let started = gateway_event_from_turn_event(
             "turn-1",
-            &psychevo::TurnEvent::Message {
-                stage: psychevo::ItemStage::Started,
+            &psychevo::application::TurnEvent::Message {
+                stage: psychevo::application::ItemStage::Started,
                 message: message.clone(),
                 usage: None,
                 metadata: None,
@@ -912,8 +925,8 @@ mod framework_projection_tests {
         .expect("typed message start projection");
         let completed = gateway_event_from_turn_event(
             "turn-1",
-            &psychevo::TurnEvent::Message {
-                stage: psychevo::ItemStage::Completed,
+            &psychevo::application::TurnEvent::Message {
+                stage: psychevo::application::ItemStage::Completed,
                 message,
                 usage: None,
                 metadata: None,
@@ -941,7 +954,7 @@ mod framework_projection_tests {
     #[test]
     fn framework_clarify_projection_preserves_the_decodable_request() {
         let event = gateway_event_from_framework_turn(
-            &psychevo::TurnEvent::InteractionRequested {
+            &psychevo::application::TurnEvent::InteractionRequested {
                 interaction_id: "clarify-1".to_string(),
                 kind: "clarify".to_string(),
                 payload: json!({
@@ -977,7 +990,7 @@ mod framework_projection_tests {
 
 pub(crate) struct FrameworkTurnSubmission {
     pub(crate) thread_id: String,
-    pub(crate) request: psychevo::TurnRequest,
+    pub(crate) request: psychevo::application::TurnRequest,
     pub(crate) observers: FrameworkTurnObservers,
 }
 
@@ -986,7 +999,7 @@ pub(crate) struct FrameworkTurnObservers {
 }
 
 impl FrameworkTurnObservers {
-    pub(crate) fn attach(self, gateway: &Gateway, handle: psychevo::TurnHandle) {
+    pub(crate) fn attach(self, gateway: &Gateway, handle: psychevo::application::TurnHandle) {
         let Some(observer) = self.turn_events else {
             return;
         };
@@ -996,7 +1009,8 @@ impl FrameworkTurnObservers {
             while let Some(event) = events.next().await {
                 let terminal = matches!(
                     event,
-                    psychevo::TurnEvent::Completed { .. } | psychevo::TurnEvent::Failed { .. }
+                    psychevo::application::TurnEvent::Completed { .. }
+                        | psychevo::application::TurnEvent::Failed { .. }
                 );
                 observer(event);
                 if terminal {
@@ -1068,7 +1082,7 @@ impl fmt::Debug for SendTurnRequest {
 pub struct SendShellRequest {
     pub thread_id: Option<String>,
     pub workspace_id: Option<String>,
-    pub workspace_snapshot: Option<psychevo::Workspace>,
+    pub workspace_snapshot: Option<psychevo::application::Workspace>,
     pub source: Option<GatewaySource>,
     pub bind_source: Option<GatewaySource>,
     pub cwd: PathBuf,

@@ -483,7 +483,7 @@ pub(super) async fn resume_resident_acp_session(
     )?;
     let workspace_roots = acp_workspace_roots(&cwd, &additional_directories);
     let workspace_root_capture =
-        psychevo::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
+        psychevo::application::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     let request = ResumeSessionRequest::new(session_ref.native_session_id.clone(), &cwd)
         .additional_directories(additional_directories.clone())
         .mcp_servers(mcp_servers.clone());
@@ -639,7 +639,7 @@ pub(super) async fn fork_resident_acp_session(
     let session_epoch = next_acp_session_epoch(next_session_epoch)?;
     let workspace_roots = acp_workspace_roots(&cwd, &additional_directories);
     let workspace_root_capture =
-        psychevo::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
+        psychevo::application::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     insert_acp_context(
         contexts,
         &native_session_id,

@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
 use psychevo::{
-    ForkThreadRequest, ImageInput, ThreadConversationEditConflict,
-    ThreadConversationEditRestoreOutcome, ThreadConversationEditStageOutcome,
-    ThreadConversationEditUnavailable, ThreadEditableDraft, ThreadEditableDraftFidelity,
-    ThreadEditableDraftPart, ThreadEditableDraftRead, ThreadEditableDraftReadOutcome,
-    ThreadEditableDraftUnavailable, ThreadHistoryEditingEligibility, ThreadHistoryEditingStaged,
-    ThreadHistoryEditingState, ThreadHistoryEditingUnavailable,
+    application::ForkThreadRequest, application::ImageInput,
+    application::ThreadConversationEditConflict, application::ThreadConversationEditRestoreOutcome,
+    application::ThreadConversationEditStageOutcome,
+    application::ThreadConversationEditUnavailable, application::ThreadEditableDraft,
+    application::ThreadEditableDraftFidelity, application::ThreadEditableDraftPart,
+    application::ThreadEditableDraftRead, application::ThreadEditableDraftReadOutcome,
+    application::ThreadEditableDraftUnavailable, application::ThreadHistoryEditingEligibility,
+    application::ThreadHistoryEditingStaged, application::ThreadHistoryEditingState,
+    application::ThreadHistoryEditingUnavailable,
 };
 use psychevo_gateway_protocol as wire;
 

@@ -83,9 +83,9 @@ fn accounted_assistant_executor(
                     None,
                 )
                 .await?;
-            Ok(psychevo::TurnResult {
+            Ok(psychevo::application::TurnResult {
                 thread_id: invocation.receipt.thread_id,
-                outcome: psychevo::TurnOutcome::Completed,
+                outcome: psychevo::application::TurnOutcome::Completed,
                 final_answer: String::new(),
                 provider: "fake-provider".to_string(),
                 model: "fake-model".to_string(),
@@ -103,8 +103,8 @@ fn accounted_assistant_executor(
     })
 }
 
-async fn start_accounted_thread(state: &WebState, cwd: &Path) -> psychevo::Thread {
-    let mut start = psychevo::StartThreadRequest::new(cwd);
+async fn start_accounted_thread(state: &WebState, cwd: &Path) -> psychevo::application::Thread {
+    let mut start = psychevo::application::StartThreadRequest::new(cwd);
     start.source = "web".to_string();
     let thread = state
         .inner
@@ -113,7 +113,9 @@ async fn start_accounted_thread(state: &WebState, cwd: &Path) -> psychevo::Threa
         .await
         .expect("Thread");
     thread
-        .start_turn(psychevo::TurnRequest::new("measure this context"))
+        .start_turn(psychevo::application::TurnRequest::new(
+            "measure this context",
+        ))
         .await
         .expect("Turn")
         .wait()
@@ -122,15 +124,11 @@ async fn start_accounted_thread(state: &WebState, cwd: &Path) -> psychevo::Threa
     thread
 }
 
-async fn occupied_port_with_free_successor() -> TcpListener {
+async fn occupied_port_with_fallback_range(fallbacks: u16) -> TcpListener {
     for _ in 0..100 {
         let occupied = TcpListener::bind("127.0.0.1:0").await.expect("occupy port");
         let port = occupied.local_addr().expect("occupied addr").port();
-        let Some(next_port) = port.checked_add(1) else {
-            continue;
-        };
-        if let Ok(probe) = TcpListener::bind(("127.0.0.1", next_port)).await {
-            drop(probe);
+        if port.checked_add(fallbacks).is_some() {
             return occupied;
         }
     }
@@ -150,16 +148,21 @@ async fn bind_gateway_web_server_falls_back_from_used_port() {
         GatewayApplication::open(home, temp.path().join("state.db"), None, BTreeMap::new())
             .await
             .expect("test composition");
-    let occupied = occupied_port_with_free_successor().await;
+    let fallback_count = 16;
+    let occupied = occupied_port_with_fallback_range(fallback_count).await;
     let occupied_addr = occupied.local_addr().expect("occupied addr");
     let mut config = GatewayWebServerConfig::with_static(runtime, cwd, static_dir);
     config.bind_addr = occupied_addr;
-    config.bind_port_fallbacks = 1;
+    config.bind_port_fallbacks = fallback_count;
 
     let bound = bind_gateway_web_server(config).await.expect("bind");
 
     assert_eq!(bound.local_addr().ip(), occupied_addr.ip());
-    assert_eq!(bound.local_addr().port(), occupied_addr.port() + 1);
+    assert!(
+        bound.local_addr().port() > occupied_addr.port()
+            && bound.local_addr().port() <= occupied_addr.port() + fallback_count,
+        "fallback must bind inside the configured successor range"
+    );
 }
 
 #[tokio::test]
@@ -391,7 +394,7 @@ async fn start_empty_source_returns_null_thread_and_creates_no_session() {
 async fn start_empty_source_clears_binding_without_archiving_previous_history() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     request.source = "web".to_string();
     let session_id = state
         .inner

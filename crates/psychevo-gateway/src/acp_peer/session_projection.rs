@@ -221,7 +221,7 @@ impl AcpSessionSnapshot {
 pub(super) struct AcpResidentSession {
     pub(super) native_session_id: String,
     pub(super) workspace_roots: Vec<PathBuf>,
-    pub(super) workspace_root_capture: Option<psychevo::WorkspaceRootCapture>,
+    pub(super) workspace_root_capture: Option<psychevo::application::WorkspaceRootCapture>,
     pub(super) agent: Option<AcpAgentIdentitySnapshot>,
     pub(super) capabilities: AcpNegotiatedCapabilitiesSnapshot,
     pub(super) config_options: Vec<SessionConfigOption>,
@@ -265,7 +265,7 @@ pub(super) enum AcpPeerInboundPayload {
 pub(super) struct AcpResidentSessionInput {
     pub(super) native_session_id: String,
     pub(super) workspace_roots: Vec<PathBuf>,
-    pub(super) workspace_root_capture: Option<psychevo::WorkspaceRootCapture>,
+    pub(super) workspace_root_capture: Option<psychevo::application::WorkspaceRootCapture>,
     pub(super) modes: Option<SessionModeState>,
     pub(super) config_options: Vec<SessionConfigOption>,
     pub(super) legacy_models: Option<AcpLegacyModelState>,

@@ -260,7 +260,7 @@ async fn settings_read_reports_model_resolution_errors_without_failing() {
 #[tokio::test]
 async fn settings_read_exposes_session_agent() {
     let (_temp, state) = web_state().await;
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let thread = state
         .inner
@@ -269,7 +269,7 @@ async fn settings_read_exposes_session_agent() {
         .await
         .expect("thread");
     thread
-        .set_main_agent_selection(psychevo::SetThreadMainAgentSelection::Agent {
+        .set_main_agent_selection(psychevo::application::SetThreadMainAgentSelection::Agent {
             input: "translate".to_string(),
             name: "translate".to_string(),
             source: psychevo::agents::AgentSource::Project,
@@ -305,7 +305,7 @@ async fn settings_update_persists_session_agent_and_default() {
         "translate",
         "Translate user messages",
     );
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let thread = state
         .inner
@@ -344,7 +344,7 @@ async fn settings_update_persists_session_agent_and_default() {
         .expect("agent selection");
     assert_eq!(
         selection,
-        psychevo::ThreadMainAgentSelection::Agent {
+        psychevo::application::ThreadMainAgentSelection::Agent {
             input: "translate".to_string()
         }
     );
@@ -379,7 +379,7 @@ async fn settings_update_persists_session_agent_and_default() {
         .expect("agent selection");
     assert!(matches!(
         selection,
-        psychevo::ThreadMainAgentSelection::Default { .. }
+        psychevo::application::ThreadMainAgentSelection::Default { .. }
     ));
 }
 
@@ -390,7 +390,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
     let home_agents = state.inner.home.join("agents");
     write_agent_definition(&project_agents, "review", "Project review");
     let shadowed = write_agent_definition(&home_agents, "review", "Global review");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let session = state
         .inner

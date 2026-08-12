@@ -10,7 +10,7 @@ use axum::extract::Json;
 use axum::http::Response;
 use axum::routing::post;
 use psychevo::application::{GatewayActivityKind, GatewayActivityTerminalStatus};
-use psychevo::{AgentRelationshipStatus, ThreadAgentBinding};
+use psychevo::{application::AgentRelationshipStatus, application::ThreadAgentBinding};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
@@ -180,7 +180,7 @@ Use the captured child session.
     .expect("Agent Definition");
 
     let client = harness._application.client();
-    let mut parent_request = psychevo::StartThreadRequest::new(&harness.cwd);
+    let mut parent_request = psychevo::application::StartThreadRequest::new(&harness.cwd);
     parent_request.source = "web".to_string();
     let parent_thread = client
         .start_thread(parent_request)
@@ -596,7 +596,7 @@ Peer instructions.
         "two turns on one thread must reuse one resident ACP process"
     );
 
-    let mut top_level_start = psychevo::StartThreadRequest::new(&harness.cwd);
+    let mut top_level_start = psychevo::application::StartThreadRequest::new(&harness.cwd);
     top_level_start.source = "peer_agent".to_string();
     let top_level_thread_id = harness
         ._application
@@ -680,7 +680,7 @@ tools: [read]
     ]);
     let gateway_events = Arc::new(Mutex::new(Vec::<GatewayEvent>::new()));
     let gateway_events_for_sink = Arc::clone(&gateway_events);
-    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::TurnEvent>::new()));
+    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::application::TurnEvent>::new()));
     let turn_events_for_sink = Arc::clone(&turn_events);
     let source = GatewaySource::new("web", "peer-stream").persistent();
     let mut first_request = request(&harness, source, "hello");
@@ -712,7 +712,7 @@ tools: [read]
         .expect("Turn events lock")
         .iter()
         .filter_map(|event| match event {
-            psychevo::TurnEvent::Runtime { data } => Some(data.clone()),
+            psychevo::application::TurnEvent::Runtime { data } => Some(data.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -734,7 +734,7 @@ tools: [read]
         assert!(
             turn_events.iter().any(|event| matches!(
                 event,
-                psychevo::TurnEvent::Runtime { data }
+                psychevo::application::TurnEvent::Runtime { data }
                     if data["type"] == "acp_peer_session_update"
                         && data["update_kind"] == "tool_call_update"
             )),

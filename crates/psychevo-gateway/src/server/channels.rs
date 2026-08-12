@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use psychevo::extensions::protocol::WechatQrPollResult;
-use psychevo::{Configuration, ConfigurationQuery, Error, config::set_channel_enabled};
+use psychevo::{
+    Error, application::Configuration, application::ConfigurationQuery, config::set_channel_enabled,
+};
 use psychevo_gateway_protocol as wire;
 use serde::Deserialize;
 use serde_json::{Value, json};

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use psychevo::application::{
     AssistantBlock, Message, Outcome, PermissionApprovalRequest, RunStreamEvent, UserContentBlock,
 };
-use psychevo::{Application, PermissionMode, RunMode};
+use psychevo::{application::Application, application::PermissionMode, application::RunMode};
 use serde_json::json;
 use tokio::sync::{Notify, oneshot};
 use uuid::Uuid;
@@ -263,12 +263,12 @@ impl FrameworkNativeProbe {
                         })));
                 }
 
-                Ok(psychevo::TurnResult {
+                Ok(psychevo::application::TurnResult {
                     thread_id: session_id,
                     outcome: if aborted {
-                        psychevo::TurnOutcome::Interrupted
+                        psychevo::application::TurnOutcome::Interrupted
                     } else {
-                        psychevo::TurnOutcome::Completed
+                        psychevo::application::TurnOutcome::Completed
                     },
                     terminal_reason: None,
                     final_answer,
@@ -393,7 +393,7 @@ pub(super) async fn send_framework_turn_with_handle(
     application: Application,
     gateway: Gateway,
     request: SendTurnRequest,
-    accepted_handle: oneshot::Sender<psychevo::TurnHandle>,
+    accepted_handle: oneshot::Sender<psychevo::application::TurnHandle>,
 ) -> psychevo::Result<GatewayTurnResult> {
     send_framework_turn_inner(application, gateway, request, None, Some(accepted_handle)).await
 }
@@ -403,7 +403,7 @@ async fn send_framework_turn_inner(
     gateway: Gateway,
     mut request: SendTurnRequest,
     turn_id: Option<String>,
-    accepted_handle: Option<oneshot::Sender<psychevo::TurnHandle>>,
+    accepted_handle: Option<oneshot::Sender<psychevo::application::TurnHandle>>,
 ) -> psychevo::Result<GatewayTurnResult> {
     let client = application.client();
     let explicit_thread_id = request.thread_id.clone();
@@ -429,7 +429,7 @@ async fn send_framework_turn_inner(
                 .collect()
         };
         client
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(request.cwd.clone()),
                 archived: false,
                 sources: continue_sources.into_iter().map(str::to_string).collect(),
@@ -450,7 +450,7 @@ async fn send_framework_turn_inner(
     {
         client.resume_thread(&thread_id).await?
     } else {
-        let mut start = psychevo::StartThreadRequest::new(&request.cwd);
+        let mut start = psychevo::application::StartThreadRequest::new(&request.cwd);
         start.source = request
             .runtime_source
             .clone()
@@ -512,10 +512,10 @@ async fn send_framework_turn_inner(
     let receipt = handle.receipt().clone();
     let result = handle.wait().await?;
     let outcome = match result.outcome {
-        psychevo::TurnOutcome::Completed => Outcome::Normal,
-        psychevo::TurnOutcome::Stopped => Outcome::Stopped,
-        psychevo::TurnOutcome::Failed => Outcome::Failed,
-        psychevo::TurnOutcome::Interrupted => Outcome::Aborted,
+        psychevo::application::TurnOutcome::Completed => Outcome::Normal,
+        psychevo::application::TurnOutcome::Stopped => Outcome::Stopped,
+        psychevo::application::TurnOutcome::Failed => Outcome::Failed,
+        psychevo::application::TurnOutcome::Interrupted => Outcome::Aborted,
     };
     let status = match outcome {
         Outcome::Normal => GatewayTurnStatus::Completed,

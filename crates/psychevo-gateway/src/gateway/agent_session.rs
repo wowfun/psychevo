@@ -124,7 +124,7 @@ pub(super) struct CapturedAgentSessionTarget {
 
 impl CapturedAgentSessionTarget {
     pub(super) fn application_bound(
-        binding: &psychevo::AgentBindingSnapshot,
+        binding: &psychevo::application::AgentBindingSnapshot,
         profile: RuntimeProfileConfig,
         peer: Option<ResolvedPeerTurn>,
     ) -> psychevo::Result<Self> {
@@ -265,11 +265,11 @@ pub(crate) struct CapturedAgentImportContext {
 
 pub(crate) struct CapturedFrameworkAgentImportReservation {
     host: AgentSessionHost,
-    token: psychevo::AgentSessionImportToken,
+    token: psychevo::application::AgentSessionImportToken,
 }
 
 impl CapturedFrameworkAgentImportReservation {
-    pub(crate) fn token(&self) -> psychevo::AgentSessionImportToken {
+    pub(crate) fn token(&self) -> psychevo::application::AgentSessionImportToken {
         self.token.clone()
     }
 }
@@ -658,7 +658,7 @@ impl AgentSessionHost {
         &self,
         captured: CapturedFrameworkAgentImport,
     ) -> CapturedFrameworkAgentImportReservation {
-        let token = psychevo::AgentSessionImportToken::unique();
+        let token = psychevo::application::AgentSessionImportToken::unique();
         self.prepared_imports
             .lock()
             .expect("prepared Agent import registry poisoned")
@@ -671,7 +671,7 @@ impl AgentSessionHost {
 
     pub(super) fn consume_framework_import(
         &self,
-        token: &psychevo::AgentSessionImportToken,
+        token: &psychevo::application::AgentSessionImportToken,
     ) -> psychevo::Result<CapturedFrameworkAgentImport> {
         self.prepared_imports
             .lock()
@@ -684,7 +684,7 @@ impl AgentSessionHost {
             })
     }
 
-    fn discard_framework_import(&self, token: &psychevo::AgentSessionImportToken) {
+    fn discard_framework_import(&self, token: &psychevo::application::AgentSessionImportToken) {
         self.prepared_imports
             .lock()
             .expect("prepared Agent import registry poisoned")

@@ -8,7 +8,7 @@ use psychevo::command_registry::{
 };
 use psychevo::config::ConfigScope;
 use psychevo::config::set_config_value;
-use psychevo::{ConfigurationQuery, Error};
+use psychevo::{Error, application::ConfigurationQuery};
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 

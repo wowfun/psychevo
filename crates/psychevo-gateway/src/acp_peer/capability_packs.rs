@@ -7,7 +7,7 @@ use super::session_projection::AcpSessionSnapshot;
 const CODEX_ACP_AGENT_NAME: &str = "@agentclientprotocol/codex-acp";
 const CODEX_ACP_REVIEWED_VERSION: &str = "1.1.2";
 const OPENCODE_ACP_AGENT_NAME: &str = "OpenCode";
-const OPENCODE_ACP_REVIEWED_VERSION: &str = "1.17.18";
+const OPENCODE_ACP_REVIEWED_VERSION: &str = "1.18.9";
 const CODEX_QUOTA_SCHEMA_VERSION: u32 = 1;
 const CODEX_QUOTA_MAX_MODEL_ENTRIES: usize = 32;
 const CODEX_QUOTA_MAX_MODEL_CHARS: usize = 256;
@@ -621,7 +621,7 @@ mod capability_pack_tests {
                 .is_some_and(|value| value.contains("capability shape"))
         );
 
-        for version in ["1.17.19", "1.17.18-rc.1", "1.17.18+unreviewed"] {
+        for version in ["1.18.10", "1.18.9-rc.1", "1.18.9+unreviewed"] {
             let rejected = project_acp_capability_pack(&pack_snapshot(
                 OPENCODE_INITIALIZE_V1_FIXTURE,
                 Some(version),

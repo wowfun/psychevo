@@ -47,8 +47,10 @@ fn terminal_test_env() -> BTreeMap<String, String> {
     env
 }
 
-async fn start_test_thread(state: &crate::server::binding::WebState) -> psychevo::Thread {
-    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+async fn start_test_thread(
+    state: &crate::server::binding::WebState,
+) -> psychevo::application::Thread {
+    let mut request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     request.source = "web".to_string();
     state
         .inner
@@ -63,7 +65,7 @@ async fn state_with_user_message(
 ) -> (
     tempfile::TempDir,
     crate::server::binding::WebState,
-    psychevo::Thread,
+    psychevo::application::Thread,
 ) {
     let (temp, state) =
         web_state_with_native_test_executor(framework_message_fixture_executor(vec![
@@ -75,7 +77,7 @@ async fn state_with_user_message(
         .await;
     let thread = start_test_thread(&state).await;
     thread
-        .start_turn(psychevo::TurnRequest::new(prompt))
+        .start_turn(psychevo::application::TurnRequest::new(prompt))
         .await
         .expect("fixture Turn")
         .wait()
@@ -855,7 +857,9 @@ async fn sandbox_command_reports_secondary_thread_workspace_roots() {
     let seed = state
         .inner
         .framework
-        .start_thread(psychevo::StartThreadRequest::new(&state.inner.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(
+            &state.inner.cwd,
+        ))
         .await
         .expect("seed Thread");
     let context = state
@@ -874,7 +878,7 @@ async fn sandbox_command_reports_secondary_thread_workspace_roots() {
     let workspace = state
         .inner
         .framework
-        .update_workspace(psychevo::WorkspaceUpdate {
+        .update_workspace(psychevo::application::WorkspaceUpdate {
             workspace_id: workspace.id,
             expected_revision: workspace.revision,
             name: workspace.name,
@@ -886,7 +890,8 @@ async fn sandbox_command_reports_secondary_thread_workspace_roots() {
         .inner
         .framework
         .start_thread(
-            psychevo::StartThreadRequest::new(&state.inner.cwd).with_workspace_snapshot(workspace),
+            psychevo::application::StartThreadRequest::new(&state.inner.cwd)
+                .with_workspace_snapshot(workspace),
         )
         .await
         .expect("explicit Workspace Thread");

@@ -20,8 +20,8 @@ use psychevo_gateway_protocol::events_transcript::{
     TranscriptEntryRole,
 };
 
-async fn start_thread(state: &WebState, source: &str) -> psychevo::Thread {
-    let mut request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+async fn start_thread(state: &WebState, source: &str) -> psychevo::application::Thread {
+    let mut request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     request.source = source.to_string();
     state
         .inner
@@ -33,12 +33,14 @@ async fn start_thread(state: &WebState, source: &str) -> psychevo::Thread {
 
 async fn web_state_with_messages(
     messages: Vec<RuntimeMessage>,
-) -> (tempfile::TempDir, WebState, psychevo::Thread) {
+) -> (tempfile::TempDir, WebState, psychevo::application::Thread) {
     let (temp, state) =
         web_state_with_native_test_executor(framework_message_fixture_executor(messages)).await;
     let thread = start_thread(&state, "web").await;
     thread
-        .start_turn(psychevo::TurnRequest::new("seed transcript fixture"))
+        .start_turn(psychevo::application::TurnRequest::new(
+            "seed transcript fixture",
+        ))
         .await
         .expect("fixture turn")
         .wait()
@@ -246,6 +248,54 @@ async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_over
     assert_eq!(third_entries[0]["messageSeq"], 1);
     assert_eq!(third_entries[4]["messageSeq"], 5);
     assert_eq!(third["nextCursor"], Value::Null);
+}
+
+#[tokio::test]
+async fn idle_thread_snapshot_settles_yielded_exec_without_losing_its_handle() {
+    let (_temp, state, thread) = web_state_with_messages(vec![
+        RuntimeMessage::Assistant {
+            content: vec![psychevo::application::AssistantBlock::ToolCall(
+                psychevo::application::ToolCallBlock {
+                    id: "call_exec".to_string(),
+                    name: "exec_command".to_string(),
+                    arguments: json!({"cmd": "sleep 30"}),
+                    arguments_json: "{\"cmd\":\"sleep 30\"}".to_string(),
+                    arguments_error: None,
+                    content_index: 0,
+                    call_index: 0,
+                },
+            )],
+            timestamp_ms: 10,
+            finish_reason: Some("tool_calls".to_string()),
+            outcome: psychevo::application::Outcome::Normal,
+            model: Some("fake-model".to_string()),
+            provider: Some("fake-provider".to_string()),
+        },
+        RuntimeMessage::ToolResult {
+            tool_call_id: "call_exec".to_string(),
+            tool_name: "exec_command".to_string(),
+            content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"\"}".to_string(),
+            is_error: false,
+            timestamp_ms: 20,
+        },
+    ])
+    .await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+
+    let snapshot = thread_snapshot(&state, &scope, Some(thread.id()))
+        .await
+        .expect("snapshot");
+    let exec = snapshot["entries"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .flat_map(|entry| entry["blocks"].as_array().into_iter().flatten())
+        .find(|block| block["metadata"]["tool_name"] == "exec_command")
+        .expect("exec block");
+
+    assert_eq!(exec["status"], "completed", "{snapshot:#}");
+    assert_eq!(exec["metadata"]["result"]["session_id"], 7);
+    assert_eq!(exec["metadata"]["result"]["exit_code"], Value::Null);
 }
 
 #[tokio::test]

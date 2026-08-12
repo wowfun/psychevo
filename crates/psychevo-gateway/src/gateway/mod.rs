@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use psychevo::application::GatewayDurability;
-use tokio::sync::Mutex as AsyncMutex;
-
 use self::activity::ActiveQueueState;
 use self::agent_session::AgentSessionHost;
 use self::durable_activity::ShellActivityRuntime;
 use self::event_ingress::GatewayEventIngress;
 pub use self::event_ingress::{GatewayEventCommitEvidence, GatewayEventIngressDiagnostics};
 use self::supervisor::GatewaySupervisor;
+use crate::active_keyed::{ActiveKeyedMutex, SourceEpochs};
+use psychevo::application::GatewayDurability;
 use psychevo_gateway_protocol::events_transcript::GatewayEvent;
 
 pub const DEFAULT_GATEWAY_EVENT_INGRESS_CAPACITY: usize = 512;
@@ -23,7 +22,7 @@ pub struct GatewayLimits {
     pub event_ingress_capacity: usize,
     pub shell_activity_limit: usize,
     pub shell_queue_limit: usize,
-    pub application: psychevo::ApplicationLimits,
+    pub application: psychevo::application::ApplicationLimits,
     pub database_connection_limit: u32,
 }
 
@@ -33,7 +32,7 @@ impl Default for GatewayLimits {
             event_ingress_capacity: DEFAULT_GATEWAY_EVENT_INGRESS_CAPACITY,
             shell_activity_limit: DEFAULT_GATEWAY_SHELL_ACTIVITY_LIMIT,
             shell_queue_limit: DEFAULT_GATEWAY_SHELL_QUEUE_LIMIT,
-            application: psychevo::ApplicationLimits::default(),
+            application: psychevo::application::ApplicationLimits::default(),
             database_connection_limit: DEFAULT_GATEWAY_DATABASE_CONNECTION_LIMIT,
         }
     }
@@ -99,14 +98,14 @@ mod limit_tests {
                 ..GatewayLimits::default()
             },
             GatewayLimits {
-                application: psychevo::ApplicationLimits {
+                application: psychevo::application::ApplicationLimits {
                     max_operations: 0,
                     max_thread_operations: 0,
                 },
                 ..GatewayLimits::default()
             },
             GatewayLimits {
-                application: psychevo::ApplicationLimits {
+                application: psychevo::application::ApplicationLimits {
                     max_operations: 1,
                     max_thread_operations: 2,
                 },
@@ -154,13 +153,13 @@ struct PendingGatewayLiveSnapshot {
 pub struct Gateway {
     durability: GatewayDurability,
     agent_sessions: AgentSessionHost,
-    framework_client: psychevo::Client,
+    framework_client: psychevo::application::Client,
     event_ingress: GatewayEventIngress,
     supervisor: GatewaySupervisor,
     active_queue: Arc<Mutex<ActiveQueueState>>,
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
-    source_generations: Arc<Mutex<HashMap<String, u64>>>,
-    source_mutations: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
+    source_epochs: SourceEpochs,
+    source_mutations: ActiveKeyedMutex,
     live_snapshots: Arc<Mutex<HashMap<String, PendingGatewayLiveSnapshot>>>,
     shell_activity_runtime: Arc<ShellActivityRuntime>,
     shell_queue_limit: usize,

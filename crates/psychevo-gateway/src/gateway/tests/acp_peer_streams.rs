@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use psychevo::ThreadAgentBinding;
+use psychevo::application::ThreadAgentBinding;
 use psychevo::application::{Message, PermissionApprovalDecision};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
@@ -62,7 +62,7 @@ entrypoints: [peer]
     )
     .expect("agent file");
 
-    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::TurnEvent>::new()));
+    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::application::TurnEvent>::new()));
     let turn_events_for_sink = Arc::clone(&turn_events);
     let env = BTreeMap::from([
         (
@@ -97,7 +97,7 @@ entrypoints: [peer]
     let turn_events = turn_events.lock().expect("Turn events lock");
     assert!(!turn_events.iter().any(|event| matches!(
         event,
-        psychevo::TurnEvent::Runtime { data }
+        psychevo::application::TurnEvent::Runtime { data }
             if data["type"] == "acp_peer_protocol_negotiated"
                 || data["type"] == "acp_peer_protocol_fallback"
     )));
@@ -161,7 +161,7 @@ Peer instructions from markdown.
     )
     .expect("agent file");
 
-    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::TurnEvent>::new()));
+    let turn_events = Arc::new(Mutex::new(Vec::<psychevo::application::TurnEvent>::new()));
     let turn_events_for_sink = Arc::clone(&turn_events);
     let env = BTreeMap::from([
         (
@@ -235,7 +235,7 @@ Peer instructions from markdown.
             .expect("Turn events lock")
             .iter()
             .filter_map(|event| match event {
-                psychevo::TurnEvent::Runtime { data } => Some(data),
+                psychevo::application::TurnEvent::Runtime { data } => Some(data),
                 _ => None,
             })
             .any(|event| {
@@ -249,13 +249,13 @@ Peer instructions from markdown.
         let turn_events = turn_events.lock().expect("Turn events lock");
         assert!(turn_events.iter().any(|event| matches!(
             event,
-            psychevo::TurnEvent::Runtime { data }
+            psychevo::application::TurnEvent::Runtime { data }
                 if data["type"] == "acp_peer_protocol_negotiated"
                     && data["protocol_version"] == "1"
         )));
         assert!(!turn_events.iter().any(|event| matches!(
             event,
-            psychevo::TurnEvent::Runtime { data }
+            psychevo::application::TurnEvent::Runtime { data }
                 if data["type"] == "acp_peer_protocol_fallback"
         )));
     }
@@ -393,7 +393,10 @@ entrypoints: [peer]
         .await
         .expect("turn task")
         .expect("aborted turn should remain a typed result");
-    assert_eq!(result.result.outcome, psychevo::TurnOutcome::Interrupted);
+    assert_eq!(
+        result.result.outcome,
+        psychevo::application::TurnOutcome::Interrupted
+    );
     let methods = std::fs::read_to_string(log).expect("cancel log");
     assert!(methods.contains("session/cancel"), "{methods}");
     let binding = harness
@@ -745,7 +748,7 @@ async fn submit_permission_resolves_gateway_permission_request() {
         thread
             .respond(
                 "permission-1",
-                psychevo::InteractionResponse::Permission(
+                psychevo::application::InteractionResponse::Permission(
                     PermissionApprovalDecision::allow_once(),
                 ),
             )
@@ -809,7 +812,7 @@ async fn framework_permission_accepts_the_materialized_source_thread() {
         thread
             .respond(
                 "permission-1",
-                psychevo::InteractionResponse::Permission(
+                psychevo::application::InteractionResponse::Permission(
                     PermissionApprovalDecision::allow_once(),
                 ),
             )

@@ -1465,7 +1465,10 @@ mod event_ingress_tests {
     use psychevo::application::{
         GatewayControlCommandInput, GatewayDurability, RunStreamEvent, StartThreadRequest,
     };
-    use psychevo::{Application, ShellCommandEvent, ShellCommandOutcome, ShellCommandRequest};
+    use psychevo::{
+        application::Application, application::ShellCommandEvent, application::ShellCommandOutcome,
+        application::ShellCommandRequest,
+    };
     use serde_json::json;
     use tokio::sync::oneshot;
     use uuid::Uuid;
@@ -1547,9 +1550,9 @@ model = "lmstudio/test-model"
         let executor: crate::FrameworkNativeTestExecutor = Arc::new(|invocation| {
             Box::pin(async move {
                 invocation.persistence.confirm_delivery().await?;
-                Ok(psychevo::TurnResult {
+                Ok(psychevo::application::TurnResult {
                     thread_id: invocation.receipt.thread_id,
-                    outcome: psychevo::TurnOutcome::Completed,
+                    outcome: psychevo::application::TurnOutcome::Completed,
                     final_answer: String::new(),
                     provider: "fixture-provider".to_string(),
                     model: "fixture-model".to_string(),
@@ -2013,6 +2016,7 @@ model = "lmstudio/test-model"
     }
 
     #[tokio::test]
+    #[ignore = "wall-clock budget runs in the isolated non-functional profile"]
     async fn retained_event_ingress_stays_within_the_persistence_budget() {
         const BATCH_COUNT: usize = 8;
         const EVENTS_PER_BATCH: usize = 32;
@@ -2026,11 +2030,11 @@ model = "lmstudio/test-model"
             .pointer("/gateway")
             .and_then(serde_json::Value::as_object)
             .expect("Gateway non-functional budget");
-        let maximum = gateway_budget["maximum"]
+        let regression_maximum = gateway_budget["regressionMaximum"]
             .as_object()
-            .expect("Gateway maximum budget");
+            .expect("Gateway regression maximum budget");
         let maximum_value = |name: &str| {
-            maximum[name]
+            regression_maximum[name]
                 .as_u64()
                 .unwrap_or_else(|| panic!("missing retained-event budget `{name}`"))
         };
@@ -2109,7 +2113,7 @@ model = "lmstudio/test-model"
             let output = std::path::PathBuf::from(root).join("non-functional");
             std::fs::create_dir_all(&output).expect("non-functional evidence directory");
             let report = serde_json::json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "scope": "gateway-retained-events",
                 "fixture": {
                     "batchCount": BATCH_COUNT,
@@ -2133,7 +2137,7 @@ model = "lmstudio/test-model"
                     "totalMicros": total_micros,
                 },
                 "baseline": gateway_budget["baseline"].clone(),
-                "maximum": gateway_budget["maximum"].clone(),
+                "regressionMaximum": gateway_budget["regressionMaximum"].clone(),
             });
             std::fs::write(
                 output.join("gateway-retained-events.json"),
@@ -2141,6 +2145,7 @@ model = "lmstudio/test-model"
             )
             .expect("write retained-event evidence");
         }
+        let instrumented_coverage = std::env::var_os("PSYCHEVO_INSTRUMENTED_COVERAGE").is_some();
         for (name, observed) in [
             (
                 "retainedEventBatchCommitLatencyP50Ms",
@@ -2174,10 +2179,12 @@ model = "lmstudio/test-model"
             ("retainedEventSqliteBusyOperations", sqlite_busy_operations),
         ] {
             let maximum = maximum_value(name);
-            assert!(
-                observed <= maximum,
-                "retained-event metric {name} observed {observed}, exceeding {maximum}"
-            );
+            if !instrumented_coverage {
+                assert!(
+                    observed <= maximum,
+                    "retained-event metric {name} observed {observed}, exceeding {maximum}"
+                );
+            }
         }
         assert!(batch_commit_latency_p50_ms <= batch_commit_latency_p95_ms);
         assert!(batch_commit_latency_p95_ms <= batch_commit_latency_p99_ms);
@@ -2411,7 +2418,7 @@ model = "lmstudio/test-model"
 
         thread
             .start_turn(
-                psychevo::TurnRequest::new("fixture terminal")
+                psychevo::application::TurnRequest::new("fixture terminal")
                     .with_requested_turn_id("turn-ingress".to_string()),
             )
             .await

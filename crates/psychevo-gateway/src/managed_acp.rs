@@ -279,7 +279,6 @@ fn managed_npm_command(
         .collect::<Vec<_>>();
     let mut command =
         psychevo::process_env::tokio_host_process_command(npm_program, &args, platform, env)?;
-    command.env_clear();
     psychevo::process_env::apply_tokio_process_env(
         &mut command,
         env,

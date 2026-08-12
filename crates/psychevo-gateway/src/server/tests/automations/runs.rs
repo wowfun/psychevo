@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use psychevo::PermissionMode;
+use psychevo::application::PermissionMode;
 use psychevo::application::{AutomationRunStatus, AutomationTaskInput, AutomationTaskKind};
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
@@ -109,10 +109,10 @@ async fn automation_run_and_task_status_follow_every_turn_outcome() {
         .lock()
         .expect("automation outcomes")
         .extend([
-            psychevo::TurnOutcome::Completed,
-            psychevo::TurnOutcome::Failed,
-            psychevo::TurnOutcome::Stopped,
-            psychevo::TurnOutcome::Interrupted,
+            psychevo::application::TurnOutcome::Completed,
+            psychevo::application::TurnOutcome::Failed,
+            psychevo::application::TurnOutcome::Stopped,
+            psychevo::application::TurnOutcome::Interrupted,
         ]);
     let (_temp, state) = web_state_with_automation_turn_probe(backend.clone()).await;
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -197,7 +197,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     let backend = Arc::new(AutomationTurnProbe::default());
     let (temp, state) = web_state_with_automation_turn_probe(backend.clone()).await;
     let cwd = state.inner.cwd.to_string_lossy().to_string();
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "automation".to_string();
     let historical_thread = state
         .inner

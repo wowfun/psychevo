@@ -117,7 +117,9 @@ pub(super) fn acp_mcp_server_declarations(
         .collect()
 }
 
-fn validate_portable_acp_mcp_policy(server: &psychevo::McpServerInput) -> psychevo::Result<()> {
+fn validate_portable_acp_mcp_policy(
+    server: &psychevo::application::McpServerInput,
+) -> psychevo::Result<()> {
     let policy = &server.policy;
     if policy.required
         || policy.enabled_tools.is_some()

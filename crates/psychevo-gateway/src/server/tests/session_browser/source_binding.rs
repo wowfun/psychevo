@@ -7,7 +7,7 @@ use crate::server::tests::helpers::web_state;
 async fn bind_source_to_thread_keeps_previous_history_active() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut first_request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut first_request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     first_request.source = "web".to_string();
     let first = state
         .inner
@@ -17,7 +17,7 @@ async fn bind_source_to_thread_keeps_previous_history_active() {
         .expect("first")
         .id()
         .to_string();
-    let mut second_request = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut second_request = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     second_request.source = "web".to_string();
     let second = state
         .inner

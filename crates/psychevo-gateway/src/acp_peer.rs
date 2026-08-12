@@ -1183,7 +1183,7 @@ mod tests {
 
     fn lifecycle_mcp_fixture() -> psychevo::application::ResolvedMcpServerInput {
         psychevo::application::ResolvedMcpServerInput::new(
-            psychevo::McpServerInput::new(
+            psychevo::application::McpServerInput::new(
                 "repo",
                 psychevo::application::McpTransportInput::Stdio {
                     command: PathBuf::from("/fixture/bin/repo-mcp"),

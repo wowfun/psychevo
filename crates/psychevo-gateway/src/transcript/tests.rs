@@ -1,7 +1,8 @@
 use psychevo::application::{AssistantBlock, Message, Outcome, UserContentBlock};
 use psychevo::{
-    AgentRelationship, AgentRelationshipAgent, AgentRelationshipStatus, ThreadCompaction,
-    ThreadItem, ThreadTurnTerminal, ThreadTurnTerminalStatus,
+    application::AgentRelationship, application::AgentRelationshipAgent,
+    application::AgentRelationshipStatus, application::ThreadCompaction, application::ThreadItem,
+    application::ThreadTurnTerminal, application::ThreadTurnTerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -14,6 +15,7 @@ use super::{
     enrich_agent_blocks_from_relationships, project_committed_turn_entries,
     project_committed_turn_window_entries, project_compaction_entries, project_transcript_entries,
     project_turn_terminal_entries, reconcile_terminal_bounded_running_blocks,
+    settle_committed_running_blocks,
 };
 
 #[test]
@@ -163,6 +165,52 @@ fn terminal_reconciliation_marks_yielded_exec_block_failed_after_turn_failure() 
 
     assert_eq!(entries[1].status, TranscriptBlockStatus::Failed);
     assert_eq!(entries[1].blocks[0].status, TranscriptBlockStatus::Failed);
+}
+
+#[test]
+fn committed_settlement_completes_yielded_exec_without_discarding_its_handle() {
+    let summaries = vec![
+        summary(
+            1,
+            Message::Assistant {
+                content: vec![tool_call(
+                    "call_exec",
+                    "exec_command",
+                    json!({"cmd": "sleep 30"}),
+                )],
+                timestamp_ms: 1,
+                finish_reason: Some("tool_calls".to_string()),
+                outcome: Outcome::Normal,
+                model: None,
+                provider: None,
+            },
+        ),
+        summary(
+            2,
+            Message::ToolResult {
+                tool_call_id: "call_exec".to_string(),
+                tool_name: "exec_command".to_string(),
+                content: "{\"session_id\":7,\"exit_code\":null,\"output\":\"\"}".to_string(),
+                is_error: false,
+                timestamp_ms: 2,
+            },
+        ),
+    ];
+    let mut entries = project_transcript_entries("thread-1", &summaries);
+    assert_eq!(entries[0].blocks[0].status, TranscriptBlockStatus::Running);
+
+    settle_committed_running_blocks(&mut entries, None);
+
+    assert_eq!(entries[0].status, TranscriptBlockStatus::Completed);
+    assert_eq!(
+        entries[0].blocks[0].status,
+        TranscriptBlockStatus::Completed
+    );
+    assert_eq!(
+        entries[0].blocks[0].metadata.as_ref().unwrap()["result"]["session_id"],
+        7
+    );
+    assert!(entries[0].blocks[0].metadata.as_ref().unwrap()["result"]["exit_code"].is_null());
 }
 
 #[test]

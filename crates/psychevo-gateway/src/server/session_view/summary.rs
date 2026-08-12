@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use psychevo::{
-    HumanThreadSummary, ThreadLifecycleActionPresentation, ThreadLifecyclePresentation,
-    ThreadPresentationBackend,
+    application::HumanThreadSummary, application::ThreadLifecycleActionPresentation,
+    application::ThreadLifecyclePresentation, application::ThreadPresentationBackend,
 };
 use serde_json::{Value, json};
 
@@ -105,8 +105,8 @@ pub(in super::super) fn gateway_shell_result_value(result: GatewayShellResult) -
 #[cfg(test)]
 mod shell_result_tests {
     use psychevo::{
-        ShellCommandOutcome, ThreadLifecycleActionPresentation, ThreadLifecyclePresentation,
-        ThreadPresentationBackend,
+        application::ShellCommandOutcome, application::ThreadLifecycleActionPresentation,
+        application::ThreadLifecyclePresentation, application::ThreadPresentationBackend,
     };
     use serde_json::Value;
 

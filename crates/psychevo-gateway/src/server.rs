@@ -2,6 +2,7 @@ mod agents;
 mod auth_input;
 mod automations;
 mod binding;
+mod blocking;
 mod browser_session_store;
 mod channel_runtime;
 mod channels;

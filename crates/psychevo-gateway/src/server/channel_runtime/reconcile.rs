@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use psychevo::ConfigurationQuery;
+use psychevo::application::ConfigurationQuery;
 
 use super::super::binding::WebState;
 use super::adapters::build_channel_gateway;

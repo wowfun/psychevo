@@ -246,23 +246,16 @@ impl Gateway {
         }
     }
 
-    pub(super) fn source_generation(&self, source: &GatewaySource) -> u64 {
+    pub(super) fn capture_source_epoch(
+        &self,
+        source: &GatewaySource,
+    ) -> crate::active_keyed::SourceEpochLease {
         let key = source.source_key();
-        self.source_generations
-            .lock()
-            .expect("gateway source generation map poisoned")
-            .get(&key.0)
-            .copied()
-            .unwrap_or(0)
+        self.source_epochs.capture(&key.0)
     }
 
-    pub(crate) fn bump_source_generation_key(&self, source_key: &SourceKey) {
-        let mut generations = self
-            .source_generations
-            .lock()
-            .expect("gateway source generation map poisoned");
-        let generation = generations.entry(source_key.0.clone()).or_default();
-        *generation = generation.saturating_add(1);
+    pub(crate) fn invalidate_source_epoch(&self, source_key: &SourceKey) {
+        self.source_epochs.invalidate(&source_key.0);
     }
 
     pub(super) fn register_active(
@@ -400,9 +393,9 @@ mod history_mutation_tests {
                     .persistence
                     .append_message(user_text_message(invocation.input.prompt.clone()))
                     .await?;
-                Ok(psychevo::TurnResult {
+                Ok(psychevo::application::TurnResult {
                     thread_id: invocation.receipt.thread_id,
-                    outcome: psychevo::TurnOutcome::Completed,
+                    outcome: psychevo::application::TurnOutcome::Completed,
                     final_answer: String::new(),
                     provider: "fixture-provider".to_string(),
                     model: "fixture-model".to_string(),
@@ -430,11 +423,11 @@ mod history_mutation_tests {
         let application = runtime.application().clone();
         let gateway = runtime.gateway().clone();
         let durability = application.gateway_durability();
-        let mut start = psychevo::StartThreadRequest::new(&cwd);
+        let mut start = psychevo::application::StartThreadRequest::new(&cwd);
         start.source = "web".to_string();
         let thread = runtime.client().start_thread(start).await.expect("Thread");
         thread
-            .start_turn(psychevo::TurnRequest::new("original"))
+            .start_turn(psychevo::application::TurnRequest::new("original"))
             .await
             .expect("accepted fixture turn")
             .wait()
@@ -590,7 +583,7 @@ mod history_mutation_tests {
         let before = fixture
             .application
             .client()
-            .list_threads(psychevo::ThreadListQuery::default())
+            .list_threads(psychevo::application::ThreadListQuery::default())
             .await
             .expect("Thread list")
             .threads
@@ -606,7 +599,7 @@ mod history_mutation_tests {
             fixture
                 .application
                 .client()
-                .list_threads(psychevo::ThreadListQuery::default())
+                .list_threads(psychevo::application::ThreadListQuery::default())
                 .await
                 .expect("Thread list")
                 .threads

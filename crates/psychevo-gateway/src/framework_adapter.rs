@@ -18,13 +18,18 @@ use crate::acp_peer;
 use crate::{ACP_PEER_METADATA_KEY, gateway_now_ms};
 use futures::future::BoxFuture;
 use psychevo::{
-    Error, ImageInput, PermissionMode, RunMode,
+    Error,
+    application::ImageInput,
+    application::PermissionMode,
+    application::RunMode,
     application::RunStreamSink,
     config::{RuntimeProfileConfig, RuntimeProfileKind},
 };
 use psychevo_gateway_protocol::source::{GatewayImageInput, GatewayInputPart};
 
-fn thread_additional_directories(thread: &psychevo::ThreadExecutionContext) -> Vec<PathBuf> {
+fn thread_additional_directories(
+    thread: &psychevo::application::ThreadExecutionContext,
+) -> Vec<PathBuf> {
     thread
         .roots
         .iter()
@@ -81,10 +86,10 @@ impl fmt::Debug for GatewayAgentSessionAdapter {
 
 struct PreparedFrameworkGatewayTurn {
     agent_sessions: AgentSessionHost,
-    native_backend: psychevo::NativeTurnBackend,
+    native_backend: psychevo::application::NativeTurnBackend,
     target: PreparedGatewayAgentTurn,
     prepared_source_key: Option<String>,
-    initial_binding: Option<psychevo::InitialAgentBinding>,
+    initial_binding: Option<psychevo::application::InitialAgentBinding>,
     #[cfg(test)]
     native_test_executor: Option<FrameworkNativeTestExecutor>,
 }
@@ -99,26 +104,27 @@ impl fmt::Debug for PreparedFrameworkGatewayTurn {
     }
 }
 
-impl psychevo::PreparedAgentTurn for PreparedFrameworkGatewayTurn {
-    fn admission(&self) -> psychevo::AgentAdmissionFacts {
-        psychevo::AgentAdmissionFacts {
+impl psychevo::application::PreparedAgentTurn for PreparedFrameworkGatewayTurn {
+    fn admission(&self) -> psychevo::application::AgentAdmissionFacts {
+        psychevo::application::AgentAdmissionFacts {
             initial_binding: self.initial_binding.clone(),
         }
     }
 
     fn invoke(
         self: Box<Self>,
-        invocation: psychevo::AgentTurnInvocation,
-    ) -> BoxFuture<'static, psychevo::Result<psychevo::TurnResult>> {
+        invocation: psychevo::application::AgentTurnInvocation,
+    ) -> BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>> {
         Box::pin(run_prepared_framework_gateway_turn(*self, invocation))
     }
 }
 
-impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
+impl psychevo::application::AgentSessionAdapter for GatewayAgentSessionAdapter {
     fn prepare_turn(
         self: Arc<Self>,
-        request: psychevo::AgentTurnPreparation,
-    ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>> {
+        request: psychevo::application::AgentTurnPreparation,
+    ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>>
+    {
         Box::pin(async move {
             let thread_id = request.thread.id.clone();
             let (target, creates_binding) =
@@ -141,7 +147,8 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
                 initial_binding,
                 #[cfg(test)]
                 native_test_executor: self.native_test_executor.clone(),
-            }) as Box<dyn psychevo::PreparedAgentTurn>)
+            })
+                as Box<dyn psychevo::application::PreparedAgentTurn>)
         })
     }
 
@@ -152,29 +159,30 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
 
     fn apply_thread_lifecycle(
         &self,
-        request: psychevo::AgentThreadLifecycleRequest,
-    ) -> BoxFuture<'static, psychevo::Result<psychevo::AgentThreadLifecycleOutcome>> {
+        request: psychevo::application::AgentThreadLifecycleRequest,
+    ) -> BoxFuture<'static, psychevo::Result<psychevo::application::AgentThreadLifecycleOutcome>>
+    {
         let adapter = self.clone();
         Box::pin(async move { adapter.apply_thread_lifecycle(request).await })
     }
 
     fn import_thread(
         self: Arc<Self>,
-        request: psychevo::AgentThreadImportRequest,
-    ) -> BoxFuture<'static, psychevo::Result<psychevo::AgentThreadPublication>> {
+        request: psychevo::application::AgentThreadImportRequest,
+    ) -> BoxFuture<'static, psychevo::Result<psychevo::application::AgentThreadPublication>> {
         Box::pin(async move { self.import_agent_thread(request).await })
     }
 
     fn fork_thread(
         self: Arc<Self>,
-        request: psychevo::AgentThreadForkRequest,
-    ) -> BoxFuture<'static, psychevo::Result<psychevo::AgentThreadPublication>> {
+        request: psychevo::application::AgentThreadForkRequest,
+    ) -> BoxFuture<'static, psychevo::Result<psychevo::application::AgentThreadPublication>> {
         Box::pin(async move { self.fork_agent_thread(request).await })
     }
 
     fn abort_thread_publication(
         &self,
-        request: psychevo::AgentThreadPublicationAbortRequest,
+        request: psychevo::application::AgentThreadPublicationAbortRequest,
     ) -> BoxFuture<'static, psychevo::Result<()>> {
         let agent_sessions = self.agent_sessions.clone();
         Box::pin(async move {
@@ -191,8 +199,8 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
 impl GatewayAgentSessionAdapter {
     async fn fork_agent_thread(
         &self,
-        request: psychevo::AgentThreadForkRequest,
-    ) -> psychevo::Result<psychevo::AgentThreadPublication> {
+        request: psychevo::application::AgentThreadForkRequest,
+    ) -> psychevo::Result<psychevo::application::AgentThreadPublication> {
         if request.binding.thread_id != request.source.id
             || request.binding.cwd != request.source.cwd
             || request.destination.cwd != request.source.cwd
@@ -253,7 +261,7 @@ impl GatewayAgentSessionAdapter {
             )
             .await?
             .into_acp()?;
-        let binding = psychevo::InitialAgentBinding {
+        let binding = psychevo::application::InitialAgentBinding {
             agent_ref: request.binding.agent_ref.clone(),
             agent_fingerprint: request.binding.agent_fingerprint.clone(),
             agent_definition_json: request.binding.agent_definition_json.clone(),
@@ -277,7 +285,7 @@ impl GatewayAgentSessionAdapter {
                 Some(&snapshot),
             ),
         )]);
-        Ok(psychevo::AgentThreadPublication {
+        Ok(psychevo::application::AgentThreadPublication {
             binding,
             messages: Vec::new(),
             metadata,
@@ -289,8 +297,8 @@ impl GatewayAgentSessionAdapter {
 
     async fn import_agent_thread(
         &self,
-        request: psychevo::AgentThreadImportRequest,
-    ) -> psychevo::Result<psychevo::AgentThreadPublication> {
+        request: psychevo::application::AgentThreadImportRequest,
+    ) -> psychevo::Result<psychevo::application::AgentThreadPublication> {
         let captured = self
             .agent_sessions
             .consume_framework_import(&request.preparation)?;
@@ -308,9 +316,9 @@ impl GatewayAgentSessionAdapter {
 
     async fn import_captured_agent_thread(
         &self,
-        request: psychevo::AgentThreadImportRequest,
+        request: psychevo::application::AgentThreadImportRequest,
         captured: CapturedFrameworkAgentImport,
-    ) -> psychevo::Result<psychevo::AgentThreadPublication> {
+    ) -> psychevo::Result<psychevo::application::AgentThreadPublication> {
         let thread = &request.thread;
         if captured.target.profile.runtime != RuntimeProfileKind::Acp {
             return Err(agent_session_configuration_error(
@@ -375,14 +383,14 @@ impl GatewayAgentSessionAdapter {
             ),
         )]);
         let history = imported_history_facts(&snapshot);
-        Ok(psychevo::AgentThreadPublication {
+        Ok(psychevo::application::AgentThreadPublication {
             binding,
             messages: acp_peer::turn::project_imported_acp_replay(&peer, &loaded.replay),
             metadata,
             title: captured
                 .title
                 .or_else(|| snapshot.session_info.title.clone()),
-            lifecycle: psychevo::AgentImportedLifecycle {
+            lifecycle: psychevo::application::AgentImportedLifecycle {
                 target_label: captured.target_label,
                 fork: snapshot.capabilities.session.fork,
                 delete: snapshot.capabilities.session.delete,
@@ -395,13 +403,13 @@ impl GatewayAgentSessionAdapter {
 
     async fn apply_thread_lifecycle(
         &self,
-        request: psychevo::AgentThreadLifecycleRequest,
-    ) -> psychevo::Result<psychevo::AgentThreadLifecycleOutcome> {
+        request: psychevo::application::AgentThreadLifecycleRequest,
+    ) -> psychevo::Result<psychevo::application::AgentThreadLifecycleOutcome> {
         let Some(binding) = request.binding.as_ref() else {
-            return Ok(psychevo::AgentThreadLifecycleOutcome::Unchanged);
+            return Ok(psychevo::application::AgentThreadLifecycleOutcome::Unchanged);
         };
         if binding.backend_kind != "acp" {
-            return Ok(psychevo::AgentThreadLifecycleOutcome::Unchanged);
+            return Ok(psychevo::application::AgentThreadLifecycleOutcome::Unchanged);
         }
         if binding.thread_id != request.thread.id || binding.cwd != request.thread.cwd {
             return Err(agent_session_error(
@@ -414,15 +422,15 @@ impl GatewayAgentSessionAdapter {
             ));
         }
         match &request.action {
-            psychevo::AgentThreadLifecycleAction::Archive { .. } => {
+            psychevo::application::AgentThreadLifecycleAction::Archive { .. } => {
                 self.archive_bound_agent_session(&request.thread, binding)
                     .await?;
-                Ok(psychevo::AgentThreadLifecycleOutcome::Unchanged)
+                Ok(psychevo::application::AgentThreadLifecycleOutcome::Unchanged)
             }
-            psychevo::AgentThreadLifecycleAction::Restore => {
+            psychevo::application::AgentThreadLifecycleAction::Restore => {
                 self.restore_bound_agent_session(&request, binding).await
             }
-            psychevo::AgentThreadLifecycleAction::Delete => {
+            psychevo::application::AgentThreadLifecycleAction::Delete => {
                 self.delete_bound_agent_session(&request, binding).await
             }
         }
@@ -430,8 +438,8 @@ impl GatewayAgentSessionAdapter {
 
     async fn archive_bound_agent_session(
         &self,
-        thread: &psychevo::ThreadExecutionContext,
-        binding: &psychevo::AgentBindingSnapshot,
+        thread: &psychevo::application::ThreadExecutionContext,
+        binding: &psychevo::application::AgentBindingSnapshot,
     ) -> psychevo::Result<()> {
         let Some(native_session_id) = binding.native_session_id.clone() else {
             return Ok(());
@@ -460,9 +468,9 @@ impl GatewayAgentSessionAdapter {
 
     async fn restore_bound_agent_session(
         &self,
-        request: &psychevo::AgentThreadLifecycleRequest,
-        binding: &psychevo::AgentBindingSnapshot,
-    ) -> psychevo::Result<psychevo::AgentThreadLifecycleOutcome> {
+        request: &psychevo::application::AgentThreadLifecycleRequest,
+        binding: &psychevo::application::AgentBindingSnapshot,
+    ) -> psychevo::Result<psychevo::application::AgentThreadLifecycleOutcome> {
         let thread = &request.thread;
         let native_session_id = required_native_session_id(binding)?;
         let (attached, peer, label) = self.lifecycle_agent(thread, binding)?;
@@ -490,23 +498,25 @@ impl GatewayAgentSessionAdapter {
                     .into_acp()?
             }
         };
-        Ok(psychevo::AgentThreadLifecycleOutcome::Projection(
-            agent_session_lifecycle_projection(&label, &snapshot),
-        ))
+        Ok(
+            psychevo::application::AgentThreadLifecycleOutcome::Projection(
+                agent_session_lifecycle_projection(&label, &snapshot),
+            ),
+        )
     }
 
     async fn delete_bound_agent_session(
         &self,
-        request: &psychevo::AgentThreadLifecycleRequest,
-        binding: &psychevo::AgentBindingSnapshot,
-    ) -> psychevo::Result<psychevo::AgentThreadLifecycleOutcome> {
+        request: &psychevo::application::AgentThreadLifecycleRequest,
+        binding: &psychevo::application::AgentBindingSnapshot,
+    ) -> psychevo::Result<psychevo::application::AgentThreadLifecycleOutcome> {
         let thread = &request.thread;
         let current = &request.current;
         if matches!(
             current.remote_delete,
-            psychevo::AgentRemoteDeleteState::Acknowledged { .. }
+            psychevo::application::AgentRemoteDeleteState::Acknowledged { .. }
         ) {
-            return Ok(psychevo::AgentThreadLifecycleOutcome::Unchanged);
+            return Ok(psychevo::application::AgentThreadLifecycleOutcome::Unchanged);
         }
         let native_session_id = required_native_session_id(binding)?;
         let (attached, peer, _) = self.lifecycle_agent(thread, binding)?;
@@ -546,10 +556,10 @@ impl GatewayAgentSessionAdapter {
         }
         if matches!(
             current.remote_delete,
-            psychevo::AgentRemoteDeleteState::NotRequested
+            psychevo::application::AgentRemoteDeleteState::NotRequested
         ) {
             return Ok(
-                psychevo::AgentThreadLifecycleOutcome::RemoteDeletePrepared {
+                psychevo::application::AgentThreadLifecycleOutcome::RemoteDeletePrepared {
                     at_ms: gateway_now_ms(),
                 },
             );
@@ -564,7 +574,7 @@ impl GatewayAgentSessionAdapter {
             })
             .await?;
         Ok(
-            psychevo::AgentThreadLifecycleOutcome::RemoteDeleteAcknowledged {
+            psychevo::application::AgentThreadLifecycleOutcome::RemoteDeleteAcknowledged {
                 at_ms: gateway_now_ms(),
             },
         )
@@ -572,8 +582,8 @@ impl GatewayAgentSessionAdapter {
 
     fn lifecycle_agent(
         &self,
-        thread: &psychevo::ThreadExecutionContext,
-        binding: &psychevo::AgentBindingSnapshot,
+        thread: &psychevo::application::ThreadExecutionContext,
+        binding: &psychevo::application::AgentBindingSnapshot,
     ) -> psychevo::Result<(AttachedAgent, ResolvedPeerTurn, String)> {
         let profile = lifecycle_profile(binding)?;
         let peer = agent_session_binding::resolve_captured_agent_peer_at(
@@ -619,19 +629,19 @@ fn acp_mcp_resolution_error(peer: &ResolvedPeerTurn, error: Error) -> Error {
 
 fn imported_history_facts(
     snapshot: &acp_peer::session_projection::AcpSessionSnapshot,
-) -> psychevo::AgentImportedHistory {
+) -> psychevo::application::AgentImportedHistory {
     let owner = match snapshot.history.owner {
         acp_peer::session_projection::AcpHistoryOwnerSnapshot::Agent => {
-            psychevo::AgentHistoryOwner::Agent
+            psychevo::application::AgentHistoryOwner::Agent
         }
         acp_peer::session_projection::AcpHistoryOwnerSnapshot::Process => {
-            psychevo::AgentHistoryOwner::Process
+            psychevo::application::AgentHistoryOwner::Process
         }
     };
     let fidelity = if snapshot.history.replay_complete {
-        psychevo::AgentHistoryFidelity::Full
+        psychevo::application::AgentHistoryFidelity::Full
     } else {
-        psychevo::AgentHistoryFidelity::Partial
+        psychevo::application::AgentHistoryFidelity::Partial
     };
     let hint = if !snapshot.history.resumable {
         Some(
@@ -651,7 +661,7 @@ fn imported_history_facts(
     } else {
         None
     };
-    psychevo::AgentImportedHistory {
+    psychevo::application::AgentImportedHistory {
         owner,
         fidelity,
         resumable: snapshot.history.resumable,
@@ -660,7 +670,7 @@ fn imported_history_facts(
 }
 
 fn lifecycle_profile(
-    binding: &psychevo::AgentBindingSnapshot,
+    binding: &psychevo::application::AgentBindingSnapshot,
 ) -> psychevo::Result<RuntimeProfileConfig> {
     let profile: RuntimeProfileConfig = serde_json::from_str(&binding.profile_config_json)
         .map_err(|error| {
@@ -689,7 +699,7 @@ fn lifecycle_profile(
 }
 
 fn required_native_session_id(
-    binding: &psychevo::AgentBindingSnapshot,
+    binding: &psychevo::application::AgentBindingSnapshot,
 ) -> psychevo::Result<String> {
     binding.native_session_id.clone().ok_or_else(|| {
         agent_session_configuration_error(format!(
@@ -702,8 +712,8 @@ fn required_native_session_id(
 pub(crate) fn agent_session_lifecycle_projection(
     target_label: &str,
     snapshot: &acp_peer::session_projection::AcpSessionSnapshot,
-) -> psychevo::AgentImportedLifecycle {
-    psychevo::AgentImportedLifecycle {
+) -> psychevo::application::AgentImportedLifecycle {
+    psychevo::application::AgentImportedLifecycle {
         target_label: target_label.to_string(),
         fork: snapshot.capabilities.session.fork,
         delete: snapshot.capabilities.session.delete,
@@ -714,8 +724,8 @@ pub(crate) fn agent_session_lifecycle_projection(
 
 async fn run_prepared_framework_gateway_turn(
     prepared: PreparedFrameworkGatewayTurn,
-    mut invocation: psychevo::AgentTurnInvocation,
-) -> psychevo::Result<psychevo::TurnResult> {
+    mut invocation: psychevo::application::AgentTurnInvocation,
+) -> psychevo::Result<psychevo::application::TurnResult> {
     if prepared.target.profile.runtime == RuntimeProfileKind::Native {
         validate_native_input(&invocation.input.parts)?;
         lower_native_invocation_controls(&mut invocation)?;
@@ -739,7 +749,7 @@ async fn run_prepared_framework_gateway_turn(
     let mcp_servers = invocation.resolve_mcp_server_handoffs(&mcp_names).await?;
     let filesystem_authorizer = invocation.filesystem_authorizer();
     let workspace_root_capture = invocation.workspace_root_capture();
-    let psychevo::AgentTurnInvocation {
+    let psychevo::application::AgentTurnInvocation {
         thread,
         history,
         receipt,
@@ -854,13 +864,13 @@ async fn run_prepared_framework_gateway_turn(
     Ok(result.turn)
 }
 
-fn validate_native_input(parts: &[psychevo::AgentInputPart]) -> psychevo::Result<()> {
+fn validate_native_input(parts: &[psychevo::application::AgentInputPart]) -> psychevo::Result<()> {
     let unsupported = parts.iter().find_map(|part| match part {
-        psychevo::AgentInputPart::Resource { .. } => Some("resource"),
-        psychevo::AgentInputPart::ResourceLink { .. } => Some("resource link"),
-        psychevo::AgentInputPart::Text { .. }
-        | psychevo::AgentInputPart::Image { .. }
-        | psychevo::AgentInputPart::Context { .. } => None,
+        psychevo::application::AgentInputPart::Resource { .. } => Some("resource"),
+        psychevo::application::AgentInputPart::ResourceLink { .. } => Some("resource link"),
+        psychevo::application::AgentInputPart::Text { .. }
+        | psychevo::application::AgentInputPart::Image { .. }
+        | psychevo::application::AgentInputPart::Context { .. } => None,
     });
     let Some(kind) = unsupported else {
         return Ok(());
@@ -876,7 +886,7 @@ fn validate_native_input(parts: &[psychevo::AgentInputPart]) -> psychevo::Result
 }
 
 fn lower_native_invocation_controls(
-    invocation: &mut psychevo::AgentTurnInvocation,
+    invocation: &mut psychevo::application::AgentTurnInvocation,
 ) -> psychevo::Result<()> {
     for (control_id, value) in std::mem::take(&mut invocation.target.runtime_options) {
         match control_id.as_str() {
@@ -922,12 +932,14 @@ fn lower_native_invocation_controls(
     Ok(())
 }
 
-fn framework_gateway_input(parts: Vec<psychevo::AgentInputPart>) -> Vec<GatewayInputPart> {
+fn framework_gateway_input(
+    parts: Vec<psychevo::application::AgentInputPart>,
+) -> Vec<GatewayInputPart> {
     parts
         .into_iter()
         .map(|part| match part {
-            psychevo::AgentInputPart::Text { text } => GatewayInputPart::Text { text },
-            psychevo::AgentInputPart::Image { input } => GatewayInputPart::Image {
+            psychevo::application::AgentInputPart::Text { text } => GatewayInputPart::Text { text },
+            psychevo::application::AgentInputPart::Image { input } => GatewayInputPart::Image {
                 input: match input {
                     ImageInput::LocalPath(path) => GatewayImageInput::LocalPath {
                         path: path.display().to_string(),
@@ -935,7 +947,7 @@ fn framework_gateway_input(parts: Vec<psychevo::AgentInputPart>) -> Vec<GatewayI
                     ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
                 },
             },
-            psychevo::AgentInputPart::Context {
+            psychevo::application::AgentInputPart::Context {
                 label,
                 text,
                 visible_to_model,
@@ -944,7 +956,7 @@ fn framework_gateway_input(parts: Vec<psychevo::AgentInputPart>) -> Vec<GatewayI
                 text,
                 visible_to_model,
             },
-            psychevo::AgentInputPart::Resource {
+            psychevo::application::AgentInputPart::Resource {
                 uri,
                 mime_type,
                 text,
@@ -955,7 +967,7 @@ fn framework_gateway_input(parts: Vec<psychevo::AgentInputPart>) -> Vec<GatewayI
                 text,
                 blob,
             },
-            psychevo::AgentInputPart::ResourceLink {
+            psychevo::application::AgentInputPart::ResourceLink {
                 name,
                 uri,
                 description,

@@ -16,7 +16,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let mut start = psychevo::StartThreadRequest::new(&other_cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&other_cwd);
     start.source = "web".to_string();
     let session_id = state
         .inner
@@ -137,7 +137,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let mut start = psychevo::StartThreadRequest::new(&other_cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&other_cwd);
     start.source = "web".to_string();
     state
         .inner

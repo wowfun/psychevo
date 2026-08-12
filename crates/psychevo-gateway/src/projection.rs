@@ -158,9 +158,9 @@ pub fn gateway_event_from_turn_event(turn_id: &str, event: &TurnEvent) -> Option
             let value = live_projector::framework_runtime_event_value(
                 data,
                 match stage {
-                    psychevo::ItemStage::Started => "tool_execution_start",
-                    psychevo::ItemStage::Updated => "tool_execution_update",
-                    psychevo::ItemStage::Completed => "tool_execution_end",
+                    psychevo::application::ItemStage::Started => "tool_execution_start",
+                    psychevo::application::ItemStage::Updated => "tool_execution_update",
+                    psychevo::application::ItemStage::Completed => "tool_execution_end",
                 },
             );
             gateway_event_from_runtime_value(turn_id, value.as_ref())

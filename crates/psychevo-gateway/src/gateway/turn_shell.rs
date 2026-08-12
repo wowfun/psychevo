@@ -1,7 +1,10 @@
 use std::sync::Mutex;
 
 use psychevo::{
-    Error, ShellCommandControl, ShellCommandOutcome, ShellCommandRequest,
+    Error,
+    application::ShellCommandControl,
+    application::ShellCommandOutcome,
+    application::ShellCommandRequest,
     application::{GatewayActivityKind, GatewayActivityTerminalStatus},
 };
 use serde_json::{Value, json};
@@ -38,12 +41,12 @@ impl Gateway {
     ) -> psychevo::Result<GatewayShellExecution> {
         let queue_source = request.source.clone();
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
-        let bind_source_generation = bind_source
+        let bind_source_epoch = bind_source
             .as_ref()
-            .map(|source| self.source_generation(source));
-        let queue_source_generation = queue_source
+            .map(|source| self.capture_source_epoch(source));
+        let queue_source_epoch = queue_source
             .as_ref()
-            .map(|source| self.source_generation(source));
+            .map(|source| self.capture_source_epoch(source));
         let mut execution = request.execution;
         let explicit_thread = request.thread_id.is_some();
         let source_thread_id = if request.workspace_id.is_none()
@@ -196,8 +199,9 @@ impl Gateway {
                 native_id: Some(session_id.clone()),
             };
             if let Some(source) = &bind_source
-                && bind_source_generation
-                    .is_none_or(|generation| self.source_generation(source) == generation)
+                && bind_source_epoch
+                    .as_ref()
+                    .is_none_or(|epoch| epoch.is_current())
             {
                 self.bind_source_thread(source, &session_id, &backend, request.lineage)
                     .await?;
@@ -206,8 +210,9 @@ impl Gateway {
                 && bind_source
                     .as_ref()
                     .is_none_or(|bind_source| bind_source.source_key() != source.source_key())
-                && queue_source_generation
-                    .is_none_or(|generation| self.source_generation(source) == generation)
+                && queue_source_epoch
+                    .as_ref()
+                    .is_none_or(|epoch| epoch.is_current())
             {
                 self.bind_source_thread(source, &session_id, &backend, None)
                     .await?;

@@ -1,5 +1,5 @@
 use psychevo::application::{StoredEditableInputEnvelope, StoredEditableInputPart};
-use psychevo::{ImageInput, PromptDisplayMetadata};
+use psychevo::{application::ImageInput, application::PromptDisplayMetadata};
 
 use super::agent_session::{AgentErrorStage, agent_session_error};
 use psychevo_gateway_protocol::source::{GatewayImageInput, GatewayInputPart, SourceKey};

@@ -119,7 +119,7 @@ fn collect_missing_automation_schema_descriptions(
 #[tokio::test]
 async fn automation_tool_create_defaults_to_current_thread() {
     let (_temp, state) = web_state().await;
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let thread_id = state
         .inner
@@ -338,10 +338,10 @@ async fn draft_open_remains_empty_without_creating_session() {
         state
             .inner
             .framework
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(state.inner.cwd.clone()),
                 limit: 1,
-                ..psychevo::ThreadListQuery::default()
+                ..psychevo::application::ThreadListQuery::default()
             })
             .await
             .expect("Threads")

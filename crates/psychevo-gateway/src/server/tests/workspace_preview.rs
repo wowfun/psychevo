@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use axum::body::to_bytes;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use psychevo::{StartThreadRequest, WorkspaceUpdate};
+use psychevo::{application::StartThreadRequest, application::WorkspaceUpdate};
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
 use tokio::sync::mpsc;

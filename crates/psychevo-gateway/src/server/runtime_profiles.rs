@@ -14,8 +14,8 @@ use psychevo::config::{
 };
 use psychevo::host_paths::HostPlatform;
 use psychevo::{
-    AgentBindingSnapshot, ConfigurationQuery, Error, ThreadAgentBinding,
-    UpdateThreadAgentControlState,
+    Error, application::AgentBindingSnapshot, application::ConfigurationQuery,
+    application::ThreadAgentBinding, application::UpdateThreadAgentControlState,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
@@ -37,6 +37,7 @@ use super::agents::active_profile_config_dir;
 use super::binding::WebState;
 #[cfg(test)]
 use super::binding::{AuthContext, GatewayWebServerConfig};
+use super::blocking::run_blocking;
 use super::rpc_dispatch::runtime_rpc_error;
 #[cfg(test)]
 use super::scope_session::default_resolved_scope;
@@ -155,7 +156,7 @@ pub(super) async fn validate_draft_workspace_roots(
     scope: &ResolvedScope,
     workspace_id: Option<&str>,
     additional_directories: &[PathBuf],
-) -> psychevo::Result<Option<psychevo::Workspace>> {
+) -> psychevo::Result<Option<psychevo::application::Workspace>> {
     let Some(workspace_id) = workspace_id else {
         return Ok(None);
     };
@@ -666,7 +667,10 @@ async fn thread_context_read_result_with_configured_models(
     wire::agents_backend_rpc::ThreadContextReadResult,
     Vec<psychevo::config::ConfiguredModel>,
 )> {
-    let target_catalog = RunnableTargetCatalog::load(state, scope)?;
+    let blocking_state = state.clone();
+    let blocking_scope = scope.clone();
+    let target_catalog =
+        run_blocking(move || RunnableTargetCatalog::load(&blocking_state, &blocking_scope)).await?;
     thread_context_read_result_with_catalog(state, scope, params, target_catalog).await
 }
 
@@ -695,11 +699,18 @@ async fn thread_context_read_result_with_catalog(
     } else {
         None
     };
-    let mut query = ConfigurationQuery::new(&scope.cwd);
-    query.inherited_env = Some(state.inner.inherited_env.clone());
-    let configuration = state.inner.framework.configuration(query)?;
-    let configured = configuration.configured_models().unwrap_or_default();
-    let selected_model = configuration.selected_model().ok().flatten();
+    let blocking_state = state.clone();
+    let blocking_scope = scope.clone();
+    let (configured, selected_model) = run_blocking(move || {
+        let mut query = ConfigurationQuery::new(&blocking_scope.cwd);
+        query.inherited_env = Some(blocking_state.inner.inherited_env.clone());
+        let configuration = blocking_state.inner.framework.configuration(query)?;
+        Ok((
+            configuration.configured_models().unwrap_or_default(),
+            configuration.selected_model().ok().flatten(),
+        ))
+    })
+    .await?;
     if let Some(binding) = binding.as_ref() {
         validate_bound_agent_snapshot(&binding.capture)?;
     }
@@ -1341,7 +1352,7 @@ pub(super) async fn prepare_draft_source_lane(
             lineage: Some(json!({"reason": "thread_draft_prepare"})),
         })
         .await?;
-    state.inner.gateway.bump_source_generation_key(&source_key);
+    state.inner.gateway.invalidate_source_epoch(&source_key);
     Ok(())
 }
 
@@ -1705,7 +1716,7 @@ async fn persist_source_lane_preparation_problem(
             })),
         })
         .await?;
-    state.inner.gateway.bump_source_generation_key(&source_key);
+    state.inner.gateway.invalidate_source_epoch(&source_key);
     Ok(())
 }
 
@@ -1984,7 +1995,7 @@ pub(super) async fn thread_control_set_result(
                 lineage: Some(json!({"reason": "thread_application_control"})),
             })
             .await?;
-        state.inner.gateway.bump_source_generation_key(&source_key);
+        state.inner.gateway.invalidate_source_epoch(&source_key);
         let (mut after_context, configured) = thread_context_read_result_with_configured_models(
             state,
             &effective_scope,

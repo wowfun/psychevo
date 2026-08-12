@@ -1,6 +1,6 @@
 use psychevo::{
-    ThreadCompaction, ThreadItem, ThreadTurnTerminal, ThreadTurnTerminalStatus,
-    thread_lineage::side_inherited_metadata_hidden,
+    application::ThreadCompaction, application::ThreadItem, application::ThreadTurnTerminal,
+    application::ThreadTurnTerminalStatus, thread_lineage::side_inherited_metadata_hidden,
     tool_argument_display::write_argument_preview_from_args,
     tool_argument_display::write_argument_preview_from_json,
 };
@@ -149,6 +149,35 @@ pub(crate) fn reconcile_terminal_bounded_running_blocks(
                 entry.status = entry_status_for_tool_result(&entry.blocks, entry.status);
                 entry.updated_at_ms = entry.updated_at_ms.max(terminal.completed_at_ms);
             }
+        }
+    }
+}
+
+pub(crate) fn settle_committed_running_blocks(
+    entries: &mut [TranscriptEntry],
+    first_active_seq: Option<i64>,
+) {
+    for entry in entries {
+        if first_active_seq.is_some_and(|first_active_seq| {
+            entry
+                .message_seq
+                .is_some_and(|message_seq| message_seq >= first_active_seq)
+        }) {
+            continue;
+        }
+        let mut changed = false;
+        for block in &mut entry.blocks {
+            if matches!(
+                block.status,
+                TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
+            ) {
+                block.status = TranscriptBlockStatus::Completed;
+                retain_terminal_write_preview(block, "completed");
+                changed = true;
+            }
+        }
+        if changed {
+            entry.status = entry_status_for_tool_result(&entry.blocks, entry.status);
         }
     }
 }

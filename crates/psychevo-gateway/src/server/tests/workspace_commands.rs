@@ -21,7 +21,7 @@ use psychevo_gateway_protocol::events_transcript::GatewayEvent;
 use psychevo_gateway_protocol::source::{GatewayTurn, GatewayTurnStatus};
 
 async fn start_test_thread(state: &WebState, cwd: &Path, source: &str) -> String {
-    let mut request = psychevo::StartThreadRequest::new(cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(cwd);
     request.source = source.to_string();
     state
         .inner
@@ -1711,7 +1711,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         .await
         .expect("side binding")
         .expect("resolved side binding");
-    let psychevo::ThreadAgentBinding::Resolved {
+    let psychevo::application::ThreadAgentBinding::Resolved {
         binding: side_binding,
         ..
     } = side_binding
@@ -1748,7 +1748,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         .resume_thread(&parent_session)
         .await
         .expect("parent Thread")
-        .update_agent_control_state(psychevo::UpdateThreadAgentControlState {
+        .update_agent_control_state(psychevo::application::UpdateThreadAgentControlState {
             expected_binding_revision: parent_binding.binding_revision,
             expected_control_revision: parent_binding.control_revision,
             thread_preferences: Some(parent_preferences),
@@ -1807,7 +1807,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         .await
         .expect("side binding")
         .expect("resolved side binding");
-    let psychevo::ThreadAgentBinding::Resolved {
+    let psychevo::application::ThreadAgentBinding::Resolved {
         binding: side_binding,
         thread_preferences,
         runtime_observed,
@@ -1895,7 +1895,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
 async fn bind_native_runtime_to_thread(
     state: &WebState,
     thread_id: &str,
-) -> psychevo::AgentBindingSnapshot {
+) -> psychevo::application::AgentBindingSnapshot {
     let scope = default_resolved_scope(state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1957,7 +1957,7 @@ async fn bind_native_runtime_to_thread(
         .await
         .expect("native Thread");
     thread
-        .set_model_selection(psychevo::ThreadModelSelection {
+        .set_model_selection(psychevo::application::ThreadModelSelection {
             provider: "fake-provider".to_string(),
             model: "fake-model".to_string(),
             reasoning_effort: None,
@@ -1969,7 +1969,7 @@ async fn bind_native_runtime_to_thread(
         .await
         .expect("native binding read")
         .expect("native binding");
-    let psychevo::ThreadAgentBinding::Resolved { binding, .. } = binding else {
+    let psychevo::application::ThreadAgentBinding::Resolved { binding, .. } = binding else {
         panic!("resolved native binding")
     };
     *binding

@@ -14,7 +14,7 @@ async fn run_profiled_framework_turn(
     caller: crate::gateway::activity::ThreadCallerContext,
     mut intent: crate::gateway::activity::ThreadTurnIntent,
 ) {
-    let mut start = psychevo::StartThreadRequest::new(&caller.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&caller.cwd);
     start.source = caller.runtime_source.clone();
     let thread = state
         .inner
@@ -46,7 +46,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     )))
     .expect("non-functional budgets");
     let max_overhead_ms = budgets
-        .pointer("/gateway/maximum/initializedGuiOverheadMs")
+        .pointer("/gateway/regressionMaximum/initializedGuiOverheadMs")
         .and_then(serde_json::Value::as_u64)
         .expect("initialized GUI overhead budget");
     let temp = tempfile::tempdir().expect("tempdir");
@@ -271,14 +271,16 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
         )
         .expect("write first-result evidence");
     }
-    assert!(
-        extra <= Duration::from_millis(max_overhead_ms),
-        "initialized GUI pre-provider overhead {extra:?} exceeded {max_overhead_ms}ms; direct median {direct_median:?}, GUI median {gui_median:?}"
-    );
-    assert!(
-        create_to_result_extra <= Duration::from_millis(max_overhead_ms),
-        "GUI create-to-first-result overhead {create_to_result_extra:?} exceeded {max_overhead_ms}ms; direct median {direct_create_to_result_median:?}, GUI median {gui_create_to_result_median:?}"
-    );
+    if std::env::var_os("PSYCHEVO_INSTRUMENTED_COVERAGE").is_none() {
+        assert!(
+            extra <= Duration::from_millis(max_overhead_ms),
+            "initialized GUI pre-provider overhead {extra:?} exceeded {max_overhead_ms}ms; direct median {direct_median:?}, GUI median {gui_median:?}"
+        );
+        assert!(
+            create_to_result_extra <= Duration::from_millis(max_overhead_ms),
+            "GUI create-to-first-result overhead {create_to_result_extra:?} exceeded {max_overhead_ms}ms; direct median {direct_create_to_result_median:?}, GUI median {gui_create_to_result_median:?}"
+        );
+    }
     let broker_log = std::fs::read_to_string(&log).expect("broker log");
     assert_eq!(broker_log.matches("plugin-installed\n").count(), 1);
     assert_eq!(broker_log.matches("mcp-status\n").count(), 0);

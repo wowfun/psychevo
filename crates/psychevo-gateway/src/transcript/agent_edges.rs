@@ -1,4 +1,4 @@
-use psychevo::AgentRelationship;
+use psychevo::application::AgentRelationship;
 use serde_json::{Value, json};
 
 use psychevo_gateway_protocol::events_transcript::{

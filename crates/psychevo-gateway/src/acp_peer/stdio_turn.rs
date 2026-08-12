@@ -66,12 +66,12 @@ pub(super) struct AcpPeerTurnContext {
     pub(super) mcp_servers: Vec<ResolvedMcpServerInput>,
     pub(super) stream: Option<RunStreamSink>,
     pub(super) workspace_mutations: Option<WorkspaceMutationSink>,
-    pub(super) approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
-    pub(super) filesystem_authorizer: psychevo::AgentFilesystemAuthorizer,
-    pub(super) turn_control: psychevo::TurnControl,
+    pub(super) approval_handler: Option<Arc<dyn psychevo::application::ApprovalHandler>>,
+    pub(super) filesystem_authorizer: psychevo::application::AgentFilesystemAuthorizer,
+    pub(super) turn_control: psychevo::application::TurnControl,
     pub(super) before_prompt: AcpBeforePromptCallback,
-    pub(super) persistence: Arc<dyn psychevo::AgentTurnPersistence>,
-    pub(super) workspace_root_capture: psychevo::WorkspaceRootCapture,
+    pub(super) persistence: Arc<dyn psychevo::application::AgentTurnPersistence>,
+    pub(super) workspace_root_capture: psychevo::application::WorkspaceRootCapture,
 }
 
 pub(super) type AcpBeforePromptCallback = Arc<
@@ -119,17 +119,17 @@ struct AcpSessionAttachment<'a> {
 struct AcpEnsureSessionInput<'a> {
     peer: &'a ResolvedPeerTurn,
     attachment: AcpSessionAttachment<'a>,
-    approval_handler: Option<Arc<dyn psychevo::ApprovalHandler>>,
-    filesystem_authorizer: Option<psychevo::AgentFilesystemAuthorizer>,
-    turn_control: Option<psychevo::TurnControl>,
+    approval_handler: Option<Arc<dyn psychevo::application::ApprovalHandler>>,
+    filesystem_authorizer: Option<psychevo::application::AgentFilesystemAuthorizer>,
+    turn_control: Option<psychevo::application::TurnControl>,
     stream: Option<RunStreamSink>,
     active_state: Option<&'a mut AcpPeerStreamState>,
-    workspace_root_capture: Option<&'a psychevo::WorkspaceRootCapture>,
+    workspace_root_capture: Option<&'a psychevo::application::WorkspaceRootCapture>,
 }
 
 pub(crate) async fn resolve_peer_mcp_server_handoffs(
     peer: &ResolvedPeerTurn,
-    configuration: &psychevo::Configuration,
+    configuration: &psychevo::application::Configuration,
 ) -> psychevo::Result<Vec<ResolvedMcpServerInput>> {
     let names = requested_peer_mcp_server_names(peer)?;
     configuration
@@ -163,7 +163,7 @@ pub(super) async fn run_acp_stdio_turn(
         .await
 }
 
-async fn wait_for_optional_abort(control: Option<psychevo::TurnControl>) {
+async fn wait_for_optional_abort(control: Option<psychevo::application::TurnControl>) {
     if let Some(control) = control {
         control.wait_for_interrupt().await;
     } else {
@@ -172,7 +172,7 @@ async fn wait_for_optional_abort(control: Option<psychevo::TurnControl>) {
 }
 
 async fn interruptible_before_prompt<T, F>(
-    control: Option<psychevo::TurnControl>,
+    control: Option<psychevo::application::TurnControl>,
     future: F,
 ) -> psychevo::Result<T>
 where
@@ -190,7 +190,7 @@ where
 
 async fn interruptible_acp_request_before_prompt<T, F>(
     process: &AcpProcessGeneration,
-    control: Option<psychevo::TurnControl>,
+    control: Option<psychevo::application::TurnControl>,
     future: F,
 ) -> Option<Result<T, agent_client_protocol::Error>>
 where
@@ -209,7 +209,7 @@ where
 
 async fn interruptible_mutating_acp_request_before_prompt<T, F>(
     process: &AcpProcessGeneration,
-    control: Option<psychevo::TurnControl>,
+    control: Option<psychevo::application::TurnControl>,
     future: F,
 ) -> psychevo::Result<T>
 where
@@ -351,7 +351,10 @@ async fn ensure_resident_acp_session(
             capture.clone()
         }
         None => {
-            psychevo::WorkspaceRootCapture::capture_async(requested_workspace_roots.clone()).await?
+            psychevo::application::WorkspaceRootCapture::capture_async(
+                requested_workspace_roots.clone(),
+            )
+            .await?
         }
     };
     let workspace_roots = workspace_root_capture.paths();
@@ -627,9 +630,9 @@ async fn ensure_resident_acp_session(
 
 fn resident_workspace_identity_matches(
     resident_roots: &[PathBuf],
-    resident_capture: Option<&psychevo::WorkspaceRootCapture>,
+    resident_capture: Option<&psychevo::application::WorkspaceRootCapture>,
     requested_roots: &[PathBuf],
-    requested_capture: &psychevo::WorkspaceRootCapture,
+    requested_capture: &psychevo::application::WorkspaceRootCapture,
 ) -> bool {
     resident_roots == requested_roots && resident_capture == Some(requested_capture)
 }
@@ -1359,12 +1362,13 @@ mod cancellation_boundary_tests {
         let root = temp.path().join("workspace");
         let old_root = temp.path().join("old-workspace");
         std::fs::create_dir(&root).expect("root");
-        let resident_capture = psychevo::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
-            .expect("resident capture");
+        let resident_capture =
+            psychevo::application::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
+                .expect("resident capture");
         std::fs::rename(&root, &old_root).expect("retain old object");
         std::fs::create_dir(&root).expect("replacement root");
         let requested_capture =
-            psychevo::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
+            psychevo::application::WorkspaceRootCapture::capture(std::slice::from_ref(&root))
                 .expect("requested capture");
 
         assert!(!resident_workspace_identity_matches(

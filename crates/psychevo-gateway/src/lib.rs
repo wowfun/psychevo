@@ -5,6 +5,7 @@ pub mod im;
 pub mod server;
 
 mod acp_peer;
+mod active_keyed;
 pub mod gateway;
 mod journey_profile;
 mod managed_acp;
@@ -113,8 +114,8 @@ pub(crate) const ACP_PEER_METADATA_KEY: &str = "peer_agent";
 #[cfg(test)]
 type FrameworkNativeTestExecutor = Arc<
     dyn Fn(
-            psychevo::AgentTurnInvocation,
-        ) -> BoxFuture<'static, psychevo::Result<psychevo::TurnResult>>
+            psychevo::application::AgentTurnInvocation,
+        ) -> BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>>
         + Send
         + Sync,
 >;

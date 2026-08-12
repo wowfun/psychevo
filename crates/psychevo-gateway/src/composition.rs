@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use psychevo::{Application, Client, Error};
+use psychevo::{Error, application::Application, application::Client};
 
 #[cfg(test)]
 use crate::FrameworkNativeTestExecutor;
@@ -201,7 +201,7 @@ impl GatewayApplication {
             .application
             .shutdown()
             .await
-            .and_then(psychevo::ShutdownReport::require_clean)
+            .and_then(psychevo::application::ShutdownReport::require_clean)
             .map(|_| ());
         combine_shutdown_results(gateway, application)
     }
@@ -212,7 +212,7 @@ impl GatewayApplication {
             .application
             .shutdown_force()
             .await
-            .and_then(psychevo::ShutdownReport::require_clean)
+            .and_then(psychevo::application::ShutdownReport::require_clean)
             .map(|_| ());
         combine_shutdown_results(gateway, application)
     }
@@ -314,7 +314,7 @@ mod tests {
             event_ingress_capacity: 7,
             shell_activity_limit: 3,
             shell_queue_limit: 2,
-            application: psychevo::ApplicationLimits {
+            application: psychevo::application::ApplicationLimits {
                 max_operations: 6,
                 max_thread_operations: 2,
             },
@@ -352,7 +352,7 @@ mod tests {
                 .expect("composition");
         let thread = runtime
             .client()
-            .start_thread(psychevo::StartThreadRequest::new(temp.path()))
+            .start_thread(psychevo::application::StartThreadRequest::new(temp.path()))
             .await
             .expect("typed Client shares the composition state");
         assert!(
@@ -369,7 +369,7 @@ mod tests {
             .expect("clean composition shutdown");
         let error = runtime
             .client()
-            .start_thread(psychevo::StartThreadRequest::new(temp.path()))
+            .start_thread(psychevo::application::StartThreadRequest::new(temp.path()))
             .await
             .expect_err("closed composition rejects new Application work");
         assert!(error.to_string().contains("shutting down"));

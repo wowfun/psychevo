@@ -116,10 +116,10 @@ fn retained_receipt_count(
         .count()
 }
 
-fn completed_result(thread_id: String, final_answer: &str) -> psychevo::TurnResult {
-    psychevo::TurnResult {
+fn completed_result(thread_id: String, final_answer: &str) -> psychevo::application::TurnResult {
+    psychevo::application::TurnResult {
         thread_id,
-        outcome: psychevo::TurnOutcome::Completed,
+        outcome: psychevo::application::TurnOutcome::Completed,
         final_answer: final_answer.to_string(),
         provider: "crash-restart-fixture".to_string(),
         model: "fixture-model".to_string(),
@@ -166,7 +166,7 @@ async fn adapter_dispatch_crash_process_helper() {
             std::io::stdout()
                 .flush()
                 .expect("flush Adapter-start barrier");
-            std::future::pending::<psychevo::Result<psychevo::TurnResult>>().await
+            std::future::pending::<psychevo::Result<psychevo::application::TurnResult>>().await
         })
     });
     let runtime = GatewayApplication::open_with_native_test_executor(
@@ -178,12 +178,12 @@ async fn adapter_dispatch_crash_process_helper() {
     )
     .await
     .expect("child composition");
-    let start = psychevo::StartThreadRequest::new(&cwd).with_initial_context(
+    let start = psychevo::application::StartThreadRequest::new(&cwd).with_initial_context(
         thread_id.clone(),
         None,
         BTreeMap::new(),
     );
-    let request = psychevo::TurnRequest::new(CRASHED_PROMPT)
+    let request = psychevo::application::TurnRequest::new(CRASHED_PROMPT)
         .with_identity("crash-restart-test", Some(client_turn_id))
         .with_requested_turn_id(turn_id.clone());
     let accepted = runtime
@@ -222,7 +222,7 @@ async fn accepted_before_adapter_dispatch_crash_process_helper() {
                     );
                 }
                 blocker_started.notify_one();
-                std::future::pending::<psychevo::Result<psychevo::TurnResult>>().await
+                std::future::pending::<psychevo::Result<psychevo::application::TurnResult>>().await
             })
         })
     };
@@ -236,12 +236,12 @@ async fn accepted_before_adapter_dispatch_crash_process_helper() {
     .await
     .expect("child composition");
     let client = runtime.client();
-    let start = psychevo::StartThreadRequest::new(&cwd).with_initial_context(
+    let start = psychevo::application::StartThreadRequest::new(&cwd).with_initial_context(
         thread_id.clone(),
         None,
         BTreeMap::new(),
     );
-    let blocker = psychevo::TurnRequest::new(LANE_BLOCKER_PROMPT)
+    let blocker = psychevo::application::TurnRequest::new(LANE_BLOCKER_PROMPT)
         .with_requested_turn_id(format!("{turn_id}-lane-blocker"));
     let blocker = client
         .start_thread_with_turn(start, blocker)
@@ -254,7 +254,7 @@ async fn accepted_before_adapter_dispatch_crash_process_helper() {
         .resume_thread(&thread_id)
         .await
         .expect("requested crash-test Thread");
-    let queued = psychevo::TurnRequest::new(PRE_DISPATCH_CRASHED_PROMPT)
+    let queued = psychevo::application::TurnRequest::new(PRE_DISPATCH_CRASHED_PROMPT)
         .with_identity("crash-restart-test", Some(client_turn_id))
         .with_requested_turn_id(turn_id.clone());
     let accepted = thread
@@ -420,7 +420,7 @@ async fn process_death_after_acceptance_before_adapter_dispatch_never_replays() 
             if turn_id == crashed_turn_id
     ));
 
-    let duplicate = psychevo::TurnRequest::new(PRE_DISPATCH_CRASHED_PROMPT)
+    let duplicate = psychevo::application::TurnRequest::new(PRE_DISPATCH_CRASHED_PROMPT)
         .with_identity(
             "crash-restart-test",
             Some(crashed_client_turn_id.to_string()),
@@ -449,7 +449,7 @@ async fn process_death_after_acceptance_before_adapter_dispatch_never_replays() 
         before_restart
     );
 
-    let recovery = psychevo::TurnRequest::new(RECOVERY_PROMPT)
+    let recovery = psychevo::application::TurnRequest::new(RECOVERY_PROMPT)
         .with_identity(
             "crash-restart-test",
             Some("pre-dispatch-recovery-client-turn".to_string()),
@@ -669,7 +669,7 @@ async fn process_death_after_adapter_dispatch_recovers_without_replay() {
         None
     );
 
-    let duplicate = psychevo::TurnRequest::new(CRASHED_PROMPT)
+    let duplicate = psychevo::application::TurnRequest::new(CRASHED_PROMPT)
         .with_identity(
             "crash-restart-test",
             Some(crashed_client_turn_id.to_string()),
@@ -705,7 +705,7 @@ async fn process_death_after_adapter_dispatch_recovers_without_replay() {
         "duplicate acceptance cannot invent a terminal"
     );
 
-    let recovery = psychevo::TurnRequest::new(RECOVERY_PROMPT)
+    let recovery = psychevo::application::TurnRequest::new(RECOVERY_PROMPT)
         .with_identity(
             "crash-restart-test",
             Some("crash-restart-recovery-client-turn".to_string()),
@@ -752,11 +752,11 @@ async fn process_death_after_adapter_dispatch_recovers_without_replay() {
         .expect("authoritative reconciled terminal");
     assert_eq!(
         framework_terminal.status,
-        psychevo::FrameworkTurnTerminalStatus::Completed
+        psychevo::application::FrameworkTurnTerminalStatus::Completed
     );
     assert_eq!(
         framework_terminal.outcome,
-        psychevo::FrameworkTurnTerminalOutcome::Normal
+        psychevo::application::FrameworkTurnTerminalOutcome::Normal
     );
 
     runtime

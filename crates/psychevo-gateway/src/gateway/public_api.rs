@@ -5,8 +5,14 @@ use std::sync::{Arc, Mutex};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use psychevo::{
-    AgentBindingSnapshot, ConfigurationQuery, Error, FrameworkTurnTerminalStatus, Thread,
-    ThreadAgentBinding, ThreadHistoryEditingStaged, ThreadItem,
+    Error,
+    application::AgentBindingSnapshot,
+    application::ConfigurationQuery,
+    application::FrameworkTurnTerminalStatus,
+    application::Thread,
+    application::ThreadAgentBinding,
+    application::ThreadHistoryEditingStaged,
+    application::ThreadItem,
     application::{
         ClarifyResult, GatewayActivityKind, GatewayActivityRecord, GatewayActivityState,
         GatewayControlCommandInput, GatewayControlCommandKind, GatewayDurability,
@@ -16,7 +22,7 @@ use psychevo::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::activity::{
@@ -38,6 +44,7 @@ use super::supervisor::{
 };
 use super::{Gateway, GatewayLimits};
 use crate::acp_peer;
+use crate::active_keyed::ActiveKeyedMutexGuard;
 use crate::gateway_now_ms;
 use crate::transcript;
 use psychevo_gateway_protocol::events_transcript::{
@@ -203,21 +210,17 @@ impl Gateway {
             .await
     }
 
-    pub(crate) async fn lock_source_mutation(&self, source_key: &SourceKey) -> OwnedMutexGuard<()> {
-        let lock = self
-            .source_mutations
-            .lock()
-            .expect("gateway source mutation map poisoned")
-            .entry(source_key.0.clone())
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone();
-        lock.lock_owned().await
+    pub(crate) async fn lock_source_mutation(
+        &self,
+        source_key: &SourceKey,
+    ) -> ActiveKeyedMutexGuard {
+        self.source_mutations.lock(&source_key.0).await
     }
 
     pub(crate) fn from_composition(
         durability: GatewayDurability,
         agent_sessions: AgentSessionHost,
-        framework_client: psychevo::Client,
+        framework_client: psychevo::application::Client,
         limits: GatewayLimits,
     ) -> Self {
         let supervisor = GatewaySupervisor::new(limits.shell_activity_limit);
@@ -232,8 +235,8 @@ impl Gateway {
             supervisor,
             active_queue: Arc::new(Mutex::new(Default::default())),
             process_bindings: Arc::new(Mutex::new(HashMap::new())),
-            source_generations: Arc::new(Mutex::new(HashMap::new())),
-            source_mutations: Arc::new(Mutex::new(HashMap::new())),
+            source_epochs: Default::default(),
+            source_mutations: Default::default(),
             live_snapshots: Arc::new(Mutex::new(HashMap::new())),
             shell_activity_runtime: Arc::new(ShellActivityRuntime::default()),
             shell_queue_limit: limits.shell_queue_limit,
@@ -245,7 +248,7 @@ impl Gateway {
         self.event_ingress.diagnostics()
     }
 
-    pub(crate) fn framework_client(&self) -> psychevo::Client {
+    pub(crate) fn framework_client(&self) -> psychevo::application::Client {
         self.framework_client.clone()
     }
 
@@ -1111,25 +1114,27 @@ impl Gateway {
         result: ClarifyResult,
     ) -> bool {
         let response = match result {
-            ClarifyResult::Answered(response) => psychevo::InteractionResponse::Clarify(
-                response
-                    .answers
-                    .into_iter()
-                    .map(|answer| answer.answers)
-                    .collect(),
-            ),
-            ClarifyResult::Cancelled => psychevo::InteractionResponse::Cancel,
+            ClarifyResult::Answered(response) => {
+                psychevo::application::InteractionResponse::Clarify(
+                    response
+                        .answers
+                        .into_iter()
+                        .map(|answer| answer.answers)
+                        .collect(),
+                )
+            }
+            ClarifyResult::Cancelled => psychevo::application::InteractionResponse::Cancel,
         };
         let foreign_payload = match &response {
-            psychevo::InteractionResponse::Clarify(answers) => json!({
+            psychevo::application::InteractionResponse::Clarify(answers) => json!({
                 "requestId": call_id,
                 "answers": answers,
             }),
-            psychevo::InteractionResponse::Cancel => json!({
+            psychevo::application::InteractionResponse::Cancel => json!({
                 "requestId": call_id,
                 "cancel": true,
             }),
-            psychevo::InteractionResponse::Permission(_) => unreachable!(),
+            psychevo::application::InteractionResponse::Permission(_) => unreachable!(),
         };
         if let Some(accepted) = self
             .enqueue_foreign_control_command(
@@ -1253,7 +1258,7 @@ impl Gateway {
         thread
             .respond(
                 request_id,
-                psychevo::InteractionResponse::Permission(decision),
+                psychevo::application::InteractionResponse::Permission(decision),
             )
             .await
             .is_ok_and(|receipt| receipt.accepted)
@@ -1297,7 +1302,7 @@ impl Gateway {
     async fn framework_thread_for_selector(
         &self,
         selector: &GatewayThreadSelector,
-    ) -> Option<psychevo::Thread> {
+    ) -> Option<psychevo::application::Thread> {
         let thread_id = match selector {
             GatewayThreadSelector::ThreadId { thread_id } => thread_id.clone(),
             GatewayThreadSelector::Source { source_key } => {

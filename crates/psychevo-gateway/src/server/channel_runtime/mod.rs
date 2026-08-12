@@ -97,7 +97,7 @@ pub(super) async fn channel_bind_target_draft(
                 lineage: Some(json!({"reason": "channel_profile_draft"})),
             })
             .await?;
-        state.inner.gateway.bump_source_generation_key(&source_key);
+        state.inner.gateway.invalidate_source_epoch(&source_key);
         return Ok(None);
     };
 
@@ -129,7 +129,7 @@ pub(super) async fn channel_bind_target_draft(
             })),
         })
         .await?;
-    state.inner.gateway.bump_source_generation_key(&source_key);
+    state.inner.gateway.invalidate_source_epoch(&source_key);
     Ok(Some(new_thread_id))
 }
 

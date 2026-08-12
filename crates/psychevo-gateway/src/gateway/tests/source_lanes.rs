@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use psychevo::RunMode;
 use psychevo::application::GatewayActivityKind;
+use psychevo::application::RunMode;
 use serde_json::json;
 use tokio::sync::oneshot;
 
@@ -24,7 +24,7 @@ async fn thread_count(harness: &Harness, source: &str) -> usize {
     harness
         ._application
         .client()
-        .list_threads(psychevo::ThreadListQuery {
+        .list_threads(psychevo::application::ThreadListQuery {
             cwd: Some(harness.cwd.clone()),
             archived: false,
             sources: vec![source.to_string()],
@@ -38,7 +38,7 @@ async fn thread_count(harness: &Harness, source: &str) -> usize {
 }
 
 async fn start_thread(harness: &Harness, source: &str) -> String {
-    let mut request = psychevo::StartThreadRequest::new(&harness.cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(&harness.cwd);
     request.source = source.to_string();
     harness
         ._application
@@ -51,7 +51,7 @@ async fn start_thread(harness: &Harness, source: &str) -> String {
 }
 
 async fn start_bound_thread(harness: &Harness, source: &str) -> String {
-    let mut request = psychevo::StartThreadRequest::new(&harness.cwd);
+    let mut request = psychevo::application::StartThreadRequest::new(&harness.cwd);
     request.source = source.to_string();
     let thread = harness
         ._application
@@ -61,7 +61,9 @@ async fn start_bound_thread(harness: &Harness, source: &str) -> String {
         .expect("Framework Thread");
     let thread_id = thread.id().to_string();
     thread
-        .start_turn(psychevo::TurnRequest::new("establish immutable binding"))
+        .start_turn(psychevo::application::TurnRequest::new(
+            "establish immutable binding",
+        ))
         .await
         .expect("bound Turn")
         .wait()
@@ -464,7 +466,7 @@ async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
     assert_eq!(result.thread.id, session_id);
     assert_eq!(
         result.result.outcome,
-        psychevo::ShellCommandOutcome::Completed
+        psychevo::application::ShellCommandOutcome::Completed
     );
     assert_eq!(
         harness

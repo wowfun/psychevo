@@ -36,7 +36,7 @@ use psychevo::skills::{
     install_skill, list_skills_value_with_options, remove_installed_skill, set_skill_enabled,
     view_skill_value_selected, write_installed_skill,
 };
-use psychevo::{ConfigurationQuery, Error, RunMode, config::ConfigScope};
+use psychevo::{Error, application::ConfigurationQuery, application::RunMode, config::ConfigScope};
 use psychevo_gateway_protocol as wire;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -66,6 +66,10 @@ use super::automations::{
     automation_run_result, automation_set_enabled_result, automation_write_result,
 };
 use super::binding::{AuthContext, WebState};
+use super::blocking::{
+    run_blocking, run_blocking_mutation, run_blocking_mutation_async, run_slow_blocking,
+    run_slow_blocking_mutation,
+};
 use super::channels::{
     channel_delete_result, channel_doctor_result_live, channel_enable_result,
     channel_list_result_for_scope, channel_show_result, channel_source_list_result,
@@ -132,6 +136,61 @@ where
     T: Into<ConnectionSender>,
 {
     let out_tx = out_tx.into();
+    match request.method.as_str() {
+        "thread/context/read" | "thread/control/set" | "thread/action/run" | "turn/start" => {
+            handle_thread_execution_rpc(state, auth, out_tx, request)
+        }
+        _ => handle_remaining_rpc(state, auth, out_tx, request),
+    }
+}
+
+fn handle_thread_execution_rpc(
+    state: WebState,
+    auth: AuthContext,
+    out_tx: ConnectionSender,
+    request: RpcRequest,
+) -> BoxFuture<'static, psychevo::Result<Value>> {
+    Box::pin(async move {
+        match request.method.as_str() {
+            "thread/context/read" => {
+                let params =
+                    request.params::<wire::agents_backend_rpc::ThreadContextReadParams>()?;
+                Ok(serde_json::to_value(
+                    thread_application::inspect_thread(&state, &auth, params).await?,
+                )?)
+            }
+            "thread/control/set" => {
+                let params = request
+                    .required_params::<wire::agents_backend_rpc::ThreadControlSetParams>()?;
+                Ok(serde_json::to_value(
+                    thread_application::set_thread_control(&state, &auth, params).await?,
+                )?)
+            }
+            "thread/action/run" => {
+                let params = request
+                    .required_params::<wire::thread_command_turn::ThreadActionRunParams>()?;
+                Ok(serde_json::to_value(
+                    thread_application::run_thread_action(&state, &auth, out_tx, params).await?,
+                )?)
+            }
+            "turn/start" => {
+                let params =
+                    request.required_params::<wire::thread_command_turn::TurnStartParams>()?;
+                Ok(serde_json::to_value(
+                    thread_application::start_thread_turn(&state, &auth, out_tx, params).await?,
+                )?)
+            }
+            method => Err(Error::Message(format!("method not found: {method}"))),
+        }
+    })
+}
+
+fn handle_remaining_rpc(
+    state: WebState,
+    auth: AuthContext,
+    out_tx: ConnectionSender,
+    request: RpcRequest,
+) -> BoxFuture<'static, psychevo::Result<Value>> {
     Box::pin(async move {
         match request.method.as_str() {
             "initialize" => {
@@ -265,32 +324,11 @@ where
                     session_application::delete(&state, &auth, params).await?,
                 )?)
             }
-            "thread/context/read" => {
-                let params =
-                    request.params::<wire::agents_backend_rpc::ThreadContextReadParams>()?;
-                Ok(serde_json::to_value(
-                    thread_application::inspect_thread(&state, &auth, params).await?,
-                )?)
-            }
             "thread/draft/prepare" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::ThreadDraftPrepareParams>()?;
                 Ok(serde_json::to_value(
                     thread_application::prepare_thread_draft(&state, &auth, params).await?,
-                )?)
-            }
-            "thread/control/set" => {
-                let params = request
-                    .required_params::<wire::agents_backend_rpc::ThreadControlSetParams>()?;
-                Ok(serde_json::to_value(
-                    thread_application::set_thread_control(&state, &auth, params).await?,
-                )?)
-            }
-            "thread/action/run" => {
-                let params = request
-                    .required_params::<wire::thread_command_turn::ThreadActionRunParams>()?;
-                Ok(serde_json::to_value(
-                    thread_application::run_thread_action(&state, &auth, out_tx, params).await?,
                 )?)
             }
             "thread/interaction/respond" => {
@@ -321,40 +359,55 @@ where
                     request.params::<wire::agents_backend_rpc::RuntimeProfileListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 state.invalidate_runnable_target_catalog();
-                Ok(serde_json::to_value(runtime_profile_list_result(
-                    &state, &scope,
-                )?)?)
+                run_blocking(move || {
+                    Ok(serde_json::to_value(runtime_profile_list_result(
+                        &state, &scope,
+                    )?)?)
+                })
+                .await
             }
             "runtime/profile/read" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::RuntimeProfileReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                runtime_profile_read_result(&state, &scope, params)
+                run_blocking(move || runtime_profile_read_result(&state, &scope, params)).await
             }
             "runtime/profile/write" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::RuntimeProfileWriteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(write_runtime_profile(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || write_runtime_profile(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "runtime/profile/delete" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::RuntimeProfileDeleteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(delete_runtime_profile(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || delete_runtime_profile(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "runtime/profile/setEnabled" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::RuntimeProfileSetEnabledParams>(
                     )?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(set_runtime_profile_enabled(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || set_runtime_profile_enabled(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "automation/list" => {
                 let params = request.params::<wire::automations::AutomationListParams>()?;
@@ -385,13 +438,6 @@ where
             "automation/run" => {
                 let params = request.required_params::<wire::automations::AutomationRunParams>()?;
                 automation_run_result(state, &auth, params, out_tx).await
-            }
-            "turn/start" => {
-                let params =
-                    request.required_params::<wire::thread_command_turn::TurnStartParams>()?;
-                Ok(serde_json::to_value(
-                    thread_application::start_thread_turn(&state, &auth, out_tx, params).await?,
-                )?)
             }
             "voice/asr/transcribe" => {
                 let params = request.required_params::<wire::voice::VoiceAsrTranscribeParams>()?;
@@ -463,14 +509,17 @@ where
                 let params = request
                     .required_params::<wire::settings_workspace_context::WorkspaceFilesParams>()?;
                 let scope = resolve_required_scope(&state, &auth, params.scope)?;
-                workspace_files_value(&scope)
+                run_blocking(move || workspace_files_value(&scope)).await
             }
             "workspace/folders" => {
                 let params = request
                     .required_params::<wire::settings_workspace_context::WorkspaceFolderListParams>(
                     )?;
                 let scope = resolve_required_scope(&state, &auth, params.scope)?;
-                workspace_folder_list_value(&state, &scope, params.path.as_deref())
+                run_blocking(move || {
+                    workspace_folder_list_value(&state, &scope, params.path.as_deref())
+                })
+                .await
             }
             "workspace/git/branches" => {
                 let params = request.required_params::<wire::settings_workspace_context::WorkspaceGitBranchesParams>()?;
@@ -485,7 +534,7 @@ where
                         ..GatewayProfileFields::default()
                     },
                 );
-                let result = workspace_git_branches_value(&scope);
+                let result = run_blocking(move || workspace_git_branches_value(&scope)).await;
                 gateway_profile_mark(
                     "workspace_git_branches_completed",
                     None,
@@ -501,19 +550,22 @@ where
             "workspace/git/checkout" => {
                 let params = request.required_params::<wire::settings_workspace_context::WorkspaceGitCheckoutParams>()?;
                 let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
-                workspace_git_checkout_value(&scope, params)
+                run_blocking(move || workspace_git_checkout_value(&scope, params)).await
             }
             "workspace/file/read" => {
                 let params = request
                     .required_params::<wire::settings_workspace_context::WorkspaceFileReadParams>(
                     )?;
                 let scope = resolve_required_scope(&state, &auth, params.scope)?;
-                workspace_file_read_value(&scope, &params.path)
+                run_blocking(move || workspace_file_read_value(&scope, &params.path)).await
             }
             "workspace/file/preview/open" => {
                 let params = request.required_params::<wire::settings_workspace_context::WorkspaceFilePreviewOpenParams>()?;
                 let scope = resolve_workspace_preview_scope(&state, &auth, params.scope).await?;
-                workspace_file_preview_open_value(&state, &scope, &params.path)
+                run_blocking(move || {
+                    workspace_file_preview_open_value(&state, &scope, &params.path)
+                })
+                .await
             }
             "workspace/file/preview/release" => {
                 let params =
@@ -525,7 +577,7 @@ where
                     .required_params::<wire::settings_workspace_context::WorkspaceFileWriteParams>(
                     )?;
                 let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
-                workspace_file_write_value(&scope, params)
+                run_blocking(move || workspace_file_write_value(&scope, params)).await
             }
             "workspace/file/externalActions" => {
                 let params =
@@ -547,7 +599,7 @@ where
                 let params = request
                     .required_params::<wire::settings_workspace_context::WorkspaceDiffParams>()?;
                 let scope = resolve_required_scope(&state, &auth, params.scope)?;
-                workspace_diff_value(&scope, params.path.as_deref())
+                run_blocking(move || workspace_diff_value(&scope, params.path.as_deref())).await
             }
             "workspace/changes" => {
                 let params = request
@@ -574,16 +626,19 @@ where
                     .required_params::<wire::settings_workspace_context::WorkspaceChangeFileParams>(
                     )?;
                 let scope = resolve_required_scope(&state, &auth, params.scope)?;
-                Ok(serde_json::to_value(state.inner.review.reject(
-                    &scope,
-                    &params.turn_id,
-                    &params.path,
-                )?)?)
+                run_blocking(move || {
+                    Ok(serde_json::to_value(state.inner.review.reject(
+                        &scope,
+                        &params.turn_id,
+                        &params.path,
+                    )?)?)
+                })
+                .await
             }
             "workspace/create" => {
                 let params = request
                     .required_params::<wire::settings_workspace_context::WorkspaceCreateParams>()?;
-                workspace_create_value(&state, &auth, params)
+                run_blocking(move || workspace_create_value(&state, &auth, params)).await
             }
             "context/read" => {
                 let params = request
@@ -631,48 +686,67 @@ where
                 let params = request.params::<wire::agents_backend_rpc::AgentListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 state.invalidate_runnable_target_catalog();
-                let catalog = discover_gateway_agents(&state, &scope)?;
-                Ok(serde_json::to_value(agent_list_result(&catalog))?)
+                run_blocking(move || {
+                    let catalog = discover_gateway_agents(&state, &scope)?;
+                    Ok(serde_json::to_value(agent_list_result(&catalog))?)
+                })
+                .await
             }
             "agent/read" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::AgentReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 if params.target.is_some() {
-                    return read_agent_definition(&state, &scope, params);
+                    return run_blocking(move || read_agent_definition(&state, &scope, params))
+                        .await;
                 }
-                let catalog = discover_gateway_agents(&state, &scope)?;
-                let agent = resolve_agent_definition(
-                    &catalog,
-                    &params.name,
-                    &scope.cwd,
-                    &state.inner.inherited_env,
-                )?;
-                Ok(serde_json::to_value(agent_read_result(&agent))?)
+                run_blocking(move || {
+                    let catalog = discover_gateway_agents(&state, &scope)?;
+                    let agent = resolve_agent_definition(
+                        &catalog,
+                        &params.name,
+                        &scope.cwd,
+                        &state.inner.inherited_env,
+                    )?;
+                    Ok(serde_json::to_value(agent_read_result(&agent))?)
+                })
+                .await
             }
             "agent/write" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::AgentWriteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(write_agent_definition(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || write_agent_definition(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "agent/setEnabled" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::AgentSetEnabledParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(set_agent_definition_enabled(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || set_agent_definition_enabled(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "agent/delete" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::AgentDeleteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(delete_agent_definition(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || delete_agent_definition(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "agent/status" => {
                 let params = request.params::<wire::agents_backend_rpc::AgentStatusParams>()?;
@@ -713,39 +787,46 @@ where
             "team/list" => {
                 let params = request.params::<wire::agents_backend_rpc::TeamListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let agents = discover_gateway_agents(&state, &scope)?;
-                let teams = discover_gateway_teams(&state, &scope, &agents)?;
-                Ok(serde_json::to_value(team_list_result(&teams))?)
+                run_blocking(move || {
+                    let agents = discover_gateway_agents(&state, &scope)?;
+                    let teams = discover_gateway_teams(&state, &scope, &agents)?;
+                    Ok(serde_json::to_value(team_list_result(&teams))?)
+                })
+                .await
             }
             "team/read" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::TeamReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 if params.target.is_some() {
-                    return read_team_definition(&state, &scope, params);
+                    return run_blocking(move || read_team_definition(&state, &scope, params))
+                        .await;
                 }
-                let agents = discover_gateway_agents(&state, &scope)?;
-                let teams = discover_gateway_teams(&state, &scope, &agents)?;
-                let team = resolve_agent_team_definition(&teams, &params.name)?;
-                Ok(serde_json::to_value(team_read_result(&team))?)
+                run_blocking(move || {
+                    let agents = discover_gateway_agents(&state, &scope)?;
+                    let teams = discover_gateway_teams(&state, &scope, &agents)?;
+                    let team = resolve_agent_team_definition(&teams, &params.name)?;
+                    Ok(serde_json::to_value(team_read_result(&team))?)
+                })
+                .await
             }
             "team/write" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::TeamWriteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                write_team_definition(&state, &scope, params)
+                run_blocking(move || write_team_definition(&state, &scope, params)).await
             }
             "team/setEnabled" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::TeamSetEnabledParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                set_team_definition_enabled(&state, &scope, params)
+                run_blocking(move || set_team_definition_enabled(&state, &scope, params)).await
             }
             "team/delete" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::TeamDeleteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                delete_team_definition(&state, &scope, params)
+                run_blocking(move || delete_team_definition(&state, &scope, params)).await
             }
             "team/status" => {
                 let params = request.params::<wire::agents_backend_rpc::TeamStatusParams>()?;
@@ -775,35 +856,44 @@ where
             "backend/list" => {
                 let params = request.params::<wire::agents_backend_rpc::BackendListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                materialize_local_acp_backends(&state, &scope)?;
                 state.invalidate_runnable_target_catalog();
-                let backends = load_agent_backend_configs(
-                    &state.inner.home,
-                    &scope.cwd,
-                    &state.inner.inherited_env,
-                )?;
-                Ok(serde_json::to_value(
-                    wire::agents_backend_rpc::BackendListResult {
-                        backends: backend_values_for_scope(&state, &scope, &backends)?,
-                    },
-                )?)
+                run_blocking(move || {
+                    materialize_local_acp_backends(&state, &scope)?;
+                    let backends = load_agent_backend_configs(
+                        &state.inner.home,
+                        &scope.cwd,
+                        &state.inner.inherited_env,
+                    )?;
+                    Ok(serde_json::to_value(
+                        wire::agents_backend_rpc::BackendListResult {
+                            backends: backend_values_for_scope(&state, &scope, &backends)?,
+                        },
+                    )?)
+                })
+                .await
             }
             "backend/doctor" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::BackendDoctorParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                materialize_local_acp_backends(&state, &scope)?;
                 state.invalidate_runnable_target_catalog();
-                let backends = load_agent_backend_configs(
-                    &state.inner.home,
-                    &scope.cwd,
-                    &state.inner.inherited_env,
-                )?;
-                let backend = backends
-                    .get(&params.id)
-                    .ok_or_else(|| Error::Message(format!("unknown backend: {}", params.id)))?;
+                let blocking_state = state.clone();
+                let blocking_scope = scope.clone();
+                let backend = run_blocking(move || {
+                    materialize_local_acp_backends(&blocking_state, &blocking_scope)?;
+                    let backends = load_agent_backend_configs(
+                        &blocking_state.inner.home,
+                        &blocking_scope.cwd,
+                        &blocking_state.inner.inherited_env,
+                    )?;
+                    backends
+                        .get(&params.id)
+                        .cloned()
+                        .ok_or_else(|| Error::Message(format!("unknown backend: {}", params.id)))
+                })
+                .await?;
                 Ok(serde_json::to_value(
-                    managed_backend_doctor_value_with_auth(&state, &scope, backend).await?,
+                    managed_backend_doctor_value_with_auth(&state, &scope, &backend).await?,
                 )?)
             }
             "backend/install" | "backend/repair" | "backend/upgrade" => {
@@ -818,25 +908,41 @@ where
                 let params =
                     request.required_params::<wire::agents_backend_rpc::BackendWriteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(write_backend_config(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || write_backend_config(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "backend/delete" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::BackendDeleteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(delete_backend_config(
-                    &state, &scope, params,
-                ))
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || delete_backend_config(&blocking_state, &scope, params),
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "plugin/list" => {
                 let params = request.params::<wire::agents_backend_rpc::PluginListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let mut query = ConfigurationQuery::new(&scope.cwd);
-                query.inherited_env = Some(state.inner.inherited_env.clone());
-                let configuration = state.inner.framework.configuration(query)?;
-                let native = configuration.plugins()?;
+                let blocking_state = state.clone();
+                let blocking_scope = scope.clone();
+                let native = run_blocking(move || {
+                    let mut query = ConfigurationQuery::new(&blocking_scope.cwd);
+                    query.inherited_env = Some(blocking_state.inner.inherited_env.clone());
+                    blocking_state
+                        .inner
+                        .framework
+                        .configuration(query)?
+                        .plugins()
+                })
+                .await?;
                 let broker = &state.inner.codex_capability_broker;
                 let codex = if broker.is_enabled() {
                     broker.plugin_list(&scope.cwd).await
@@ -846,11 +952,16 @@ where
                     ))
                 };
                 let merged = codex_capability_broker::merge_plugin_list(native, codex);
-                let merged = codex_capability_broker::apply_codex_policy_views(
-                    merged,
-                    &state.inner.home,
-                    &scope.cwd,
-                )?;
+                let policy_home = state.inner.home.clone();
+                let policy_cwd = scope.cwd.clone();
+                let merged = run_blocking(move || {
+                    codex_capability_broker::apply_codex_policy_views(
+                        merged,
+                        &policy_home,
+                        &policy_cwd,
+                    )
+                })
+                .await?;
                 Ok(codex_capability_broker::apply_authority_view(
                     merged,
                     broker.authority_view(),
@@ -868,11 +979,17 @@ where
                         .codex_capability_broker
                         .plugin_read(&scope.cwd, &identity)
                         .await?;
-                    let policy = psychevo::plugins::codex_plugin_policy_value(
-                        &state.inner.home,
-                        &scope.cwd,
-                        &identity.selector(),
-                    )?;
+                    let policy_home = state.inner.home.clone();
+                    let policy_cwd = scope.cwd.clone();
+                    let policy_selector = identity.selector();
+                    let policy = run_blocking(move || {
+                        psychevo::plugins::codex_plugin_policy_value(
+                            &policy_home,
+                            &policy_cwd,
+                            &policy_selector,
+                        )
+                    })
+                    .await?;
                     let trust = state
                         .inner
                         .codex_capability_broker
@@ -883,13 +1000,16 @@ where
                         trust,
                     ));
                 }
-                let mut query = ConfigurationQuery::new(&scope.cwd);
-                query.inherited_env = Some(state.inner.inherited_env.clone());
-                state
-                    .inner
-                    .framework
-                    .configuration(query)?
-                    .plugin(&params.selector)
+                run_blocking(move || {
+                    let mut query = ConfigurationQuery::new(&scope.cwd);
+                    query.inherited_env = Some(state.inner.inherited_env.clone());
+                    state
+                        .inner
+                        .framework
+                        .configuration(query)?
+                        .plugin(&params.selector)
+                })
+                .await
             }
             "plugin/doctor" => {
                 let params = request.params::<wire::agents_backend_rpc::PluginDoctorParams>()?;
@@ -916,12 +1036,15 @@ where
                         },
                     }));
                 }
-                let mut query = ConfigurationQuery::new(&scope.cwd);
-                query.inherited_env = Some(state.inner.inherited_env.clone());
-                state
-                    .inner
-                    .framework
-                    .configuration(query)?
+                let blocking_state = state.clone();
+                let blocking_scope = scope.clone();
+                let configuration = run_blocking(move || {
+                    let mut query = ConfigurationQuery::new(&blocking_scope.cwd);
+                    query.inherited_env = Some(blocking_state.inner.inherited_env.clone());
+                    blocking_state.inner.framework.configuration(query)
+                })
+                .await?;
+                configuration
                     .diagnose_plugins(params.selector.as_deref())
                     .await
             }
@@ -929,17 +1052,21 @@ where
                 let params =
                     request.required_params::<wire::agents_backend_rpc::PluginInspectParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                plugin_import_inspect_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    PluginInspectOptions {
-                        source: params.source,
-                        source_kind: parse_plugin_source_kind(params.source_kind.as_deref())?,
-                        git_ref: params.git_ref,
-                        npm_version: params.npm_version,
-                        npm_registry: params.npm_registry,
-                    },
-                )
+                let source_kind = parse_plugin_source_kind(params.source_kind.as_deref())?;
+                run_slow_blocking(move || {
+                    plugin_import_inspect_value(
+                        &state.inner.home,
+                        &scope.cwd,
+                        PluginInspectOptions {
+                            source: params.source,
+                            source_kind,
+                            git_ref: params.git_ref,
+                            npm_version: params.npm_version,
+                            npm_registry: params.npm_registry,
+                        },
+                    )
+                })
+                .await
             }
             "plugin/install" => {
                 let params =
@@ -965,20 +1092,29 @@ where
                     );
                     return Ok(Value::Object(response));
                 }
-                let result = plugin_install_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    PluginInstallOptions {
-                        source: params.source,
-                        source_kind: parse_plugin_source_kind(params.source_kind.as_deref())?,
-                        scope: parse_plugin_scope(params.scope_name.as_deref())?,
-                        git_ref: params.git_ref,
-                        npm_version: params.npm_version,
-                        npm_registry: params.npm_registry,
-                        force: params.force,
+                let source_kind = parse_plugin_source_kind(params.source_kind.as_deref())?;
+                let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_slow_blocking_mutation(
+                    move || {
+                        plugin_install_value(
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            PluginInstallOptions {
+                                source: params.source,
+                                source_kind,
+                                scope: plugin_scope,
+                                git_ref: params.git_ref,
+                                npm_version: params.npm_version,
+                                npm_registry: params.npm_registry,
+                                force: params.force,
+                            },
+                        )
                     },
-                );
-                state.invalidate_runnable_target_catalog_after(result)
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "plugin/uninstall" => {
                 let params =
@@ -1003,13 +1139,21 @@ where
                         "result": result,
                     }));
                 }
-                let result = plugin_uninstall_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_plugin_scope(params.scope_name.as_deref())?,
-                    &params.selector,
-                );
-                state.invalidate_runnable_target_catalog_after(result)
+                let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || {
+                        plugin_uninstall_value(
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            plugin_scope,
+                            &params.selector,
+                        )
+                    },
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "plugin/setEnabled" => {
                 let params = request
@@ -1018,44 +1162,67 @@ where
                 if codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
                     .is_some()
                 {
-                    let result = codex_plugin_set_enabled_value(
-                        &state.inner.home,
-                        &scope.cwd,
-                        parse_plugin_scope(params.scope_name.as_deref())?,
-                        &params.selector,
-                        params.enabled,
-                    );
-                    if result.is_ok() {
-                        state
-                            .inner
-                            .codex_capability_broker
-                            .invalidate_runtime_inventories()
-                            .await;
-                    }
-                    return state.invalidate_runnable_target_catalog_after(result);
+                    let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                    state
+                        .inner
+                        .codex_capability_broker
+                        .invalidate_runtime_inventories()
+                        .await;
+                    let blocking_state = state.clone();
+                    let invalidation_state = state.clone();
+                    return run_blocking_mutation_async(
+                        move || {
+                            codex_plugin_set_enabled_value(
+                                &blocking_state.inner.home,
+                                &scope.cwd,
+                                plugin_scope,
+                                &params.selector,
+                                params.enabled,
+                            )
+                        },
+                        move || async move {
+                            invalidation_state.invalidate_runnable_target_catalog();
+                            invalidation_state
+                                .inner
+                                .codex_capability_broker
+                                .invalidate_runtime_inventories()
+                                .await;
+                        },
+                    )
+                    .await;
                 }
                 let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
-                let result = match params.enabled {
-                    Some(enabled) => plugin_set_enabled_value(
-                        &state.inner.home,
-                        &scope.cwd,
-                        plugin_scope,
-                        &params.selector,
-                        enabled,
-                    ),
-                    None => plugin_reset_enabled_value(
-                        &state.inner.home,
-                        &scope.cwd,
-                        plugin_scope,
-                        &params.selector,
-                    ),
-                };
-                state.invalidate_runnable_target_catalog_after(result)
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || match params.enabled {
+                        Some(enabled) => plugin_set_enabled_value(
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            plugin_scope,
+                            &params.selector,
+                            enabled,
+                        ),
+                        None => plugin_reset_enabled_value(
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            plugin_scope,
+                            &params.selector,
+                        ),
+                    },
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
+                )
+                .await
             }
             "extension/list" => {
                 let params = request.params::<wire::agents_backend_rpc::ExtensionListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let mut result = extension_list_result(&state.inner.home, &scope.cwd)?;
+                let blocking_state = state.clone();
+                let blocking_scope = scope.clone();
+                let mut result = run_blocking(move || {
+                    extension_list_result(&blocking_state.inner.home, &blocking_scope.cwd)
+                })
+                .await?;
                 for extension in &mut result.extensions {
                     if let Some(reason) = state
                         .inner
@@ -1072,12 +1239,17 @@ where
                 let params =
                     request.required_params::<wire::agents_backend_rpc::ExtensionReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let mut result = extension_read_result(
-                    &state.inner.home,
-                    &scope.cwd,
-                    &params.selector,
-                    params.scope_name.as_deref(),
-                )?;
+                let blocking_state = state.clone();
+                let blocking_scope = scope.clone();
+                let mut result = run_blocking(move || {
+                    extension_read_result(
+                        &blocking_state.inner.home,
+                        &blocking_scope.cwd,
+                        &params.selector,
+                        params.scope_name.as_deref(),
+                    )
+                })
+                .await?;
                 if let Some(reason) = state
                     .inner
                     .extension_app_leases
@@ -1092,32 +1264,44 @@ where
                 let params =
                     request.required_params::<wire::agents_backend_rpc::ExtensionRemoveParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(
-                    extension_remove_result(
-                        &state.inner.extension_app_leases,
-                        &state.inner.home,
-                        &scope.cwd,
-                        &params.selector,
-                        params.scope_name.as_deref(),
-                    )
-                    .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || {
+                        extension_remove_result(
+                            &blocking_state.inner.extension_app_leases,
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            &params.selector,
+                            params.scope_name.as_deref(),
+                        )
+                        .and_then(|result| serde_json::to_value(result).map_err(Into::into))
+                    },
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
                 )
+                .await
             }
             "extension/setEnabled" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::ExtensionSetEnabledParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                state.invalidate_runnable_target_catalog_after(
-                    extension_set_enabled_result(
-                        &state.inner.extension_app_leases,
-                        &state.inner.home,
-                        &scope.cwd,
-                        &params.selector,
-                        params.scope_name.as_deref(),
-                        params.enabled,
-                    )
-                    .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+                let blocking_state = state.clone();
+                let invalidation_state = state.clone();
+                run_blocking_mutation(
+                    move || {
+                        extension_set_enabled_result(
+                            &blocking_state.inner.extension_app_leases,
+                            &blocking_state.inner.home,
+                            &scope.cwd,
+                            &params.selector,
+                            params.scope_name.as_deref(),
+                            params.enabled,
+                        )
+                        .and_then(|result| serde_json::to_value(result).map_err(Into::into))
+                    },
+                    move || invalidation_state.invalidate_runnable_target_catalog(),
                 )
+                .await
             }
             "extension/app/open" => {
                 let params = request
@@ -1214,11 +1398,11 @@ where
                         .plugin_list(&scope.cwd)
                         .await;
                 }
-                plugin_marketplace_list_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_plugin_scope(params.scope_name.as_deref())?,
-                )
+                let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                run_blocking(move || {
+                    plugin_marketplace_list_value(&state.inner.home, &scope.cwd, plugin_scope)
+                })
+                .await
             }
             "plugin/catalog/add" => {
                 let params = request
@@ -1235,19 +1419,23 @@ where
                         )
                         .await;
                 }
-                plugin_marketplace_add_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_plugin_scope(params.scope_name.as_deref())?,
-                    PluginMarketplaceEntry {
-                        name: params.name,
-                        source: params.source,
-                        kind: params.kind,
-                        git_ref: params.git_ref,
-                        npm_version: params.npm_version,
-                        npm_registry: params.npm_registry,
-                    },
-                )
+                let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                run_slow_blocking(move || {
+                    plugin_marketplace_add_value(
+                        &state.inner.home,
+                        &scope.cwd,
+                        plugin_scope,
+                        PluginMarketplaceEntry {
+                            name: params.name,
+                            source: params.source,
+                            kind: params.kind,
+                            git_ref: params.git_ref,
+                            npm_version: params.npm_version,
+                            npm_registry: params.npm_registry,
+                        },
+                    )
+                })
+                .await
             }
             "plugin/catalog/remove" => {
                 let params = request
@@ -1260,12 +1448,16 @@ where
                         .catalog_remove(&params.name)
                         .await;
                 }
-                plugin_marketplace_remove_value(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_plugin_scope(params.scope_name.as_deref())?,
-                    &params.name,
-                )
+                let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+                run_blocking(move || {
+                    plugin_marketplace_remove_value(
+                        &state.inner.home,
+                        &scope.cwd,
+                        plugin_scope,
+                        &params.name,
+                    )
+                })
+                .await
             }
             "plugin/catalog/upgrade" => {
                 let params = request
@@ -1315,122 +1507,150 @@ where
             "skill/list" => {
                 let params = request.params::<wire::agents_backend_rpc::SkillListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let catalog = discover_skills(&SkillDiscoveryOptions {
-                    home: state.inner.home.clone(),
-                    cwd: scope.cwd,
-                    config_path: state.inner.config_path.clone(),
-                    env: state.inner.inherited_env.clone(),
-                    explicit_inputs: Vec::new(),
-                    additional_roots: Vec::new(),
-                    no_skills: false,
-                })?;
-                Ok(list_skills_value_with_options(
-                    &catalog,
-                    &ListSkillsOptions {
-                        include_hidden: true,
-                        detail: true,
-                        ..ListSkillsOptions::default()
-                    },
-                ))
+                run_blocking(move || {
+                    let catalog = discover_skills(&SkillDiscoveryOptions {
+                        home: state.inner.home.clone(),
+                        cwd: scope.cwd,
+                        config_path: state.inner.config_path.clone(),
+                        env: state.inner.inherited_env.clone(),
+                        explicit_inputs: Vec::new(),
+                        additional_roots: Vec::new(),
+                        no_skills: false,
+                    })?;
+                    Ok(list_skills_value_with_options(
+                        &catalog,
+                        &ListSkillsOptions {
+                            include_hidden: true,
+                            detail: true,
+                            ..ListSkillsOptions::default()
+                        },
+                    ))
+                })
+                .await
             }
             "skill/read" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::SkillReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let catalog = discover_skills(&SkillDiscoveryOptions {
-                    home: state.inner.home.clone(),
-                    cwd: scope.cwd,
-                    config_path: state.inner.config_path.clone(),
-                    env: state.inner.inherited_env.clone(),
-                    explicit_inputs: Vec::new(),
-                    additional_roots: Vec::new(),
-                    no_skills: false,
-                })?;
-                view_skill_value_selected(
-                    &catalog,
-                    &params.name,
-                    params.path.as_deref().map(std::path::Path::new),
-                    None,
-                )
+                run_blocking(move || {
+                    let catalog = discover_skills(&SkillDiscoveryOptions {
+                        home: state.inner.home.clone(),
+                        cwd: scope.cwd,
+                        config_path: state.inner.config_path.clone(),
+                        env: state.inner.inherited_env.clone(),
+                        explicit_inputs: Vec::new(),
+                        additional_roots: Vec::new(),
+                        no_skills: false,
+                    })?;
+                    view_skill_value_selected(
+                        &catalog,
+                        &params.name,
+                        params.path.as_deref().map(std::path::Path::new),
+                        None,
+                    )
+                })
+                .await
             }
             "skill/install" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::SkillInstallParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                install_skill(
-                    &state.inner.home,
-                    &scope.cwd,
-                    InstallOptions {
-                        source: params.source,
-                        target: parse_skill_target(params.target.as_deref())?,
-                        name: params.name,
-                        all: params.all,
-                        force: params.force,
-                    },
-                )
+                let target = parse_skill_target(params.target.as_deref())?;
+                run_slow_blocking(move || {
+                    install_skill(
+                        &state.inner.home,
+                        &scope.cwd,
+                        InstallOptions {
+                            source: params.source,
+                            target,
+                            name: params.name,
+                            all: params.all,
+                            force: params.force,
+                        },
+                    )
+                })
+                .await
             }
             "skill/uninstall" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::SkillUninstallParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                remove_installed_skill(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_skill_target(params.target.as_deref())?,
-                    &params.name,
-                    params.path.as_deref().map(std::path::Path::new),
-                )
+                let target = parse_skill_target(params.target.as_deref())?;
+                run_blocking(move || {
+                    remove_installed_skill(
+                        &state.inner.home,
+                        &scope.cwd,
+                        target,
+                        &params.name,
+                        params.path.as_deref().map(std::path::Path::new),
+                    )
+                })
+                .await
             }
             "skill/setEnabled" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::SkillSetEnabledParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                set_skill_enabled(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_skill_target(params.target.as_deref())?,
-                    &params.name,
-                    params.enabled,
-                )
+                let target = parse_skill_target(params.target.as_deref())?;
+                run_blocking(move || {
+                    set_skill_enabled(
+                        &state.inner.home,
+                        &scope.cwd,
+                        target,
+                        &params.name,
+                        params.enabled,
+                    )
+                })
+                .await
             }
             "skill/write" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::SkillWriteParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                write_installed_skill(
-                    &state.inner.home,
-                    &scope.cwd,
-                    parse_skill_target(params.target.as_deref())?,
-                    &params.name,
-                    params.path.as_deref().map(std::path::Path::new),
-                    &params.raw_markdown,
-                )
+                let target = parse_skill_target(params.target.as_deref())?;
+                run_blocking(move || {
+                    write_installed_skill(
+                        &state.inner.home,
+                        &scope.cwd,
+                        target,
+                        &params.name,
+                        params.path.as_deref().map(std::path::Path::new),
+                        &params.raw_markdown,
+                    )
+                })
+                .await
             }
             "tool/list" => {
                 let params = request.params::<wire::agents_backend_rpc::ToolListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                gateway_configuration(&state, scope.cwd)?.toolsets(ConfigScope::Effective)
+                run_blocking(move || {
+                    gateway_configuration(&state, scope.cwd)?.toolsets(ConfigScope::Effective)
+                })
+                .await
             }
             "tool/read" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::ToolReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                let value =
-                    gateway_configuration(&state, scope.cwd)?.toolsets(ConfigScope::Effective)?;
-                let toolsets = value
-                    .get("toolsets")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let Some(toolset) = toolsets.into_iter().find(|toolset| {
-                    toolset
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|name| name == params.name)
-                }) else {
-                    return Err(Error::Config(format!("unknown toolset: {}", params.name)));
-                };
-                Ok(json!({"toolset": toolset}))
+                run_blocking(move || {
+                    let value = gateway_configuration(&state, scope.cwd)?
+                        .toolsets(ConfigScope::Effective)?;
+                    let toolsets = value
+                        .get("toolsets")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let Some(toolset) = toolsets.into_iter().find(|toolset| {
+                        toolset
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .is_some_and(|name| name == params.name)
+                    }) else {
+                        return Err(Error::Config(format!("unknown toolset: {}", params.name)));
+                    };
+                    Ok(json!({"toolset": toolset}))
+                })
+                .await
             }
             "tool/setEnabled" => {
                 let params =
@@ -1438,93 +1658,120 @@ where
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 let config_dir = tool_config_dir(&state, &scope, params.local);
                 let mode = parse_tool_mode(&params.mode)?;
-                Ok(toolset_mutation_value(set_local_toolset_enabled(
-                    config_dir,
-                    mode,
-                    &params.name,
-                    params.enabled,
-                )?))
+                run_blocking(move || {
+                    Ok(toolset_mutation_value(set_local_toolset_enabled(
+                        config_dir,
+                        mode,
+                        &params.name,
+                        params.enabled,
+                    )?))
+                })
+                .await
             }
             "tool/create" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::ToolCreateParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 let config_dir = tool_config_dir(&state, &scope, params.local);
-                Ok(toolset_mutation_value(create_local_toolset(
-                    config_dir,
-                    &params.name,
-                    params.description,
-                    params.tools,
-                    params.includes,
-                    params.force,
-                )?))
+                run_blocking(move || {
+                    Ok(toolset_mutation_value(create_local_toolset(
+                        config_dir,
+                        &params.name,
+                        params.description,
+                        params.tools,
+                        params.includes,
+                        params.force,
+                    )?))
+                })
+                .await
             }
             "tool/remove" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::ToolRemoveParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
                 let config_dir = tool_config_dir(&state, &scope, params.local);
-                Ok(toolset_mutation_value(remove_local_toolset(
-                    config_dir,
-                    &params.name,
-                )?))
+                run_blocking(move || {
+                    Ok(toolset_mutation_value(remove_local_toolset(
+                        config_dir,
+                        &params.name,
+                    )?))
+                })
+                .await
             }
             "mcp/list" => {
                 let params = request.params::<wire::agents_backend_rpc::McpListParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                gateway_configuration(&state, scope.cwd)?.mcp_servers(ConfigScope::Effective)
+                run_blocking(move || {
+                    gateway_configuration(&state, scope.cwd)?.mcp_servers(ConfigScope::Effective)
+                })
+                .await
             }
             "mcp/read" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpReadParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                gateway_configuration(&state, scope.cwd)?.mcp_server(&params.name)
+                run_blocking(move || {
+                    gateway_configuration(&state, scope.cwd)?.mcp_server(&params.name)
+                })
+                .await
             }
             "mcp/upsert" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpUpsertParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                upsert_mcp_server(
-                    active_profile_config_dir(&state, &scope),
-                    mcp_config_input(params),
-                )
+                run_blocking(move || {
+                    upsert_mcp_server(
+                        active_profile_config_dir(&state, &scope),
+                        mcp_config_input(params),
+                    )
+                })
+                .await
             }
             "mcp/remove" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpNameParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                remove_mcp_server(active_profile_config_dir(&state, &scope), &params.name)
+                run_blocking(move || {
+                    remove_mcp_server(active_profile_config_dir(&state, &scope), &params.name)
+                })
+                .await
             }
             "mcp/setEnabled" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpSetEnabledParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                set_mcp_server_enabled(
-                    active_profile_config_dir(&state, &scope),
-                    &params.name,
-                    params.enabled,
-                )
+                run_blocking(move || {
+                    set_mcp_server_enabled(
+                        active_profile_config_dir(&state, &scope),
+                        &params.name,
+                        params.enabled,
+                    )
+                })
+                .await
             }
             "mcp/setToolPolicy" => {
                 let params = request
                     .required_params::<wire::agents_backend_rpc::McpSetToolPolicyParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                set_mcp_server_tool_policy(
-                    active_profile_config_dir(&state, &scope),
-                    &params.name,
-                    McpToolPolicyInput {
-                        enabled_tools: params.enabled_tools,
-                        disabled_tools: params.disabled_tools,
-                    },
-                )
+                run_blocking(move || {
+                    set_mcp_server_tool_policy(
+                        active_profile_config_dir(&state, &scope),
+                        &params.name,
+                        McpToolPolicyInput {
+                            enabled_tools: params.enabled_tools,
+                            disabled_tools: params.disabled_tools,
+                        },
+                    )
+                })
+                .await
             }
             "mcp/test" => {
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpNameParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                gateway_configuration(&state, scope.cwd)?
-                    .test_mcp_server(&params.name)
-                    .await
+                let configuration =
+                    run_blocking(move || gateway_configuration(&state, scope.cwd)).await?;
+                configuration.test_mcp_server(&params.name).await
             }
             "mcp/oauth/start" => {
                 let params =
@@ -1541,7 +1788,7 @@ where
                 let params =
                     request.required_params::<wire::agents_backend_rpc::McpNameParams>()?;
                 let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-                mcp_oauth_logout_value(&state, &scope, &params.name)
+                run_blocking(move || mcp_oauth_logout_value(&state, &scope, &params.name)).await
             }
             "channel/list" => {
                 let params = request.params::<wire::channels::ChannelListParams>()?;
@@ -1908,7 +2155,7 @@ pub(super) fn runtime_rpc_error(
 fn gateway_configuration(
     state: &WebState,
     cwd: PathBuf,
-) -> psychevo::Result<psychevo::Configuration> {
+) -> psychevo::Result<psychevo::application::Configuration> {
     let mut query = ConfigurationQuery::new(cwd);
     query.inherited_env = Some(state.inner.inherited_env.clone());
     state
@@ -2009,7 +2256,12 @@ async fn mcp_oauth_start_value(
     scope: ResolvedScope,
     params: wire::agents_backend_rpc::McpOAuthStartParams,
 ) -> psychevo::Result<Value> {
-    let metadata = mcp_oauth_metadata(&state, &scope, &params.name)?;
+    let metadata_state = state.clone();
+    let metadata_scope = scope.clone();
+    let metadata_name = params.name.clone();
+    let metadata =
+        run_blocking(move || mcp_oauth_metadata(&metadata_state, &metadata_scope, &metadata_name))
+            .await?;
     let session_id = Uuid::now_v7().to_string();
     let state_token = Uuid::now_v7().to_string();
     let deadline = state
@@ -2454,14 +2706,14 @@ pub(super) async fn enqueue_thread_compact_result_for_thread(
     inherited_env
         .entry("PSYCHEVO_HOME".to_string())
         .or_insert_with(|| state.inner.home.to_string_lossy().into_owned());
-    let request = psychevo::CompactThreadRequest {
+    let request = psychevo::application::CompactThreadRequest {
         config_path: state.inner.config_path.clone(),
         instructions: instructions
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
         force: true,
         inherited_env: Some(inherited_env),
-        ..psychevo::CompactThreadRequest::default()
+        ..psychevo::application::CompactThreadRequest::default()
     };
     let source = scope.source.clone();
     let event_selector = GatewayThreadSelector::thread_id(&thread_id);

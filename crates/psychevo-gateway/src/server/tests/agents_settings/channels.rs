@@ -142,7 +142,7 @@ allow_users = ["12345"]
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "channel".to_string();
     let bound_thread = state
         .inner
@@ -239,7 +239,7 @@ allow_users = ["12345"]
     );
     assert!(bound_summary.archived_at_ms.is_some());
 
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "channel".to_string();
     let same_cwd_thread = state
         .inner
@@ -317,7 +317,7 @@ allow_users = ["12345"]
     );
     assert!(!settings.to_string().contains("telegram-secret"));
 
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "channel".to_string();
     let source_list_thread = state
         .inner

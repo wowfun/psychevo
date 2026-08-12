@@ -120,9 +120,9 @@ fn framework_fixture_executor(
             for message in messages {
                 invocation.persistence.append_message(message).await?;
             }
-            Ok(psychevo::TurnResult {
+            Ok(psychevo::application::TurnResult {
                 thread_id: invocation.receipt.thread_id,
-                outcome: psychevo::TurnOutcome::Completed,
+                outcome: psychevo::application::TurnOutcome::Completed,
                 final_answer: String::new(),
                 provider: "fixture-provider".to_string(),
                 model: "fixture-model".to_string(),

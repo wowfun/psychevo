@@ -105,7 +105,7 @@ pub(super) fn peer_allows_fs_read(peer: &ResolvedPeerTurn) -> bool {
 pub(super) fn peer_allows_fs_write(peer: &ResolvedPeerTurn) -> bool {
     platform_callback_enabled(
         peer.backend.client_capabilities.contains("fs.write"),
-        psychevo::IDENTITY_BOUND_FILE_MUTATIONS_SUPPORTED,
+        psychevo::application::IDENTITY_BOUND_FILE_MUTATIONS_SUPPORTED,
     ) && agent_allows_any_tool(&peer.agent, &["write", "edit"])
 }
 

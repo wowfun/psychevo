@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use psychevo::application::WorkspaceMutation;
 use psychevo::{
-    ConfigurationQuery, Error,
+    Error,
+    application::ConfigurationQuery,
     host_paths::normalized_native_path,
     paths::canonicalize_cwd,
     workspace_diff::{WorkspaceDiffFileStatus, collect_workspace_diff, is_inside_git_work_tree},

@@ -482,8 +482,13 @@ pub(in super::super) fn spawn_gateway_live_event_tailer(state: WebState) {
             .latest_live_event_seq()
             .await
             .unwrap_or_default();
+        let mut last_snapshot_version = state
+            .inner
+            .gateway
+            .latest_live_snapshot_version()
+            .await
+            .unwrap_or_default();
         drop(state);
-        let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
         let mut last_cleanup_ms = gateway_now_ms();
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         loop {
@@ -510,18 +515,17 @@ pub(in super::super) fn spawn_gateway_live_event_tailer(state: WebState) {
                 );
             }
             let now = gateway_now_ms();
-            let snapshots = match state.inner.gateway.foreign_live_snapshots(None, 1000).await {
-                Ok(snapshots) => snapshots,
+            let snapshot_page = match state
+                .inner
+                .gateway
+                .foreign_live_snapshot_changes(last_snapshot_version, 1000)
+                .await
+            {
+                Ok(page) => page,
                 Err(_) => continue,
             };
-            for snapshot in snapshots {
-                if snapshot_revisions
-                    .get(&snapshot.snapshot_key)
-                    .is_some_and(|revision| *revision >= snapshot.revision)
-                {
-                    continue;
-                }
-                snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
+            last_snapshot_version = snapshot_page.next_version;
+            for snapshot in snapshot_page.snapshots {
                 state.publish_gateway_event_with_context(
                     snapshot.event,
                     snapshot.context.into(),

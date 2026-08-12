@@ -25,7 +25,7 @@ async fn workspace_dir_name_rejects_path_components() {
 async fn reset_source_to_empty_archives_previous_binding_without_replacement() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let first_id = state
         .inner
@@ -67,9 +67,9 @@ async fn reset_source_to_empty_archives_previous_binding_without_replacement() {
         state
             .inner
             .framework
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(state.inner.cwd.clone()),
-                ..psychevo::ThreadListQuery::default()
+                ..psychevo::application::ThreadListQuery::default()
             })
             .await
             .expect("active threads")
@@ -83,7 +83,7 @@ async fn reset_source_to_empty_archives_previous_binding_without_replacement() {
 async fn bind_source_to_thread_rebinds_existing_session() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let session_id = state
         .inner
@@ -114,7 +114,7 @@ async fn bind_source_to_thread_rebinds_existing_session() {
 async fn bind_source_to_thread_does_not_restore_an_archived_session() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let thread = state
         .inner
@@ -139,7 +139,7 @@ async fn bind_source_to_thread_does_not_restore_an_archived_session() {
 async fn deleting_the_idle_current_thread_clears_its_source_binding() {
     let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let session_id = state
         .inner

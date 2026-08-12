@@ -162,7 +162,7 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
 async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
-    let mut start = psychevo::StartThreadRequest::new(&state.inner.cwd);
+    let mut start = psychevo::application::StartThreadRequest::new(&state.inner.cwd);
     start.source = "web".to_string();
     let thread = state
         .inner

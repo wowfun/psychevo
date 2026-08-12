@@ -189,7 +189,7 @@ pub(super) async fn gateway_backend_info_for_thread(
 }
 
 pub(super) async fn gateway_backend_info_for_thread_handle(
-    thread: &psychevo::Thread,
+    thread: &psychevo::application::Thread,
 ) -> psychevo::Result<GatewayBackendInfo> {
     let thread_id = thread.id();
     if let Some(binding) = thread.agent_binding().await? {
@@ -390,7 +390,7 @@ pub(super) async fn resolve_workspace_start_scope(
     auth: &AuthContext,
     mut scope: wire::source::GatewayRequestScope,
     workspace_id: Option<&str>,
-) -> psychevo::Result<(ResolvedScope, Option<psychevo::Workspace>)> {
+) -> psychevo::Result<(ResolvedScope, Option<psychevo::application::Workspace>)> {
     let workspace = if let Some(workspace_id) = workspace_id {
         let workspace = state
             .inner
@@ -609,7 +609,7 @@ pub(super) async fn grant_browser_session_thread_scope(
             .framework
             .thread_workspace_context(thread_id)
             .await?;
-        if context.root_source != psychevo::ThreadWorkspaceRootSource::Workspace {
+        if context.root_source != psychevo::application::ThreadWorkspaceRootSource::Workspace {
             return Ok(());
         }
         let Some(generation) =

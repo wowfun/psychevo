@@ -6,7 +6,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use futures::future::BoxFuture;
 use psychevo::application::{GatewayControlCommandInput, GatewayControlCommandKind};
-use psychevo::{Application, PermissionMode, RunMode, ShellCommandRequest, ThreadAgentBinding};
+use psychevo::{
+    application::Application, application::PermissionMode, application::RunMode,
+    application::ShellCommandRequest, application::ThreadAgentBinding,
+};
 use serde_json::{Value, json};
 use tokio::sync::Notify;
 
@@ -27,33 +30,35 @@ struct PreparedBlockingFrameworkTurn {
     release: Arc<Notify>,
 }
 
-impl psychevo::AgentSessionAdapter for BlockingFrameworkAdapter {
+impl psychevo::application::AgentSessionAdapter for BlockingFrameworkAdapter {
     fn prepare_turn(
         self: Arc<Self>,
-        _request: psychevo::AgentTurnPreparation,
-    ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>> {
+        _request: psychevo::application::AgentTurnPreparation,
+    ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>>
+    {
         Box::pin(async move {
             Ok(Box::new(PreparedBlockingFrameworkTurn {
                 started: self.started.clone(),
                 release: self.release.clone(),
-            }) as Box<dyn psychevo::PreparedAgentTurn>)
+            })
+                as Box<dyn psychevo::application::PreparedAgentTurn>)
         })
     }
 }
 
-impl psychevo::PreparedAgentTurn for PreparedBlockingFrameworkTurn {
+impl psychevo::application::PreparedAgentTurn for PreparedBlockingFrameworkTurn {
     fn invoke(
         self: Box<Self>,
-        invocation: psychevo::AgentTurnInvocation,
-    ) -> BoxFuture<'static, psychevo::Result<psychevo::TurnResult>> {
+        invocation: psychevo::application::AgentTurnInvocation,
+    ) -> BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>> {
         Box::pin(async move {
             self.started.notify_one();
             self.release.notified().await;
             let receipt = invocation.receipt.clone();
             drop(invocation);
-            Ok(psychevo::TurnResult {
+            Ok(psychevo::application::TurnResult {
                 thread_id: receipt.thread_id,
-                outcome: psychevo::TurnOutcome::Completed,
+                outcome: psychevo::application::TurnOutcome::Completed,
                 final_answer: "done".to_string(),
                 provider: "fake".to_string(),
                 model: "fake".to_string(),
@@ -74,7 +79,7 @@ impl psychevo::PreparedAgentTurn for PreparedBlockingFrameworkTurn {
 async fn resolved_binding(
     harness: &super::support_peer::Harness,
     thread_id: &str,
-) -> psychevo::AgentBindingSnapshot {
+) -> psychevo::application::AgentBindingSnapshot {
     match harness
         ._application
         .client()
@@ -107,11 +112,11 @@ async fn typed_steer_requires_expected_turn_id() {
         .expect("Application");
     let thread = application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(temp.path()))
+        .start_thread(psychevo::application::StartThreadRequest::new(temp.path()))
         .await
         .expect("Framework Thread");
     let handle = thread
-        .start_turn(psychevo::TurnRequest::new("first"))
+        .start_turn(psychevo::application::TurnRequest::new("first"))
         .await
         .expect("accepted Turn");
     started.notified().await;
@@ -557,12 +562,12 @@ async fn failed_terminal_keeps_its_committed_boundary_between_later_turns() {
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
 
     thread
-        .start_turn(psychevo::TurnRequest::new("first"))
+        .start_turn(psychevo::application::TurnRequest::new("first"))
         .await
         .expect("first accepted")
         .wait()
@@ -570,13 +575,13 @@ async fn failed_terminal_keeps_its_committed_boundary_between_later_turns() {
         .expect("first completed");
     backend.fail_next();
     let failed = thread
-        .start_turn(psychevo::TurnRequest::new("failed"))
+        .start_turn(psychevo::application::TurnRequest::new("failed"))
         .await
         .expect("failed accepted");
     let failed_turn_id = failed.receipt().turn_id.clone();
     failed.wait().await.expect_err("failed terminal");
     thread
-        .start_turn(psychevo::TurnRequest::new("later"))
+        .start_turn(psychevo::application::TurnRequest::new("later"))
         .await
         .expect("later accepted")
         .wait()
@@ -608,14 +613,16 @@ async fn structural_only_same_boundary_burst_pages_exactly_once() {
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
 
     for index in 0..7 {
         backend.fail_next();
         let handle = thread
-            .start_turn(psychevo::TurnRequest::new(format!("fail {index}")))
+            .start_turn(psychevo::application::TurnRequest::new(format!(
+                "fail {index}"
+            )))
             .await
             .expect("failed Turn accepted");
         handle.wait().await.expect_err("failed Turn terminal");
@@ -643,11 +650,11 @@ async fn same_thread_forged_message_cursor_is_rejected() {
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
     thread
-        .start_turn(psychevo::TurnRequest::new("visible"))
+        .start_turn(psychevo::application::TurnRequest::new("visible"))
         .await
         .expect("Turn accepted")
         .wait()
@@ -682,13 +689,13 @@ async fn same_thread_forged_structural_cursor_is_rejected() {
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
     for prompt in ["first failure", "second failure"] {
         backend.fail_next();
         thread
-            .start_turn(psychevo::TurnRequest::new(prompt))
+            .start_turn(psychevo::application::TurnRequest::new(prompt))
             .await
             .expect("Turn accepted")
             .wait()
@@ -724,13 +731,13 @@ async fn reverted_terminal_cursor_is_rejected_until_the_projection_is_restored()
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
     for prompt in ["first failure", "second failure"] {
         backend.fail_next();
         thread
-            .start_turn(psychevo::TurnRequest::new(prompt))
+            .start_turn(psychevo::application::TurnRequest::new(prompt))
             .await
             .expect("Turn accepted")
             .wait()
@@ -777,11 +784,11 @@ async fn visible_history_paging_skips_an_unbounded_hidden_run_before_limit() {
     let thread = harness
         ._application
         .client()
-        .start_thread(psychevo::StartThreadRequest::new(&harness.cwd))
+        .start_thread(psychevo::application::StartThreadRequest::new(&harness.cwd))
         .await
         .expect("Thread");
     thread
-        .start_turn(psychevo::TurnRequest::new("older visible"))
+        .start_turn(psychevo::application::TurnRequest::new("older visible"))
         .await
         .expect("older Turn accepted")
         .wait()
@@ -789,14 +796,14 @@ async fn visible_history_paging_skips_an_unbounded_hidden_run_before_limit() {
         .expect("older Turn completed");
     backend.append_hidden_messages_on_next(20);
     thread
-        .start_turn(psychevo::TurnRequest::new("hidden context"))
+        .start_turn(psychevo::application::TurnRequest::new("hidden context"))
         .await
         .expect("hidden Turn accepted")
         .wait()
         .await
         .expect("hidden Turn completed");
     thread
-        .start_turn(psychevo::TurnRequest::new("latest visible"))
+        .start_turn(psychevo::application::TurnRequest::new("latest visible"))
         .await
         .expect("latest Turn accepted")
         .wait()

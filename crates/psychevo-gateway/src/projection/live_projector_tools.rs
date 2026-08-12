@@ -1,4 +1,4 @@
-use psychevo::{ShellCommandEvent, ShellCommandOutcome};
+use psychevo::{application::ShellCommandEvent, application::ShellCommandOutcome};
 use serde_json::{Value, json};
 
 use psychevo_gateway_protocol::events_transcript::{

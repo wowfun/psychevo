@@ -314,7 +314,8 @@ pub(super) async fn import(
                 title: candidate.title,
                 target_label: target.label,
             });
-    let mut request = psychevo::ImportAgentThreadRequest::new(import_cwd, preparation.token());
+    let mut request =
+        psychevo::application::ImportAgentThreadRequest::new(import_cwd, preparation.token());
     request.source = "web".to_string();
     let imported = state.inner.framework.import_agent_thread(request).await?;
     drop(preparation);
@@ -370,7 +371,7 @@ pub(super) async fn fork_acp_thread(
         .resume_thread(source_thread_id)
         .await?;
     let fork = source
-        .fork_agent(psychevo::ForkAgentThreadRequest {
+        .fork_agent(psychevo::application::ForkAgentThreadRequest {
             source: "web".to_string(),
         })
         .await?;
