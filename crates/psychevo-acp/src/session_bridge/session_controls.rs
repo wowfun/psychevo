@@ -13,7 +13,10 @@ use psychevo::compaction::CompactionReason;
 use psychevo::config::ConfigScope;
 use psychevo::paths::canonicalize_cwd;
 use psychevo::skills::{SkillDiscoveryOptions, discover_skills, list_skill_bundles};
-use psychevo::{CompactThreadRequest, PermissionMode, RunMode, ThreadSummary};
+use psychevo::{
+    application::CompactThreadRequest, application::PermissionMode, application::RunMode,
+    application::ThreadSummary,
+};
 use serde_json::Value;
 
 use crate::commands::{
@@ -130,7 +133,7 @@ impl PsychevoAcpAgent {
     ) -> Result<Vec<ThreadSummary>, Error> {
         let page = self
             .framework
-            .list_threads(psychevo::ThreadListQuery {
+            .list_threads(psychevo::application::ThreadListQuery {
                 cwd: Some(session.cwd.clone()),
                 ..Default::default()
             })
@@ -473,7 +476,7 @@ impl PsychevoAcpAgent {
                 session_id,
                 format!("steer queued: {prompt}"),
             )),
-            Err(psychevo::ControlInputError::Closed) => {
+            Err(psychevo::application::ControlInputError::Closed) => {
                 session.queued_prompts.push_back(prompt.clone());
                 Ok(send_slash_text(
                     cx,

@@ -2157,3 +2157,31 @@ pub enum ServerNotification {
     #[serde(rename = "thread/realtime/closed")]
     ThreadRealtimeClosed(ThreadRealtimeClosedNotification),
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::AgentWriteParams;
+    use crate::test_support::assert_stable_wire_round_trip;
+
+    #[test]
+    fn agent_write_wire_round_trip_preserves_owned_names_and_defaults() {
+        let canonical = assert_stable_wire_round_trip::<AgentWriteParams>(json!({
+            "name": "reviewer",
+            "description": "Reviews changes",
+            "target": "project",
+            "enabled": true,
+            "backend": { "ref": "codex" },
+            "entrypoints": ["review"],
+            "tools": ["read"],
+            "mcpServers": ["docs"],
+            "optionalContributions": ["skills"]
+        }));
+
+        assert_eq!(canonical["backend"]["ref"], "codex");
+        assert_eq!(canonical["mcpServers"], json!(["docs"]));
+        assert_eq!(canonical["optionalContributions"], json!(["skills"]));
+        assert_eq!(canonical["instructions"], "");
+    }
+}

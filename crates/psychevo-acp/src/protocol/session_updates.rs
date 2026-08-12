@@ -41,7 +41,7 @@ pub(crate) mod tests {
         TextResourceContents,
     };
     use psychevo::mcp::McpTransportInput;
-    use psychevo::{ImageInput, StartThreadRequest};
+    use psychevo::{application::ImageInput, application::StartThreadRequest};
     use serde_json::json;
 
     use crate::commands::{

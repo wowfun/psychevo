@@ -14,7 +14,10 @@ use agent_client_protocol::schema::v2::{
     StateUpdate, StopReason,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Error};
-use psychevo::{Application, ImageInput, RunMode, StartThreadRequest, ThreadListQuery};
+use psychevo::{
+    application::Application, application::ImageInput, application::RunMode,
+    application::StartThreadRequest, application::ThreadListQuery,
+};
 
 use crate::commands::{
     AcpApprovalHandler, AcpTurnProjection, SlashPromptAction, TERMINAL_SETUP_AUTH_METHOD_ID,

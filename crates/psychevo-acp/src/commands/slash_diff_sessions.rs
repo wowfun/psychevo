@@ -11,7 +11,7 @@ use agent_client_protocol::schema::v2::{
 };
 use agent_client_protocol::{Client, ConnectionTo};
 use futures::future::BoxFuture;
-use psychevo::ThreadSummary;
+use psychevo::application::ThreadSummary;
 use psychevo::application::{
     ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest,
 };

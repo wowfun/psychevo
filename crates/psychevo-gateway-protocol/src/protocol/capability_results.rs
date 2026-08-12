@@ -1097,3 +1097,35 @@ pub struct McpOAuthLogoutResult {
     pub name: String,
     pub removed: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{McpTransportView, PluginAuthorityIdentityView};
+    use crate::test_support::assert_stable_wire_round_trip;
+
+    #[test]
+    fn capability_tagged_unions_preserve_explicit_wire_names() {
+        let authority = assert_stable_wire_round_trip::<PluginAuthorityIdentityView>(json!({
+            "kind": "codex",
+            "plugin": "docs",
+            "marketplace": "official"
+        }));
+        assert_eq!(authority["kind"], "codex");
+
+        let transport = assert_stable_wire_round_trip::<McpTransportView>(json!({
+            "kind": "streamable_http",
+            "url": "https://example.test/mcp",
+            "headers": { "X-Tenant": "test" },
+            "auth": {
+                "bearerTokenEnvVar": "MCP_TOKEN",
+                "scopes": ["tools"],
+                "oauthConfigured": false,
+                "storedOAuthToken": false
+            }
+        }));
+        assert_eq!(transport["kind"], "streamable_http");
+        assert_eq!(transport["auth"]["storedOAuthToken"], false);
+    }
+}

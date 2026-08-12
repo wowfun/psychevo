@@ -11,7 +11,7 @@ use agent_client_protocol::schema::v2::{
 };
 use psychevo::config::ConfiguredModel;
 use psychevo::mcp::McpTransportInput;
-use psychevo::{ImageInput, McpServerInput, RunMode};
+use psychevo::{application::ImageInput, application::McpServerInput, application::RunMode};
 use serde_json::{Value, json};
 
 use super::session_updates::{Pipe, resolve_path};
@@ -857,12 +857,12 @@ pub(crate) fn compact_tool_result_text(value: &Value) -> String {
         .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default())
 }
 
-pub(crate) fn stop_reason(outcome: psychevo::TurnOutcome) -> StopReason {
+pub(crate) fn stop_reason(outcome: psychevo::application::TurnOutcome) -> StopReason {
     match outcome {
-        psychevo::TurnOutcome::Completed => StopReason::EndTurn,
-        psychevo::TurnOutcome::Interrupted => StopReason::Cancelled,
-        psychevo::TurnOutcome::Stopped => StopReason::EndTurn,
-        psychevo::TurnOutcome::Failed => StopReason::Refusal,
+        psychevo::application::TurnOutcome::Completed => StopReason::EndTurn,
+        psychevo::application::TurnOutcome::Interrupted => StopReason::Cancelled,
+        psychevo::application::TurnOutcome::Stopped => StopReason::EndTurn,
+        psychevo::application::TurnOutcome::Failed => StopReason::Refusal,
     }
 }
 

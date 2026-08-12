@@ -6,7 +6,7 @@ mod mission_tests {
     use std::collections::BTreeMap;
 
     use agent_client_protocol::schema::v2::SessionId;
-    use psychevo::ThreadListQuery;
+    use psychevo::application::ThreadListQuery;
     use uuid::Uuid;
 
     use crate::stdio::{AcpOptions, AcpSession, PsychevoAcpAgent};

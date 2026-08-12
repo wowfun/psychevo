@@ -1378,3 +1378,26 @@ pub struct UsageReadResult {
     pub windows: Vec<UsageWindowSummaryView>,
     pub activity: UsageActivityView,
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::ModelAssignmentSetParams;
+    use crate::test_support::assert_stable_wire_round_trip;
+
+    #[test]
+    fn model_assignment_wire_round_trip_preserves_camel_case_contract() {
+        let canonical = assert_stable_wire_round_trip::<ModelAssignmentSetParams>(json!({
+            "scope": "global",
+            "target": "auxiliary",
+            "task": "title",
+            "provider": "openai",
+            "model": "gpt-5",
+            "reasoningEffort": "low"
+        }));
+
+        assert_eq!(canonical["reasoningEffort"], "low");
+        assert!(canonical.get("reasoning_effort").is_none());
+    }
+}

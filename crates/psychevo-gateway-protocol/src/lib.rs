@@ -26,6 +26,29 @@ pub mod thread_command_turn;
 pub mod voice;
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+    use serde_json::Value;
+
+    pub(crate) fn assert_stable_wire_round_trip<T>(wire: Value) -> Value
+    where
+        T: Serialize + DeserializeOwned,
+    {
+        let decoded: T = serde_json::from_value(wire).expect("decode representative wire value");
+        let canonical = serde_json::to_value(&decoded).expect("encode representative wire value");
+        let decoded_again: T = serde_json::from_value(canonical.clone())
+            .expect("decode canonical representative wire value");
+        assert_eq!(
+            serde_json::to_value(decoded_again).expect("re-encode representative wire value"),
+            canonical,
+            "wire representation must stabilize after one decode/encode cycle"
+        );
+        canonical
+    }
+}
+
+#[cfg(test)]
 mod thread_application_contract_tests {
     use crate::agents_backend_rpc::{
         RuntimeErrorView, RuntimeProfileView, RuntimeProfileWriteParams, RuntimeRetryClassView,

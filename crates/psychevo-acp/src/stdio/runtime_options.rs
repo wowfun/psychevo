@@ -10,7 +10,7 @@ use psychevo::command_registry::{
     SlashCommandParse, SlashCommandSurface, dynamic_slash_command_effect, parse_slash_command_line,
     slash_invocation_effect,
 };
-use psychevo::{ApprovalHandler, ImageInput, TurnRequest};
+use psychevo::{application::ApprovalHandler, application::ImageInput, application::TurnRequest};
 use serde_json::Value;
 
 use crate::commands::{SlashPromptAction, acp_command_capabilities, send_session_update};

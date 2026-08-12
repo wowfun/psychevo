@@ -6,7 +6,7 @@ use agent_client_protocol::schema::v2::{
     UpdateSessionNotification,
 };
 use agent_client_protocol::{Client, ConnectionTo, Error};
-use psychevo::Thread;
+use psychevo::application::Thread;
 use psychevo::application::{
     AssistantBlock, AssistantSource, HistoryReplayItem, HistoryReplayWarning,
     HistoryReplayWarningKind, Message, ProviderToolBlock, ToolCallBlock, UserContentBlock,

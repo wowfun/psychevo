@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::{ByteStreams, Error};
 use psychevo::application::{MAX_QUEUED_STEER_BYTES, MAX_QUEUED_STEERS, user_text_message};
 use psychevo::{
-    Application, Client as FrameworkClient, ContextSnapshot, McpServerInput, PermissionMode,
-    RunMode, Thread, ThreadSummary, TurnHandle,
+    application::Application, application::Client as FrameworkClient, application::McpServerInput,
+    application::PermissionMode, application::RunMode, application::Thread,
+    application::ThreadSummary, application::TurnHandle, context_usage::ContextSnapshot,
 };
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -52,7 +53,8 @@ impl AcpOptions {
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
-    use std::path::PathBuf;
+    use std::ops::Deref;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -72,7 +74,8 @@ mod tests {
         Outcome,
     };
     use psychevo::{
-        Application, StartThreadRequest, ThreadListQuery, TurnOutcome, TurnRequest, TurnResult,
+        application::Application, application::StartThreadRequest, application::ThreadListQuery,
+        application::TurnOutcome, application::TurnRequest, application::TurnResult,
     };
     use serde_json::Value;
     use sqlx::Connection;
@@ -80,6 +83,27 @@ mod tests {
     use uuid::Uuid;
 
     use super::{AcpOptions, AcpSession, PsychevoAcpAgent};
+
+    struct TestRoot(tempfile::TempDir);
+
+    impl TestRoot {
+        fn new(prefix: &str) -> Self {
+            Self(
+                tempfile::Builder::new()
+                    .prefix(prefix)
+                    .tempdir()
+                    .expect("temporary ACP test root"),
+            )
+        }
+    }
+
+    impl Deref for TestRoot {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            self.0.path()
+        }
+    }
 
     #[derive(Debug)]
     struct SnapshotRootAdapter {
@@ -123,24 +147,26 @@ mod tests {
         }
     }
 
-    impl psychevo::AgentSessionAdapter for SnapshotRootAdapter {
+    impl psychevo::application::AgentSessionAdapter for SnapshotRootAdapter {
         fn prepare_turn(
             self: Arc<Self>,
-            _request: psychevo::AgentTurnPreparation,
-        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>> {
+            _request: psychevo::application::AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>>
+        {
             Box::pin(async move {
                 Ok(Box::new(PreparedSnapshotRootTurn {
                     observed: self.observed.clone(),
-                }) as Box<dyn psychevo::PreparedAgentTurn>)
+                })
+                    as Box<dyn psychevo::application::PreparedAgentTurn>)
             })
         }
     }
 
-    impl psychevo::PreparedAgentTurn for PreparedSnapshotRootTurn {
+    impl psychevo::application::PreparedAgentTurn for PreparedSnapshotRootTurn {
         fn invoke(
             self: Box<Self>,
-            invocation: psychevo::AgentTurnInvocation,
-        ) -> BoxFuture<'static, psychevo::Result<psychevo::TurnResult>> {
+            invocation: psychevo::application::AgentTurnInvocation,
+        ) -> BoxFuture<'static, psychevo::Result<psychevo::application::TurnResult>> {
             Box::pin(async move {
                 *self.observed.lock().expect("snapshot root observation") =
                     invocation.execution.snapshot_root;
@@ -151,22 +177,23 @@ mod tests {
         }
     }
 
-    impl psychevo::AgentSessionAdapter for ReplayHistoryAdapter {
+    impl psychevo::application::AgentSessionAdapter for ReplayHistoryAdapter {
         fn prepare_turn(
             self: Arc<Self>,
-            _request: psychevo::AgentTurnPreparation,
-        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>> {
+            _request: psychevo::application::AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>>
+        {
             Box::pin(async move {
                 Ok(Box::new(PreparedReplayHistoryTurn(self))
-                    as Box<dyn psychevo::PreparedAgentTurn>)
+                    as Box<dyn psychevo::application::PreparedAgentTurn>)
             })
         }
     }
 
-    impl psychevo::PreparedAgentTurn for PreparedReplayHistoryTurn {
+    impl psychevo::application::PreparedAgentTurn for PreparedReplayHistoryTurn {
         fn invoke(
             self: Box<Self>,
-            invocation: psychevo::AgentTurnInvocation,
+            invocation: psychevo::application::AgentTurnInvocation,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             Box::pin(async move {
                 let call = self.0.calls.fetch_add(1, Ordering::SeqCst);
@@ -223,11 +250,12 @@ mod tests {
         }
     }
 
-    impl psychevo::AgentSessionAdapter for AdmissionGateAdapter {
+    impl psychevo::application::AgentSessionAdapter for AdmissionGateAdapter {
         fn prepare_turn(
             self: Arc<Self>,
-            _request: psychevo::AgentTurnPreparation,
-        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::PreparedAgentTurn>>> {
+            _request: psychevo::application::AgentTurnPreparation,
+        ) -> BoxFuture<'static, psychevo::Result<Box<dyn psychevo::application::PreparedAgentTurn>>>
+        {
             Box::pin(async move {
                 self.prepare_entered.add_permits(1);
                 self.release_prepare
@@ -236,15 +264,15 @@ mod tests {
                     .expect("release admission preparation")
                     .forget();
                 Ok(Box::new(PreparedAdmissionGateTurn(self))
-                    as Box<dyn psychevo::PreparedAgentTurn>)
+                    as Box<dyn psychevo::application::PreparedAgentTurn>)
             })
         }
     }
 
-    impl psychevo::PreparedAgentTurn for PreparedAdmissionGateTurn {
+    impl psychevo::application::PreparedAgentTurn for PreparedAdmissionGateTurn {
         fn invoke(
             self: Box<Self>,
-            invocation: psychevo::AgentTurnInvocation,
+            invocation: psychevo::application::AgentTurnInvocation,
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             Box::pin(async move {
                 invocation.persistence.confirm_delivery().await?;
@@ -291,9 +319,8 @@ mod tests {
         }
     }
 
-    async fn test_agent() -> (Arc<PsychevoAcpAgent>, PathBuf) {
-        let root = std::env::temp_dir().join(format!("psychevo-acp-v2-{}", Uuid::now_v7()));
-        std::fs::create_dir_all(&root).expect("create acp test root");
+    async fn test_agent() -> (Arc<PsychevoAcpAgent>, TestRoot) {
+        let root = TestRoot::new("psychevo-acp-v2-");
         let home = root.join("home");
         let inherited_env = BTreeMap::from([
             ("HOME".to_string(), root.display().to_string()),
@@ -345,16 +372,15 @@ mod tests {
         assert!(second.next_cursor.is_none());
 
         agent.application.shutdown().await.expect("shutdown");
-        let _ = std::fs::remove_dir_all(root);
     }
 
     async fn admission_gate_agent() -> (
         Arc<PsychevoAcpAgent>,
         Arc<AdmissionGateAdapter>,
-        PathBuf,
+        TestRoot,
         SessionId,
     ) {
-        let root = std::env::temp_dir().join(format!("psychevo-acp-gate-{}", Uuid::now_v7()));
+        let root = TestRoot::new("psychevo-acp-gate-");
         let home = root.join("home");
         let cwd = root.join("workspace");
         std::fs::create_dir_all(&home).expect("home");
@@ -448,7 +474,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn admission_steers_transfer_to_the_first_handle_in_fifo_order() -> Result<(), Error> {
-        let (agent, gate, root, session_id) = admission_gate_agent().await;
+        let (agent, gate, _root, session_id) = admission_gate_agent().await;
         let request_session_id = session_id.clone();
         let request_gate = gate.clone();
         let request_agent = agent.clone();
@@ -540,14 +566,13 @@ mod tests {
             .shutdown()
             .await
             .map_err(Error::into_internal_error)?;
-        let _ = std::fs::remove_dir_all(root);
         result
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn admission_cancel_clears_steers_interrupts_the_handle_and_allows_new_session()
     -> Result<(), Error> {
-        let (agent, gate, root, session_id) = admission_gate_agent().await;
+        let (agent, gate, _root, session_id) = admission_gate_agent().await;
         let request_session_id = session_id.clone();
         let request_gate = gate.clone();
         let request_agent = agent.clone();
@@ -663,7 +688,6 @@ mod tests {
             .shutdown()
             .await
             .map_err(Error::into_internal_error)?;
-        let _ = std::fs::remove_dir_all(root);
         result
     }
 
@@ -786,13 +810,12 @@ no_auth = true
             .await
             .map_err(Error::into_internal_error)?;
 
-        let _ = std::fs::remove_dir_all(root);
         result
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn framework_turn_request_keeps_the_acp_snapshot_root() {
-        let root = std::env::temp_dir().join(format!("psychevo-acp-v2-{}", Uuid::now_v7()));
+        let root = TestRoot::new("psychevo-acp-v2-");
         let home = root.join("home");
         std::fs::create_dir_all(&home).expect("home");
         let observed = Arc::new(Mutex::new(None));
@@ -840,7 +863,6 @@ no_auth = true
             Some(home.join("snapshots"))
         );
         agent.application.shutdown().await.expect("shutdown");
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -907,13 +929,12 @@ no_auth = true
             .shutdown()
             .await
             .map_err(Error::into_internal_error)?;
-        let _ = std::fs::remove_dir_all(root);
         result
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn session_load_honors_replay_cursor_order_and_warning_bound() -> Result<(), Error> {
-        let root = std::env::temp_dir().join(format!("psychevo-acp-replay-{}", Uuid::now_v7()));
+        let root = TestRoot::new("psychevo-acp-replay-");
         let home = root.join("home");
         let cwd = root.join("workspace");
         let db_path = root.join("state.db");
@@ -1071,7 +1092,6 @@ no_auth = true
             .shutdown()
             .await
             .map_err(Error::into_internal_error)?;
-        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
@@ -1119,7 +1139,7 @@ pub async fn run_stdio(options: AcpOptions) -> std::io::Result<()> {
         .application
         .shutdown()
         .await
-        .and_then(psychevo::ShutdownReport::require_clean);
+        .and_then(psychevo::application::ShutdownReport::require_clean);
     match (result, shutdown) {
         (Err(error), _) => Err(std::io::Error::other(format!("ACP error: {error}"))),
         (Ok(()), Err(error)) => Err(std::io::Error::other(format!(

@@ -1111,3 +1111,29 @@ pub struct ShellErrorPayload {
 pub struct SourceResetParams {
     pub scope: GatewayRequestScope,
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{ThreadActionInput, ThreadEditableInputPart};
+    use crate::test_support::assert_stable_wire_round_trip;
+
+    #[test]
+    fn history_action_wire_round_trip_preserves_nested_tagged_variants() {
+        let canonical = assert_stable_wire_round_trip::<ThreadActionInput>(json!({
+            "kind": "revertConversation",
+            "messageId": "message-7",
+            "draft": {
+                "parts": [{ "type": "text", "text": "revised prompt" }]
+            }
+        }));
+
+        assert_eq!(canonical["kind"], "revertConversation");
+        assert_eq!(canonical["messageId"], "message-7");
+        let part: ThreadEditableInputPart =
+            serde_json::from_value(canonical["draft"]["parts"][0].clone())
+                .expect("decode nested editable part");
+        assert!(matches!(part, ThreadEditableInputPart::Text { text } if text == "revised prompt"));
+    }
+}

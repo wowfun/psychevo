@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::v2::{Meta, SessionId, SessionUpdate, ToolCallContent};
 use agent_client_protocol::{Client, ConnectionTo};
-use psychevo::TurnEvent;
+use psychevo::application::TurnEvent;
 use serde_json::{Value, json};
 
 use crate::protocol::{
@@ -227,7 +227,7 @@ pub(crate) fn send_turn_event_update(
             );
         }
         TurnEvent::Message {
-            stage: psychevo::ItemStage::Completed,
+            stage: psychevo::application::ItemStage::Completed,
             message,
             usage: message_usage,
             metadata,

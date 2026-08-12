@@ -1,10 +1,10 @@
 use agent_client_protocol::schema::v2::SessionId;
 use agent_client_protocol::{Client, ConnectionTo, Error};
-use psychevo::StartThreadRequest;
 use psychevo::agents::{
     AgentDiscoveryOptions, discover_agent_teams_with_catalog, discover_agents, list_agents_value,
     resolve_agent_team_definition,
 };
+use psychevo::application::StartThreadRequest;
 use psychevo::application::{AgentMissionRegistration, AgentTeamRegistration, UsageQuery};
 use psychevo::command_registry::{SlashCommandAction, SlashCommandEffect};
 use psychevo::config::{

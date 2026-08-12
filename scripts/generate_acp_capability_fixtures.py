@@ -21,7 +21,7 @@ REVIEWED_CODEX_NAME = "@agentclientprotocol/codex-acp"
 REVIEWED_CODEX_VERSION = "1.1.2"
 REVIEWED_OPENCODE_NAME = "opencode"
 REVIEWED_OPENCODE_AGENT_NAME = "OpenCode"
-REVIEWED_OPENCODE_VERSION = "1.17.18"
+REVIEWED_OPENCODE_VERSION = "1.18.9"
 
 FIXTURE_DIR = Path("crates/psychevo-gateway/tests/fixtures/acp_capability_packs")
 
@@ -91,6 +91,132 @@ def source_record(repo_root: Path, path: Path, marker_ids: list[str]) -> dict[st
         "sha256": sha256(path),
         "assertedMarkers": marker_ids,
     }
+
+
+def fixture_payloads() -> tuple[dict[str, Any], dict[str, Any]]:
+    codex_initialize = {
+        "protocolVersion": 1,
+        "agentInfo": {
+            "name": REVIEWED_CODEX_NAME,
+            "title": "Codex",
+            "version": REVIEWED_CODEX_VERSION,
+        },
+        "agentCapabilities": {
+            "auth": {"logout": {}},
+            "providers": {},
+            "loadSession": True,
+            "promptCapabilities": {"embeddedContext": True, "image": True},
+            "sessionCapabilities": {
+                "resume": {},
+                "list": {},
+                "close": {},
+                "delete": {},
+                "additionalDirectories": {},
+            },
+            "mcpCapabilities": {"acp": False, "http": True, "sse": False},
+        },
+        # Deterministic reviewed scenario: browser auth is enabled and the
+        # client opts into the source's gateway-auth metadata extension.
+        "authMethods": [
+            {
+                "id": "api-key",
+                "name": "API Key",
+                "description": "Use an API key to authenticate",
+                "_meta": {"api-key": {"provider": "openai"}},
+            },
+            {
+                "id": "chat-gpt",
+                "name": "ChatGPT",
+                "description": "Use ChatGPT to authenticate",
+            },
+            {
+                "id": "gateway",
+                "name": "Custom model gateway",
+                "description": "Use a custom gateway to authenticate and access models",
+                "_meta": {"gateway": {"protocol": "openai", "restartRequired": "false"}},
+            },
+        ],
+    }
+    opencode_initialize = {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+            "loadSession": True,
+            "mcpCapabilities": {"http": True, "sse": True},
+            "promptCapabilities": {"embeddedContext": True, "image": True},
+            "sessionCapabilities": {"close": {}, "fork": {}, "list": {}, "resume": {}},
+        },
+        # Deterministic reviewed scenario: the client opts into terminal-auth.
+        "authMethods": [
+            {
+                "description": "Run `opencode auth login` in the terminal",
+                "name": "Login with opencode",
+                "id": "opencode-login",
+                "_meta": {
+                    "terminal-auth": {
+                        "command": "opencode",
+                        "args": ["auth", "login"],
+                        "label": "OpenCode Login",
+                    }
+                },
+            }
+        ],
+        "agentInfo": {
+            "name": REVIEWED_OPENCODE_AGENT_NAME,
+            "version": REVIEWED_OPENCODE_VERSION,
+        },
+    }
+    return codex_initialize, opencode_initialize
+
+
+def fixture_outputs(repo_root: Path) -> dict[Path, bytes]:
+    codex_initialize, opencode_initialize = fixture_payloads()
+    return {
+        repo_root / FIXTURE_DIR / "codex_initialize_v1.json": pretty_json(codex_initialize),
+        repo_root / FIXTURE_DIR / "opencode_initialize_v1.json": pretty_json(
+            opencode_initialize
+        ),
+    }
+
+
+def validate_committed_evidence(repo_root: Path) -> None:
+    manifest_path = repo_root / FIXTURE_DIR / "source-evidence.json"
+    manifest = read_json(manifest_path)
+    fixtures = manifest.get("fixtures")
+    if not isinstance(fixtures, dict):
+        raise EvidenceError(f"committed evidence is missing fixtures: {manifest_path}")
+    expected = {
+        "codex": {
+            "name": REVIEWED_CODEX_NAME,
+            "version": REVIEWED_CODEX_VERSION,
+        },
+        "opencode": {
+            "name": REVIEWED_OPENCODE_NAME,
+            "agentName": REVIEWED_OPENCODE_AGENT_NAME,
+            "version": REVIEWED_OPENCODE_VERSION,
+        },
+    }
+    for fixture_id, identity in expected.items():
+        fixture = fixtures.get(fixture_id)
+        actual = fixture.get("packageIdentity") if isinstance(fixture, dict) else None
+        if actual != identity:
+            raise EvidenceError(
+                f"committed {fixture_id} evidence identity drifted: "
+                f"expected {identity!r}, got {actual!r}"
+            )
+        sources = fixture.get("sources")
+        if not isinstance(sources, list) or not sources:
+            raise EvidenceError(f"committed {fixture_id} evidence has no reviewed sources")
+        for source in sources:
+            digest = source.get("sha256") if isinstance(source, dict) else None
+            markers = source.get("assertedMarkers") if isinstance(source, dict) else None
+            if not isinstance(digest, str) or len(digest) != 64:
+                raise EvidenceError(
+                    f"committed {fixture_id} evidence has an invalid source digest"
+                )
+            if not isinstance(markers, list) or not markers:
+                raise EvidenceError(
+                    f"committed {fixture_id} evidence has no asserted source markers"
+                )
 
 
 def generate(repo_root: Path, references_root: Path) -> dict[Path, bytes]:
@@ -204,78 +330,6 @@ def generate(repo_root: Path, references_root: Path) -> dict[Path, bytes]:
         },
     )
 
-    codex_initialize = {
-        "protocolVersion": 1,
-        "agentInfo": {
-            "name": codex_package["name"],
-            "title": "Codex",
-            "version": codex_package["version"],
-        },
-        "agentCapabilities": {
-            "auth": {"logout": {}},
-            "providers": {},
-            "loadSession": True,
-            "promptCapabilities": {"embeddedContext": True, "image": True},
-            "sessionCapabilities": {
-                "resume": {},
-                "list": {},
-                "close": {},
-                "delete": {},
-                "additionalDirectories": {},
-            },
-            "mcpCapabilities": {"acp": False, "http": True, "sse": False},
-        },
-        # Deterministic reviewed scenario: browser auth is enabled and the
-        # client opts into the source's gateway-auth metadata extension.
-        "authMethods": [
-            {
-                "id": "api-key",
-                "name": "API Key",
-                "description": "Use an API key to authenticate",
-                "_meta": {"api-key": {"provider": "openai"}},
-            },
-            {
-                "id": "chat-gpt",
-                "name": "ChatGPT",
-                "description": "Use ChatGPT to authenticate",
-            },
-            {
-                "id": "gateway",
-                "name": "Custom model gateway",
-                "description": "Use a custom gateway to authenticate and access models",
-                "_meta": {"gateway": {"protocol": "openai", "restartRequired": "false"}},
-            },
-        ],
-    }
-    opencode_initialize = {
-        "protocolVersion": 1,
-        "agentCapabilities": {
-            "loadSession": True,
-            "mcpCapabilities": {"http": True, "sse": True},
-            "promptCapabilities": {"embeddedContext": True, "image": True},
-            "sessionCapabilities": {"close": {}, "fork": {}, "list": {}, "resume": {}},
-        },
-        # Deterministic reviewed scenario: the client opts into terminal-auth.
-        "authMethods": [
-            {
-                "description": "Run `opencode auth login` in the terminal",
-                "name": "Login with opencode",
-                "id": "opencode-login",
-                "_meta": {
-                    "terminal-auth": {
-                        "command": "opencode",
-                        "args": ["auth", "login"],
-                        "label": "OpenCode Login",
-                    }
-                },
-            }
-        ],
-        "agentInfo": {
-            "name": REVIEWED_OPENCODE_AGENT_NAME,
-            "version": opencode_package["version"],
-        },
-    }
-
     codex_fixture_path = FIXTURE_DIR / "codex_initialize_v1.json"
     opencode_fixture_path = FIXTURE_DIR / "opencode_initialize_v1.json"
     manifest_path = FIXTURE_DIR / "source-evidence.json"
@@ -322,14 +376,14 @@ def generate(repo_root: Path, references_root: Path) -> dict[Path, bytes]:
             },
         },
     }
-    return {
-        repo_root / codex_fixture_path: pretty_json(codex_initialize),
-        repo_root / opencode_fixture_path: pretty_json(opencode_initialize),
-        repo_root / manifest_path: pretty_json(manifest),
-    }
+    outputs = fixture_outputs(repo_root)
+    outputs[repo_root / manifest_path] = pretty_json(manifest)
+    return outputs
 
 
-def write_or_check(outputs: dict[Path, bytes], *, check: bool) -> int:
+def write_or_check(
+    outputs: dict[Path, bytes], *, check: bool, success_message: str
+) -> int:
     stale: list[Path] = []
     for path, expected in outputs.items():
         actual = path.read_bytes() if path.is_file() else None
@@ -350,27 +404,48 @@ def write_or_check(outputs: dict[Path, bytes], *, check: bool) -> int:
         )
         return 1
     if check:
-        print("ACP capability fixtures match reviewed local source evidence")
+        print(success_message)
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--check",
         action="store_true",
         help="compare committed fixtures and evidence hashes without writing",
     )
+    mode.add_argument(
+        "--check-fixtures",
+        action="store_true",
+        help="compare tracked fixture payloads with the generator without local references",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
+    if args.check_fixtures:
+        try:
+            validate_committed_evidence(repo_root)
+        except EvidenceError as error:
+            print(f"ACP capability fixture evidence check failed: {error}", file=sys.stderr)
+            return 1
+        return write_or_check(
+            fixture_outputs(repo_root),
+            check=True,
+            success_message="ACP capability fixtures match the tracked generator contract",
+        )
     references_root = repo_root / ".references"
     try:
         outputs = generate(repo_root, references_root)
     except EvidenceError as error:
         print(f"ACP capability fixture evidence check failed: {error}", file=sys.stderr)
         return 1
-    return write_or_check(outputs, check=args.check)
+    return write_or_check(
+        outputs,
+        check=args.check,
+        success_message="ACP capability fixtures match reviewed local source evidence",
+    )
 
 
 if __name__ == "__main__":

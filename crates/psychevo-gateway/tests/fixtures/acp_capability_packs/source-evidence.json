@@ -71,12 +71,12 @@
       "packageIdentity": {
         "name": "opencode",
         "agentName": "OpenCode",
-        "version": "1.17.18"
+        "version": "1.18.9"
       },
       "sources": [
         {
           "path": ".references/opencode/packages/opencode/package.json",
-          "sha256": "e0011b881695001c0e72f8bba7a80e61907afdeb4154db794bb204c69f10ba62",
+          "sha256": "b8870ed4685c3294eab1b502025d1ae7414dc511ada941379c9ce610b29cc047",
           "assertedMarkers": [
             "package-name",
             "package-version",
@@ -120,7 +120,7 @@
         },
         {
           "path": ".references/opencode/packages/opencode/script/build.ts",
-          "sha256": "73bac3ce4360e7016cd103176c934c7fc09e8691992f3a316098645f70061901",
+          "sha256": "c98c068580faac0ebcade9a1179827a24bd3f3102e6c08fef637a0636fa9f19d",
           "assertedMarkers": [
             "build-injects-script-version"
           ]
