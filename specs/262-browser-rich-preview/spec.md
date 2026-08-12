@@ -493,3 +493,14 @@ Default validation uses deterministic local harnesses and fake providers.
 - Visual validation includes right-workspace Markdown/Mermaid, HTML preview,
   Browser empty state, Browser preview fallback, and Capabilities Browser
   plugin rows at desktop and mobile widths.
+
+## Attachments
+
+- [Testing](testing.md) indexes the renderer, preview-transport, browser, and
+  visual validation entrypoints.
+
+## Related Topics
+
+- [021 Gateway](../021-gateway/spec.md) owns the authenticated RPC and preview
+  transport boundary.
+- [246 pevo Desktop](../246-pevo-desktop/spec.md) owns native Browser hosting.

@@ -77,6 +77,12 @@ The SDK callback feeds one 64-entry ingress queue and awaits capacity rather
 than dropping an accepted event. Adapter shutdown signals the long-connection
 stream to stop and awaits its stream task. Gateway runner completion therefore
 cannot leave a detached Feishu/Lark stream or callback producer.
+The sidecar `channel/poll` call waits for the first queued SDK event and then
+drains the immediately available batch. It returns an empty batch on a bounded
+idle deadline shorter than the host's Extension-call timeout, so an idle healthy
+connection neither creates one round trip per Gateway polling interval nor
+causes host timeout, sidecar termination, and reconnect churn. Adapter shutdown
+also releases a pending poll through the sidecar connection cancellation owner.
 
 Feishu/Lark can support richer delivery than text-only channels. Cards and
 buttons may be used for approvals, Ask responses, and structured status when

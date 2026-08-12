@@ -131,6 +131,12 @@ pruning, and built-in tool assembly remain internal Framework modules.
 `StateRuntime` is the single internal state Module. SQLite connections, schema
 helpers, and transaction helpers remain implementation details; no public store
 handle, repository family, or pass-through state facade is added.
+`store.rs` owns only `StateRuntime`, its diagnostics/guard primitives, and
+explicit re-exports from bounded-context record modules. Undo, session,
+source-binding, delivery, runtime-binding, activity, live-state, control,
+interaction, automation, prompt, mailbox, compaction, and message records are
+declared in their named state contexts. The architecture gate rejects a new
+domain record declared directly in `store.rs`.
 
 The Framework Interface is exposed through named owning modules and high-level
 `Application`, `Client`, `Thread`, and `TurnHandle` vocabulary. It must not be
@@ -147,6 +153,10 @@ rendezvous, and bounded event journaling as defined by
 [Runtime Scalability And Ownership](runtime-scalability.md). Implementations
 move behind those seams; callers still learn one Framework Interface. This is
 an ownership split, not a second Application interface.
+The administration delegation module does not own domain type declarations;
+usage, Agent control, side-conversation/context, and coordination types live in
+their named administration modules and are explicitly re-exported by the
+Application namespace.
 
 The production `StateRuntime` Interface is asynchronous and backed by one
 runtime-owned SQLite connection pool. Callers await semantic state operations;
@@ -417,6 +427,11 @@ with the work they constrain. Psychevo does not add a global
 engine, process-wide task tree, or Workbench mega-store. A new private module
 is justified only when deleting it would spread a real invariant back across
 multiple callers; pass-through facades and duplicate projections are removed.
+The Workbench composition root may bind feature-owned applications and derive
+presentation models, but it must not reimplement their transition or request
+ownership. Cross-controller callback contracts used by more than one feature
+have one shared type declaration rather than structurally identical local
+aliases that can drift independently.
 
 ## Related Topics
 

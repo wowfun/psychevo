@@ -68,8 +68,12 @@ at most one eligible row, and list-card message counts use SQL aggregation.
 The allocation and decoded payload count of each production history query must
 therefore be independent of total Thread length.
 
-- Last-provider-request reconstruction selects the final eligible
-  assistant/prompt boundary first and reconstructs that request once.
+- Export acceptance captures one transcript visibility watermark. Messages,
+  latest provider response, and last-provider-request reconstruction all use
+  that same watermark. Last-provider-request reconstruction selects the final
+  eligible assistant/prompt boundary inside it before loading the bounded
+  trailing working set, so a newer incomplete or oversized record cannot hide
+  the latest completed generation.
 - Projected context and compaction reads apply the latest valid compaction and
   revert boundary in Store queries before message JSON is decoded.
 - Session usage is aggregated from structured usage columns in SQL after the
@@ -101,6 +105,20 @@ therefore be independent of total Thread length.
   snapshots remain usable.
 - Browser event journals use bounded O(1) global and per-Thread rings. A
   subscription receives only the scope it requested.
+- Gateway blocking filesystem work has separate bounded admission for short
+  reads and potentially network-bound install/import work. Saturating the slow
+  lane cannot consume the short-read lane's permits.
+- Per-source and per-session serialization uses one private active-keyed mutex
+  registry. Reserving a key happens before waiting; cancellation and guard
+  release both relinquish that reservation. The final reservation removes the
+  entry only when it still owns the registered entry, so queued work cannot
+  race a newly created mutex for the same key. Idle keys retain no registry
+  state.
+- A source operation that crosses an async boundary holds an opaque epoch
+  lease. Invalidating that source makes existing leases stale without
+  allocating state for an idle source; releasing the final lease removes the
+  source entry. Epoch values are process-wide monotonic identities and are not
+  an exposed cache or durable version.
 
 No second database, read replica, materialized usage table, outbox, global
 scheduler, or process-wide actor runtime is introduced for these rules.

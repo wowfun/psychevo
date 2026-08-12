@@ -261,6 +261,33 @@ with a revision counter. Consumers must reconcile snapshots against durable
 message and terminal facts and may discard stale snapshots after bounded
 retention or activity completion.
 
+Every changed snapshot row also receives a process-independent, persistently
+monotonic `change_version`. The Store exposes bounded pages after a caller's
+last version together with a read-transaction high-water mark. The query
+excludes an explicitly supplied local owner before applying `LIMIT`, orders by
+the unique change version, and uses a leading change-version index. A consumer
+advances to the returned page cursor, or directly to the high-water mark when
+the page is exhausted, so more than one page of older rows cannot starve newer
+updates. Activity-status filtering remains projection-owned because terminal
+reconciliation is authoritative; consumers retain no per-snapshot historical
+revision map.
+
+A consumer that first hydrates the current Thread reads Thread-filtered snapshot
+pages through the same change-version seam and one fixed high-water mark. After
+all pages through that mark are applied, the consumer advances its incremental
+cursor to the mark. It therefore cannot apply a terminal event and then replay
+an older running snapshot merely because initial hydration did not advance the
+global change cursor; changes committed after the captured mark remain visible
+to the next incremental read.
+
+Retention uses leading `(created_at_ms, seq)` and
+`(updated_at_ms, snapshot_key)` indexes. Schema migrations remove explicit
+indexes that exactly duplicate a UNIQUE constraint or `INTEGER PRIMARY KEY`.
+Snapshot upsert returns the new revision in the write statement; a no-op input
+may use one targeted revision read without forcing an update. Chunked retention
+is introduced only when measured lock duration demonstrates a need; indexable
+set deletion remains the simpler default.
+
 `gateway_control_commands` stores cross-process control requests for activities
 owned by another Gateway process. It is a command mailbox for interrupt,
 takeover, steering, permission, and clarify control paths, not a transcript or

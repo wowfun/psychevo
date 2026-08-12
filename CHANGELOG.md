@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-08-12
+
+- Kept Workbench terminal and observability state fresh and settled across delayed
+  events on desktop and mobile.
+- Unified session exports around one accepted transcript watermark and bounded
+  provider-request history at the latest completed assistant.
+- Isolated blocking Gateway mutations from filesystem work and made Codex
+  inventory invalidation cancellation-safe after config writes.
+- Hardened risk-selected coverage, native Channel adapter compilation, and
+  deterministic release-asset ordering across delayed Vite build hooks.
+
+## 2026-08-11
+
+- Bounded long-running Channel, SDK, ACP, live projection, retention, and export
+  operations for cancellation and memory stability.
+- Simplified Framework and Gateway async boundaries and strengthened CI checks
+  for generated protocol, test reachability, dependencies, and high-risk
+  coverage.
+- Kept Workbench actions, terminal/debug/observability/file views, usage, and
+  pending actions coherent across live events and refreshes on desktop and
+  mobile.
+- Made release artifacts and instrumentation leaner and reproducible, updated
+  Ratatui for its security fix, and hardened TUI, profiling, and shutdown
+  behavior.
+
 ## 2026-08-08
 
 - Added persistent, renameable Workspaces with ordered multi-directory roots,

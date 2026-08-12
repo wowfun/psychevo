@@ -401,6 +401,10 @@ rows with parameters and results shown once. The center transcript uses a
 shared reading column: user messages align right inside that column with a
 filled neutral bubble, while assistant text, reasoning rows, and tool rows keep
 a common left edge and do not become filled message cards.
+Message actions may float in the compact pointer layout while hidden, but any
+action row that is persistently visible on a coarse-pointer layout must reserve
+its own vertical space. Pin, copy, read-aloud, edit, elapsed-time, and timestamp
+content must never overlap the following reasoning or evidence row.
 Only real reasoning projections are labeled `Thinking` in the UI; `Reasoning`
 and `Preamble` remain internal protocol/projection terms and must not appear as
 ordinary transcript headers. Empty reasoning completions and no-text assistant

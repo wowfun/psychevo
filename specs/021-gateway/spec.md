@@ -266,6 +266,14 @@ slice is authoritative when populated; when it is empty, the client performs
 one epoch-guarded snapshot read before treating retained live rows as durable
 history.
 
+A yielded `exec_command` result may retain its resumable process handle and
+partial output in committed metadata, but `pending` and `running` are live Turn
+states rather than durable history states. The active Turn's retained overlay
+may project that process as running. Normal `TurnCompleted` settlement and an
+authoritative history projection must settle any such committed block without
+discarding its handle or result; refreshing an idle Thread must never resurrect
+an active spinner from a previously yielded result.
+
 For Native execution, persistence of a completed message precedes publication
 of that message's public `entryCompleted` observation. The observation remains
 live evidence rather than a persistence record, but a same-Thread snapshot read
@@ -586,6 +594,10 @@ Gateway servers may watch or poll both retained sources and re-emit ordinary
 `gateway/event` notifications to their clients. Committed runtime messages
 remain the durable transcript source of truth; retained live storage is only a
 cross-process delivery buffer and may be discarded after completion.
+The process-wide relay tailer starts both retained cursors at the Store's
+current high-water marks. Per-Thread hydration owns pre-existing running
+snapshot replay; startup must not rebroadcast the entire retention window to
+every connected client before observing new changes.
 Local interactive surfaces such as TUI may also poll retained boundary events
 and latest-entry snapshots directly when they share the same state database.
 They must filter events by thread/activity identity, skip observations owned by
@@ -733,6 +745,15 @@ Client request timeout is also a loss of interest and emits the same
 notification before rejecting the local promise; server work does not continue
 solely because cancellation originated from a deadline instead of an explicit
 AbortSignal.
+
+Potentially blocking host-filesystem and Git work invoked by async RPC dispatch
+runs through one bounded blocking-work seam. Admission is acquired before
+`spawn_blocking`, so request bursts cannot create an unbounded blocking queue,
+and runtime worker threads never execute synchronous directory walks, file
+reads/writes, or Git subprocess waits directly. A successful blocking mutation
+and its cache invalidation share that worker-owned completion boundary. Once the
+mutation starts, connection cancellation may discard its response but cannot
+leave a committed write hidden behind a stale process cache.
 
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
 conversion of transport values into typed Framework requests, calling the
@@ -1191,6 +1212,10 @@ contract: generated schema property names must match the serialized variant
 field names. Protocol tests must serialize representative multi-field variants
 and validate those values against their generated schemas, including active
 Thread activity returned by `thread/read` and `thread/resume`.
+The high-churn Agent/backend, settings/workspace, Thread/command, and capability
+modules each own a direct wire round-trip test. These tests exercise defaulted
+collections, explicit wire renames, and tagged-enum fields so coverage cannot
+remain concentrated only in code generation or transport consumers.
 `thread/browser` therefore always emits each workspace's `nextCursor`; the last
 page uses an explicit `null`, matching its required nullable TypeScript field.
 Workspace and Thread pins use the separate Gateway-owned navigation contract and
@@ -1258,6 +1283,9 @@ thread. The replay overlays `entryStarted`, `entryUpdated`, and
 `entryCompleted` evidence on top of persisted entries without creating durable
 messages, so switching away from and back to a running session preserves active
 tool rows, spinners, elapsed timers, and incremental tool output.
+This all-owner hydration uses the same fixed-high-watermark, change-version
+pagination as foreign polling and reads every page; the Store's per-page safety
+limit is not a total cap on a running Thread's overlay.
 
 Gateway must project reasoning as typed live entries, not anonymous deltas.
 Reasoning streams use a stable entry id for the current assistant segment, such

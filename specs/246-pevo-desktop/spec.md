@@ -440,6 +440,11 @@ credentials or native host prerequisites are reported as `blocked` or
 `skipped` with structured artifacts, not hidden behind a second opt-in.
 Deterministic fake activation must not be reported as real OS capture.
 
+## Attachments
+
+- [Testing](testing.md) indexes the deterministic, native, visual, and live
+  validation entrypoints.
+
 ## Related Topics
 
 - [021 Gateway](../021-gateway/spec.md) defines source identity, thread/turn

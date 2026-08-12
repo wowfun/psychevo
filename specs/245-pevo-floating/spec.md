@@ -281,6 +281,10 @@ Default validation is deterministic and local:
 Real macOS, Windows, Linux/X11, Linux/Wayland, and WSLg capture smoke tests are
 opt-in. Real provider tests are not part of default Floating validation.
 
+## Attachments
+
+- [Testing](testing.md) indexes the deterministic and live validation entrypoints.
+
 ## Related Topics
 
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing entrypoint

@@ -54,6 +54,10 @@ or shell out through a CLI command for normal interactive behavior.
 Concrete product specs choose how Psychevo exposes an ACP server. This topic
 owns the protocol mapping, not the product process that hosts it.
 
+ACP integration fixtures own their isolated home, database, and workspace
+through an automatic temporary-directory guard. Cleanup must run on success,
+error, and panic; tests must not depend on a manually reached teardown tail.
+
 Psychevo pins `agent-client-protocol = 1.2.0`. The inbound server uses the SDK's
 ACP v2 agent builder and typed request, response, and notification surface. ACP v1
 clients are served through the SDK compatibility layer when the requested
@@ -88,6 +92,17 @@ matching Thread beyond the bounded default page without gaps or silent
 truncation.
 `session/close` closes the ACP actor and aborts any active invocation for that
 actor.
+
+Every outbound ACP operation that reads or mutates one resident session uses
+the shared active-keyed session lane. A request reserves its lane before it can
+wait, and owns the guard through its peer response, notification projection
+barrier, resident-state cleanup, and reply settlement. Close, release, and
+delete do not manually remove a keyed mutex: the lane registry reclaims an
+entry only after the final active or queued reservation is gone. Multi-session
+operations acquire the two stable public ids in lexical order. Consequently a
+queued command can never run on an orphaned mutex concurrently with a later
+command for the same id, and process-lifetime lane state is bounded by active
+or queued work.
 
 Outbound ACP Agent sessions receive the Thread Workspace context from
 [032 Workspaces](../032-workspaces/spec.md). New, load, resume, fork, Turn, and

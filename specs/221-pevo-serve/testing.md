@@ -66,6 +66,9 @@ with isolated config and database state.
   implementation details.
 - Server tests must isolate sockets, temp state, environment variables, and
   provider configuration.
+- Managed bind fallback tests hold only the requested occupied listener and let
+  the server select from a bounded successor range. They must not probe and
+  release one predicted successor before the assertion.
 - Browser launch cookies and managed server reuse belong to
   [220 pevo Gateway Testing](../220-pevo-gateway/testing.md). Workbench UI
   behavior belongs to [240 pevo Web Testing](../240-pevo-web/testing.md).

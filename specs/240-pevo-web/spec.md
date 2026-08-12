@@ -154,8 +154,18 @@ turn-start receipt.
 
 One external `GatewayEventJournal` owns retained diagnostic events. It uses an
 O(1) ring of at most 2,000 global events and an O(1) ring of at most 500 events
-per Thread. Global, Thread, and event-family subscriptions receive only their
-scope; appending an event does not clone, flatten, or sort the whole journal.
+per Thread. It is a bounded query store, not a second notification owner.
+Global and event-family subscriptions belong to its instance-level Application;
+appending an event does not clone, flatten, or sort the whole journal.
+Snapshot-barrier reconciliation does not assume that an action event remains in
+the diagnostic ring. The journal separately coalesces the latest lifecycle fact
+per action id in a bounded map, so a delayed snapshot cannot resurrect an action
+whose resolution was evicted by unrelated Thread events. Turn completion writes
+the same terminal fact for every still-open action it settles before forgetting
+the action-to-Thread lookup. Turn completion advances one app-local monotonic
+resource-freshness generation. The visible-demand effect owns the resulting
+refresh from the latest UI state; no second trigger or freshness map is derived
+from diagnostic-ring retention.
 The injected `GatewayTransport` remains the narrow Adapter interface for
 connect, reconnectable `close`, terminal async `dispose`, send, message, and
 disconnect operations; connection policy is not duplicated in browser or
@@ -336,6 +346,38 @@ does not receive a setter bag, retain a global WeakMap request deduper, or issue
 duplicate administration reads. Panel visibility, voice draft, preferences,
 and other truly local presentation state remain local React state; this split
 does not add Redux, Zustand, a global reducer, or a Workbench mega-store.
+
+Terminal and debug notification retention are owned by narrow external-store
+applications with 240-event and 120-event immutable snapshots respectively.
+Gateway notifications append directly to those owners; only a mounted Terminal
+or Debug panel subscribes. Retained diagnostics therefore do not schedule a
+`WorkbenchApp`, History, Transcript, or unrelated right-panel render. Event
+sequences are owned by each application instance rather than process-global
+module state.
+
+The Workbench composition root subscribes to a stable operational projection of
+`ThreadSession` containing only the committed Thread snapshot and context. A
+live-overlay-only publication keeps that projection's identity and therefore
+does not render the root, History, Composer, or right Workspace. The mounted
+Transcript subscribes directly to the complete `ThreadSessionView`, so streamed
+content remains immediate without a second writable copy. Live-overlay file-link
+demand and terminal voice playback read the same Session owner outside the root
+render path. External-store projection owners attach to their source when their
+first consumer subscribes and detach when the last consumer leaves. React
+lifecycle probing may subscribe, unsubscribe, and subscribe the same owner
+again; cleanup therefore cannot permanently disconnect a still-mounted reused
+owner, and constructing a projection during render performs no subscription
+side effect.
+
+The retained `GatewayEventJournal` is likewise exposed through one instance-level
+external-store Application. The root subscribes only to Turn lifecycle events
+needed for steering. Team subscribes only to its lifecycle event families, while
+child Thread panels subscribe to the complete feed they reduce. Appending an
+ordinary transcript or diagnostic event cannot schedule a `WorkbenchApp`,
+History, Composer, or unrelated right-panel render.
+Transport events append directly to that Application; the Workbench must not
+thread inert queue or animation-frame compatibility refs through connection
+ownership.
 
 Session browser requests are invalidated when their Gateway client is replaced
 or when a newer request for the same result family supersedes them. Changing the
@@ -907,14 +949,26 @@ Resource reads follow visible demand. A closed right Workspace reads nothing
 unless the visible Transcript contains an unresolved file link. Workspace Home
 reads Diff plus Observability, Review reads Diff plus Changes, Files reads the
 file inventory, and other tabs read none of those resources. Reads remain
-single-flight, latest-wins, and view-epoch guarded. Turn completion reevaluates
-the materialized `ThreadSession` transcript after reduction, including a live
+single-flight, latest-wins, and view-epoch guarded. Concurrent Observability
+reads for the same client, Thread, view epoch, and freshness state share one
+request promise. A bound Thread is the resource identity even while its request
+scope transitions from a draft source to the accepted source; without a Thread,
+canonical scope is the identity. Turn completion is a freshness boundary and
+supersedes an older pre-terminal read; a changed client or resource identity
+likewise supersedes rather than joins the old request. Workspace Home and post-terminal
+refresh route Observability through the same latest-wins owner;
+an older Home response cannot replace a newer terminal response. Turn completion
+reevaluates the materialized `ThreadSession` transcript after reduction, including a live
 overlay retained by a terminal with an empty committed slice; when it contains
 workspace-file demand, the same-workspace inventory refreshes once even while
 Files is closed, so created and deleted paths do not leave transcript actions
 stale. A completed supported file-tool entry triggers the same refresh
 immediately, before the enclosing turn completes. A completion without file
-demand does not add a hidden workspace read. The always-visible Composer
+demand does not add a hidden workspace read. The Turn-completion notification
+owns one visible-resource refresh; React effects do not derive a second refresh
+from a retained settlement revision. A completion from another Thread still
+invalidates the currently visible workspace resource because it can represent a
+child Turn that changed the shared workspace. The always-visible Composer
 environment owns one lightweight `workspace/git/branches` read for a new draft;
 an explicit Workspace draft starts that read only after `thread/draft/open`
 returns its authoritative scope, and uses that returned primary root rather

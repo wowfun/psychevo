@@ -220,6 +220,14 @@ ACP peers. Windows process-tree termination targets the child tree when a
 process id is available. PTY backends that cannot report a process id still fall
 back to direct child termination.
 
+The effective environment snapshot is authoritative for every managed child
+process variable, including `PATH`. Applying it clears the environment inherited
+by the command builder before installing the captured values. Managed path
+prefixes are prepended to the captured `PATH`/`Path`; absence of that key means
+there is no inherited search path. Execution, hooks, Extensions, language
+servers, terminals, Agent backends, and tooling never silently reread the
+process-global `PATH`; the captured map is the single environment authority.
+
 Configured executable names that are entered as shell-like product settings,
 such as ACP peer backend commands, must be resolved at the host boundary before
 native process launch. On Windows this resolution must search `PATH`/`Path`,

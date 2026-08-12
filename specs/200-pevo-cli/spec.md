@@ -448,6 +448,32 @@ When an output path is supplied through `-o, --output <path>`, parent
 directories may be created, existing files may be overwritten, and the command
 reports the written path.
 
+All export sinks consume the same asynchronous byte stream and one transcript
+visibility watermark captured when the export is accepted. Transcript,
+provider-input evidence, and mailbox rows are read in bounded keyset pages;
+selected metadata and the latest provider response use targeted Store queries.
+Evidence grouping is represented directly in the output stream rather than by
+materializing a session-wide collection. Unselected sections perform no
+transcript or evidence query. Mailbox output is derived only when `messages` or
+`reasoning` is selected. Last-provider-request reconstruction first locates the
+latest completed assistant generation within the accepted watermark, then loads
+a bounded trailing transcript working set ending at that generation. Newer
+incomplete records do not enter that working set. When older history does not fit that working
+set, the already-best-effort reconstruction remains available and carries an
+explicit truncation warning; the persisted session does not contain the exact
+provider-side context-window pruning decision needed to reproduce that request.
+File output writes a temporary
+file in the destination directory and atomically renames it after successful
+completion; cancellation or failure removes the temporary file. Stdout, HTTP,
+and filesystem paths do not first construct the complete artifact `String`.
+The SDK may retain an explicit in-memory collector for callers and fixtures,
+but the CLI, Gateway HTTP, and download paths use the streaming contract and do
+not impose a product-visible output-size cap. Any in-memory safety preflight
+is the same byte stream with a 32 MiB collector bound: it stops consuming as
+soon as the next emitted chunk would cross that bound and never materializes a
+second session-wide representation. SQLite character counts are not a byte-size
+approximation for Unicode content.
+
 Export content is selected with `-i, --include <comma-separated-list>`. The
 export include vocabulary is `header` (`h`), `messages` (`m`), `reasoning`
 (`r`), `provider-input-evidence` (`pie`), and `last-provider-request` (`lpr`).
@@ -496,7 +522,8 @@ hidden/system prompts, project instructions, skill context, tool schemas, tool
 outputs, reasoning adapter fields, and image data URLs when those inputs are
 reconstructable.
 `last_provider_response` contains the latest persisted assistant response before
-the current undo/revert boundary, derived from stored assistant message,
+the export's accepted transcript watermark and current undo/revert boundary,
+derived from stored assistant message,
 usage, and allowlisted provider metadata. It is labeled `raw: false` and
 `reconstructed: true` because original provider SSE chunks and whole raw
 response bodies are not persisted. Reasoning blocks inside its `message` follow

@@ -482,6 +482,11 @@ needs trust, partial, incompatible, and draining states, plus the compatibility
 card, authority-partitioned lists, two-layer policy controls, Connect, and
 partial-failure recovery.
 
+## Attachments
+
+- [Testing](testing.md) indexes the runtime, Gateway, Workbench, and visual
+  validation entrypoints.
+
 ## Related Topics
 
 - [051 Agents](../051-agents/spec.md) owns agent definition, discovery,

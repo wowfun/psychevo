@@ -53,9 +53,10 @@ single-address bind behavior.
 
 ## HTTP And WebSocket
 
-`/readyz` is public and returns only non-sensitive readiness/version data.
-WebSocket, downloads, and detailed status routes require authentication.
-Non-browser API clients use `Authorization: Bearer <token>`.
+HTTP readiness and authentication follow the canonical Gateway facade contract
+in [021 Gateway](../021-gateway/spec.md#websocket-facade): `/readyz` is the only
+public readiness surface, while WebSocket, download, and detailed status routes
+require the authentication mechanism defined there.
 
 The WebSocket transport is strict JSON-RPC 2.0:
 

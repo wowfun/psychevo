@@ -182,6 +182,22 @@ deadline longer than the longest declared transport poll, supports cancellation
 without corrupting the response stream, and invalidates a terminated or timed-
 out session so the next call starts and initializes a fresh process.
 
+The Channel sidecar accepts at most one 16 MiB newline-delimited request frame
+and admits at most 64 concurrent requests. Admission is fail-fast when full;
+there is no unbounded task or response queue. The process owner tracks every
+request task, observes stdout failure, and cancels plus drains accepted work
+before replying to `shutdown`. A connection id is reserved before adapter
+construction. Duplicate starts fail without constructing another adapter, and
+a stopped, cancelled, or stale construction can never publish itself; every
+adapter that did finish construction receives exactly one explicit async
+shutdown. The connection registry contains only `Starting` and `Running`
+ownership states and is empty after process shutdown.
+Long-running `channel/poll` calls consume a bounded subset of request admission,
+leaving capacity for send, stop, and other control requests. A running
+connection retains one cancellation owner; stop and process shutdown revoke
+that owner before adapter teardown, so every pending poll finishes promptly and
+releases its admission permit instead of retaining a cloned adapter.
+
 The WeChat QR control response is a typed status union. Waiting and scanned
 states require a message and base URL, `scaned_but_redirect` additionally
 updates the active base URL, expired requires a message, and confirmed requires
@@ -260,6 +276,15 @@ runs the request, sends `shutdown`, and waits for process exit before the CLI
 returns. TUI, Desktop/Web, and Gateway hosts retain a process-lifetime runtime
 pool keyed by effective Extension identity and fingerprint, and reuse its one
 initialized sidecar across concurrent App, display, and Channel leases.
+
+Runtime state locks protect only lease counters and short lifecycle
+transitions. Process start, initialize, Channel restoration, poll, send, stop,
+and process shutdown never run while that state lock or an adapter lease-slot
+lock is held. One private startup gate coalesces concurrent session creation;
+after IPC completes, publication rechecks both runtime shutdown and live-lease
+state. Channel calls clone a call-capable lease handle under the adapter slot
+lock and release that lock before awaiting IPC, so shutdown can revoke the
+lease and stop the sidecar while a long poll is pending.
 
 The host owns a lease for every active call, display, MCP App bridge, or
 Channel runner. Releasing the final lease starts one cancelable five-minute
@@ -410,6 +435,11 @@ home and must explicitly build the release-form sidecar, materialize it as a
 local package, and install the real Channel Extension into that home before
 Gateway starts. Writing a Channel connection alone is not activation evidence,
 and the validation harness has no private in-process transport fallback.
+
+Every first-party Channel executable also has a deterministic offline smoke
+test for its concrete factory. It verifies the shipped descriptor and proves
+an unsupported alias or missing required configuration is rejected before any
+filesystem or upstream-network operation.
 
 ## Acceptance Criteria
 

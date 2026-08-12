@@ -20,6 +20,9 @@ product surface and frontend platform.
   operations through typed host contracts.
 - Generated protocol schemas and clients preserve public `gatewaySchemas`,
   method names, event names, and wire shape compatibility.
+- The ordinary Workbench typecheck compiles shared Playwright E2E support in
+  addition to production `src`; deleting a support-only import or drifting a
+  Node process type cannot remain hidden until a visual run.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls. Expanded History assertions keep the `New Session` icon
   aligned with the `Search` navigation icon while collapsed action icons remain
@@ -28,6 +31,9 @@ product surface and frontend platform.
   assertions keep the location strip background transparent while preserving
   the editable path field. Workspace-create tests address its name field by the
   stable `Workspace name` accessibility contract rather than placeholder text.
+- Narrow coarse-pointer transcript assertions compare rendered bounding boxes:
+  persistently visible message actions and timestamps must end before the next
+  reasoning or tool-evidence row begins.
 - Right-workspace Home visual assertions keep each icon-and-label navigation
   row left-aligned rather than inheriting centered shared-button content.
 - Agent-session import browser coverage uses a short viewport and enough
@@ -409,6 +415,9 @@ checks must not print tokens or secrets.
   Gateway state.
 - Browser tests should assert user-visible behavior and stable protocol
   invariants rather than private DOM structure when possible.
+- Unit and component tests must not copy renderer payloads into application
+  public directories or synthetic Vite public roots. Preview assets are build
+  and visual-journey inputs, not unit-test fixtures.
 - Cross-surface comparison failures preserve partial manifests and traces.
   Validators reject prompt/response/token/credential fields, missing samples,
   mixed clock arithmetic, ambiguous provider requests, and percentile inputs

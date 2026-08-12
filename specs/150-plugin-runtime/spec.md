@@ -173,7 +173,11 @@ requests and tool calls are never retried after delivery.
 Inventory is keyed by profile plus canonical cwd and carries a generation. The
 provider hot path reads only a ready memory snapshot. Loading, stale, or failed
 inventory contributes an empty Codex set with structured diagnostics and never
-delays provider dispatch or writes transcript/UI noise.
+delays provider dispatch or writes transcript/UI noise. A Codex enablement write
+invalidates ready inventory before mutation and again after a successful
+mutation. A load that races between those boundaries cannot remain published
+after the new policy is durable, including when the requesting connection is
+cancelled.
 
 Each admitted turn freezes generation and policy digest and holds a lease. A
 disable rejects new leases while admitted work completes. Remove, package

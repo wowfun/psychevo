@@ -124,8 +124,9 @@ Configuration may define:
 - optional per-provider `name` for display in human-facing selectors and
   status surfaces
 - per-provider `api`, the OpenAI Chat-compatible API URL
-- optional per-provider `inference_idle_timeout_secs`; it defaults to `300`
-  seconds and `0` disables inference-idle enforcement for that provider
+- optional per-provider `inference_idle_timeout_secs`; omission uses the SDK
+  progress-idle default defined by [080 Framework and SDK](../080-sdk/spec.md),
+  while `0` disables inference-idle enforcement for that provider
 - optional per-provider `api_key_env` override; when absent, the provider uses
   the derived credential environment variable
 - per-provider `no_auth`
@@ -220,6 +221,11 @@ header.
 Provider names are display-only. They do not change provider identity,
 selection, config merge keys, or the `provider/model` model-spec form.
 
+Provider ids, aliases, credential environment-variable names, and provider API
+URLs are validated by the product configuration module. CLI and UI setup flows
+delegate to those validators; they must not carry private copies of the
+built-in provider inventory or identifier grammar.
+
 Provider generation HTTP uses one process-shared connection pool with a
 10-second connection-establishment timeout. The provider inference timeout is
 an idle-progress guard, not a total turn deadline: response headers and each
@@ -304,15 +310,16 @@ credentials in this order:
 
 1. `openrouter`
 2. `openai`
-3. `opencode-zen`
-4. `xai`
-5. `zai`
-6. `deepseek`
-7. `dashscope`
-8. `xiaomi`
-9. `xiaomi-token-plan`
-10. `lmstudio`
-11. `custom`
+3. `anthropic`
+4. `opencode-zen`
+5. `xai`
+6. `zai`
+7. `deepseek`
+8. `dashscope`
+9. `xiaomi`
+10. `xiaomi-token-plan`
+11. `lmstudio`
+12. `custom`
 
 The selected provider must have a model from CLI, configuration, or
 `PSYCHEVO_INFERENCE_MODEL`. CLI and env model values may use the

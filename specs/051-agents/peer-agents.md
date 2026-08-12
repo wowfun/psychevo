@@ -144,7 +144,7 @@ An effective feature is the intersection of Agent negotiation, Adapter
 implementation, Psychevo certification, and binding grant. Standard ACP is the
 baseline. Reviewed Codex/OpenCode capability packs activate only for the exact
 stable Agent versions whose local source was audited (`codex-acp 1.1.2` and
-`OpenCode 1.17.18`). Future patch versions, prereleases, and build-qualified
+`OpenCode 1.18.9`). Future patch versions, prereleases, and build-qualified
 versions remain standard ACP until separately reviewed. Raw or unknown `_meta`
 never becomes a product action.
 

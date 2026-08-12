@@ -166,6 +166,22 @@ Artifact-only CD may produce local build outputs, package trees, checksums,
 manifests, logs, and inspection reports. It must keep those artifacts under an
 explicit local artifact root and report the paths.
 
+Every user-facing release tree is selected by a deterministic product-owned
+manifest rather than recursive build-directory discovery. The manifest names
+each shipped regular file by relative path and content digest; it contains no
+build timestamp, host path, cache path, or source-map entry. Production source
+maps may be retained as opt-in diagnostic artifacts outside the release tree,
+but are never implicit wheel, archive, or application content. Release
+packagers fail closed on missing manifest entries, unmanifested regular files,
+absolute paths, duplicate payloads larger than 64 KiB, and manifest/content
+digest mismatch.
+
+Archive construction streams manifest entries instead of retaining every
+payload in memory. ZIP-based wheels use deterministic timestamps and modes plus
+DEFLATE compression. Repeating a build from identical executable and asset
+inputs must produce byte-identical wheels; artifact inspection reports both
+total and per-class compressed and uncompressed bytes.
+
 Artifact-only CD must not publish packages, push tags, create hosted release
 objects, upload assets to release services, deploy Web assets, modify update
 channels, or contact package registries except for ordinary dependency

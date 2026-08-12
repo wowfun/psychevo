@@ -650,10 +650,17 @@ is single-flight. A `turn/start` acceptance fallback and the corresponding live
 entry/Turn completion events join the same `thread/read` plus observability
 refresh instead of issuing overlapping reads whose responses can arrive in a
 different order.
+Each read records the bounded Gateway event-feed sequence before dispatch.
+Pending-action lifecycle events observed after that barrier are reduced over
+the returned snapshot before publication, so a pre-action response cannot
+erase a request and a post-resolution response cannot resurrect one.
 The Thread-read flight ends as soon as its snapshot is consumed, before the
 independent observability refresh begins. A terminal event arriving during a
 slow observability request therefore starts a post-terminal `thread/read`
 instead of joining an already-consumed pre-terminal result.
+For the same scope, Thread, and view generation, only the latest-started
+observability read may publish. This keeps a slow pre-terminal response from
+overwriting the post-terminal usage projection.
 
 The Web Shell supports TUI-compatible shell mode through `shell/start`.
 `shell/start` accepts `scope`, optional `threadId`, and a stripped local shell

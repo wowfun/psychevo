@@ -1021,6 +1021,16 @@ delivery. These owners exchange direct typed calls and results, not an internal
 event bus or compatibility shim. The public `Client`, `Thread`, and
 `TurnHandle` interface and behavior remain unchanged.
 
+The public Client serializes `connect()` and `close()` with one lifecycle lock.
+Concurrent connects produce one transport and return the same connected state;
+close waits for an in-progress connect and closes what it published before
+returning. Failed or cancelled initialization closes any constructed RPC and
+leaves the Client retryable. Repeated close is idempotent. This lifecycle uses
+neither a public five-state machine nor shared connect/close task objects; an
+ordinary request snapshots one published RPC, so a concurrent close either
+terminates that request through the existing connection error or begins after
+the request obtained its connection without producing an `AttributeError`.
+
 The Python SDK supports:
 
 - local stdio transport using the exact-version App Server binary dependency;

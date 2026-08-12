@@ -124,9 +124,13 @@ Initial profiles:
 - `changed`: lightweight local confidence for the current checkout; v1 plans
   format checking and lets future work add diff-aware selection.
 - `rust-broad`: Rust workspace broad gate; checks generated Gateway protocol
-  bindings, compiles `psychevo --no-default-features --all-targets` as an
+  bindings and tracked ACP capability-pack payloads, compiles `psychevo
+  --no-default-features --all-targets` as an
   independent consumer without workspace feature unification, and checks the
-  CLI no-default-features core graph before format, clippy, and tests.
+  CLI no-default-features core graph before format, clippy, and tests. For any
+  crate that disables Cargo integration-test auto-discovery, the architecture
+  step rejects a top-level `tests/*.rs` file that is not declared by a
+  `[[test]]` target and rejects declared target paths that do not exist.
   JavaScript CLIs invoked directly by this profile or its code-generation
   helpers are explicit root workspace development dependencies. The Gateway
   validator generator therefore owns a direct `tsx` dependency rather than
@@ -140,8 +144,9 @@ Initial profiles:
   the canonical local Rust gate and is exactly the ordered concatenation of
   these shards, with all three profiles sharing the same step definitions.
 - `sdk-contracts`: deterministic cross-language SDK and wire-contract checks.
-  It owns the Rust SDK surface check, Gateway protocol generation check,
-  App Server and generated protocol fixture validation, TypeScript client
+  Rust architecture, default-surface, and generated Gateway checks remain
+  owned by `rust-checks`; this profile does not execute them again. It owns App
+  Server and generated protocol fixture validation, TypeScript client
   contracts, Python SDK tests, and Python distribution contract tests. It does
   not build release artifacts, access provider credentials, or duplicate the
   package profile's installed-wheel smoke.
@@ -176,6 +181,15 @@ Initial profiles:
   succeeds, the hosted package job uses the checksum manifest as the exact
   subject set for one build-provenance attestation. The scanner profile does
   not duplicate or claim that provenance.
+  When an otherwise-current direct dependency still pins a vulnerable
+  transitive package and has no fixed parent release, the workspace may own an
+  exact, reviewed package-manager override to the upstream patched release.
+  Such an override must preserve the consumed API, remain visible in the lock,
+  and pass the same zero-ignore production advisory gate; it is removed when a
+  fixed parent release makes it redundant.
+  When a fixed parent release exists, the owning direct dependency family is
+  upgraded instead; the workspace must not mask the advisory or force a
+  semver-incompatible transitive patch around an obsolete parent.
 - `non-functional`: Linux-only, non-live performance and footprint evidence.
   It measures a clean and immediate no-op Framework check in one
   artifact-owned Cargo target, checks the normal-build dependency graph,
@@ -187,21 +201,29 @@ Initial profiles:
   production Workbench startup-byte journey. It also measures the release
   Desktop executable and all three wheel artifacts, and counts every regular file
   copied into the production `dist/file-viewer/` tree, which is the Vite
-  plugin-owned optional-preview asset boundary. The
+  plugin-owned optional-preview asset boundary. Production asset manifests hash
+  files through a fixed-size worker set, so output cardinality cannot translate
+  into one simultaneously open stream per asset. Their final build hook is
+  ordered after asset-copy hooks, so the manifest cannot observe a partially
+  copied distribution. The
   Desktop footprint step builds the native release executable with bundling
   disabled; installer/container construction belongs exclusively to the
   `package` profile and must not be repeated merely to measure that executable.
-  The
-  reviewable `non-functional-budgets.json` records the maximum accepted value
-  and, after the first canonical run, the measured baseline. Deterministic
-  counts and byte sizes are hard gates. Host-sensitive durations are recorded
-  and compared only within the
-  same run where a meaningful comparator exists, plus deliberately broad
-  runaway ceilings; they must not masquerade as cross-machine nanobenchmarks.
+  The reviewable `non-functional-budgets.json` records a measured baseline and
+  one close `regressionMaximum` used as the performance gate. Deterministic
+  counts and byte sizes are hard gates. Canonical-runner duration samples use
+  the same threshold; local runs remain useful evidence but are not claims
+  about other hosts. The manifest must not carry a looser, unenforced duplicate
+  ceiling: a threshold that cannot change the outcome is not a control.
+  Wall-clock benchmark tests are ignored by ordinary functional test discovery
+  and are invoked explicitly by this profile in isolation. Workspace test
+  parallelism must not turn unrelated CPU or I/O contention into a product
+  performance regression, and the isolated profile must not weaken or bypass
+  the reviewable regression thresholds.
   The first CLI invocation is a first-process sample, not a claim that Linux
   page caches were evicted. A newly added metric may use a null baseline until
-  the first complete canonical profile run records it; its maximum still
-  applies and the observed value remains mandatory evidence.
+  the first complete canonical profile run records it; its regression maximum
+  still applies and the observed value remains mandatory evidence.
   Root-workspace release artifacts use ThinLTO with one code-generation unit
   so executable code is optimized across crate boundaries without stripping
   the symbols used by bounded panic evidence. Release build latency is the
@@ -224,23 +246,58 @@ Initial profiles:
   Coverage and report generation execute with the repository's same
   date-pinned nightly toolchain, whose installed components include
   `llvm-tools-preview`; stable Rust must not be asked to accept the nightly-only
-  branch instrumentation flags. Coverage enables LLVM branch instrumentation
+  branch instrumentation flags. Coverage enables LLVM branch instrumentation.
+  Its environment marks the run as instrumented so wall-clock regression
+  assertions are not evaluated against instrumented code; those tests still
+  execute their functional and persistence invariants, while the uninstrumented
+  `non-functional` profile remains the sole owner of latency budgets.
+  Native C dependencies in this profile compile with a fixed low optimization
+  level (`CFLAGS=-O1`): this avoids host-GCC pathologies in large bundled C
+  sources without optimizing the instrumented Rust code or depending on the
+  caller's ambient flags.
   and retains reviewable per-file
   counters for the Framework shutdown/admission lifecycle, Framework Turn
-  delivery persistence, Gateway durable-activity persistence, and the App
-  Server public-event protocol projection. The profile fails if any named high-risk file is
-  absent from the report or has no exercised lines, functions, or branches; it
-  does not convert those local counters into a repository-wide percentage
-  target.
-  Every invocation owns a clean coverage, deterministic-contract, Miri target,
-  or sanitizer target directory beneath its artifact root. Reusing an explicit
-  artifact root must not let a file from an earlier invocation count as current
-  evidence. Every external
+  delivery persistence and streaming export, Gateway durable-activity
+  persistence, source epochs, keyed coordination and foreign live projection,
+  the App Server public-event protocol projection, and the Channel sidecar
+  lifecycle. Each file owns reviewed line, function, and branch percentage
+  floors calibrated below the measured baseline. The profile fails if a named
+  file is absent, a metric has no exercised counters, or a local floor regresses;
+  it does not disguise these risks behind a repository-wide percentage target.
+  Pull-request scope classification reads the target paths from the same
+  instrumentation module that enforces their floors. Workflow YAML does not
+  hand-copy that inventory; adding or moving a target therefore cannot silently
+  leave the coverage merge gate behind.
+  Every invocation owns clean coverage, deterministic-contract, Miri, and
+  sanitizer evidence directories beneath its artifact root. Compiled Cargo
+  outputs instead live in toolchain-qualified scratch targets outside the
+  evidence root, so uploads cannot retain gigabytes of compiler intermediates
+  and sequential profiles can reuse correct fingerprints. Coverage clears only
+  prior raw profiles before running against its dedicated target; current
+  reports are always rebuilt from the current run. Reusing an explicit artifact
+  root must not let a file from an earlier invocation count as current evidence.
+  The repository manifest sets a fixed sixteen-way maximum parallelism for
+  Cargo builds, Rust tests, Tokio, and Rayon. Instrumentation must not inherit a
+  high-core host's unbounded defaults; sixteen-way execution remains subject to
+  the memory and disk reserves below and must be validated as a complete profile
+  on the intended host before it replaces the lower measured policy.
+  Before any artifact-producing profile starts, it enforces manifest-owned
+  minimum available-memory and free-scratch-disk reserves and records the
+  observed values. A host below either reserve fails before spawning compiler
+  work instead of entering swap or disk-exhaustion thrash. Every invocation
+  records this resource policy and scratch boundary as structured evidence.
+  Every external
   instrumentation command has a finite, deliberately wide timeout that allows
   a cold toolchain build; a timeout identifies the exact command and is
   reported as an instrumentation timeout rather than as a product-test
   failure. The hosted instrumentation job also has a finite outer timeout so a
   wedged installer or runner cannot occupy a worker indefinitely.
+  Toolchain-only `verify` commands require no artifact root and perform no
+  evidence or scratch writes; artifact-producing instrumentation commands own
+  the resource-policy record.
+  Pull-request high-risk coverage restores the ordinary Rust build cache before
+  compiling the instrumented graph; instrumentation still owns a distinct
+  target root and therefore cannot contaminate ordinary artifacts.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
@@ -250,8 +307,17 @@ Initial profiles:
   checked-in test-only `capabilities/wdio.json`; after a production-only build
   rewrites those files, the feature-enabled schema generation is the canonical
   finalization step.
-- `web`: all JavaScript workspace unit tests, all workspace typechecks, and all
-  workspace production builds, including Workbench and Desktop. Workspace
+- Native Windows/macOS selection includes direct Channel adapter changes as
+  well as the sidecar. Once selected, each host runs the complete owning
+  Framework and Gateway library suites, the Channel sidecar suite, all Channel
+  adapter feature tests, and compilation of each first-party Channel Extension
+  binary. Direct Extension package changes also select this job; a path must not
+  select a native job whose corresponding platform tests are only compiled or
+  excluded by an unrelated name filter.
+- `web`: all JavaScript workspace unit tests, all workspace typechecks, a
+  zero-dead-file/avoidable-export Knip gate, and all workspace production
+  builds, including Workbench and Desktop. Dynamically selected ACP fixture
+  scripts are declared as inputs rather than misclassified as dead files. Workspace
   tests execute with bounded workspace concurrency so packages that own process
   state or browser-like globals do not race. This profile owns the Browser and
   native Gateway Adapter contract together so reconnect behavior cannot pass
@@ -277,6 +343,10 @@ Initial profiles:
   prerequisite is a failure rather than a successful Linux skip. Permanent
   visual filenames, suite labels, request ids, and proof inventory describe
   behavior and contain no planning date or implementation-batch identifier.
+  Final-state browser assertions synchronize on the product's semantic Turn
+  settlement instead of treating an early message, tool, or plan projection as
+  completion. Asset-boundary assertions follow the URL selected by the current
+  production build and must not require a removed duplicate public asset.
   Every visual-owned external command has a finite step-specific timeout. A
   timeout names the command, terminates its complete process tree, and fails
   the step instead of waiting for the hosted job's outer timeout.
@@ -319,9 +389,10 @@ Initial profiles:
 
 ## Hosted CI
 
-The pull-request workflow has a `Scope` job, five independent Linux execution
-jobs (`Rust checks`, `Rust tests`, `SDK contracts`, `Desktop Rust`, and `Web`),
-and an always-run `CI Gate`. The execution jobs start in parallel after
+The pull-request workflow has a `Scope` job, five general Linux execution jobs
+(`Rust checks`, `Rust tests`, `SDK contracts`, `Desktop Rust`, and `Web`), two
+risk-selected jobs (`Native host` and `High-risk coverage`), and an always-run
+`CI Gate`. The execution jobs start in parallel after
 successful scope classification. Pushes to `main` additionally run a Linux
 `Main artifact smoke` job through `main-artifact-smoke`; pull requests must
 skip it. `CI Gate` requires each selected job to succeed, each unselected job
@@ -332,7 +403,8 @@ result fails the aggregate check.
 Draft pull requests select execution jobs from the complete pull-request diff:
 
 - CI workflow changes, root Cargo configuration or lockfiles, `.cargo/**`, and
-  `xtask/**` are common infrastructure and select all five jobs.
+  `xtask/**` are common infrastructure and select all general jobs plus the
+  risk gates whose own harness or selection policy changed.
 - `crates/**`, `scripts/**`, Rust-consumed assets, root pnpm configuration, and
   `packages/protocol/**` select both Rust shards. SDK, Gateway App Server,
   protocol, and Python changes select SDK contracts; protocol and pnpm changes
@@ -343,8 +415,13 @@ Draft pull requests select execution jobs from the complete pull-request diff:
   configuration select Web.
 - `apps/desktop/src-tauri/**` selects Desktop Rust and also matches the Web
   surface so native and renderer integration remain covered together.
+- Changes to a named high-risk lifecycle, persistence, export, App Server,
+  keyed-coordination, live-projection, or Channel sidecar module select the
+  bounded `risk-coverage` profile. It installs the pinned instrumentation
+  toolchain, enforces the per-file line/function/branch floors, and retains the
+  exact report. This is a PR merge gate, not only a weekly diagnostic.
 
-A ready-for-review pull request ignores path selection and runs all five jobs
+A ready-for-review pull request ignores path selection for the five general jobs
 for every head update. The workflow handles `ready_for_review` and
 `converted_to_draft` transitions explicitly. Every push to `main` runs all five
 deterministic jobs plus the Linux installed-artifact smoke rather than applying
@@ -362,10 +439,25 @@ classification uses full-commit-pinned `dorny/paths-filter` v4.0.2 with only
 compiles root or Desktop Rust uses full-commit-pinned `Swatinem/rust-cache`
 v2.9.1 with failed-run cache saving enabled. Root Rust shards and Web keep
 job-specific root workspace caches; Desktop Rust caches the independent
-`apps/desktop/src-tauri` target. Rust tests install Node.js for JavaScript
-fixtures but do not install pnpm dependencies; Desktop Rust installs no Node or
-pnpm toolchain; Rust checks retains the frozen workspace install required by
-generated Gateway protocol verification.
+`apps/desktop/src-tauri` target. The Linux Rust-test shard uses Python ACP
+fixtures and installs neither Node.js nor pnpm dependencies; Desktop Rust also
+installs no Node or pnpm toolchain. Rust checks retains the frozen workspace
+install required by generated Gateway protocol verification. Its tracked ACP
+fixture check is source-independent for hosted execution; maintainers run the
+deeper local `.references` evidence check when advancing a reviewed adapter
+version.
+
+Changes to process environment, process-tree, PTY, ACP launch, Channel sidecar,
+CLI host compilation, or Desktop native sources select a small native-host
+matrix on Windows and macOS. That matrix runs the owning process/ACP/sidecar
+tests and checks the CLI target; it is a merge gate for the selected risk but
+does not duplicate the full release artifact matrix. The complete installed
+artifact matrix remains package-profile evidence.
+
+The high-risk coverage selector is similarly independent of draft readiness and
+event kind: when a named module changes, the coverage job must succeed for a
+draft, ready pull request, or push to `main`. Unrelated changes do not pay its
+pinned-nightly setup and full owning-library test cost.
 
 Every third-party `uses:` reference in tracked workflows is pinned to exactly
 40 hexadecimal commit characters. A repository test parses workflow `uses:`
@@ -495,8 +587,9 @@ and p99 separately for end-to-end envelope commit latency in microseconds and
 for batch commit latency in milliseconds. It also records peak ingress queue
 depth and the Store's SQLite busy-operation delta for the measured run; average
 microseconds per event remains the commit-throughput indicator. Compilation and
-process durations are not compared
-across different machines. These executable and wheel baselines are Linux
+process durations are evaluated only against the pinned Linux canonical-runner
+baseline; results from different machines are evidence, not a portable latency
+claim. These executable and wheel baselines are Linux
 x86_64 measurements; the cross-platform package workflow records, tests, and
 retains real Windows and macOS outputs without comparing them to Linux caps.
 The profile does not sample process-wide idle CPU on a shared CI host. The
@@ -626,7 +719,10 @@ Registered live checks:
   UI.
   Completion checks for live skill flows must scope running/streaming DOM state
   to the active Transcript region so shell, sidebar, or history running
-  affordances cannot mask a completed assistant response.
+  affordances cannot mask a completed assistant response. Completion is the
+  settled Composer plus no running Transcript rows and a non-empty final
+  assistant response. It must not depend on the provider repeating the skill
+  name, prompt, or a hard-coded completion phrase in that response.
 - `opencode-acp-gui-lifecycle-live`: one OpenCode ACP GUI live flow covering
   both the provider-backed Turn and the same test-owned Session's lifecycle;
   those projections are not registered as a second execution of the same
@@ -740,6 +836,12 @@ remain independent of the user-facing managed fallback range and of stale test
 instances left by an interrupted earlier worker. Fixture teardown propagates a
 failed managed stop instead of reporting successful cleanup.
 
+Native release-artifact smoke has the same cleanup boundary: after stopping
+the Desktop process and issuing the CLI-managed stop, it must verify that the
+isolated managed Gateway is no longer running. A still-live test Gateway makes
+the smoke fail; a successful stop command alone is not sufficient evidence and
+temporary profile deletion must never be used to hide a surviving process.
+
 Cross-surface profiling artifacts belong under
 `profile/surface-comparison/`. The runner provides the comparison root, sample
 count, built `pevo` binary, and Chromium selection explicitly. A successful
@@ -747,6 +849,14 @@ step requires the comparison manifest, Markdown report, TUI content-free JSONL
 trace, Workbench trace, raw samples, and recomputed p50/p95/delta data. Failed
 runs retain a partial manifest and logs. This profile uses only isolated local
 home/config/database paths and never resolves real provider credentials.
+
+Fullscreen TUI startup clears and positions the alternate screen exactly once;
+it must not add a cursor-position query merely to repeat that clear before the
+first complete draw. The content-discarding pseudo-terminal therefore need not
+pretend to be a terminal emulator. Trace waits still observe the driver
+lifecycle and fail immediately with bounded content-free process diagnostics
+when the TUI exits; they must not replace an already-known process failure with
+a generic trace timeout.
 
 The comparison manifest uses schema v2. Its shared presentation boundary is a
 surface commit: completed terminal draw for TUI and observed DOM commit for
