@@ -35,10 +35,8 @@ import type {
   Appearance,
   CommandFeedback,
   CommandOverlay,
-  DebugEvent,
   MainView,
   RightWorkspaceTab,
-  TerminalNotificationEvent,
   TraceState,
   WorkbenchPrefs
 } from "./types";
@@ -52,6 +50,8 @@ import {
   type DraftOpenToken
 } from "./composer-session-coordinator";
 import type { WorkspaceApplication } from "./workspace-application";
+import type { RefreshSnapshot, RefreshWorkspaceSurface } from "./runtime-types";
+import type { TerminalEventApplication } from "./terminal-event-application";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
 const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
@@ -62,29 +62,6 @@ const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
   "revertConversation",
   "unrevertConversation"
 ]);
-
-let terminalEventSeq = 0;
-
-function nextTerminalEventSeq(): number {
-  terminalEventSeq += 1;
-  return terminalEventSeq;
-}
-
-type RefreshSnapshot = (
-  runtimeClient?: GatewayClient | null,
-  threadId?: string,
-  scope?: GatewayRequestScope,
-  readOnly?: boolean,
-  expectedEpoch?: number | null,
-  allowDetachedAdoption?: boolean
-) => Promise<void>;
-
-type RefreshWorkspaceSurface = (
-  runtimeClient?: GatewayClient | null,
-  scope?: GatewayRequestScope,
-  threadId?: string | null,
-  expectedEpoch?: number | null
-) => Promise<void>;
 
 type RefreshWorkspaceFacet = (
   runtimeClient?: GatewayClient | null,
@@ -108,12 +85,11 @@ type AppEffectsParams = {
   debugEnabled: boolean;
   dirtyRightTabs: Record<string, boolean>;
   draftSession: unknown;
-  gatewayEventQueueRef: MutableRefObject<GatewayEvent[]>;
-  gatewayEventRafRef: MutableRefObject<number | null>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   mainView: MainView;
   mobilePanel: "history" | "transcript" | "status";
+  observabilityFreshness: number;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
   firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   rightTabs: RightWorkspaceTab[];
@@ -152,6 +128,7 @@ type AppEffectsParams = {
   refreshWorkspaceDiff: RefreshWorkspaceFacet;
   refreshWorkspaceFiles: RefreshWorkspaceFacet;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
+  markObservabilityStale(): void;
   setActiveRightTabId(value: string | null): void;
   setActiveScope(value: GatewayRequestScope | null): void;
   setClient(value: GatewayClient | null): void;
@@ -174,7 +151,7 @@ type AppEffectsParams = {
   setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)): void;
   setStatus(value: string): void;
   setStartupStable(value: boolean): void;
-  setTerminalEvents(updater: (current: TerminalNotificationEvent[]) => TerminalNotificationEvent[]): void;
+  terminalEvents: TerminalEventApplication;
   setTraceState(value: TraceState): void;
   updateMainView(value: MainView): void;
 };
@@ -188,7 +165,8 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     runtimeClient: GatewayClient,
     scope: GatewayRequestScope,
     threadId: string | null,
-    epoch = current.viewEpochRef.current
+    epoch = current.viewEpochRef.current,
+    includeObservability = true
   ): void {
     if (!current.rightWorkspaceOpen) {
       return;
@@ -206,8 +184,13 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     }
     if (current.activeRightTabId === null) {
       void current.refreshWorkspaceDiff(runtimeClient, scope, epoch);
-      if (threadId) {
-        void current.refreshObservability(runtimeClient, scope, threadId, epoch);
+      if (threadId && includeObservability) {
+        void current.refreshObservability(
+          runtimeClient,
+          scope,
+          threadId,
+          epoch
+        );
       }
     }
   }
@@ -446,19 +429,13 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       if (notification.method === "terminal/output") {
         const parsed = TerminalOutputPayloadSchema.safeParse(notification.params);
         if (parsed.success) {
-          params.setTerminalEvents((current) => [
-            ...current.slice(-240),
-            { method: "terminal/output", params: parsed.data, seq: nextTerminalEventSeq() }
-          ]);
+          params.terminalEvents.appendOutput(parsed.data);
         }
       }
       if (notification.method === "terminal/exited") {
         const parsed = TerminalExitedPayloadSchema.safeParse(notification.params);
         if (parsed.success) {
-          params.setTerminalEvents((current) => [
-            ...current.slice(-240),
-            { method: "terminal/exited", params: parsed.data, seq: nextTerminalEventSeq() }
-          ]);
+          params.terminalEvents.appendExit(parsed.data);
         }
       }
       if (notification.method === "gateway/event") {
@@ -500,6 +477,9 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             const threadId = event.threadId ?? event.turn.threadId;
             if (!threadId) {
               return;
+            }
+            if (threadId === viewedThreadId) {
+              params.markObservabilityStale();
             }
             const context = params.threadSession.getContext();
             const refreshFirstTurnContext = params.firstTurnContextRefreshPendingRef.current;
@@ -546,21 +526,24 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             const scope = params.scopeRef.current;
             if (scope) {
               const epoch = params.viewEpochRef.current;
-              const filesVisible = params.rightWorkspaceOpen && params.activeRightTabKind === "files";
               const sessionView = params.threadSession.getView();
               const transcriptNeedsFiles = transcriptProjectionMayContainWorkspaceFile(
                 sessionView.threadSnapshot?.entries ?? params.snapshot.entries,
                 sessionView.liveEntries,
                 event.committedEntries
               );
-              if (filesVisible) {
-                void params.refreshWorkspaceFiles(runtimeClient, scope, epoch);
-              }
               if (transcriptNeedsFiles) {
                 void params.workspaceApplication.refresh("linkFiles", runtimeClient, scope);
               }
-              if (!filesVisible) {
-                refreshVisibleWorkspace(params, runtimeClient, scope, threadId, epoch);
+              if (threadId !== viewedThreadId) {
+                refreshVisibleWorkspace(
+                  params,
+                  runtimeClient,
+                  scope,
+                  viewedThreadId,
+                  epoch,
+                  false
+                );
               }
             }
           }
@@ -775,11 +758,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     void boot();
     return () => {
       alive = false;
-      params.gatewayEventQueueRef.current = [];
-      if (params.gatewayEventRafRef.current !== null) {
-        window.cancelAnimationFrame(params.gatewayEventRafRef.current);
-        params.gatewayEventRafRef.current = null;
-      }
       openThreadUnlisten?.();
       connectionUnlisten?.();
       activeClient = null;
@@ -825,6 +803,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     params.currentThreadId,
     params.workspaceFilesAuthorityKey,
     params.activeRightTabKind,
+    params.observabilityFreshness,
     params.rightWorkspaceOpen
   ]);
 

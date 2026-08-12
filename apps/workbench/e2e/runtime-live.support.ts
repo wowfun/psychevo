@@ -36,7 +36,7 @@ export type DeterministicAcpScenario =
 
 export type DeterministicJourneyMode = "profile" | "visual";
 
-export type DeterministicJourneyEventName =
+type DeterministicJourneyEventName =
   | "request_received"
   | "first_output_emitted"
   | "completion_emitted";
@@ -163,7 +163,7 @@ export function prepareDeterministicAcpAgent(
     name: options.agentInfo?.name
       ?? (agent === "codex" ? "@agentclientprotocol/codex-acp" : "OpenCode"),
     title: options.agentInfo?.title ?? defaultTitle,
-    version: options.agentVersion ?? (agent === "codex" ? "1.1.2" : "1.17.18")
+    version: options.agentVersion ?? (agent === "codex" ? "1.1.2" : "1.18.9")
   };
   const runtimeRef = options.runtimeRef
     ?? (agent === "codex" && scenario !== "managed" ? "codex-fixture" : agent);

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
@@ -14,6 +14,7 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
     mkdirSync(screenshotDir, { recursive: true });
     const fixture = prepareDeterministicAcpAgent("codex", screenshotDir);
     const server = await startPevoWeb({ live: false });
+    const websocketFrames = captureWebSocketFrames(page);
     let failed = false;
     try {
       await page.goto(server.url);
@@ -99,6 +100,9 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await expect(statusRegion).not.toContainText("reported by ACP peer");
       await expect(statusRegion).toContainText("Session tokens");
       await expect(statusRegion).toContainText("Unavailable");
+      // The provider output rows precede the authoritative Turn settlement.
+      // The final Agent-reported context value is the semantic completion
+      // barrier and also verifies the post-terminal Status refresh.
       await expect(statusRegion).toContainText("129");
       await assertNoWorkbenchRenderError(page);
       await assertNoHorizontalOverflow(page, statusRegion);
@@ -118,10 +122,53 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       throw error;
     } finally {
       preserveFailedGatewayRoot(server.root, failed, testInfo, "acp-peer-visual");
+      writeFileSync(
+        path.join(screenshotDir, `acp-peer-rpc-${testInfo.project.name}.json`),
+        JSON.stringify(websocketFrames, null, 2)
+      );
       await server.stop();
     }
   });
 });
+
+type WebSocketFrameCapture = { received: string[]; sent: string[] };
+
+function captureWebSocketFrames(page: Page): WebSocketFrameCapture {
+  const capture: WebSocketFrameCapture = { received: [], sent: [] };
+  const requestIds = new Set<string>();
+  page.on("websocket", (socket) => {
+    socket.on("framesent", (event) => {
+      const payload = String(event.payload);
+      try {
+        const message = JSON.parse(payload) as { id?: unknown; method?: string };
+        if (message.method !== "observability/read" && message.method !== "thread/read") return;
+        requestIds.add(String(message.id));
+        capture.sent.push(payload);
+      } catch {
+        // Ignore non-JSON transport frames.
+      }
+    });
+    socket.on("framereceived", (event) => {
+      const payload = String(event.payload);
+      try {
+        const message = JSON.parse(payload) as {
+          id?: unknown;
+          method?: string;
+          params?: { type?: string };
+        };
+        if (
+          requestIds.has(String(message.id))
+          || (message.method === "gateway/event" && message.params?.type === "turnCompleted")
+        ) {
+          capture.received.push(payload);
+        }
+      } catch {
+        // Ignore non-JSON transport frames.
+      }
+    });
+  });
+  return capture;
+}
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
   if (name === "Status") {
@@ -222,6 +269,8 @@ async function assertTranscriptRowsFit(page: Page) {
 
 async function assertNoWorkbenchRenderError(page: Page) {
   const alert = page.getByRole("alert");
-  const alertText = await alert.textContent().catch(() => null);
+  const alertText = await alert.count() > 0
+    ? await alert.first().textContent()
+    : null;
   if (alertText?.includes("Workbench render failed")) throw new Error(alertText);
 }

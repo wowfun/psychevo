@@ -1,0 +1,16 @@
+diff --git a/package.json b/package.json
+index 6cfa61955f4bd6dcf20715b2fab270e886526a57..129a69b5b76be8d088db33f9f62d1ceb43fd79e8 100644
+--- a/package.json
++++ b/package.json
+@@ -46,6 +46,11 @@
+       "import": "./dist/index.js",
+       "default": "./dist/index.js"
+     },
++    "./pptx": {
++      "types": "./dist/pptx.d.ts",
++      "import": "./dist/pptx.js",
++      "default": "./dist/pptx.js"
++    },
+     "./package.json": "./package.json"
+   },
+   "files": [

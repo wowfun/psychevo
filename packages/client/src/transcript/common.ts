@@ -107,11 +107,11 @@ export function isHiddenTranscriptEntry(entry: TranscriptEntry): boolean {
   return metadataHidden(entry.metadata);
 }
 
-export function metadataHidden(metadata: unknown): boolean {
+function metadataHidden(metadata: unknown): boolean {
   return recordForValue(metadata).hidden === true || sideInheritedMetadataHidden(metadata);
 }
 
-export function blockText(block: TranscriptBlock): string {
+function blockText(block: TranscriptBlock): string {
   return block.body ?? block.detail ?? block.preview ?? "";
 }
 
@@ -141,12 +141,12 @@ export function mergeBlockMetadata(current: TranscriptBlock, next: TranscriptBlo
   return mergeMetadata(current.metadata, next.metadata);
 }
 
-export function isSpawnAgentBlock(block: TranscriptBlock): boolean {
+function isSpawnAgentBlock(block: TranscriptBlock): boolean {
   const metadata = recordForValue(block.metadata);
   return stringValue(metadata.tool_name) === "spawn_agent";
 }
 
-export function mergeAgentMetadata(left: unknown, right: unknown): unknown {
+function mergeAgentMetadata(left: unknown, right: unknown): unknown {
   if (!isRecord(left) || !isRecord(right)) {
     return right ?? left ?? null;
   }
@@ -198,7 +198,7 @@ export function mergeAgentMetadata(left: unknown, right: unknown): unknown {
   return merged;
 }
 
-export function copyFieldIfMissing(
+function copyFieldIfMissing(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
   key: string
@@ -212,7 +212,7 @@ export function copyFieldIfMissing(
   }
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -242,7 +242,7 @@ export function threadForTurn(snapshot: ThreadSnapshot, threadId: string | null)
   };
 }
 
-export function sourceKeyForSnapshot(snapshot: ThreadSnapshot): string | null {
+function sourceKeyForSnapshot(snapshot: ThreadSnapshot): string | null {
   const source = snapshot.source;
   const kind = typeof source.kind === "string" && source.kind.trim() ? source.kind : null;
   const rawId = typeof source.rawId === "string" && source.rawId.trim() ? source.rawId : null;
@@ -280,13 +280,13 @@ export function liveOrder(entry: TranscriptEntry): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export function compareTimelineMs(left: TranscriptEntry, right: TranscriptEntry): number {
+function compareTimelineMs(left: TranscriptEntry, right: TranscriptEntry): number {
   const leftTime = timelineMs(left);
   const rightTime = timelineMs(right);
   return leftTime !== null && rightTime !== null && leftTime !== rightTime ? leftTime - rightTime : 0;
 }
 
-export function timelineMs(entry: TranscriptEntry): number | null {
+function timelineMs(entry: TranscriptEntry): number | null {
   const value = entry.createdAtMs || entry.updatedAtMs;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }

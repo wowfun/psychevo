@@ -29,9 +29,9 @@ const SAFE_IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp|avif|bmp));base6
 type JsonPrimitive = boolean | number | string | null;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type WorkspaceExcalidrawElement = { [key: string]: JsonValue };
+type WorkspaceExcalidrawElement = { [key: string]: JsonValue };
 
-export type WorkspaceExcalidrawBinaryFile = {
+type WorkspaceExcalidrawBinaryFile = {
   created: number;
   dataURL: string;
   id: string;

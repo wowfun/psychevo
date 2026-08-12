@@ -177,8 +177,3 @@ function throwIfAborted(signal: AbortSignal) {
     throw new DOMException("Aborted", "AbortError");
   }
 }
-
-export const workspaceOfficePreviewPolicy = {
-  entryLimit: OFFICE_ENTRY_LIMIT,
-  uncompressedLimitBytes: OFFICE_UNCOMPRESSED_LIMIT_BYTES
-} as const;

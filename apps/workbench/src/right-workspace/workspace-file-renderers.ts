@@ -4,14 +4,17 @@ import {
   type FileViewerRenderedInstance,
   type FileViewerRendererPlugin
 } from "@file-viewer/core";
+import {
+  OPEN_DOCUMENT_EXTENSIONS,
+  PRESENTATION_EXTENSIONS,
+  SPREADSHEET_EXTENSIONS,
+  WORD_OPENXML_EXTENSIONS
+} from "./workspace-file-formats";
 
-const WORD_OPENXML_EXTENSIONS = new Set(["docx", "docm", "dotx", "dotm"]);
-const SPREADSHEET_EXTENSIONS = new Set([
-  "xlsx", "xlsm", "xlsb", "xltx", "xltm", "ods"
-]);
-const PRESENTATION_EXTENSIONS = new Set([
-  "pptx", "pptm", "potx", "potm", "ppsx", "ppsm"
-]);
+const wordOpenXmlExtensions = new Set<string>(WORD_OPENXML_EXTENSIONS);
+const openDocumentExtensions = new Set<string>(OPEN_DOCUMENT_EXTENSIONS);
+const spreadsheetExtensions = new Set<string>(SPREADSHEET_EXTENSIONS);
+const presentationExtensions = new Set<string>(PRESENTATION_EXTENSIONS);
 
 export type WorkspaceFileRendererFamily =
   | "pdf"
@@ -31,12 +34,12 @@ export function workspaceFileRendererFamily(
 ): WorkspaceFileRendererFamily | null {
   const extension = fileExtension(filename);
   if (extension === "pdf") return "pdf";
-  if (WORD_OPENXML_EXTENSIONS.has(extension)) return "word-openxml";
-  if (extension === "rtf" || extension === "odt" || extension === "odp") {
+  if (wordOpenXmlExtensions.has(extension)) return "word-openxml";
+  if (openDocumentExtensions.has(extension)) {
     return "open-document";
   }
-  if (SPREADSHEET_EXTENSIONS.has(extension)) return "spreadsheet";
-  if (PRESENTATION_EXTENSIONS.has(extension)) return "presentation";
+  if (spreadsheetExtensions.has(extension)) return "spreadsheet";
+  if (presentationExtensions.has(extension)) return "presentation";
   if (extension === "ofd") return "ofd";
   if (extension === "heic" || extension === "heif") return "image";
   return null;

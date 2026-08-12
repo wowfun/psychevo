@@ -1,4 +1,4 @@
-export type VoiceRecording = {
+type VoiceRecording = {
   data: string;
   durationMs: number;
   format: "wav";

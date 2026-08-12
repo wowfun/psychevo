@@ -7,7 +7,7 @@ const agent = process.argv[2] || "codex";
 const scenario = process.argv[3] || "stream";
 const logPath = process.argv[4];
 const statePath = process.argv[5];
-const agentVersion = process.argv[6] || (agent === "codex" ? "1.1.2" : "1.17.18");
+const agentVersion = process.argv[6] || (agent === "codex" ? "1.1.2" : "1.18.9");
 const agentInfoName = process.argv[7] || (agent === "codex" ? "@agentclientprotocol/codex-acp" : "OpenCode");
 const title = process.argv[8] || (agent === "codex" ? "Codex" : "OpenCode");
 const journeyMode = process.argv[9] || "profile";

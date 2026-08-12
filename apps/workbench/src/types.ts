@@ -236,11 +236,6 @@ export type TerminalNotificationEvent =
   | { method: "terminal/output"; params: TerminalOutputPayload; seq: number }
   | { method: "terminal/exited"; params: TerminalExitedPayload; seq: number };
 
-export type GatewayEventFeed = {
-  event: GatewayEvent;
-  seq: number;
-};
-
 export type WorkspaceFileTreeItem = {
   badge?: string | null;
   kind: "directory" | "file";

@@ -133,7 +133,7 @@ type NormalizeBrowserUrlResult =
   | { ok: true; url: string }
   | { error: string; ok: false };
 
-export function normalizeBrowserUrl(input: string): NormalizeBrowserUrlResult {
+function normalizeBrowserUrl(input: string): NormalizeBrowserUrlResult {
   const trimmed = input.trim();
   if (!trimmed) {
     return { error: "Enter a URL.", ok: false };

@@ -1,16 +1,23 @@
 import { Bug, RefreshCw } from "lucide-react";
+import { useSyncExternalStore } from "react";
 import { prettyJson, traceEventLabel, traceEventSeq, traceEventTime } from "../data";
-import type { DebugEvent, TraceState } from "../types";
+import type { TraceState } from "../types";
+import type { DebugEventApplication } from "../debug-event-application";
 
 export function DebugPanel({
-  events,
+  events: eventApplication,
   onRefreshTrace,
   trace
 }: {
-  events: DebugEvent[];
+  events: DebugEventApplication;
   onRefreshTrace(): void;
   trace: TraceState;
 }) {
+  const events = useSyncExternalStore(
+    eventApplication.subscribe,
+    eventApplication.getSnapshot,
+    eventApplication.getSnapshot
+  );
   const traceEvents = trace.result?.events ?? [];
   const traceWarnings = trace.result?.warnings ?? [];
   return (

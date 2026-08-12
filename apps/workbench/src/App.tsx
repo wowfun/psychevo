@@ -63,9 +63,8 @@ import {
 import { readWorkbenchPrefs } from "./storage";
 import { createRightWorkspaceActions } from "./right-workspace-actions";
 import {
-  EMPTY_GATEWAY_EVENT_FEED,
-  confirmedSteerTurnId,
-  type GatewayThreadEventFeed
+  GatewayEventFeedApplication,
+  confirmedSteerTurnId
 } from "./gateway-event-feed";
 import {
   enabledThreadAction
@@ -78,18 +77,19 @@ import {
 } from "./runtime";
 import { startWavRecorder, type VoiceRecorder } from "./voice-capture";
 import { WorkspaceApplication } from "./workspace-application";
+import { TerminalEventApplication } from "./terminal-event-application";
+import { DebugEventApplication } from "./debug-event-application";
+import { ThreadSessionOperationalApplication } from "./thread-session-operational-application";
 import type {
   Appearance,
   BackendDraft,
   CommandFeedback,
   CommandOverlay,
-  DebugEvent,
   CapabilityTab,
   MainView,
   PendingAttachment,
   RightWorkspaceTab,
   SettingsSection,
-  TerminalNotificationEvent,
   TraceState,
   WorkbenchAgent,
   WorkbenchBackend,
@@ -129,17 +129,26 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
   const sessionBrowserApplication = useMemo(() => new SessionBrowserApplication(), []);
   const workspaceApplication = useMemo(() => new WorkspaceApplication(), []);
-  const threadSessionViewStore = useMemo(() => ({
-    getSnapshot: () => threadSession.getView(),
-    subscribe: (listener: () => void) => threadSession.subscribe(listener)
-  }), [threadSession]);
+  const threadSessionOperationalApplication = useMemo(
+    () => new ThreadSessionOperationalApplication(threadSession),
+    [threadSession]
+  );
   const threadSessionView = useSyncExternalStore(
-    threadSessionViewStore.subscribe,
-    threadSessionViewStore.getSnapshot,
-    threadSessionViewStore.getSnapshot
+    threadSessionOperationalApplication.subscribe,
+    threadSessionOperationalApplication.getSnapshot,
+    threadSessionOperationalApplication.getSnapshot
+  );
+  const gatewayEvents = useMemo(() => new GatewayEventFeedApplication(), []);
+  const gatewayLifecycleStore = useMemo(() => ({
+    getSnapshot: gatewayEvents.getSnapshot,
+    subscribe: (listener: () => void) => gatewayEvents.subscribe(listener, "turnLifecycle")
+  }), [gatewayEvents]);
+  const latestGatewayEvent = useSyncExternalStore(
+    gatewayLifecycleStore.subscribe,
+    gatewayLifecycleStore.getSnapshot,
+    gatewayLifecycleStore.getSnapshot
   );
   const snapshot = threadSessionView.threadSnapshot ?? EMPTY_SNAPSHOT;
-  const liveTranscriptEntries = threadSessionView.liveEntries;
   const runtimeContext = useMemo(
     () => threadSessionView.context
       ? parseThreadContext(threadSessionView.context)
@@ -216,6 +225,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextReadResult | null>(null);
   const [observability, setObservability] = useState<ObservabilityReadResult | null>(null);
+  const [observabilityFreshness, setObservabilityFreshness] = useState(0);
   const [usageStats, setUsageStats] = useState<UsageReadResult | null>(null);
   const [usageStatsLoading, setUsageStatsLoading] = useState(false);
   const [usageStatsError, setUsageStatsError] = useState<string | null>(null);
@@ -228,9 +238,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceAutoSpeak, setVoiceAutoSpeak] = useState(false);
   const [voiceRealtimeSessionId, setVoiceRealtimeSessionId] = useState<string | null>(null);
-  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
-  const [terminalEvents, setTerminalEvents] = useState<TerminalNotificationEvent[]>([]);
-  const [latestGatewayEvent, setLatestGatewayEvent] = useState<GatewayThreadEventFeed>(EMPTY_GATEWAY_EVENT_FEED);
+  const debugEvents = useMemo(() => new DebugEventApplication(), []);
+  const terminalEvents = useMemo(() => new TerminalEventApplication(), []);
   const [traceState, setTraceState] = useState<TraceState>({
     error: null,
     loading: false,
@@ -251,6 +260,12 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const snapshotReadFlightsRef = useRef(new Map<string, {
     client: GatewayClient;
     promise: Promise<void>;
+  }>());
+  const observabilityReadsRef = useRef(new Map<string, {
+    client: GatewayClient;
+    freshness: number;
+    promise: Promise<void>;
+    token: symbol;
   }>());
   const mainViewRef = useRef<MainView>("transcript");
   const selectedThreadIdRef = useRef<string | null>(null);
@@ -288,7 +303,10 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     workspaceApplication
   ]);
 
-  useEffect(() => () => threadSession.dispose(), [threadSession]);
+  useEffect(() => () => {
+    threadSessionOperationalApplication.dispose();
+    threadSession.dispose();
+  }, [threadSession, threadSessionOperationalApplication]);
 
   function setRuntimeContext(context: ThreadContextReadResult | null): void {
     threadSession.setContext(context ? parseThreadContext(context) : null);
@@ -302,13 +320,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
-  const workspaceFileLinkDemand = useMemo(
-    () => (
-      transcriptMayContainWorkspaceFile(transcriptEntries)
-      || transcriptMayContainWorkspaceFile(liveTranscriptEntries)
-    ),
-    [liveTranscriptEntries, transcriptEntries]
-  );
   const workspaceFileRoots = useMemo(() => resolveWorkspaceFileRoots({
     draftWorkspaceId,
     scopeCwd: snapshot.scope.cwd,
@@ -524,13 +535,16 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     snapshot,
     viewEpochRef,
     workspaceApplication,
+    gatewayEvents,
+    observabilityFreshness,
+    observabilityReads: observabilityReadsRef.current,
     snapshotReadFlights: snapshotReadFlightsRef.current,
     setActiveScope,
     setAgents,
     setBackends,
     setCommands,
     setContextUsage,
-    setDebugEvents,
+    debugEvents,
     setError,
     setObservability,
     setRuntimeOptionsError,
@@ -558,21 +572,38 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   } = surfaceActions;
 
   useEffect(() => {
-    if (
-      !startupStable
-      || !client
-      || !activeScope
-      || !workspaceFileLinkDemand
-      || workspaceLinkFiles?.root === activeScope.cwd
-    ) {
-      return;
-    }
-    void workspaceApplication.ensure("linkFiles", client, activeScope);
+    let committedEntries: ThreadSnapshot["entries"] | null = null;
+    let liveEntries: ThreadSnapshot["entries"] | null = null;
+    let committedDemand = false;
+    let liveDemand = false;
+    const ensureLiveFileLinks = () => {
+      const view = threadSession.getView();
+      const nextCommittedEntries = view.threadSnapshot?.entries ?? [];
+      if (committedEntries !== nextCommittedEntries) {
+        committedEntries = nextCommittedEntries;
+        committedDemand = transcriptMayContainWorkspaceFile(nextCommittedEntries);
+      }
+      if (liveEntries !== view.liveEntries) {
+        liveEntries = view.liveEntries;
+        liveDemand = transcriptMayContainWorkspaceFile(view.liveEntries);
+      }
+      if (
+        startupStable
+        && client
+        && activeScope
+        && (committedDemand || liveDemand)
+        && workspaceLinkFiles?.root !== activeScope.cwd
+      ) {
+        void workspaceApplication.ensure("linkFiles", client, activeScope);
+      }
+    };
+    ensureLiveFileLinks();
+    return threadSession.subscribe(ensureLiveFileLinks);
   }, [
     startupStable,
     client,
     activeScope,
-    workspaceFileLinkDemand,
+    threadSession,
     workspaceApplication,
     workspaceLinkFiles?.root
   ]);
@@ -599,13 +630,9 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setMobilePanel,
     updateMainView
   });
-  const {
-    applyGatewayEvent,
-    gatewayEventQueueRef,
-    gatewayEventRafRef
-  } = useGatewayLiveEvents({
+  const { applyGatewayEvent } = useGatewayLiveEvents({
+    gatewayEvents,
     selectedThreadIdRef,
-    setLatestGatewayEvent,
     threadSession
   });
 
@@ -692,13 +719,12 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     debugEnabled,
     dirtyRightTabs,
     draftSession,
-    gatewayEventQueueRef,
-    gatewayEventRafRef,
     host,
     initScope: init?.scope ?? null,
     mainView,
     mainViewRef,
     mobilePanel,
+    observabilityFreshness,
     pendingDetachedShellRef,
     firstTurnContextRefreshPendingRef,
     rightTabs,
@@ -740,6 +766,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     refreshWorkspaceDiff,
     refreshWorkspaceFiles,
     refreshWorkspaceSurface,
+    markObservabilityStale: () => setObservabilityFreshness((current) => current + 1),
     setActiveRightTabId,
     setActiveScope,
     setClient,
@@ -762,7 +789,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setSnapshot,
     setStatus,
     setStartupStable,
-    setTerminalEvents,
+    terminalEvents,
     setTraceState,
     updateMainView
   });
@@ -1343,7 +1370,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     if (!voiceAutoSpeak || running || !client) {
       return;
     }
-    const text = latestAssistantTranscriptText(liveTranscriptEntries)
+    const text = latestAssistantTranscriptText(threadSession.getView().liveEntries)
       ?? latestAssistantTranscriptText(transcriptEntries);
     if (!text) {
       return;
@@ -1354,7 +1381,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     }
     voiceAutoSpeakKeyRef.current = spokenKey;
     void runAction(async () => synthesizeVoiceText(text));
-  }, [client, currentThreadId, liveTranscriptEntries, running, transcriptEntries, voiceAutoSpeak]);
+  }, [client, currentThreadId, running, threadSession, transcriptEntries, voiceAutoSpeak]);
 
   useEffect(() => {
     if (voiceRealtimeSessionId) {
@@ -1488,7 +1515,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         handleAttachmentFiles,
         init,
         latestGatewayEvent,
-        liveTranscriptEntries,
         loadOlderHistory,
         onComposerRetry: retryComposerStartup,
         onGatewayRetry: () => void client?.reconnectNow(),
@@ -1520,6 +1546,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         status,
         submitTurn,
         transcriptEntries,
+        threadSession,
         turnBlockReason,
         turnSendable,
         voiceAutoSpeak,
@@ -1564,6 +1591,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         copyText,
         debugEnabled,
         debugEvents,
+        gatewayEvents,
         openAgentSessionTab,
         openDiffPreview,
         openFilePreview,

@@ -29,7 +29,7 @@ export interface MarkdownTextProps {
   workspaceFileLinks?: WorkspaceFileLinkContext;
 }
 
-export type MermaidLoader = () => Promise<MermaidModule>;
+type MermaidLoader = () => Promise<MermaidModule>;
 
 type MermaidModule = MermaidApi | { default: MermaidApi };
 

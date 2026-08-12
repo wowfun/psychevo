@@ -68,7 +68,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
     }
   });
 
-  test("shows the same model and reasoning controls for Codex ACP and OpenCode ACP", async ({ page }, testInfo) => {
+  test("shows the same model and reasoning controls for Codex ACP and OpenCode ACP", async ({ page, isMobile }, testInfo) => {
     test.setTimeout(180_000);
     mkdirSync(screenshotDir, { recursive: true });
     const codex = prepareDeterministicAcpAgent("codex", screenshotDir);
@@ -162,6 +162,18 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await expect(modelPicker.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "Agent target" })).toContainText(`${opencodeTarget.agentLabel} (ACP)`);
+      if (isMobile) {
+        const userMeta = page.locator(".pevo-messageFrame.is-user", { hasText: "Prove prepared OpenCode ACP controls" })
+          .locator(".pevo-messageMeta");
+        const thinkingRow = page.locator(".pevo-reasoning").last();
+        const assistantMeta = page.locator(".pevo-messageFrame.is-assistant", { hasText: /OpenCode ACP response.*fixture\/second/i })
+          .locator(".pevo-messageMeta");
+        const toolRow = page.locator(".pevo-evidence", { hasText: "Inspect ACP fixture" }).last();
+        await expect(userMeta).toBeVisible();
+        await expect(assistantMeta).toBeVisible();
+        await expectVerticallyBefore(userMeta, thinkingRow, "user message actions", "Thinking row");
+        await expectVerticallyBefore(assistantMeta, toolRow, "assistant message actions", "tool evidence row");
+      }
       await capture(page, testInfo, "opencode-acp-common-controls");
     } finally {
       writeFileSync(
@@ -1017,6 +1029,16 @@ async function expectInsideViewport(page: Page, locator: Locator) {
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width + 1);
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height + 1);
+}
+
+async function expectVerticallyBefore(upper: Locator, lower: Locator, upperName: string, lowerName: string) {
+  const [upperBox, lowerBox] = await Promise.all([upper.boundingBox(), lower.boundingBox()]);
+  expect(upperBox, `${upperName} has no rendered bounding box`).not.toBeNull();
+  expect(lowerBox, `${lowerName} has no rendered bounding box`).not.toBeNull();
+  expect(
+    upperBox!.y + upperBox!.height,
+    `${upperName} overlaps ${lowerName}`
+  ).toBeLessThanOrEqual(lowerBox!.y + 1);
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {

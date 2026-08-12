@@ -5,7 +5,7 @@ import { ThreadSession, emptyThreadSnapshot } from "@psychevo/client";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayEvent } from "@psychevo/protocol";
 import {
-  EMPTY_GATEWAY_EVENT_FEED,
+  GatewayEventFeedApplication,
   gatewayEventsForThread
 } from "./gateway-event-feed";
 import { useGatewayLiveEvents } from "./app-live-events";
@@ -15,10 +15,10 @@ describe("useGatewayLiveEvents", () => {
     const session = new ThreadSession({
       snapshot: emptyThreadSnapshot(scope(), "thread-shared")
     });
-    const setLatestGatewayEvent = vi.fn();
+    const gatewayEvents = new GatewayEventFeedApplication();
     const { result } = renderHook(() => useGatewayLiveEvents({
+      gatewayEvents,
       selectedThreadIdRef: { current: "thread-shared" },
-      setLatestGatewayEvent,
       threadSession: session
     }));
     const event: GatewayEvent = {
@@ -30,12 +30,8 @@ describe("useGatewayLiveEvents", () => {
 
     act(() => result.current.applyGatewayEvent(event));
 
-    expect(setLatestGatewayEvent).toHaveBeenCalledOnce();
-    const update = setLatestGatewayEvent.mock.calls[0]?.[0] as (
-      current: typeof EMPTY_GATEWAY_EVENT_FEED
-    ) => typeof EMPTY_GATEWAY_EVENT_FEED;
     expect(
-      gatewayEventsForThread(update(EMPTY_GATEWAY_EVENT_FEED), "thread-shared")[0]?.event
+      gatewayEventsForThread(gatewayEvents.getSnapshot(), "thread-shared")[0]?.event
     ).toEqual(event);
     expect(session.getSnapshot()?.thread?.id).toBe("thread-shared");
   });
@@ -46,8 +42,8 @@ describe("useGatewayLiveEvents", () => {
     });
     const selectedThreadIdRef = { current: "thread-a" as string | null };
     renderHook(() => useGatewayLiveEvents({
+      gatewayEvents: new GatewayEventFeedApplication(),
       selectedThreadIdRef,
-      setLatestGatewayEvent: vi.fn(),
       threadSession: session
     }));
 
@@ -62,8 +58,8 @@ describe("useGatewayLiveEvents", () => {
     });
     const selectedThreadIdRef = { current: "thread-a" as string | null };
     renderHook(() => useGatewayLiveEvents({
+      gatewayEvents: new GatewayEventFeedApplication(),
       selectedThreadIdRef,
-      setLatestGatewayEvent: vi.fn(),
       threadSession: session
     }));
     vi.spyOn(session, "getSnapshot").mockImplementation(() => {
@@ -81,8 +77,8 @@ describe("useGatewayLiveEvents", () => {
     });
     const selectedThreadIdRef = { current: null as string | null };
     renderHook(() => useGatewayLiveEvents({
+      gatewayEvents: new GatewayEventFeedApplication(),
       selectedThreadIdRef,
-      setLatestGatewayEvent: vi.fn(),
       threadSession: session
     }));
     vi.spyOn(session, "getActiveThreadId").mockReturnValue("thread-accepted");

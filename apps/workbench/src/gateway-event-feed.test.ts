@@ -1,14 +1,60 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GatewayEvent, PendingActionView } from "@psychevo/protocol";
 import {
-    EMPTY_GATEWAY_EVENT_FEED,
-    GatewayEventJournal,
-    appendGatewayEventFeed,
+  EMPTY_GATEWAY_EVENT_FEED,
+  GatewayEventFeedApplication,
+  GatewayEventJournal,
+  appendGatewayEventFeed,
   confirmedSteerTurnId,
-  gatewayEventsForThread
+  gatewayEventsForThread,
+  reconcileThreadSnapshotAfterGatewayBarrier
 } from "./gateway-event-feed";
+import { snapshot } from "./liveTranscript.test-support";
 
 describe("Gateway thread event feed", () => {
+  it("publishes only the subscribed semantic event families", () => {
+    const application = new GatewayEventFeedApplication();
+    const all = vi.fn();
+    const team = vi.fn();
+    const turns = vi.fn();
+    application.subscribe(all);
+    application.subscribe(team, "teamLifecycle");
+    application.subscribe(turns, "turnLifecycle");
+
+    application.append({
+      displayTitle: "Renamed",
+      threadId: "thread-1",
+      title: "Renamed",
+      type: "titleChanged"
+    });
+    application.append({
+      entry: {
+        blocks: [],
+        createdAtMs: 1,
+        id: "plain-text",
+        role: "assistant",
+        source: "runtime",
+        status: "running",
+        threadId: "thread-1",
+        turnId: "turn-1",
+        updatedAtMs: 1
+      },
+      type: "entryUpdated",
+      turnId: "turn-1"
+    });
+    application.append({
+      queuePosition: 1,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      type: "turnQueued"
+    });
+
+    expect(all).toHaveBeenCalledTimes(3);
+    expect(team).not.toHaveBeenCalled();
+    expect(turns).toHaveBeenCalledOnce();
+    expect(application.getSnapshot().latestSeq).toBe(3);
+  });
+
   it("keeps each action lifecycle on its originating thread and forgets terminal actions", () => {
     let feed = EMPTY_GATEWAY_EVENT_FEED;
     feed = appendGatewayEventFeed(feed, actionEvent("actionRequested", action("permission-resolve")));
@@ -34,6 +80,92 @@ describe("Gateway thread event feed", () => {
       "actionRequested",
       "actionCancelled"
     ]);
+  });
+
+  it("replays pending-action lifecycle events observed after a snapshot-read barrier", () => {
+    const permission = action("permission-raced", "thread-1");
+    const beforeRead = snapshot();
+    const barrierSeq = 0;
+    let feed = appendGatewayEventFeed(
+      EMPTY_GATEWAY_EVENT_FEED,
+      actionEvent("actionRequested", permission)
+    );
+
+    const afterRequest = reconcileThreadSnapshotAfterGatewayBarrier(
+      { ...beforeRead, pendingActions: [permission] },
+      beforeRead,
+      feed,
+      "thread-1",
+      barrierSeq
+    );
+    expect(afterRequest.pendingActions).toEqual([permission]);
+
+    feed = appendGatewayEventFeed(
+      feed,
+      terminalActionEvent("actionResolved", permission.actionId)
+    );
+    const afterResolution = reconcileThreadSnapshotAfterGatewayBarrier(
+      { ...beforeRead, pendingActions: [] },
+      { ...beforeRead, pendingActions: [permission] },
+      feed,
+      "thread-1",
+      barrierSeq
+    );
+    expect(afterResolution.pendingActions).toEqual([]);
+  });
+
+  it("does not resurrect an action after its resolution leaves the Thread event ring", () => {
+    const permission = action("permission-evicted-resolution", "thread-1");
+    const beforeRead = snapshot();
+    const barrierSeq = 0;
+    let feed = appendGatewayEventFeed(
+      EMPTY_GATEWAY_EVENT_FEED,
+      actionEvent("actionRequested", permission)
+    );
+    feed = appendGatewayEventFeed(
+      feed,
+      terminalActionEvent("actionResolved", permission.actionId)
+    );
+    for (let index = 0; index < 501; index += 1) {
+      feed = appendGatewayEventFeed(feed, {
+        type: "titleChanged",
+        threadId: "thread-1",
+        title: `Title ${index}`,
+        displayTitle: `Title ${index}`
+      });
+    }
+
+    expect(gatewayEventsForThread(feed, "thread-1").some(
+      ({ event }) => event.type === "actionResolved"
+    )).toBe(false);
+    const reconciled = reconcileThreadSnapshotAfterGatewayBarrier(
+      { ...beforeRead, pendingActions: [] },
+      { ...beforeRead, pendingActions: [permission] },
+      feed,
+      "thread-1",
+      barrierSeq
+    );
+
+    expect(reconciled.pendingActions).toEqual([]);
+  });
+
+  it("treats pending-action state at or before the read barrier as snapshot-owned", () => {
+    const permission = action("permission-before-read", "thread-1");
+    const current = { ...snapshot(), pendingActions: [permission] };
+    const feed = appendGatewayEventFeed(
+      EMPTY_GATEWAY_EVENT_FEED,
+      actionEvent("actionRequested", permission)
+    );
+
+    const reconciled = reconcileThreadSnapshotAfterGatewayBarrier(
+      current,
+      snapshot(),
+      feed,
+      "thread-1",
+      feed.latestSeq
+    );
+
+    expect(reconciled.pendingActions).toEqual([]);
   });
 
   it("forgets unresolved actions when their turn completes", () => {
@@ -77,6 +209,39 @@ describe("Gateway thread event feed", () => {
       "actionRequested",
       "actionResolved"
     ]);
+  });
+
+  it("does not resurrect a completed Turn action after the completion leaves the ring", () => {
+    const permission = action("permission-completed-then-evicted", "thread-1");
+    const beforeRead = snapshot();
+    let feed = appendGatewayEventFeed(
+      EMPTY_GATEWAY_EVENT_FEED,
+      actionEvent("actionRequested", permission)
+    );
+    feed = appendGatewayEventFeed(feed, turnCompletedEvent("thread-1", "parent-turn"));
+    for (let index = 0; index < 2_001; index += 1) {
+      feed = appendGatewayEventFeed(feed, {
+        type: "titleChanged",
+        threadId: "sibling-thread",
+        title: `Sibling ${index}`,
+        displayTitle: `Sibling ${index}`
+      });
+    }
+    expect(feed.journal?.actionLifecyclesForThread(
+      "thread-1",
+      0,
+      feed.latestSeq
+    ).map(({ event }) => event.type)).toEqual(["turnCompleted"]);
+
+    const reconciled = reconcileThreadSnapshotAfterGatewayBarrier(
+      { ...beforeRead, pendingActions: [] },
+      { ...beforeRead, pendingActions: [permission] },
+      feed,
+      "thread-1",
+      0
+    );
+
+    expect(reconciled.pendingActions).toEqual([]);
   });
 
   it("rejects stale snapshot turns until the queued follow-up actually starts", () => {
@@ -136,34 +301,6 @@ describe("Gateway thread event feed", () => {
     expect(gatewayEventsForThread(feed, "thread-2")).toHaveLength(500);
   });
 
-  it("notifies only matching thread and event-family subscribers", () => {
-    const journal = new GatewayEventJournal();
-    const seen: number[] = [];
-    journal.subscribe(({ seq }) => seen.push(seq), {
-      eventTypes: ["titleChanged"],
-      threadId: "thread-1"
-    });
-
-    journal.append({
-      type: "activityChanged",
-      threadId: "thread-1",
-      activity: { running: false, activeTurnId: null, queuedTurns: 0 }
-    });
-    journal.append({
-      type: "titleChanged",
-      threadId: "thread-2",
-      title: "Other",
-      displayTitle: "Other"
-    });
-    journal.append({
-      type: "titleChanged",
-      threadId: "thread-1",
-      title: "Match",
-      displayTitle: "Match"
-    });
-
-    expect(seen).toEqual([3]);
-  });
 });
 
 function action(actionId: string, threadId: string | null = "child-thread"): PendingActionView {
@@ -201,4 +338,22 @@ function terminalActionEvent(
         kind: "permission",
         reason: "cancelled"
       };
+}
+
+function turnCompletedEvent(threadId: string, turnId: string): GatewayEvent {
+  return {
+    type: "turnCompleted",
+    threadId,
+    turnId,
+    turn: {
+      id: turnId,
+      threadId,
+      status: "completed",
+      outcome: "normal",
+      error: null,
+      startedAtMs: 1,
+      completedAtMs: 2
+    },
+    committedEntries: []
+  };
 }

@@ -464,10 +464,6 @@ function hasReadyTargetForAgent(
   ));
 }
 
-export function agentOptionValue(agent: WorkbenchAgent): string {
-  return agent.source === "explicit" ? agent.path?.trim() || agent.name : agent.name;
-}
-
 export function runtimeControlAsConfigOption(
   control: ThreadControlDescriptorView | null
 ): RuntimeModeOption | null {
@@ -500,7 +496,7 @@ export type RuntimeModeProjection = {
   supportsPlan: boolean;
 };
 
-export type RuntimeModeValue = {
+type RuntimeModeValue = {
   value: string;
   name: string;
   description: string | null;
@@ -572,8 +568,4 @@ export function formatRuntimeModeValues(projection: RuntimeModeProjection): stri
     return labels.join(", ") || "none";
   }
   return projection.allValues.map((value) => value.value).join(", ") || "none";
-}
-
-export function isRuntimeModeOption(option: RuntimeModeOption): boolean {
-  return option.id === "mode" || option.category === "mode";
 }

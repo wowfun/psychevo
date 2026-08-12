@@ -221,7 +221,9 @@ export function sharedViteBuildConfig(options: SharedViteBuildOptions = {}) {
 
   return {
     rolldownOptions: { output: { codeSplitting: { groups } } },
-    sourcemap: true,
+    sourcemap: process.env.PSYCHEVO_BUILD_SOURCEMAPS === "1"
+      ? ("hidden" as const)
+      : false,
     chunkSizeWarningLimit: CHUNK_SIZE_WARNING_LIMIT_KB
   };
 }

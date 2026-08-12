@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 export const MCP_APP_MAX_DOCUMENT_BYTES = 1_048_576;
-export const MCP_APP_MAX_MESSAGE_BYTES = 65_536;
+const MCP_APP_MAX_MESSAGE_BYTES = 65_536;
 const MIN_FRAME_HEIGHT = 120;
 const MAX_FRAME_HEIGHT = 1_200;
 const DEFAULT_FRAME_HEIGHT = 420;
 
-export type McpAppDisplayMode = "inline" | "fullscreen" | "picture_in_picture";
+type McpAppDisplayMode = "inline" | "fullscreen" | "picture_in_picture";
 
 export interface McpAppFrameDescriptor {
   id: string;

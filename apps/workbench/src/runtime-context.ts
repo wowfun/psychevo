@@ -38,7 +38,7 @@ const THREAD_ACTION_KINDS = new Set<ThreadActionKind>([
   "unrevertConversation"
 ]);
 
-export type WorkbenchRuntimeProfile = RuntimeProfileView & {
+type WorkbenchRuntimeProfile = RuntimeProfileView & {
   capabilities: NonNullable<RuntimeProfileView["capabilities"]>;
   diagnostics: NonNullable<RuntimeProfileView["diagnostics"]>;
   health: NonNullable<RuntimeProfileView["health"]>;
@@ -171,7 +171,7 @@ function threadHistoryOwner(value: unknown): ThreadHistoryOwnerView {
   return value === "agent" || value === "process" ? value : "psychevo";
 }
 
-export function parseRuntimeProfile(value: unknown): WorkbenchRuntimeProfile {
+function parseRuntimeProfile(value: unknown): WorkbenchRuntimeProfile {
   const record = objectValue(value);
   const runtimeValue = stringValue(record.runtime);
   const runtime = runtimeValue === "acp" || runtimeValue === "native" ? runtimeValue : "";
@@ -212,34 +212,12 @@ export function runtimeProfileDisplayLabel(profile: RuntimeProfileView): string 
   return `${base} (ACP)`;
 }
 
-export function runtimeProfileProvenance(profile: RuntimeProfileView): string {
+function runtimeProfileProvenance(profile: RuntimeProfileView): string {
   return profile.provenance?.trim() || defaultRuntimeProvenance(profile.runtime);
 }
 
 export function runtimeProfileCapsuleLabel(profile: RuntimeProfileView): string {
   return `${runtimeProfileDisplayLabel(profile)} · ${runtimeProfileProvenance(profile)}`;
-}
-
-export function runtimeProfileSourceLabel(profile: RuntimeProfileView): string {
-  if ((profile.sourceTargets ?? []).length > 0) {
-    return (profile.sourceTargets ?? []).map(capitalize).join(" + ");
-  }
-  return profile.generated ? "Generated" : "Configured";
-}
-
-export function runtimeProfileUnavailableReason(profile: RuntimeProfileView): string | null {
-  if (!profile.enabled) return "This Runtime Profile is disabled.";
-  switch (profile.health.status) {
-    case "missing":
-      return `${runtimeProfileDisplayLabel(profile)} is missing on this device. Open Runtime Profiles to repair it.`;
-    case "needsAuth":
-      return `${runtimeProfileDisplayLabel(profile)} needs authentication. Open Runtime Profiles to repair it.`;
-    case "unsupported":
-    case "error":
-      return profile.health.summary || `${runtimeProfileDisplayLabel(profile)} is not ready.`;
-    default:
-      return null;
-  }
 }
 
 export function runnableTargetUnavailableReason(target: RunnableTargetView | null): string | null {

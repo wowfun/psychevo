@@ -14,15 +14,7 @@ import type {
   MainView,
   WorkbenchAutomation
 } from "./types";
-
-type RefreshSnapshot = (
-  nextClient?: GatewayClient | null,
-  threadId?: string,
-  scope?: GatewayRequestScope,
-  readOnly?: boolean,
-  expectedEpoch?: number | null,
-  allowDetachedAdoption?: boolean
-) => Promise<void>;
+import type { RefreshSnapshot } from "./runtime-types";
 
 type UseAutomationsParams = {
   activeScope: GatewayRequestScope | null;

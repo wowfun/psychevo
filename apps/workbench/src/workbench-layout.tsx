@@ -2,8 +2,11 @@ import {
   lazy,
   Suspense,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
+  type ComponentProps,
   type CSSProperties,
   type Dispatch,
   type MutableRefObject,
@@ -21,7 +24,7 @@ import {
   type HistoryDraftSession,
   type WorkspaceFileLinkContext
 } from "@psychevo/components";
-import { scopeForCwd, type GatewayClient } from "@psychevo/client";
+import { scopeForCwd, type GatewayClient, type ThreadSession } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import type {
   ContextReadResult,
@@ -58,17 +61,17 @@ import {
   enabledThreadAction
 } from "./thread-application";
 import type { PendingAttachment, RightWorkspaceTab } from "./types";
+import type { TerminalEventApplication } from "./terminal-event-application";
+import type { DebugEventApplication } from "./debug-event-application";
 import type {
   Appearance,
   BackendDraft,
   CapabilityTab,
   CommandFeedback,
   CommandOverlay,
-  DebugEvent,
   MainView,
   SessionBrowserWorkspaceState,
   SettingsSection,
-  TerminalNotificationEvent,
   TraceState,
   WorkbenchBackend,
   WorkbenchBackendDoctor,
@@ -77,7 +80,10 @@ import type {
 } from "./types";
 import { DeleteSessionDialog } from "./delete-session-dialog";
 import { SessionArchivePanel } from "./session-archive-panel";
-import type { GatewayThreadEventFeed } from "./gateway-event-feed";
+import type {
+  GatewayEventFeedApplication,
+  GatewayThreadEventFeed
+} from "./gateway-event-feed";
 import type { ReturnTypeOfAppActions } from "./app-actions";
 import type { ReturnTypeOfAutomations } from "./app-automations";
 import type { ReturnTypeOfCommandActions } from "./command-actions";
@@ -98,7 +104,7 @@ type RightActions = ReturnTypeOfRightWorkspaceActions;
 type AutomationModel = ReturnTypeOfAutomations;
 type CommandActions = ReturnTypeOfCommandActions;
 
-export type ThreadViewModel = {
+type ThreadViewModel = {
   activeCommandOverlay: CommandOverlay | null;
   activeScope: GatewayRequestScope | null;
   activeWorkbenchCwd: string;
@@ -129,7 +135,6 @@ export type ThreadViewModel = {
   handleAttachmentFiles: AppActions["handleAttachmentFiles"];
   init: InitializeResult | null;
   latestGatewayEvent: GatewayThreadEventFeed;
-  liveTranscriptEntries: ThreadSnapshot["entries"];
   loadOlderHistory(): Promise<void>;
   onComposerRetry(): void | Promise<void>;
   onGatewayRetry(): void | Promise<void>;
@@ -161,6 +166,7 @@ export type ThreadViewModel = {
   status: string;
   submitTurn: AppActions["submitTurn"];
   transcriptEntries: ThreadSnapshot["entries"];
+  threadSession: ThreadSession;
   turnBlockReason: string;
   turnSendable: boolean;
   voiceAutoSpeak: boolean;
@@ -169,7 +175,7 @@ export type ThreadViewModel = {
   workbenchIntents: WorkbenchIntentOwner;
 };
 
-export type HistoryViewModel = {
+type HistoryViewModel = {
   archivedSessions: SessionSummary[];
   createWorkspace: AppActions["createWorkspace"];
   draftWorkspaceId: string | null;
@@ -195,7 +201,7 @@ export type HistoryViewModel = {
   setWorkspaceDialogOpen: SetState<boolean>;
 };
 
-export type WorkspaceViewModel = {
+type WorkspaceViewModel = {
   acceptWorkspaceChange: AppActions["acceptWorkspaceChange"];
   activeRightTab: RightWorkspaceTab | null;
   activeRightTabId: string | null;
@@ -205,7 +211,8 @@ export type WorkspaceViewModel = {
   confirmFilesTransition: RightActions["confirmFilesTransition"];
   copyText: AppActions["copyText"];
   debugEnabled: boolean;
-  debugEvents: DebugEvent[];
+  debugEvents: DebugEventApplication;
+  gatewayEvents: GatewayEventFeedApplication;
   openDiffPreview: AppActions["openDiffPreview"];
   openAgentSessionTab: RightActions["openAgentSessionTab"];
   openFilePreview: AppActions["openFilePreview"];
@@ -233,7 +240,7 @@ export type WorkspaceViewModel = {
   setRightCollapsed: SetState<boolean>;
   setRightTabs: SetState<RightWorkspaceTab[]>;
   setRightWidthPx: SetState<number>;
-  terminalEvents: TerminalNotificationEvent[];
+  terminalEvents: TerminalEventApplication;
   traceState: TraceState;
   togglePinnedMessage: RightActions["togglePinnedMessage"];
   workspaceBranch: string | null | undefined;
@@ -249,7 +256,7 @@ export type WorkspaceViewModel = {
   ): Promise<boolean>;
 };
 
-export type CapabilityViewModel = {
+type CapabilityViewModel = {
   appearance: Appearance;
   automations: AutomationModel["automations"];
   automationsError: AutomationModel["automationsError"];
@@ -372,8 +379,8 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     historyLoading,
     init,
     leftCollapsed,
+    gatewayEvents,
     latestGatewayEvent,
-    liveTranscriptEntries,
     loadOlderHistory,
     loadingOlderCwd,
     loadChannelSources,
@@ -472,6 +479,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     togglePinnedWorkspace,
     traceState,
     transcriptEntries,
+    threadSession,
     togglePinnedMessage,
     voiceAutoSpeak,
     voiceListening,
@@ -979,11 +987,10 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
               onRunAutomation={(id) => runAutomation(id)}
               onRefreshUsageStats={() => void runAction(async () => refreshUsageStats())}
               transcript={(
-                <TranscriptPanel
+                <ThreadSessionTranscript
                   activity={activity}
                   entries={transcriptEntries}
                   history={snapshot.history}
-                  liveEntries={liveTranscriptEntries}
                   onLoadOlderHistory={() => void runAction(loadOlderHistory)}
                   onCopyText={copyText}
                   {...(historyEditAvailable && pointForkAvailable ? {
@@ -1001,6 +1008,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   threadId={snapshot.thread?.id ?? null}
                   onReadAloudText={onReadAloudText}
                   olderHistoryLoading={olderHistoryLoading}
+                  threadSession={threadSession}
                   {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
                 />
               )}
@@ -1201,7 +1209,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                 debugEvents={debugEvents}
                 files={workspaceFiles?.entries ?? []}
                 hostKind={host?.platform?.kind ?? "browser"}
-                latestGatewayEvent={latestGatewayEvent}
+                gatewayEvents={gatewayEvents}
                 root={workspaceFiles?.root ?? settings?.cwd ?? ""}
                 roots={workspaceFileRoots}
                 scope={activeScope ?? init?.scope ?? null}
@@ -1277,6 +1285,29 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
       </div>
     </main>
   );
+}
+
+type ThreadSessionTranscriptProps = Omit<
+  ComponentProps<typeof TranscriptPanel>,
+  "liveEntries"
+> & {
+  threadSession: ThreadSession;
+};
+
+function ThreadSessionTranscript({
+  threadSession,
+  ...props
+}: ThreadSessionTranscriptProps) {
+  const store = useMemo(() => ({
+    getSnapshot: () => threadSession.getView(),
+    subscribe: (listener: () => void) => threadSession.subscribe(listener)
+  }), [threadSession]);
+  const view = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot
+  );
+  return <TranscriptPanel {...props} liveEntries={view.liveEntries} />;
 }
 
 function useComposerDockTransition(

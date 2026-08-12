@@ -384,7 +384,7 @@ export class SessionBrowserApplication {
   }
 }
 
-export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionSummary[] {
+function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionSummary[] {
   const seen = new Set<string>();
   const sessions: SessionSummary[] = [];
   for (const workspace of result.workspaces) {
@@ -399,7 +399,7 @@ export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionS
   return sessions;
 }
 
-export function workspacesFromThreadBrowser(
+function workspacesFromThreadBrowser(
   result: ThreadBrowserResult
 ): SessionBrowserWorkspaceState[] {
   return result.workspaces.map((workspace) => ({

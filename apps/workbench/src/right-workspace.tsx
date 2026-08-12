@@ -1,4 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type ComponentProps,
+  type ReactNode
+} from "react";
 import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Pin, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
 import { ActionButton, DismissibleDetails, IconButton, type TranscriptAgentSession, type TranscriptPinnedMessage, type WorkspaceFileLinkContext } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
@@ -12,8 +21,10 @@ import type {
   WorkspaceFileEntry,
   WorkspaceFileWriteResult
 } from "@psychevo/protocol";
-import type { GatewayThreadEventFeed } from "./gateway-event-feed";
-import type { Appearance, DebugEvent, RightWorkspaceBrowserState, RightWorkspacePreview, RightWorkspaceTab, RightWorkspaceTabKind, TerminalNotificationEvent, TraceState } from "./types";
+import type { GatewayEventFeedApplication } from "./gateway-event-feed";
+import type { Appearance, RightWorkspaceBrowserState, RightWorkspacePreview, RightWorkspaceTab, RightWorkspaceTabKind, TraceState } from "./types";
+import type { TerminalEventApplication } from "./terminal-event-application";
+import type { DebugEventApplication } from "./debug-event-application";
 import { BrowserPanel } from "./right-workspace/browser";
 import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
@@ -51,8 +62,8 @@ export function RightWorkspace({
   debugEnabled,
   debugEvents,
   files,
+  gatewayEvents,
   hostKind,
-  latestGatewayEvent,
   root,
   roots,
   scope,
@@ -96,10 +107,10 @@ export function RightWorkspace({
   client: GatewayClient | null;
   context: ContextReadResult | null;
   debugEnabled: boolean;
-  debugEvents: DebugEvent[];
+  debugEvents: DebugEventApplication;
   files: WorkspaceFileEntry[];
+  gatewayEvents: GatewayEventFeedApplication;
   hostKind: string;
-  latestGatewayEvent: GatewayThreadEventFeed;
   root: string;
   roots: string[];
   scope: GatewayRequestScope | null;
@@ -107,7 +118,7 @@ export function RightWorkspace({
   status: string;
   usage: SessionUsageSummaryView | null;
   tabs: RightWorkspaceTab[];
-  terminalEvents: TerminalNotificationEvent[];
+  terminalEvents: TerminalEventApplication;
   trace: TraceState;
   truncated: boolean;
   cwd: string;
@@ -256,10 +267,10 @@ export function RightWorkspace({
               />
             )}
             {tab.kind === "team" && (
-              <TeamPanel
+              <LiveTeamPanel
                 client={client}
                 disabled={status !== "connected"}
-                latestGatewayEvent={latestGatewayEvent}
+                gatewayEvents={gatewayEvents}
                 nativeActivities={runtimeActivitiesForThread(tabs, tab.parentThreadId ?? sessionId)}
                 scope={scope}
                 threadId={tab.parentThreadId ?? sessionId}
@@ -267,10 +278,10 @@ export function RightWorkspace({
               />
             )}
             {(tab.kind === "sideConversation" || tab.kind === "agentSession") && (
-              <ThreadPanel
+              <LiveThreadPanel
                 client={client}
                 disabled={status !== "connected"}
-                gatewayEventFeed={latestGatewayEvent}
+                gatewayEvents={gatewayEvents}
                 kind={tab.kind}
                 parentThreadId={tab.parentThreadId ?? sessionId}
                 pendingPrompt={tab.pendingPrompt ?? null}
@@ -290,6 +301,46 @@ export function RightWorkspace({
       </div>
     </section>
   );
+}
+
+type LiveTeamPanelProps = Omit<
+  ComponentProps<typeof TeamPanel>,
+  "latestGatewayEvent"
+> & {
+  gatewayEvents: GatewayEventFeedApplication;
+};
+
+function LiveTeamPanel({ gatewayEvents, ...props }: LiveTeamPanelProps) {
+  const store = useMemo(() => ({
+    getSnapshot: gatewayEvents.getSnapshot,
+    subscribe: (listener: () => void) => gatewayEvents.subscribe(listener, "teamLifecycle")
+  }), [gatewayEvents]);
+  const latestGatewayEvent = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot
+  );
+  return <TeamPanel {...props} latestGatewayEvent={latestGatewayEvent} />;
+}
+
+type LiveThreadPanelProps = Omit<
+  ComponentProps<typeof ThreadPanel>,
+  "gatewayEventFeed"
+> & {
+  gatewayEvents: GatewayEventFeedApplication;
+};
+
+function LiveThreadPanel({ gatewayEvents, ...props }: LiveThreadPanelProps) {
+  const store = useMemo(() => ({
+    getSnapshot: gatewayEvents.getSnapshot,
+    subscribe: (listener: () => void) => gatewayEvents.subscribe(listener)
+  }), [gatewayEvents]);
+  const gatewayEventFeed = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot
+  );
+  return <ThreadPanel {...props} gatewayEventFeed={gatewayEventFeed} />;
 }
 
 function runtimeActivitiesForThread(

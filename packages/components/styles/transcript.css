@@ -773,6 +773,7 @@
   .pevo-messageFrame.is-pinnable {
     --pevo-messageActionHitArea: 48px;
     --pevo-messageActionHitOffset: -48px;
+    margin-bottom: 0;
   }
 
   .pevo-messageFrame.is-pinnable .pevo-messageMeta {

@@ -254,7 +254,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       expect(traceEvents(opencode).find((event) => event.type === "initialize_result")?.agentInfo).toEqual({
         name: "OpenCode",
         title: "OpenCode",
-        version: "1.17.18"
+        version: "1.18.9"
       });
       expect(traceEvents(opaque).find((event) => event.type === "initialize_result")?.agentInfo)
         .toEqual(opaque.agentInfo);
@@ -738,12 +738,20 @@ test.describe("Native and ACP Agent application-path validation", () => {
       "require_mention = false",
       ""
     ].join("\n");
+    const callbackPermissionConfig = [
+      'default_permissions = "acp-callback-test"',
+      "[permissions.acp-callback-test]",
+      'extends = ":workspace"',
+      "[permissions.acp-callback-test.filesystem]",
+      `${JSON.stringify(path.join(context.cwd, "acp-live-written.txt"))} = "prompt"`,
+      ""
+    ].join("\n");
     writeFileSync(path.join(context.cwd, "acp-live-seed.txt"), "first line\nsecond line\nthird line\n");
     let server: Awaited<ReturnType<typeof startPevoWeb>> | null = null;
     try {
       server = await startPevoWeb({
         channelRuntime: true,
-        configAppend: `${fixture.configAppend}\n${channelConfig}`,
+        configAppend: `${callbackPermissionConfig}\n${fixture.configAppend}\n${channelConfig}`,
         cwd: context.cwd,
         dbPath: context.dbPath,
         envFile: telegram.envFile,
@@ -763,7 +771,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       const writePrompt = await waitForTelegramMessage(
         telegram,
         beforeCallbackTurn,
-        (message) => /Permission required for fs\/write_text_file/i.test(message.text)
+        (message) => /Permission required for write:/i.test(message.text)
       );
       const writeToken = interactionToken(writePrompt.text, "approve");
       const beforeWriteApproval = telegram.sent().length;

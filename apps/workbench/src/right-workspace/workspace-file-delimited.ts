@@ -10,7 +10,7 @@ export type DelimitedTablePreview = {
   truncated: boolean;
 };
 
-export const DELIMITED_TABLE_LIMITS: DelimitedTableLimits = {
+const DELIMITED_TABLE_LIMITS: DelimitedTableLimits = {
   maxCells: 20_000,
   maxColumns: 100,
   maxRows: 2_000

@@ -585,7 +585,9 @@ async function assertTranscriptRowsFit(page: Page) {
 
 async function assertNoWorkbenchRenderError(page: Page) {
   const alert = page.getByRole("alert");
-  const alertText = await alert.textContent().catch(() => null);
+  const alertText = await alert.count() > 0
+    ? await alert.first().textContent()
+    : null;
   if (alertText?.includes("Workbench render failed")) {
     throw new Error(alertText);
   }

@@ -21,6 +21,33 @@ import {
 import { emptyThreadSnapshot } from "./thread-controller";
 
 describe("ThreadSession", () => {
+  it("preserves the committed snapshot identity across live entry updates", async () => {
+    vi.useFakeTimers();
+    const session = readySession(new FakeThreadSessionClient(), runningSnapshot());
+    const committed = session.getView().threadSnapshot;
+
+    session.ingestGatewayEvent(streamedEntryEvent(
+      "entryStarted",
+      "first",
+      1,
+      "running"
+    ));
+    session.ingestGatewayEvent({
+      type: "entryBlockTextDelta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      entryId: "entry-1",
+      blockId: "block-1",
+      text: " delta",
+      updatedAtMs: 2
+    });
+    await vi.runAllTimersAsync();
+
+    expect(session.getView().threadSnapshot).toBe(committed);
+    expect(session.getView().liveEntries[0]?.blocks[0]?.body).toBe("first delta");
+    vi.useRealTimers();
+  });
+
   it("isolates view subscribers and reports a bounded diagnostic", () => {
     const diagnostics: Array<{ source: string; message: string }> = [];
     const session = new ThreadSession({

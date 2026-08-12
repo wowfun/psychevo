@@ -25,7 +25,6 @@ import {
 import { normalizeSnapshot } from "./session-utils";
 import type { SessionBrowserApplication } from "./session-browser-application";
 import type {
-  DebugEvent,
   TraceState,
   WorkbenchAgent,
   WorkbenchBackend,
@@ -33,6 +32,18 @@ import type {
 } from "./types";
 import { shouldApplyReadOnlySnapshot } from "./viewGuard";
 import type { WorkspaceApplication } from "./workspace-application";
+import type { DebugEventApplication } from "./debug-event-application";
+import {
+  reconcileThreadSnapshotAfterGatewayBarrier,
+  type GatewayEventFeedApplication
+} from "./gateway-event-feed";
+
+type ObservabilityRead = {
+  client: GatewayClient;
+  freshness: number;
+  promise: Promise<void>;
+  token: symbol;
+};
 
 type SurfaceActionsParams = {
   activeScope: GatewayRequestScope | null;
@@ -47,13 +58,16 @@ type SurfaceActionsParams = {
   snapshot: ThreadSnapshot;
   viewEpochRef: MutableRefObject<number>;
   workspaceApplication: WorkspaceApplication;
+  gatewayEvents: GatewayEventFeedApplication;
+  observabilityFreshness: number;
+  observabilityReads: Map<string, ObservabilityRead>;
   snapshotReadFlights: Map<string, { client: GatewayClient; promise: Promise<void> }>;
   setActiveScope: Dispatch<SetStateAction<GatewayRequestScope | null>>;
   setAgents: Dispatch<SetStateAction<WorkbenchAgent[]>>;
   setBackends: Dispatch<SetStateAction<WorkbenchBackend[]>>;
   setCommands: Dispatch<SetStateAction<WorkbenchCommand[]>>;
   setContextUsage: Dispatch<SetStateAction<ContextReadResult | null>>;
-  setDebugEvents: Dispatch<SetStateAction<DebugEvent[]>>;
+  debugEvents: DebugEventApplication;
   setError: Dispatch<SetStateAction<string | null>>;
   setObservability: Dispatch<SetStateAction<ObservabilityReadResult | null>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
@@ -85,6 +99,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       const flightKey = `${threadId}:${expectedEpoch ?? params.viewEpochRef.current}`;
       const existing = params.snapshotReadFlights.get(flightKey);
       if (existing?.client === nextClient) return existing.promise;
+      const gatewayEventBarrier = params.gatewayEvents.getSnapshot().latestSeq;
       const snapshotFlight = (async (): Promise<ThreadSnapshot | null> => {
         const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
         if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
@@ -100,7 +115,13 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
           )) {
             return current;
           }
-          const next = normalizeSnapshot(reconcileThreadSnapshot(normalizeSnapshot(current), normalizeSnapshot(nextSnapshot)));
+          const next = normalizeSnapshot(reconcileThreadSnapshotAfterGatewayBarrier(
+            normalizeSnapshot(current),
+            normalizeSnapshot(nextSnapshot),
+            params.gatewayEvents.getSnapshot(),
+            threadId,
+            gatewayEventBarrier
+          ));
           params.selectedThreadIdRef.current = next.thread?.id ?? null;
           return next;
         });
@@ -262,13 +283,12 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setObservability(null);
       params.setContextUsage(null);
     }
-    const [, nextObservability] = await Promise.all([
+    await Promise.all([
       params.workspaceApplication.refreshSurface(nextClient, scope),
-      threadId ? nextClient.request("observability/read", { scope, threadId }) : Promise.resolve(null)
+      threadId
+        ? refreshObservability(nextClient, scope, threadId, expectedEpoch)
+        : Promise.resolve()
     ]);
-    if (nextObservability && shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
-      applyObservability(nextObservability);
-    }
   }
 
   async function refreshWorkspaceFiles(
@@ -318,11 +338,42 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setContextUsage(null);
       return;
     }
-    const nextObservability = await nextClient.request("observability/read", { scope, threadId });
-    if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
-      return;
+    const readKey = JSON.stringify([
+      threadId ? ["thread", threadId] : ["scope", gatewayScopeKey(scope)],
+      expectedEpoch ?? params.viewEpochRef.current
+    ]);
+    const existing = params.observabilityReads.get(readKey);
+    if (
+      existing?.client === nextClient
+      && existing.freshness === params.observabilityFreshness
+    ) {
+      return existing.promise;
     }
-    applyObservability(nextObservability);
+    const token = Symbol();
+    const promise = (async () => {
+      try {
+        const nextObservability = await nextClient.request("observability/read", { scope, threadId });
+        if (
+          params.observabilityReads.get(readKey)?.token !== token
+          || !shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)
+        ) {
+          return;
+        }
+        applyObservability(nextObservability);
+      } finally {
+        if (params.observabilityReads.get(readKey)?.token === token) {
+          params.observabilityReads.delete(readKey);
+        }
+      }
+    })();
+    const read: ObservabilityRead = {
+      client: nextClient,
+      freshness: params.observabilityFreshness,
+      promise,
+      token
+    };
+    params.observabilityReads.set(readKey, read);
+    return promise;
   }
 
   function shouldApplyAsyncSurfaceResult(
@@ -352,15 +403,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   }
 
   function pushDebugEvent(method: string, payload: unknown) {
-    params.setDebugEvents((current) => [
-      {
-        id: `${Date.now()}:${method}:${current.length}`,
-        at: Date.now(),
-        method,
-        payload
-      },
-      ...current
-    ].slice(0, 120));
+    params.debugEvents.append(method, payload);
   }
 
   async function refreshTrace(
@@ -437,7 +480,3 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
 }
 
 export type ReturnTypeOfSurfaceActions = ReturnType<typeof createSurfaceActions>;
-export {
-  sessionsFromThreadBrowser,
-  workspacesFromThreadBrowser
-} from "./session-browser-application";

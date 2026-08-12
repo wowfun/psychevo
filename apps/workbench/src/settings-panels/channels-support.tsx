@@ -99,7 +99,7 @@ export function channelDraftSignature(draft: ChannelSettingsDraft): string {
   return JSON.stringify(channelUpdateDraftFromDraft(draft));
 }
 
-export function splitChannelListText(value: string): string[] {
+function splitChannelListText(value: string): string[] {
   const seen = new Set<string>();
   const items: string[] = [];
   for (const part of value.split(/[,\n]/)) {
@@ -139,7 +139,7 @@ export function channelRuntimeSafetyLabel(
   ].join(" · ");
 }
 
-export function uniqueStrings(values: string[]): string[] {
+function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
@@ -580,7 +580,7 @@ export function ChannelSetupCard({
   );
 }
 
-export function QrPlaceholder() {
+function QrPlaceholder() {
   return (
     <div className="channelQrPlaceholder" aria-hidden>
       <span />
@@ -615,7 +615,7 @@ export function ChannelHealthItem({
   );
 }
 
-export function formatQrTimeLeft(expiresAtMs: number, nowMs: number): string {
+function formatQrTimeLeft(expiresAtMs: number, nowMs: number): string {
   const seconds = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
   if (seconds === 0) {
     return "QR expired";
@@ -623,16 +623,16 @@ export function formatQrTimeLeft(expiresAtMs: number, nowMs: number): string {
   return `${seconds}s left`;
 }
 
-export function isWechatQrTerminalStatus(status: string, done: boolean): boolean {
+function isWechatQrTerminalStatus(status: string, done: boolean): boolean {
   return done || status === "expired" || status === "needs_qr_login";
 }
 
-export function isWechatQrSessionLostError(error: unknown): boolean {
+function isWechatQrSessionLostError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("QR session not found");
 }
 
-export function qrSetupErrorMessage(error: unknown): string {
+function qrSetupErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("QR session not found")) {
     return "This QR session has expired, completed, or was created before the Gateway restarted. Generate a new code to reconnect.";
@@ -640,7 +640,7 @@ export function qrSetupErrorMessage(error: unknown): string {
   return message;
 }
 
-export function channelSetupCopy(channel: ChannelChoice): { command: string; fields: string[]; primary: string; title: string } {
+function channelSetupCopy(channel: ChannelChoice): { command: string; fields: string[]; primary: string; title: string } {
   switch (channel) {
     case "wechat":
       return {
@@ -701,33 +701,15 @@ export function channelRunnerTone(status: string): "danger" | "muted" | "ok" | "
   }
 }
 
-export function formatRunnerActivity(channel: WorkbenchChannel): string {
-  if (channel.runner.reason === "qr_login_pending") {
-    return "polling start pending";
-  }
-  if (channel.runner.reason === "needs_qr_login") {
-    return "QR reconnect required";
-  }
-  if (channel.runner.lastOutboundAtMs) {
-    return `outbound ${formatRunnerTimestamp(channel.runner.lastOutboundAtMs)}`;
-  }
-  if (channel.runner.lastInboundAtMs) {
-    return `inbound ${formatRunnerTimestamp(channel.runner.lastInboundAtMs)}`;
-  }
-  if (channel.runner.lastPollAtMs) {
-    return `poll ${formatRunnerTimestamp(channel.runner.lastPollAtMs)}`;
-  }
-  if (channel.runner.reason) {
-    return channel.runner.reason;
-  }
-  return channel.runner.lastError ?? "no activity yet";
-}
-
 export function formatRunnerTimestamp(value: number | null | undefined): string {
   if (!value) {
     return "never";
   }
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 export function channelAllowlistSummary(channel: WorkbenchChannel): string {

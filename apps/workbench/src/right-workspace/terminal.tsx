@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Terminal as XTermTerminal, ITheme } from "@xterm/xterm";
 import { psychevoDesignSystem } from "@psychevo/assets";
 import type { GatewayClient } from "@psychevo/client";
 import type { GatewayRequestScope } from "@psychevo/protocol";
-import type { Appearance, TerminalNotificationEvent } from "../types";
+import type { Appearance } from "../types";
+import type { TerminalEventApplication } from "../terminal-event-application";
 
 const EMBEDDED_TERMINAL_THEMES = psychevoDesignSystem.platforms.embeddedTerminal.appearances;
 
@@ -11,15 +12,20 @@ export function TerminalPanel({
   appearance,
   client,
   scope,
-  terminalEvents,
+  terminalEvents: terminalEventApplication,
   cwd
 }: {
   appearance: Appearance;
   client: GatewayClient | null;
   scope: GatewayRequestScope | null;
-  terminalEvents: TerminalNotificationEvent[];
+  terminalEvents: TerminalEventApplication;
   cwd: string;
 }) {
+  const terminalEvents = useSyncExternalStore(
+    terminalEventApplication.subscribe,
+    terminalEventApplication.getSnapshot,
+    terminalEventApplication.getSnapshot
+  );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermTerminal | null>(null);
   const fitRef = useRef<{ fit(): void } | null>(null);

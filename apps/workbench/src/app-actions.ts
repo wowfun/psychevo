@@ -67,6 +67,7 @@ import {
 import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
 import type { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import type { WorkspaceApplication } from "./workspace-application";
+import type { RefreshSnapshot, RefreshWorkspaceSurface } from "./runtime-types";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
@@ -76,22 +77,6 @@ type StartNewThreadOptions = {
   targetId?: string;
   workspaceId?: string;
 };
-
-type RefreshSnapshot = (
-  nextClient?: GatewayClient | null,
-  threadId?: string,
-  scope?: GatewayRequestScope,
-  readOnly?: boolean,
-  expectedEpoch?: number | null,
-  allowDetachedAdoption?: boolean
-) => Promise<void>;
-
-type RefreshWorkspaceSurface = (
-  nextClient?: GatewayClient | null,
-  scope?: GatewayRequestScope,
-  threadId?: string | null,
-  expectedEpoch?: number | null
-) => Promise<void>;
 
 type AppActionsParams = {
   activeScope: GatewayRequestScope | null;

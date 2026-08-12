@@ -245,10 +245,6 @@ export function desktopFallbackCwd(): Promise<string> {
   return invoke<string>("desktop_fallback_cwd");
 }
 
-export function desktopPlatformCapabilities(): Promise<DesktopPlatformCapabilities> {
-  return invoke<DesktopPlatformCapabilities>("desktop_platform_capabilities");
-}
-
 export function floatingInitialActivation(): Promise<FloatingActivation> {
   return invoke<FloatingActivation>("floating_initial_activation");
 }

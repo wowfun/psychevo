@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-export type JourneyAdapter = "acp" | "native";
+type JourneyAdapter = "acp" | "native";
 export type JourneyPass = "profile" | "visual";
 export type JourneyScenario = "pending-draft-send" | "ready-send";
-export type JourneySurface = "desktop" | "workbench";
+type JourneySurface = "desktop" | "workbench";
 
 export type JourneyCheckpointId =
   | "gui_ready"

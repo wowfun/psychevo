@@ -1,0 +1,57 @@
+diff --git a/dist/index.js b/dist/index.js
+index 1e00e14d1d7ea1b7285eeb070689c00504c4b1a2..6c1bb509d05a77ef3bae5a71926d668ab85d07e6 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -55,7 +55,6 @@ const rendererModules = [
+         exportName: 'presentationRenderer',
+         formats: [
+             'presentation',
+-            'ppt',
+             'pptx',
+             'pptm',
+             'potx',
+@@ -63,7 +62,7 @@ const rendererModules = [
+             'ppsx',
+             'ppsm'
+         ],
+-        rendererIds: ['office-presentation-binary', 'office-presentation'],
++        rendererIds: ['office-presentation'],
+         chunkName: 'file-viewer-presentation'
+     },
+     {
+@@ -1230,8 +1229,6 @@ async function copyKnownRendererAssets(targetRoot, rendererIds) {
+         '@file-viewer/renderer-pdf'
+     ]);
+     await push('pdf', 'pdf-cjk-font-fallback', join(targetRoot, 'vendor/pdf/fonts'), () => copyPdfCjkFontAssets(pdfCjkFontRoot, join(targetRoot, 'vendor/pdf/fonts')));
+-    const pptxRoot = resolvePackageRoot('@file-viewer/pptx', ['@file-viewer/renderer-presentation']);
+-    await push('office-presentation', 'pptx-worker', join(targetRoot, 'vendor/pptx/pptx.worker.js'), () => copyFileIfPresent(pptxRoot ? join(pptxRoot, 'dist/worker/pptx.worker.js') : null, join(targetRoot, 'vendor/pptx/pptx.worker.js')));
+     const pptRoot = resolvePackageRoot('@file-viewer/ppt', ['@file-viewer/renderer-presentation']);
+     const pptVersion = readPackageVersion(pptRoot);
+     const pptSource = pptRoot
+@@ -1313,8 +1310,10 @@ async function copyKnownRendererAssets(targetRoot, rendererIds) {
+         schemaVersion: 1,
+         generatedBy: '@file-viewer/vite-plugin',
+         rendererIds,
+-        copiedAt: new Date().toISOString(),
+-        assets: results
++        assets: results.map((result) => ({
++            ...result,
++            to: relative(targetRoot, result.to).replace(/\\/g, '/')
++        }))
+     }, null, 2)}\n`);
+     return results;
+ }
+@@ -1453,9 +1452,11 @@ async function copyBundledFullRendererAssets(targetRoot, rendererIds, installedF
+     await writeFile(join(targetRoot, 'flyfish-viewer-assets.json'), `${JSON.stringify({
+         ...manifest,
+         generatedBy: '@file-viewer/vite-plugin',
+-        copiedAt: new Date().toISOString(),
+         rendererIds,
+-        assets: results
++        assets: results.map((result) => ({
++            ...result,
++            to: relative(targetRoot, result.to).replace(/\\/g, '/')
++        }))
+     }, null, 2)}\n`);
+     return results;
+ }

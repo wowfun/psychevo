@@ -42,28 +42,13 @@ import type {
 } from "./types";
 import type { PendingDetachedShell } from "./viewGuard";
 import type { WorkspaceApplication } from "./workspace-application";
+import type { RefreshSnapshot, RefreshWorkspaceSurface } from "./runtime-types";
 import {
   enabledThreadAction,
   runThreadInterrupt,
   snapshotThreadApplicationTarget,
   threadActionDescriptor
 } from "./thread-application";
-
-type RefreshSnapshot = (
-  nextClient?: GatewayClient | null,
-  threadId?: string,
-  scope?: GatewayRequestScope,
-  readOnly?: boolean,
-  expectedEpoch?: number | null,
-  allowDetachedAdoption?: boolean
-) => Promise<void>;
-
-type RefreshWorkspaceSurface = (
-  nextClient?: GatewayClient | null,
-  scope?: GatewayRequestScope,
-  threadId?: string | null,
-  expectedEpoch?: number | null
-) => Promise<void>;
 
 type CommandActionsParams = {
   activeScope: GatewayRequestScope | null;

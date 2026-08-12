@@ -249,10 +249,10 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
       workspace
     });
     tui = await TuiPtyDriver.start(tuiRuntime);
-    const tuiInputReady = await waitForTuiTrace(artifacts.tuiTrace, (record) => (
+    const tuiInputReady = await waitForTuiTrace(tui, artifacts.tuiTrace, (record) => (
       record.event === "input_ready"
     ));
-    const tuiProcessStarted = await waitForTuiTrace(artifacts.tuiTrace, (record) => (
+    const tuiProcessStarted = await waitForTuiTrace(tui, artifacts.tuiTrace, (record) => (
       record.event === "process_started"
     ));
     const tuiProfile = await runTuiProfile({
@@ -457,20 +457,20 @@ async function runTuiSample(options: {
 }): Promise<SurfaceSample> {
   assertMainRequestCount(options.control, options.mainRequestSequence - 1);
   const written = await options.driver.type(FIXED_INPUT);
-  const send = await waitForTuiTrace(options.tracePath, (record) => (
+  const send = await waitForTuiTrace(options.driver, options.tracePath, (record) => (
     record.event === "send_committed" && record.sampleIndex === options.index
   ));
-  const feedback = await waitForTuiTrace(options.tracePath, (record) => (
+  const feedback = await waitForTuiTrace(options.driver, options.tracePath, (record) => (
     record.event === "send_feedback_surface_committed" && record.sampleIndex === options.index
   ));
   const selector = mainTurn(options.mainRequestSequence);
   const request = await options.control.waitFor("request_received", selector, 60_000);
   const firstEmit = await options.control.waitFor("first_output_emitted", selector, 60_000);
-  const firstVisible = await waitForTuiTrace(options.tracePath, (record) => (
+  const firstVisible = await waitForTuiTrace(options.driver, options.tracePath, (record) => (
     record.event === "first_output_surface_committed" && record.sampleIndex === options.index
   ));
   const completion = await options.control.waitFor("completion_emitted", selector, 60_000);
-  const settled = await waitForTuiTrace(options.tracePath, (record) => (
+  const settled = await waitForTuiTrace(options.driver, options.tracePath, (record) => (
     record.event === "turn_settled_surface_committed" && record.sampleIndex === options.index
   ));
   await assertMainRequestCountSettled(options.control, options.mainRequestSequence);
@@ -1030,16 +1030,19 @@ function readTuiTrace(tracePath: string): TuiTraceRecord[] {
 }
 
 async function waitForTuiTrace(
+  driver: TuiPtyDriver,
   tracePath: string,
   predicate: (record: TuiTraceRecord) => boolean,
   timeoutMs = 60_000
 ): Promise<{ observedRunnerMs: number; record: TuiTraceRecord }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    driver.throwIfExited();
     const record = readTuiTrace(tracePath).find(predicate);
     if (record) return { observedRunnerMs: monotonicNow(), record };
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
+  driver.throwIfExited();
   throw new Error(`timed out waiting for content-free TUI profile event in ${tracePath}`);
 }
 
@@ -1488,6 +1491,7 @@ interface TuiRuntimeOptions {
 
 class TuiPtyDriver {
   private buffer = "";
+  private exitError: Error | null = null;
   private nextCommandId = 1;
   private readonly pending = new Map<number, {
     reject(error: Error): void;
@@ -1508,6 +1512,7 @@ class TuiPtyDriver {
     });
     child.once("exit", (code, signal) => {
       const error = new Error(`TUI PTY driver exited code=${code} signal=${signal}: ${this.stderr}`);
+      this.exitError = error;
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
     });
@@ -1541,6 +1546,10 @@ class TuiPtyDriver {
     sentRunnerMonotonicMs: number;
   }> {
     return this.command("type", { text });
+  }
+
+  throwIfExited(): void {
+    if (this.exitError) throw this.exitError;
   }
 
   async stop(): Promise<void> {

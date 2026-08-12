@@ -35,7 +35,7 @@ export type ToolDetailSection =
       tone?: "default" | "error" | "muted";
     };
 
-export type ToolDetailRow = {
+type ToolDetailRow = {
   label: string;
   value: string;
 };
@@ -50,7 +50,7 @@ export type EvidenceDisplay = {
   writePreviewPhase: WriteArgumentPreviewPhase | null;
 };
 
-export type WriteArgumentPreviewPhase = "generating" | "writing" | "failed" | "cancelled";
+type WriteArgumentPreviewPhase = "generating" | "writing" | "failed" | "cancelled";
 
 type WriteArgumentPreview = {
   bytesSeen: number;

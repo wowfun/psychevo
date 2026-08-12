@@ -1,9 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { Readable } from "node:stream";
+
+type PevoWebProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 export const repoRoot = path.resolve(import.meta.dirname, "../../..");
-export const staticDir = path.join(repoRoot, "apps/workbench/dist");
+const staticDir = path.join(repoRoot, "apps/workbench/dist");
 const testRoot = path.join(repoRoot, ".local/playwright");
 
 export interface PevoWebServer {
@@ -172,13 +175,13 @@ function spawnPevoWeb(options: {
   configPath: string;
   dbPath: string;
   home: string;
-  channelRuntime?: boolean;
+  channelRuntime?: boolean | undefined;
   live: boolean;
-  pevoBin?: string;
-  processEnv?: NodeJS.ProcessEnv;
+  pevoBin?: string | undefined;
+  processEnv?: NodeJS.ProcessEnv | undefined;
   staticDir: string;
   cwd: string;
-}): ChildProcessWithoutNullStreams {
+}): PevoWebProcess {
   const command = options.pevoBin ?? "cargo";
   const args = options.pevoBin
     ? [
@@ -220,7 +223,7 @@ function spawnPevoWeb(options: {
   });
 }
 
-function waitForServerUrl(child: ChildProcessWithoutNullStreams): Promise<string> {
+function waitForServerUrl(child: PevoWebProcess): Promise<string> {
   return new Promise((resolve, reject) => {
     const logs: string[] = [];
     const timer = setTimeout(() => {

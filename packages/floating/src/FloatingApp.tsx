@@ -50,12 +50,12 @@ export interface FloatingRuntime {
   turnControls?(context: FloatingTurnControlsContext): Promise<FloatingTurnPreparation | null>;
 }
 
-export interface FloatingGatewayConnection {
+interface FloatingGatewayConnection {
   client: GatewayClient;
   dispose(): Promise<void> | void;
 }
 
-export interface FloatingTurnControlsContext {
+interface FloatingTurnControlsContext {
   client: GatewayClient;
   scope: GatewayRequestScope;
   threadId: string | null;

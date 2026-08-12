@@ -318,7 +318,7 @@ function ModelReasoningRow({
   );
 }
 
-export function modelOptionsForControls(
+function modelOptionsForControls(
   controls: SettingsReadResult["controls"],
   model: string | null
 ): ModelOptionView[] {
@@ -532,7 +532,7 @@ function normalizeReasoningEfforts(values: string[]): string[] {
   return normalized.includes("none") ? normalized : ["none", ...normalized];
 }
 
-export function reasoningLabel(value: string): string {
+function reasoningLabel(value: string): string {
   return REASONING_LABELS[value] ?? value;
 }
 

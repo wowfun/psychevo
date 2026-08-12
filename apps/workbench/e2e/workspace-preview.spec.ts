@@ -33,7 +33,10 @@ test("renders generated workspace preview fixtures without external document req
     }
   });
   page.on("response", (response) => {
-    if (response.url().includes("/file-viewer/")) {
+    if (
+      response.url().includes("/file-viewer/")
+      || response.url().includes("/assets/pptx.worker-")
+    ) {
       fileViewerResponses.push({ status: response.status(), url: response.url() });
     }
     if (response.url().includes("/excalidraw/fonts/")) {
@@ -153,7 +156,7 @@ test("renders generated workspace preview fixtures without external document req
     for (const [filename, sentinel, workerPath] of [
       ["fixture.docx", "DOCX fixture visible", "/file-viewer/vendor/docx/docx.worker.js"],
       ["fixture.xlsx", "XLSX fixture visible", "/file-viewer/vendor/xlsx/sheet.worker.js"],
-      ["fixture.pptx", "PPTX fixture visible", "/file-viewer/vendor/pptx/pptx.worker.js"],
+      ["fixture.pptx", "PPTX fixture visible", "/assets/pptx.worker-"],
       ["fixture.rtf", "RTF fixture visible", null],
       ["fixture.odt", "ODT fixture visible", null],
       ["fixture.ods", "ODS fixture visible", null],

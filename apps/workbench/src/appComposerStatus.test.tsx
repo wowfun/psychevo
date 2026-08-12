@@ -129,7 +129,7 @@ describe("Workbench session status observability", () => {
     expect(within(home).queryByText("8.0k/200.0k (4.0%)")).toBeNull();
   });
 
-  it("ignores late completed-turn observability refreshes for a previous session", async () => {
+  it("does not refresh observability for a completed previous session", async () => {
     gatewayMock.observabilityRead = (params: unknown) => {
       const threadId = (params as { threadId?: string | null } | undefined)?.threadId ?? null;
       return observabilityResult(threadId, threadId === "old-thread");
@@ -145,6 +145,9 @@ describe("Workbench session status observability", () => {
       expect(within(home).getByText("draft")).toBeTruthy();
       expect(within(home).getByText("No active session")).toBeTruthy();
     });
+    const observabilityRequestCount = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "observability/read"
+    )).length;
 
     await act(async () => {
       for (const subscriber of gatewayMock.subscribers) {
@@ -170,12 +173,9 @@ describe("Workbench session status observability", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => {
-      expect(gatewayMock.requestLog).toContainEqual({
-        method: "observability/read",
-        params: expect.objectContaining({ threadId: "old-thread" })
-      });
-    });
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "observability/read"
+    ))).toHaveLength(observabilityRequestCount);
     expect(within(home).getByText("No active session")).toBeTruthy();
     expect(within(home).queryByText("reported by ACP peer")).toBeNull();
     expect(within(home).queryByText("8.0k/200.0k (4.0%)")).toBeNull();

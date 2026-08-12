@@ -1648,8 +1648,3 @@ function workspaceFileOpenExternal(
 ) {
   return client.request("workspace/file/openExternal", { ...target, action });
 }
-
-export const workspaceFilePreviewPolicy = {
-  wholeFileLimitBytes: WHOLE_FILE_LIMIT_BYTES,
-  excalidrawLimitBytes: EXCALIDRAW_LIMIT_BYTES
-} as const;

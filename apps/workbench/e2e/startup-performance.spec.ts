@@ -5,7 +5,7 @@ import { startPevoWeb } from "./harness";
 import { openPanel } from "./workbench.support";
 
 const WORKBENCH_BUDGET = loadWorkbenchBudget();
-const INITIAL_JAVASCRIPT_BUDGET_BYTES = WORKBENCH_BUDGET.maximum.initialJavascriptBytes;
+const INITIAL_JAVASCRIPT_BUDGET_BYTES = WORKBENCH_BUDGET.regressionMaximum.initialJavascriptBytes;
 const DEFERRED_CHUNK_PATTERN = /(mermaid|terminal|settings-panels|capabilities-page|automations-panel|search-|right-workspace)/i;
 
 test("keeps off-screen features outside the production startup graph", async ({ page }, testInfo) => {
@@ -59,35 +59,35 @@ test("keeps off-screen features outside the production startup graph", async ({ 
 
 function loadWorkbenchBudget(): {
   baseline: { initialJavascriptBytes: number | null };
-  maximum: { initialJavascriptBytes: number };
+  regressionMaximum: { initialJavascriptBytes: number };
 } {
   const source = readFileSync(path.resolve(process.cwd(), "non-functional-budgets.json"), "utf8");
   const parsed = JSON.parse(source) as {
     schemaVersion?: unknown;
     workbench?: {
       baseline?: { initialJavascriptBytes?: unknown };
-      maximum?: { initialJavascriptBytes?: unknown };
+      regressionMaximum?: { initialJavascriptBytes?: unknown };
     };
   };
   const baseline = parsed.workbench?.baseline?.initialJavascriptBytes;
-  const maximum = parsed.workbench?.maximum?.initialJavascriptBytes;
+  const regressionMaximum = parsed.workbench?.regressionMaximum?.initialJavascriptBytes;
   if (
-    parsed.schemaVersion !== 1
+    parsed.schemaVersion !== 2
     || (baseline !== null && (
       typeof baseline !== "number"
       || !Number.isSafeInteger(baseline)
       || baseline < 0
     ))
-    || typeof maximum !== "number"
-    || !Number.isSafeInteger(maximum)
-    || maximum < 0
-    || (typeof baseline === "number" && maximum < baseline)
+    || typeof regressionMaximum !== "number"
+    || !Number.isSafeInteger(regressionMaximum)
+    || regressionMaximum < 0
+    || (typeof baseline === "number" && regressionMaximum < baseline)
   ) {
     throw new Error("non-functional-budgets.json has an invalid Workbench budget");
   }
   return {
     baseline: { initialJavascriptBytes: baseline },
-    maximum: { initialJavascriptBytes: maximum }
+    regressionMaximum: { initialJavascriptBytes: regressionMaximum }
   };
 }
 

@@ -1,4 +1,8 @@
-import type { GatewayEvent } from "@psychevo/protocol";
+import {
+  applyLiveTranscriptEvent,
+  reconcileThreadSnapshot
+} from "@psychevo/client";
+import type { GatewayEvent, ThreadSnapshot } from "@psychevo/protocol";
 
 export type GatewayEventFeedItem = {
   event: GatewayEvent;
@@ -15,10 +19,8 @@ type JournalRecord = GatewayEventFeedItem & {
   threadId: string | null;
 };
 
-type JournalSubscription = {
-  eventTypes: ReadonlySet<GatewayEvent["type"]> | null;
-  listener(item: GatewayEventFeedItem): void;
-  threadId: string | null;
+type ActionLifecycleRecord = GatewayEventFeedItem & {
+  threadId: string;
 };
 
 export type GatewayThreadEventFeed = {
@@ -26,25 +28,64 @@ export type GatewayThreadEventFeed = {
   latestSeq: number;
 };
 
+export type GatewayEventFamily = "all" | "teamLifecycle" | "turnLifecycle";
+
 const MAX_EVENTS_PER_THREAD = 500;
 const MAX_EVENTS_TOTAL = 2_000;
+const MAX_ACTION_LIFECYCLES = 2_000;
 
 export const EMPTY_GATEWAY_EVENT_FEED: GatewayThreadEventFeed = {
   journal: null,
   latestSeq: 0
 };
 
+export class GatewayEventFeedApplication {
+  private readonly journal = new GatewayEventJournal();
+  private readonly subscriptions = new Set<{
+    family: GatewayEventFamily;
+    listener: () => void;
+  }>();
+  private snapshot: GatewayThreadEventFeed = {
+    journal: this.journal,
+    latestSeq: 0
+  };
+
+  getSnapshot = (): GatewayThreadEventFeed => this.snapshot;
+
+  subscribe(
+    listener: () => void,
+    family: GatewayEventFamily = "all"
+  ): () => void {
+    const subscription = { family, listener };
+    this.subscriptions.add(subscription);
+    return () => this.subscriptions.delete(subscription);
+  }
+
+  append(event: GatewayEvent): void {
+    this.snapshot = {
+      journal: this.journal,
+      latestSeq: this.journal.append(event)
+    };
+    for (const subscription of this.subscriptions) {
+      if (eventBelongsToFamily(event, subscription.family)) {
+        subscription.listener();
+      }
+    }
+  }
+}
+
 export class GatewayEventJournal {
+  private readonly actionLifecycles = new Map<string, ActionLifecycleRecord>();
   private readonly actionThreads = new Map<string, GatewayActionThread>();
   private readonly global = new Ring<JournalRecord>(MAX_EVENTS_TOTAL);
   private readonly perThread = new Map<string, Ring<GatewayEventFeedItem>>();
-  private readonly subscriptions = new Set<JournalSubscription>();
   private readonly teamLifecycleSequences = new Map<string, number>();
   private latestSeq = 0;
 
   append(event: GatewayEvent): number {
     const seq = ++this.latestSeq;
     const threadId = gatewayEventThreadId(event) ?? this.rememberedActionThreadId(event);
+    this.updateActionLifecycle(event, threadId, seq);
     this.updateActionThreads(event, threadId, seq);
     const item = { event, seq };
     const evicted = this.global.push({ ...item, threadId });
@@ -67,14 +108,6 @@ export class GatewayEventJournal {
         this.teamLifecycleSequences.set(threadId, seq);
       }
     }
-    for (const subscription of this.subscriptions) {
-      if (
-        (!subscription.threadId || subscription.threadId === threadId)
-        && (!subscription.eventTypes || subscription.eventTypes.has(event.type))
-      ) {
-        subscription.listener(item);
-      }
-    }
     return seq;
   }
 
@@ -86,24 +119,22 @@ export class GatewayEventJournal {
     return this.perThread.get(threadId)?.valuesThrough(latestSeq) ?? [];
   }
 
-  teamLifecycleRevision(threadId: string, latestSeq: number): number {
-    return Math.min(this.teamLifecycleSequences.get(threadId) ?? 0, latestSeq);
+  actionLifecyclesForThread(
+    threadId: string,
+    afterSeq: number,
+    latestSeq: number
+  ): GatewayEventFeedItem[] {
+    return [...this.actionLifecycles.values()]
+      .filter((item) => (
+        item.threadId === threadId
+        && item.seq > afterSeq
+        && item.seq <= latestSeq
+      ))
+      .sort((left, right) => left.seq - right.seq);
   }
 
-  subscribe(
-    listener: (item: GatewayEventFeedItem) => void,
-    options: {
-      eventTypes?: Iterable<GatewayEvent["type"]>;
-      threadId?: string | null;
-    } = {}
-  ): () => void {
-    const subscription: JournalSubscription = {
-      eventTypes: options.eventTypes ? new Set(options.eventTypes) : null,
-      listener,
-      threadId: options.threadId ?? null
-    };
-    this.subscriptions.add(subscription);
-    return () => this.subscriptions.delete(subscription);
+  teamLifecycleRevision(threadId: string, latestSeq: number): number {
+    return Math.min(this.teamLifecycleSequences.get(threadId) ?? 0, latestSeq);
   }
 
   private rememberedActionThreadId(event: GatewayEvent): string | null {
@@ -130,10 +161,9 @@ export class GatewayEventJournal {
     }
     if (event.type === "turnCompleted") {
       for (const [actionId, action] of this.actionThreads) {
-        const sameThread = threadId === null || action.threadId === threadId;
-        const sameTurn = action.turnId === event.turnId
-          || (threadId !== null && action.turnId === null);
-        if (sameThread && sameTurn) this.actionThreads.delete(actionId);
+        if (actionSettledByTurn(action, event, threadId)) {
+          this.actionThreads.delete(actionId);
+        }
       }
       return;
     }
@@ -152,6 +182,53 @@ export class GatewayEventJournal {
       this.actionThreads.delete(oldest);
     }
   }
+
+  private updateActionLifecycle(
+    event: GatewayEvent,
+    threadId: string | null,
+    seq: number
+  ): void {
+    if (event.type === "turnCompleted") {
+      for (const [actionId, action] of this.actionThreads) {
+        if (!actionSettledByTurn(action, event, threadId)) continue;
+        this.rememberActionLifecycle(actionId, {
+          event,
+          seq,
+          threadId: action.threadId
+        });
+      }
+      return;
+    }
+    if (!threadId) return;
+    const actionId = event.type === "actionRequested" || event.type === "actionUpdated"
+      ? event.action.actionId
+      : event.type === "actionResolved" || event.type === "actionCancelled"
+        ? event.actionId
+        : null;
+    if (!actionId) return;
+    this.rememberActionLifecycle(actionId, { event, seq, threadId });
+  }
+
+  private rememberActionLifecycle(actionId: string, record: ActionLifecycleRecord): void {
+    this.actionLifecycles.delete(actionId);
+    this.actionLifecycles.set(actionId, record);
+    while (this.actionLifecycles.size > MAX_ACTION_LIFECYCLES) {
+      const oldest = this.actionLifecycles.keys().next().value;
+      if (typeof oldest !== "string") break;
+      this.actionLifecycles.delete(oldest);
+    }
+  }
+}
+
+function actionSettledByTurn(
+  action: GatewayActionThread,
+  event: Extract<GatewayEvent, { type: "turnCompleted" }>,
+  threadId: string | null
+): boolean {
+  const sameThread = threadId === null || action.threadId === threadId;
+  const sameTurn = action.turnId === event.turnId
+    || (threadId !== null && action.turnId === null);
+  return sameThread && sameTurn;
 }
 
 export function appendGatewayEventFeed(
@@ -172,6 +249,35 @@ export function gatewayEventsForThread(
   return threadId && feed.journal
     ? feed.journal.eventsForThread(threadId, feed.latestSeq)
     : [];
+}
+
+export function reconcileThreadSnapshotAfterGatewayBarrier(
+  current: ThreadSnapshot,
+  incoming: ThreadSnapshot,
+  feed: GatewayThreadEventFeed,
+  threadId: string,
+  barrierSeq: number
+): ThreadSnapshot {
+  let next = reconcileThreadSnapshot(current, incoming);
+  const retainedTurnCompletions = gatewayEventsForThread(feed, threadId)
+    .filter(({ event, seq }) => seq > barrierSeq && event.type === "turnCompleted");
+  const retainedActionLifecycles = feed.journal?.actionLifecyclesForThread(
+    threadId,
+    barrierSeq,
+    feed.latestSeq
+  ) ?? [];
+  const lifecycle = [...retainedTurnCompletions, ...retainedActionLifecycles]
+    .sort((left, right) => left.seq - right.seq);
+  for (const { event } of lifecycle) {
+    if (!changesPendingActions(event)) {
+      continue;
+    }
+    const reduced = applyLiveTranscriptEvent(next, event);
+    if (reduced.pendingActions !== next.pendingActions) {
+      next = { ...next, pendingActions: reduced.pendingActions };
+    }
+  }
+  return next;
 }
 
 export function teamLifecycleRevision(
@@ -205,7 +311,7 @@ export function confirmedSteerTurnId(
   return lifecycle.type === "turnStarted" ? lifecycle.turnId : null;
 }
 
-export function gatewayEventThreadId(event: GatewayEvent): string | null {
+function gatewayEventThreadId(event: GatewayEvent): string | null {
   switch (event.type) {
     case "turnStarted":
     case "turnQueued":
@@ -245,6 +351,22 @@ function isTeamLifecycleEvent(event: GatewayEvent): boolean {
     default:
       return false;
   }
+}
+
+function changesPendingActions(event: GatewayEvent): boolean {
+  return event.type === "actionRequested"
+    || event.type === "actionUpdated"
+    || event.type === "actionResolved"
+    || event.type === "actionCancelled"
+    || event.type === "turnCompleted";
+}
+
+function eventBelongsToFamily(event: GatewayEvent, family: GatewayEventFamily): boolean {
+  if (family === "all") return true;
+  if (family === "teamLifecycle") return isTeamLifecycleEvent(event);
+  return event.type === "turnStarted"
+    || event.type === "turnQueued"
+    || event.type === "turnCompleted";
 }
 
 class Ring<T extends { seq: number }> {

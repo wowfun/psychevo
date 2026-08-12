@@ -89,9 +89,6 @@ export default function VendorFilePreview({
     spreadsheet: {
       worker: "auto" as const,
       workerUrl: "vendor/xlsx/sheet.worker.js"
-    },
-    presentation: {
-      workerUrl: "vendor/pptx/pptx.worker.js"
     }
   }), [renderers]);
   const handleViewerStateChange = useCallback((state: ViewerState) => {

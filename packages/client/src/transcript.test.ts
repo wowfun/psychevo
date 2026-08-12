@@ -90,6 +90,45 @@ describe("applyLiveTranscriptEvent activity ordering", () => {
   });
 });
 
+describe("applyLiveTranscriptEvent normal terminal settlement", () => {
+  it("settles a yielded committed process without discarding its resumable handle", () => {
+    const yielded = entry({
+      id: "message:4",
+      threadId: "thread-1",
+      turnId: null,
+      messageSeq: 4,
+      source: "runtime.message",
+      status: "running",
+      blocks: [block({
+        id: "message:4:tool:0",
+        kind: "shell",
+        source: "runtime.message",
+        status: "running",
+        metadata: {
+          projection: "tool",
+          tool_name: "exec_command",
+          tool_call_id: "call_exec",
+          result: { session_id: 7, exit_code: null, output: "" }
+        }
+      })]
+    });
+
+    const next = applyLiveTranscriptEvent(threadSnapshot(), {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: [yielded]
+    });
+
+    expect(next.entries[0]?.status).toBe("completed");
+    expect(next.entries[0]?.blocks[0]?.status).toBe("completed");
+    expect(next.entries[0]?.blocks[0]?.metadata).toMatchObject({
+      result: { session_id: 7, exit_code: null, output: "" }
+    });
+  });
+});
+
 describe("applyLiveTranscriptEvent detached drafts", () => {
   it("ignores a stale completed turn for an empty detached draft", () => {
     const current = detachedSnapshot();

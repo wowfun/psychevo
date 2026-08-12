@@ -332,5 +332,3 @@ export function absoluteWorkspacePath(root: string, path: string): string {
   }
   return `${trimmedRoot}/${normalizedWorkspacePath(trimmedPath)}`;
 }
-
-export { fileBasename } from "../right-workspace-model";

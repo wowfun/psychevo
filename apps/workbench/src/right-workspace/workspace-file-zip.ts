@@ -46,5 +46,3 @@ function sanitizeZipPath(path: string): string {
   }
   return segments.join("/");
 }
-
-export const workspaceZipPolicy = { entryLimit: ZIP_ENTRY_LIMIT } as const;

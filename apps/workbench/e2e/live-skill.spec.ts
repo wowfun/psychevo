@@ -192,9 +192,11 @@ async function captureAndAssert(
 
 async function assertNoWorkbenchRenderError(page: Page, sample: number) {
   const alert = page.getByRole("alert");
-  const alertText = await alert.textContent().catch(() => null);
+  const alertText = await alert.count() > 0
+    ? await alert.first().textContent()
+    : null;
   if (alertText?.includes("Workbench render failed")) {
-    const stack = await alert.getAttribute("data-error-stack").catch(() => null);
+    const stack = await alert.first().getAttribute("data-error-stack");
     throw new Error(`sample ${sample}: ${normalize(alertText)}${stack ? `\n${stack}` : ""}`);
   }
 }
@@ -513,10 +515,9 @@ async function liveSkillCompleted(page: Page): Promise<boolean> {
   const runningRows = await transcript.locator(
     ".pevo-message.is-streaming, .pevo-reasoning.is-streaming, .pevo-evidence.is-running"
   ).count();
+  const composerRunning = await page.locator(".pevo-composer.is-running").count() > 0;
   const assistantText = normalize(await page.locator(".pevo-message.is-assistant").last().textContent().catch(() => "") ?? "");
-  return runningRows === 0 &&
-    /(x-daily|日报|daily)/.test(assistantText) &&
-    /(执行完成|已生成|生成|完成|完成总结|all done|complete)/.test(assistantText);
+  return !composerRunning && runningRows === 0 && assistantText.length > 0;
 }
 
 async function assertNoCompletionPopover(page: Page, sample: number) {

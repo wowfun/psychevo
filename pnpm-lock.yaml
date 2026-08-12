@@ -6,11 +6,15 @@ settings:
 
 overrides:
   '@wdio/native-utils': 2.5.0
-  dompurify@3.4.11: 3.4.12
+  dompurify: 3.4.13
   fast-uri@3.1.2: 3.1.5
   lodash-es@4.17.21: 4.18.1
-  nanoid@3.3.3: 3.3.12
-  nanoid@4.0.2: 5.0.9
+  nanoid@3.3.3: 3.3.18
+  nanoid@4.0.2: 5.1.16
+
+patchedDependencies:
+  '@file-viewer/renderer-presentation@2.2.2': 319c7a06f414caad58c4f1701685418109eabf346c62d77cb8668300d262818d
+  '@file-viewer/vite-plugin@2.2.2': 541011d74a0cafd3442bbb6718c9f8d840022569b06ccc6cec9c66692793f34e
 
 importers:
 
@@ -97,7 +101,7 @@ importers:
         version: 2.2.2
       '@file-viewer/renderer-presentation':
         specifier: 2.2.2
-        version: 2.2.2
+        version: 2.2.2(patch_hash=319c7a06f414caad58c4f1701685418109eabf346c62d77cb8668300d262818d)
       '@file-viewer/renderer-spreadsheet':
         specifier: 2.2.2
         version: 2.2.2
@@ -106,7 +110,7 @@ importers:
         version: 2.2.2
       '@file-viewer/vite-plugin':
         specifier: 2.2.2
-        version: 2.2.2(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+        version: 2.2.2(patch_hash=541011d74a0cafd3442bbb6718c9f8d840022569b06ccc6cec9c66692793f34e)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
       '@tauri-apps/cli':
         specifier: 2.11.4
         version: 2.11.4
@@ -166,7 +170,7 @@ importers:
         version: 2.2.2
       '@file-viewer/renderer-presentation':
         specifier: 2.2.2
-        version: 2.2.2
+        version: 2.2.2(patch_hash=319c7a06f414caad58c4f1701685418109eabf346c62d77cb8668300d262818d)
       '@file-viewer/renderer-spreadsheet':
         specifier: 2.2.2
         version: 2.2.2
@@ -212,7 +216,7 @@ importers:
     devDependencies:
       '@file-viewer/vite-plugin':
         specifier: 2.2.2
-        version: 2.2.2(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+        version: 2.2.2(patch_hash=541011d74a0cafd3442bbb6718c9f8d840022569b06ccc6cec9c66692793f34e)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.0.2(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
@@ -244,8 +248,8 @@ importers:
         specifier: ^1.21.0
         version: 1.21.0(react@19.2.7)
       mermaid:
-        specifier: 11.15.0
-        version: 11.15.0
+        specifier: 11.16.1
+        version: 11.16.1
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -2770,8 +2774,8 @@ packages:
     resolution: {integrity: sha512-cgwlv/1iFQiFnU96XXgROh8xTeetsnJiDsTc7TYCLFd9+/WNkIqPTxiM/8pSd8VIrhXGTf1Ny1q1hquVqDJB5w==}
     engines: {node: '>= 4'}
 
-  dompurify@3.4.12:
-    resolution: {integrity: sha512-zQvGet8Z2sWbQhCmfFz/T5QWH2oBmjnqK3qvOjaqaNLrLEF912WamU+ohnTp0TCep/MFVHpdJuCZEdFOdTnEFg==}
+  dompurify@3.4.13:
+    resolution: {integrity: sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ==}
 
   domutils@3.2.2:
     resolution: {integrity: sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==}
@@ -3586,8 +3590,8 @@ packages:
   mdn-data@2.27.1:
     resolution: {integrity: sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ==}
 
-  mermaid@11.15.0:
-    resolution: {integrity: sha512-pTMbcf3rWdtLiYGpmoTjHEpeY8seiy6sR+9nD7LOs8KfUbHE4lOUAprTRqRAcWSQ6MQpdX+YEsxShtGsINtPtw==}
+  mermaid@11.16.1:
+    resolution: {integrity: sha512-TQsq6u22fAn3rek5VOubrhKPo1g5hwC3FXUN9hiyupTckcYiGuuKGkNQrKYwGJkXUxZdojwRG46gsSCFZMDp4g==}
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -3715,8 +3719,13 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@5.0.9:
-    resolution: {integrity: sha512-Aooyr6MXU6HpvvWXKoVoXwKMs/KyVakWwg7xQfv5/S/RIgJMy0Ifa45H9qqYy7pTCszrHzP21Uk4PZq2HpEM8Q==}
+  nanoid@3.3.18:
+    resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
+    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
+  nanoid@5.1.16:
+    resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
     engines: {node: ^18 || >=20}
     hasBin: true
 
@@ -5007,7 +5016,7 @@ snapshots:
       jotai-scope: 0.7.2(jotai@2.11.0(@types/react@19.2.17)(react@19.2.7))(react@19.2.7)
       lodash.debounce: 4.0.8
       lodash.throttle: 4.1.1
-      nanoid: 3.3.12
+      nanoid: 3.3.18
       open-color: 1.9.1
       pako: 2.0.3
       perfect-freehand: 1.2.0
@@ -5035,8 +5044,8 @@ snapshots:
     dependencies:
       '@excalidraw/markdown-to-text': 0.1.2
       '@mermaid-js/parser': 0.6.3
-      mermaid: 11.15.0
-      nanoid: 5.0.9
+      mermaid: 11.16.1
+      nanoid: 5.1.16
 
   '@excalidraw/random-username@1.1.0': {}
 
@@ -5083,7 +5092,7 @@ snapshots:
       pdf-lib: 1.17.1
       pdfjs-dist: 5.4.624
 
-  '@file-viewer/renderer-presentation@2.2.2':
+  '@file-viewer/renderer-presentation@2.2.2(patch_hash=319c7a06f414caad58c4f1701685418109eabf346c62d77cb8668300d262818d)':
     dependencies:
       '@file-viewer/core': 2.2.2
       '@file-viewer/ppt': 0.3.1
@@ -5106,7 +5115,7 @@ snapshots:
       jszip: 3.10.1
       rtf.js: 3.0.9
 
-  '@file-viewer/vite-plugin@2.2.2(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))':
+  '@file-viewer/vite-plugin@2.2.2(patch_hash=541011d74a0cafd3442bbb6718c9f8d840022569b06ccc6cec9c66692793f34e)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))':
     dependencies:
       vite: 8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0)
 
@@ -7185,7 +7194,7 @@ snapshots:
     dependencies:
       domelementtype: 2.3.0
 
-  dompurify@3.4.12:
+  dompurify@3.4.13:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -7734,7 +7743,7 @@ snapshots:
       chalk: 4.1.2
       graceful-fs: 4.2.11
       jest-util: 30.4.1
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       pretty-format: 30.4.1
       slash: 3.0.0
       stack-utils: 2.0.6
@@ -7754,7 +7763,7 @@ snapshots:
       chalk: 4.1.2
       ci-info: 4.4.0
       graceful-fs: 4.2.11
-      picomatch: 4.0.4
+      picomatch: 4.0.5
 
   jiti@2.7.0: {}
 
@@ -8124,7 +8133,7 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
-  mermaid@11.15.0:
+  mermaid@11.16.1:
     dependencies:
       '@braintree/sanitize-url': 7.1.2
       '@iconify/utils': 3.1.4
@@ -8138,7 +8147,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.21
-      dompurify: 3.4.12
+      dompurify: 3.4.13
       es-toolkit: 1.49.0
       katex: 0.16.47
       khroma: 2.1.0
@@ -8391,7 +8400,9 @@ snapshots:
 
   nanoid@3.3.12: {}
 
-  nanoid@5.0.9: {}
+  nanoid@3.3.18: {}
+
+  nanoid@5.1.16: {}
 
   netmask@2.1.1: {}
 

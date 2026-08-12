@@ -476,8 +476,16 @@ export class ThreadController {
       || event.type === "entryUpdated"
       || event.type === "entryBlockTextDelta"
       || event.type === "entryCompleted"
-      || event.type === "turnStarted"
     ) {
+      const projected = applyGatewayEventToThreadSnapshot({
+        ...this.currentSnapshot,
+        entries: this.liveEntries
+      }, event);
+      this.liveEntries = projected.entries;
+      this.notifySnapshotChanged();
+      return;
+    }
+    if (event.type === "turnStarted") {
       const projected = applyGatewayEventToThreadSnapshot({
         ...this.currentSnapshot,
         entries: this.liveEntries

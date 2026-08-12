@@ -129,18 +129,20 @@ export function applyLiveTranscriptEvent(
             finalizePendingEntriesForTurn(
               mergeTerminalCommittedEntries(snapshot, event.turnId, committedEntries),
               event.turnId,
-              terminalStatus === "interrupted" ? "cancelled" : "failed"
+              terminalStatus === "interrupted" ? "cancelled" : "failed",
+              committedEntries
             ),
             snapshot,
             event
           )
-        : committedEntries.length > 0
-          ? mergeCommittedEntries(snapshot, event.turnId, committedEntries)
-          : finalizePendingEntriesForTurn(
-              removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId),
-              event.turnId,
-              "completed"
-            );
+        : finalizePendingEntriesForTurn(
+            committedEntries.length > 0
+              ? mergeCommittedEntries(snapshot, event.turnId, committedEntries)
+              : removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId),
+            event.turnId,
+            "completed",
+            committedEntries
+          );
       return {
         ...snapshot,
         thread: threadForTurn(snapshot, terminalThreadId),
@@ -505,10 +507,12 @@ function mergeTerminalCommittedEntries(
 function finalizePendingEntriesForTurn(
   entries: TranscriptEntry[],
   turnId: string,
-  status: "completed" | "failed" | "cancelled"
+  status: "completed" | "failed" | "cancelled",
+  committedEntries: TranscriptEntry[] = []
 ): TranscriptEntry[] {
+  const committedEntryIds = new Set(committedEntries.map((entry) => entry.id));
   return sortTranscriptEntries(entries.map((entry) => {
-    if (entry.turnId !== turnId) {
+    if (entry.turnId !== turnId && !committedEntryIds.has(entry.id)) {
       return entry;
     }
     let changed = false;

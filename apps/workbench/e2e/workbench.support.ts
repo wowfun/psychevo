@@ -3,11 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { analyzeTranscriptRuntimeRows, type TranscriptRuntimeRowSample } from "../src/transcriptRuntimeAnalyzer";
+import type { TranscriptRuntimeRowSample } from "../src/transcriptRuntimeAnalyzer";
 import { repoRoot } from "./harness";
-
-export { analyzeTranscriptRuntimeRows };
-export type { TranscriptRuntimeRowSample };
 
 export const LIVE_TRANSLATE_SUBAGENT_PROMPT = "使用 translate agent 演示简单的中译英和英译中";
 export const CHANNELS_VISUAL_CONFIG = `
@@ -346,17 +343,6 @@ async function allTranscriptRowSamples(page: Page): Promise<TranscriptRowSample[
   return transcriptRowSamples(
     page.locator(".pevo-threadItems .pevo-message, .pevo-threadItems .pevo-evidence")
   );
-}
-
-export async function sampleTranscriptRuntimeRows(page: Page): Promise<TranscriptRuntimeRowSample[]> {
-  return allTranscriptRowSamples(page);
-}
-
-export function assertTranscriptRuntimeRowsHealthy(rows: TranscriptRuntimeRowSample[], label: string) {
-  const analysis = analyzeTranscriptRuntimeRows(rows);
-  if (analysis.errors.length > 0) {
-    throw new Error(`${label}: transcript runtime analyzer failed: ${JSON.stringify({ analysis, rows }, null, 2)}`);
-  }
 }
 
 export async function captureChannelsWorkbench(page: Page, testInfo: TestInfo, label: string) {
