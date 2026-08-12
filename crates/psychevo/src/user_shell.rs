@@ -194,7 +194,10 @@ pub(crate) async fn prepare_user_shell_context(
             capture.validate_async().await?;
             capture.clone()
         }
-        None => crate::WorkspaceRootCapture::capture_async(workspace_root_paths.clone()).await?,
+        None => {
+            crate::application::WorkspaceRootCapture::capture_async(workspace_root_paths.clone())
+                .await?
+        }
     };
     let options = RunOptions {
         state: context.state.clone(),
@@ -620,7 +623,8 @@ include_common_caches = false
         .expect("config");
         let state = StateRuntime::open(":memory:").await.expect("state");
         let roots = vec![primary.clone(), secondary.clone()];
-        let capture = crate::WorkspaceRootCapture::capture(&roots).expect("shell capture");
+        let capture =
+            crate::application::WorkspaceRootCapture::capture(&roots).expect("shell capture");
         std::fs::rename(&secondary, &original_secondary).expect("retain original root");
         std::fs::create_dir(&secondary).expect("replacement root");
         let environment = BTreeMap::from([

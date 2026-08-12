@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
+use futures::future::join_all;
 use psychevo_extension_protocol::{
     ChannelConnectionParams, ChannelIdentity, ChannelOutboundMessage, ChannelSendParams,
     ChannelStartParams, CommandEffect, CommandRunParams, ExtensionSurface, HostCapabilities,
@@ -59,6 +60,49 @@ async fn one_shot_host_is_lazy_preserves_argv_and_shuts_down() {
 
     lease.release().await.expect("release");
     assert!(!runtime.started().await);
+    assert_eq!(
+        fs::read_to_string(marker).expect("lifecycle marker"),
+        "initialize\nshutdown\n"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_calls_share_one_startup_without_holding_runtime_state() {
+    let profile = TempDir::new().expect("profile");
+    let source = TempDir::new().expect("source");
+    write_sidecar_extension(source.path(), "example.single-start");
+    let store = ExtensionStore::new(profile.path(), source.path());
+    let record = store
+        .install_local(source.path(), ExtensionScope::Profile)
+        .expect("install");
+    let marker = record.data_root.join("lifecycle.log");
+    let manifest = super::load_extension_manifest(source.path()).expect("manifest");
+    let runtime = ExtensionRuntime::new(
+        record,
+        manifest,
+        BTreeMap::new(),
+        ExtensionHostMode::OneShot,
+    )
+    .expect("runtime");
+    let lease = runtime.acquire().await.expect("lease");
+    let calls = (0..32)
+        .map(|_| {
+            let lease = lease.clone();
+            tokio::spawn(async move { lease.contributions().await })
+        })
+        .collect::<Vec<_>>();
+    for result in join_all(calls).await {
+        result.expect("call task").expect("contributions");
+    }
+    assert_eq!(
+        fs::read_to_string(&marker)
+            .expect("lifecycle marker")
+            .lines()
+            .filter(|line| *line == "initialize")
+            .count(),
+        1
+    );
+    lease.release().await.expect("release");
     assert_eq!(
         fs::read_to_string(marker).expect("lifecycle marker"),
         "initialize\nshutdown\n"

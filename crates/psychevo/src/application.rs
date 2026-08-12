@@ -84,10 +84,10 @@ pub use presentation::{
 pub use psychevo_agent_core::{
     AssistantBlock, ControlInputError, MAX_CONTROL_INPUT_BYTES as MAX_QUEUED_STEER_BYTES,
     MAX_CONTROL_INPUT_ITEMS as MAX_QUEUED_STEERS, Message, ProviderToolBlock, TerminalReason,
-    ToolBinding, ToolCallBlock, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec,
-    ToolExecutionMode, ToolOutput, UserContentBlock, user_text_message,
+    ToolBinding, ToolBinding as Tool, ToolCallBlock, ToolDisplayBodyPolicy, ToolDisplayCategory,
+    ToolDisplaySpec, ToolExecutionMode, ToolOutput, UserContentBlock, user_text_message,
 };
-pub use psychevo_ai::{AbortSignal, AssistantSource, Outcome, UrlCitationSource};
+pub use psychevo_ai::{AbortSignal, AssistantSource, Outcome, Provider, UrlCitationSource};
 pub use replay::{
     HistoryReplayItem, HistoryReplayPage, HistoryReplayWarning, HistoryReplayWarningKind,
 };
@@ -117,6 +117,9 @@ pub fn validate_queued_steer(message: &Message) -> std::result::Result<(), Contr
 
 use crate::compaction::CompactionReason;
 use crate::config::McpOAuthCredentialStore;
+pub use crate::filesystem_identity::{
+    IDENTITY_BOUND_FILE_MUTATIONS_SUPPORTED, WorkspaceRootCapture,
+};
 #[cfg(test)]
 use crate::state::{FrameworkInteractionStatus, GatewayTurnDeliveryInput};
 use crate::state::{SessionListCursor, StateRuntime};
@@ -127,11 +130,11 @@ pub use crate::types::{
     FilesystemApprovalRequest, FilesystemApprovalScope, FilesystemApprovalTarget, ImageInput,
     McpServerInput, McpStartupApprovalRequest, McpStartupApprovalTarget, McpTransportInput,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
-    PermissionMode, ProjectContextInstructionMode, PromptDisplayMetadata, ResolvedMcpServerInput,
-    RunMode, RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunTerminalError,
-    RunWarning, RuntimeTool, SelectedAgent, SessionEvent, SessionEventPayload,
-    StoredEditableInputEnvelope, StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY,
-    USER_SHELL_METADATA_KEY, WorkspaceMutation, WorkspaceMutationSink,
+    PermissionMode, ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
+    ResolvedMcpServerInput, RunMode, RunSandboxMode, RunSandboxOverride, RunStreamEvent,
+    RunStreamSink, RunTerminalError, RunWarning, RuntimeTool, SelectedAgent, SessionEvent,
+    SessionEventPayload, StoredEditableInputEnvelope, StoredEditableInputPart,
+    TUI_DISPLAY_METADATA_KEY, USER_SHELL_METADATA_KEY, WorkspaceMutation, WorkspaceMutationSink,
 };
 use crate::{Error, Result};
 
@@ -7201,7 +7204,7 @@ mod tests {
             .expect("parent Workspace")
             .expect("parent context");
         let parent_thread = ThreadExecutionContext::from_summary(parent_summary, parent_workspace);
-        let parent_workspace_root_capture = crate::WorkspaceRootCapture::capture(
+        let parent_workspace_root_capture = crate::application::WorkspaceRootCapture::capture(
             &parent_thread
                 .roots
                 .iter()
@@ -7376,7 +7379,7 @@ mod tests {
             )
             .await
             .expect("child edge");
-        let parent_workspace_root_capture = crate::WorkspaceRootCapture::capture(
+        let parent_workspace_root_capture = crate::application::WorkspaceRootCapture::capture(
             &captured_parent
                 .roots
                 .iter()

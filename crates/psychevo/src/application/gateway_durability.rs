@@ -15,8 +15,8 @@ pub use crate::state::{
     GatewayChannelOutboxRecord, GatewayChannelOutboxStatus, GatewayControlCommandInput,
     GatewayControlCommandKind, GatewayControlCommandRecord, GatewayControlCommandStatus,
     GatewayLiveEventCommit, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, GatewaySourceBindingRecord, GatewaySourceLaneInput,
-    GatewaySourceLaneRecord,
+    GatewayLiveSnapshotPage, GatewayLiveSnapshotRecord, GatewaySourceBindingRecord,
+    GatewaySourceLaneInput, GatewaySourceLaneRecord,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,6 +289,40 @@ impl GatewayDurability {
         limit: usize,
     ) -> Result<Vec<GatewayLiveSnapshotRecord>> {
         self.state.list_gateway_live_snapshots(limit).await
+    }
+
+    pub async fn latest_gateway_live_snapshot_version(&self) -> Result<i64> {
+        self.state.latest_gateway_live_snapshot_version().await
+    }
+
+    pub async fn list_gateway_live_snapshot_changes(
+        &self,
+        after_version: i64,
+        excluding_owner_id: &str,
+        limit: usize,
+    ) -> Result<GatewayLiveSnapshotPage> {
+        self.state
+            .list_gateway_live_snapshot_changes(after_version, excluding_owner_id, limit)
+            .await
+    }
+
+    pub async fn list_gateway_live_snapshot_changes_for_thread(
+        &self,
+        after_version: i64,
+        through_version: Option<i64>,
+        excluding_owner_id: Option<&str>,
+        thread_id: &str,
+        limit: usize,
+    ) -> Result<GatewayLiveSnapshotPage> {
+        self.state
+            .list_gateway_live_snapshot_changes_for_thread(
+                after_version,
+                through_version,
+                excluding_owner_id,
+                thread_id,
+                limit,
+            )
+            .await
     }
 
     pub async fn list_gateway_live_snapshots_for_thread(

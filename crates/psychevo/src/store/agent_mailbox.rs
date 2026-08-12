@@ -277,6 +277,64 @@ impl StateRuntime {
         })
         .await
     }
+
+    pub(crate) async fn load_agent_mailbox_events_page(
+        &self,
+        parent_session_id: &str,
+        after: Option<(i64, i64)>,
+        through_id: i64,
+        limit: usize,
+    ) -> Result<Vec<AgentMailboxEventRecord>> {
+        let (after_created_at_ms, after_id) = after.unwrap_or((i64::MIN, i64::MIN));
+        let limit = i64::try_from(limit.max(1)).unwrap_or(i64::MAX);
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT id, parent_session_id, child_session_id, agent_id, task_name,
+                       agent_name, created_at_ms, delivered_at_ms,
+                       delivered_prompt_session_seq, delivered_after_session_seq,
+                       delivered_tool_call_id, content_text, payload_json, metadata_json
+                FROM agent_mailbox_events
+                WHERE parent_session_id = ?1
+                  AND id <= ?4
+                  AND (
+                    created_at_ms > ?2
+                    OR (created_at_ms = ?2 AND id > ?3)
+                  )
+                ORDER BY created_at_ms ASC, id ASC
+                LIMIT ?5
+                "#,
+            )
+            .bind(parent_session_id)
+            .bind(after_created_at_ms)
+            .bind(after_id)
+            .bind(through_id)
+            .bind(limit)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| agent_mailbox_event_from_row(&row))
+                .collect()
+        })
+        .await
+    }
+
+    pub(crate) async fn latest_agent_mailbox_event_id(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<i64> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            Ok(sqlx::query_scalar::<_, i64>(
+                "SELECT COALESCE(MAX(id), 0) FROM agent_mailbox_events WHERE parent_session_id = ?1",
+            )
+            .bind(parent_session_id)
+            .fetch_one(&mut *conn)
+            .await?)
+        })
+        .await
+    }
 }
 
 const AGENT_MAILBOX_EVENTS_QUERY: &str = r#"

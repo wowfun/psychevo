@@ -398,7 +398,7 @@ impl Configuration {
     ) -> Result<()> {
         let provider_id = request.provider_id.trim();
         let label = request.label.trim();
-        let base_url = request.base_url.trim().trim_end_matches('/');
+        let base_url = config::validate_provider_base_url(&request.base_url)?;
         let api_key_env = request.api_key_env.trim();
         if !config::valid_provider_id(provider_id) {
             return Err(Error::Config(
@@ -408,11 +408,6 @@ impl Configuration {
         }
         if label.is_empty() {
             return Err(Error::Config("provider name is required".to_string()));
-        }
-        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-            return Err(Error::Config(
-                "base url must start with http:// or https://".to_string(),
-            ));
         }
         if !config::valid_env_name(api_key_env) {
             return Err(Error::Config(

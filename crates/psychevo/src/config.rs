@@ -144,9 +144,10 @@ pub(crate) use config_loading::{
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
+pub use config_file_env::valid_env_name;
 pub(crate) use config_file_env::{
     CONFIG_FILE_NAME, deep_merge, load_toml_config_file, resolve_config_path,
-    resolve_psychevo_home, valid_env_name, write_toml_config_file,
+    resolve_psychevo_home, write_toml_config_file,
 };
 #[path = "config/parse.rs"]
 pub(crate) mod config_parse;
@@ -175,10 +176,10 @@ pub use config_models::{
 };
 #[path = "config/custom_provider.rs"]
 pub(crate) mod config_custom_provider;
-pub(crate) use config_custom_provider::valid_provider_id;
 pub use config_custom_provider::{
     create_global_custom_provider, create_scoped_custom_provider, custom_provider_api_key_env,
-    set_provider_api_key, set_provider_model_config,
+    set_provider_api_key, set_provider_model_config, valid_provider_id,
+    validate_custom_provider_id, validate_provider_base_url,
 };
 #[path = "config/default_model.rs"]
 pub(crate) mod config_default_model;

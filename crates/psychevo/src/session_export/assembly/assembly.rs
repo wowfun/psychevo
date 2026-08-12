@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use psychevo_agent_core::{Message, contextual_user_message_to_ai, message_to_ai};
 use psychevo_ai::{
@@ -10,18 +10,18 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::inputs::{
-    ExportMessageRecord, SessionArtifactKind, SessionExportArtifact, SessionExportFormat,
-    SessionExportInclude, SessionExportOptions, SessionExportWriteResult,
+    ExportMessageRecord, SessionArtifactKind, SessionExportFormat, SessionExportInclude,
+    SessionExportOptions,
 };
 use crate::error::{Error, Result};
 use crate::session_export::markdown_helpers::{sanitize_reasoning_for_export, short_session_id};
 use crate::session_export::reconstruction_markdown::{
     base_reconstruction_warnings, contextual_user_messages_from_evidence,
-    effective_tool_names_from_prefix_metadata, export_document, filter_tool_declarations,
+    effective_tool_names_from_prefix_metadata, filter_tool_declarations,
     generation_metadata_from_session_metadata, prefix_contextual_user_messages,
     prefix_prompt_instruction_messages, prompt_instruction_messages_from_evidence,
     prompt_prefix_hash, prompt_prefix_version, push_mailbox_events_delivered_after_message,
-    push_mailbox_events_delivered_for_prompt, reconstructed_tool_declarations, render_markdown,
+    push_mailbox_events_delivered_for_prompt, reconstructed_tool_declarations,
     sanitize_message_without_reasoning, session_mode_from_metadata,
     tool_declarations_hash_from_declarations, turn_contextual_user_messages_from_evidence,
     turn_prompt_instruction_messages_from_evidence,
@@ -31,27 +31,11 @@ use crate::store::{AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixR
 use crate::tools::mode_instruction;
 use crate::types::{RunMode, SessionSummary};
 
-#[derive(Serialize)]
-pub(crate) struct ExportDocument<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) header: Option<ExportHeaderValue<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) messages: Option<Vec<ExportMessageValue>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) mailbox_events: Option<Vec<ExportMailboxEventValue>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) provider_input_evidence: Option<Vec<ExportPromptEvidence>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) last_provider_request: Option<ProviderRequestExport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) last_provider_response: Option<ProviderResponseExport>,
-}
+const LAST_PROVIDER_REQUEST_TRANSCRIPT_BYTES: u64 = 16 * 1024 * 1024;
+const LAST_PROVIDER_REQUEST_PAGE_SIZE: usize = 256;
 
 pub(crate) struct ExportSections {
     pub(crate) prompt_prefix: Option<ExportPromptPrefixValue>,
-    pub(crate) messages: Option<Vec<ExportMessageRecord>>,
-    pub(crate) mailbox_events: Option<Vec<ExportMailboxEventValue>>,
-    pub(crate) evidence: Option<Vec<ExportPromptEvidence>>,
     pub(crate) last_request: Option<ProviderRequestExport>,
     pub(crate) last_response: Option<ProviderResponseExport>,
 }
@@ -86,12 +70,6 @@ pub(crate) struct ExportOptionsValue {
     pub(crate) format: SessionExportFormat,
     pub(crate) artifact_kind: SessionArtifactKind,
     pub(crate) include: Vec<SessionExportInclude>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ExportMessageValue {
-    pub(crate) session_seq: i64,
-    pub(crate) message: Message,
 }
 
 #[derive(Serialize)]
@@ -148,12 +126,6 @@ pub(crate) struct ExportPromptPrefixSlotValue {
     pub(crate) source_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) source_path: Option<String>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct ExportPromptEvidence {
-    pub(crate) prompt_session_seq: i64,
-    pub(crate) items: Vec<ExportEvidenceItem>,
 }
 
 #[derive(Serialize)]
@@ -218,129 +190,80 @@ pub fn default_session_export_filename(
     }
 }
 
-pub async fn render_session_export(
+pub(crate) async fn assemble_export_sections(
     store: &StateRuntime,
     session_id: &str,
-    options: SessionExportOptions,
-) -> Result<SessionExportArtifact> {
-    let summary = store
-        .session_summary(session_id)
-        .await?
-        .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
-    let include_messages = options.include.contains(SessionExportInclude::Messages);
+    summary: &SessionSummary,
+    options: &SessionExportOptions,
+    before_session_seq: i64,
+) -> Result<ExportSections> {
     let include_reasoning = options.include.contains(SessionExportInclude::Reasoning);
-    let messages = if include_messages {
-        Some(load_export_messages(store, session_id, include_reasoning).await?)
+    let include_last_request = options
+        .include
+        .contains(SessionExportInclude::LastProviderRequest);
+    let include_last_response = options
+        .include
+        .contains(SessionExportInclude::LastProviderResponse);
+    let latest_assistant = if include_last_request || include_last_response {
+        store
+            .latest_export_assistant_message_summary(session_id, before_session_seq)
+            .await?
     } else {
         None
     };
-    let last_response = if options
-        .include
-        .contains(SessionExportInclude::LastProviderResponse)
-    {
-        if let Some(messages) = messages.as_ref() {
-            latest_provider_response_from_messages(&summary, messages)
+    let (unfiltered_messages, lpr_history_truncated) =
+        if include_last_request && let Some(assistant) = latest_assistant.as_ref() {
+            let (messages, truncated) = load_bounded_last_provider_request_messages(
+                store,
+                session_id,
+                assistant.session_seq.saturating_add(1),
+            )
+            .await?;
+            (Some(messages), truncated)
         } else {
-            let response_messages =
-                load_export_messages(store, session_id, include_reasoning).await?;
-            latest_provider_response_from_messages(&summary, &response_messages)
-        }
+            (None, false)
+        };
+    let last_response = if include_last_response {
+        latest_assistant
+            .as_ref()
+            .map(|record| ExportMessageRecord {
+                session_seq: record.session_seq,
+                message: if include_reasoning {
+                    sanitize_reasoning_for_export(&record.message)
+                } else {
+                    sanitize_message_without_reasoning(&record.message)
+                },
+                usage: record.usage.clone(),
+                metadata: record.metadata.clone(),
+            })
+            .and_then(|record| latest_provider_response_from_messages(summary, &[record]))
     } else {
         None
     };
-    let prompt_prefix_record = store.load_session_prompt_prefix(session_id).await?;
-    let last_request = if options
-        .include
-        .contains(SessionExportInclude::LastProviderRequest)
-    {
-        let unfiltered_messages = load_unfiltered_export_messages(store, session_id).await?;
-        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages).await?
+    let prompt_prefix_record = if options.include.contains(SessionExportInclude::Header) {
+        store.load_session_prompt_prefix(session_id).await?
     } else {
         None
     };
-    let evidence = if options
-        .include
-        .contains(SessionExportInclude::ProviderInputEvidence)
-    {
-        Some(load_provider_input_evidence(store, session_id).await?)
-    } else {
-        None
-    };
-    let mailbox_events = store
-        .load_agent_mailbox_events(session_id)
+    let last_request = if let Some(unfiltered_messages) = unfiltered_messages.as_ref() {
+        reconstruct_last_provider_request_with_history_state(
+            store,
+            session_id,
+            summary,
+            unfiltered_messages,
+            lpr_history_truncated,
+        )
         .await?
-        .into_iter()
-        .map(export_mailbox_event_value)
-        .collect::<Vec<_>>();
-    let mailbox_events = (!mailbox_events.is_empty()).then_some(mailbox_events);
+    } else {
+        None
+    };
     let prompt_prefix = prompt_prefix_record.map(export_prompt_prefix_value);
     let sections = ExportSections {
         prompt_prefix,
-        messages,
-        mailbox_events,
-        evidence,
         last_request,
         last_response,
     };
-    let format = options.format;
-    let content = match format {
-        SessionExportFormat::Markdown => render_markdown(&summary, &sections, &options),
-        SessionExportFormat::Json => {
-            let document = export_document(&summary, sections, options);
-            serde_json::to_string_pretty(&document)?
-        }
-    };
-    Ok(SessionExportArtifact {
-        content,
-        format,
-        session_id: summary.id,
-    })
-}
-
-pub async fn write_session_export(
-    store: &StateRuntime,
-    session_id: &str,
-    output_path: &Path,
-    options: SessionExportOptions,
-) -> Result<SessionExportWriteResult> {
-    let artifact = render_session_export(store, session_id, options).await?;
-    if let Some(parent) = output_path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(output_path, artifact.content.as_bytes())?;
-    Ok(SessionExportWriteResult {
-        path: output_path.to_path_buf(),
-        bytes: artifact.content.len(),
-        format: artifact.format,
-        session_id: artifact.session_id,
-    })
-}
-
-pub(crate) async fn load_export_messages(
-    store: &StateRuntime,
-    session_id: &str,
-    include_reasoning: bool,
-) -> Result<Vec<ExportMessageRecord>> {
-    store
-        .load_export_message_summaries(session_id)
-        .await?
-        .into_iter()
-        .map(|record| {
-            let message = if include_reasoning {
-                sanitize_reasoning_for_export(&record.message)
-            } else {
-                sanitize_message_without_reasoning(&record.message)
-            };
-            Ok(ExportMessageRecord {
-                session_seq: record.session_seq,
-                message,
-                usage: record.usage,
-                metadata: record.metadata,
-            })
-        })
-        .collect()
+    Ok(sections)
 }
 
 pub(crate) async fn load_unfiltered_export_messages(
@@ -360,6 +283,71 @@ pub(crate) async fn load_unfiltered_export_messages(
             })
         })
         .collect()
+}
+
+async fn load_bounded_last_provider_request_messages(
+    store: &StateRuntime,
+    session_id: &str,
+    before_session_seq: i64,
+) -> Result<(Vec<ExportMessageRecord>, bool)> {
+    load_bounded_last_provider_request_messages_with_limit(
+        store,
+        session_id,
+        before_session_seq,
+        LAST_PROVIDER_REQUEST_TRANSCRIPT_BYTES,
+    )
+    .await
+}
+
+pub(super) async fn load_bounded_last_provider_request_messages_with_limit(
+    store: &StateRuntime,
+    session_id: &str,
+    before_session_seq: i64,
+    byte_limit: u64,
+) -> Result<(Vec<ExportMessageRecord>, bool)> {
+    let mut before = before_session_seq;
+    let mut source_bytes = 0_u64;
+    let mut reversed = Vec::new();
+    let mut truncated = false;
+    'pages: loop {
+        let page = store
+            .load_export_message_summaries_reverse_page(
+                session_id,
+                before,
+                LAST_PROVIDER_REQUEST_PAGE_SIZE,
+            )
+            .await?;
+        let page_len = page.len();
+        for (record, record_bytes) in page {
+            if record_bytes > byte_limit && reversed.is_empty() {
+                return Err(Error::structured(
+                    "latest provider request cannot be reconstructed from a single oversized transcript record",
+                    serde_json::json!({
+                        "code": "last_provider_request_record_too_large",
+                        "bytes": record_bytes,
+                        "limit": byte_limit,
+                    }),
+                ));
+            }
+            if source_bytes.saturating_add(record_bytes) > byte_limit {
+                truncated = true;
+                break 'pages;
+            }
+            source_bytes = source_bytes.saturating_add(record_bytes);
+            before = record.session_seq;
+            reversed.push(ExportMessageRecord {
+                session_seq: record.session_seq,
+                message: record.message,
+                usage: record.usage,
+                metadata: record.metadata,
+            });
+        }
+        if page_len < LAST_PROVIDER_REQUEST_PAGE_SIZE {
+            break;
+        }
+    }
+    reversed.reverse();
+    Ok((reversed, truncated))
 }
 
 pub(crate) fn latest_provider_response_from_messages(
@@ -422,29 +410,6 @@ pub(crate) fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPr
     }
 }
 
-pub(crate) async fn load_provider_input_evidence(
-    store: &StateRuntime,
-    session_id: &str,
-) -> Result<Vec<ExportPromptEvidence>> {
-    let mut prompts = Vec::new();
-    for record in store.load_export_message_summaries(session_id).await? {
-        if !matches!(record.message, Message::User { .. }) {
-            continue;
-        }
-        let items = store
-            .load_context_evidence(session_id, record.session_seq)
-            .await?;
-        if items.is_empty() {
-            continue;
-        }
-        prompts.push(ExportPromptEvidence {
-            prompt_session_seq: record.session_seq,
-            items: items.into_iter().map(export_evidence_item).collect(),
-        });
-    }
-    Ok(prompts)
-}
-
 pub(crate) fn export_evidence_item(record: ContextEvidenceRecord) -> ExportEvidenceItem {
     ExportEvidenceItem {
         context_seq: record.context_seq,
@@ -487,6 +452,19 @@ pub(crate) async fn reconstruct_last_provider_request(
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
 ) -> Result<Option<ProviderRequestExport>> {
+    reconstruct_last_provider_request_with_history_state(
+        store, session_id, summary, messages, false,
+    )
+    .await
+}
+
+async fn reconstruct_last_provider_request_with_history_state(
+    store: &StateRuntime,
+    session_id: &str,
+    summary: &SessionSummary,
+    messages: &[ExportMessageRecord],
+    history_truncated: bool,
+) -> Result<Option<ProviderRequestExport>> {
     let Some((assistant_index, prompt_session_seq, prompt_metadata)) =
         last_provider_request_boundary(messages)
     else {
@@ -508,6 +486,12 @@ pub(crate) async fn reconstruct_last_provider_request(
         .unwrap_or_else(|| crate::run::language_protocol_for_provider(&summary.provider))
         .to_string();
     let mut warnings = base_reconstruction_warnings(&metadata);
+    if history_truncated {
+        warnings.push(format!(
+            "older transcript history was omitted from this best-effort reconstruction to keep the working set within {} bytes; the persisted session does not record the provider's exact context-window pruning decision",
+            LAST_PROVIDER_REQUEST_TRANSCRIPT_BYTES
+        ));
+    }
     let mode = session_mode_from_metadata(&metadata, &mut warnings);
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
     let cwd = PathBuf::from(&summary.cwd);

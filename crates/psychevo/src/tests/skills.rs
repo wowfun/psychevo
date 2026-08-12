@@ -11,7 +11,7 @@ use crate::skills::{
     write_skill_file,
 };
 use crate::tools::skill_tools_for_mode;
-use crate::{tests::assert_first_party_tool_declaration_quality, types::RunMode};
+use crate::{application::RunMode, tests::assert_first_party_tool_declaration_quality};
 use std::{collections::BTreeMap, fs};
 use tempfile::tempdir;
 

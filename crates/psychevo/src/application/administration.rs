@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::agent_session::AGENT_SESSION_METADATA_KEY;
@@ -14,7 +13,7 @@ use crate::agents::{
 use crate::context_usage::{ContextOptions, ContextSnapshot};
 use crate::run::reload_session_context;
 use crate::session_export::{
-    SessionExportArtifact, SessionExportOptions, SessionExportWriteResult,
+    SessionExportArtifact, SessionExportByteStream, SessionExportOptions, SessionExportWriteResult,
 };
 #[cfg(test)]
 use crate::state::store_agents::AgentCoordinationRunStatus;
@@ -23,280 +22,41 @@ use crate::state::{
     ChildSessionRuntimeBindingSnapshotInput, ChildSessionSnapshotInput,
     GatewayRuntimeBindingOwnership, GatewayRuntimeBindingStatus,
 };
-use crate::types::{
-    PermissionMode, ReloadContextOptions, RunMode, SessionUndoOptions, StatsOptions,
-};
+#[cfg(test)]
+use crate::types::{PermissionMode, RunMode};
+use crate::types::{ReloadContextOptions, SessionUndoOptions, StatsOptions};
 use crate::{Error, Result, stats, undo};
+
+#[path = "administration/usage.rs"]
+mod usage;
+pub use usage::{
+    AgentUsageObservation, ThreadRedoResult, ThreadUndoResult, ThreadUsageSummary, UsageOverview,
+};
+#[path = "administration/agent_controls.rs"]
+mod agent_controls;
+pub use agent_controls::{
+    AgentRelationship, AgentRelationshipAgent, AgentRelationshipStatus,
+    SetThreadMainAgentSelection, ThreadAgentBinding, ThreadMainAgentSelection,
+    ThreadModelSelection, UpdateThreadAgentControlState,
+};
+#[path = "administration/thread_context.rs"]
+mod thread_context;
+pub use thread_context::{
+    AutoCompactionRequest, RefreshThreadContextRequest, RefreshThreadContextResult,
+    SideConversationAgentBindingSnapshot, SideConversationSurface, StartSideConversationRequest,
+};
+#[path = "administration/usage_query.rs"]
+mod usage_query;
+pub use usage_query::UsageQuery;
+#[path = "administration/coordination.rs"]
+mod coordination;
+pub use coordination::{
+    AgentCoordinationStatus, AgentMissionRegistration, AgentMissionRunStatus,
+    AgentTeamRegistration, AgentTeamRunStatus,
+};
 
 pub fn suggested_thread_title(prompt: &str) -> String {
     crate::run::normalize_session_title(prompt).unwrap_or_else(|| "New session".to_string())
-}
-
-pub type ThreadUndoResult = crate::types::SessionUndoResult;
-pub type ThreadRedoResult = crate::types::SessionRedoResult;
-pub type ThreadUsageSummary = crate::types::SessionUsageSummary;
-pub type UsageOverview = crate::types::UsageReadResult;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentUsageObservation {
-    pub used_tokens: Option<u64>,
-    pub context_limit: Option<u64>,
-    pub estimated_cost_nanodollars: Option<i64>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ThreadAgentBinding {
-    Resolved {
-        binding: Box<AgentBindingSnapshot>,
-        writable: bool,
-        thread_preferences: BTreeMap<String, Value>,
-        runtime_observed: BTreeMap<String, Value>,
-    },
-    Unresolved {
-        thread_id: String,
-        reason: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct UpdateThreadAgentControlState {
-    pub expected_binding_revision: i64,
-    pub expected_control_revision: i64,
-    pub thread_preferences: Option<BTreeMap<String, Value>>,
-    pub runtime_observed: Option<BTreeMap<String, Value>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum ThreadMainAgentSelection {
-    Missing { base_agent: Option<String> },
-    Default { base_agent: Option<String> },
-    Agent { input: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetThreadMainAgentSelection {
-    Default,
-    Agent {
-        input: String,
-        name: String,
-        source: AgentSource,
-        path: Option<PathBuf>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadModelSelection {
-    pub provider: String,
-    pub model: String,
-    pub reasoning_effort: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentRelationshipStatus {
-    Open,
-    Closed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRelationshipAgent {
-    pub id: Option<String>,
-    pub name: Option<String>,
-    pub task_name: Option<String>,
-    pub task: Option<String>,
-    pub description: Option<String>,
-    pub parent_tool_call_id: Option<String>,
-    pub team_run_id: Option<String>,
-    pub mission_run_id: Option<String>,
-    pub team_name: Option<String>,
-    pub team_member_id: Option<String>,
-    pub runtime_ref: Option<String>,
-    pub role: Option<String>,
-    pub background: Option<bool>,
-    pub fork_context: Option<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRelationship {
-    pub parent_thread_id: String,
-    pub child_thread_id: String,
-    pub status: AgentRelationshipStatus,
-    pub created_at_ms: i64,
-    pub updated_at_ms: i64,
-    pub agent: Option<AgentRelationshipAgent>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SideConversationSurface {
-    Tui,
-    Web,
-}
-
-impl SideConversationSurface {
-    fn source(self) -> &'static str {
-        match self {
-            Self::Tui => crate::thread_lineage::TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-            Self::Web => crate::thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SideConversationAgentBindingSnapshot {
-    parent_thread_id: String,
-    expected_binding_revision: i64,
-    expected_control_revision: i64,
-    effective_controls: BTreeMap<String, Value>,
-}
-
-impl SideConversationAgentBindingSnapshot {
-    pub fn new(
-        binding: &AgentBindingSnapshot,
-        effective_controls: BTreeMap<String, Value>,
-    ) -> Self {
-        Self {
-            parent_thread_id: binding.thread_id.clone(),
-            expected_binding_revision: binding.binding_revision,
-            expected_control_revision: binding.control_revision,
-            effective_controls,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct StartSideConversationRequest {
-    pub surface: SideConversationSurface,
-    pub model: ThreadModelSelection,
-    pub mode: RunMode,
-    pub permission_mode: PermissionMode,
-    pub selected_agent: Option<String>,
-    pub agent_binding: Option<SideConversationAgentBindingSnapshot>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AutoCompactionRequest {
-    pub snapshot: ContextSnapshot,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub inherited_env: Option<BTreeMap<String, String>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RefreshThreadContextRequest {
-    pub mode: Option<RunMode>,
-    pub inherited_env: Option<BTreeMap<String, String>>,
-    pub agent: Option<String>,
-    pub no_agents: bool,
-    pub no_skills: bool,
-    pub invalidation_reason: String,
-    pub notice: Option<String>,
-}
-
-impl Default for RefreshThreadContextRequest {
-    fn default() -> Self {
-        Self {
-            mode: None,
-            inherited_env: None,
-            agent: None,
-            no_agents: false,
-            no_skills: false,
-            invalidation_reason: "manual_reload".to_string(),
-            notice: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshThreadContextResult {
-    pub thread_id: String,
-    pub prefix_hash: String,
-    pub version: i64,
-    pub provider: String,
-    pub model: String,
-    pub invalidation_reason: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UsageQuery {
-    pub cwd: PathBuf,
-    pub all: bool,
-    pub days: Option<u64>,
-    pub limit: usize,
-}
-
-impl UsageQuery {
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self {
-            cwd: cwd.into(),
-            all: false,
-            days: None,
-            limit: 20,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentTeamRegistration {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub source_path: Option<String>,
-    pub leader_agent_name: String,
-    pub members: Value,
-    pub max_parallel_agents: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentMissionRegistration {
-    pub id: String,
-    pub goal: String,
-    pub lead_agent_name: String,
-    pub team: Option<AgentTeamRegistration>,
-    pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentCoordinationStatus {
-    pub team: Option<AgentTeamRunStatus>,
-    pub mission: Option<AgentMissionRunStatus>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentTeamRunStatus {
-    pub id: String,
-    pub parent_thread_id: String,
-    pub mission_run_id: Option<String>,
-    pub team_name: String,
-    pub description: Option<String>,
-    pub source_path: Option<String>,
-    pub leader_agent_name: String,
-    pub members: Vec<crate::agents::AgentTeamMember>,
-    pub max_parallel_agents: u64,
-    pub status: String,
-    pub started_at_ms: i64,
-    pub ended_at_ms: Option<i64>,
-    pub final_summary: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentMissionRunStatus {
-    pub id: String,
-    pub parent_thread_id: String,
-    pub team_run_id: Option<String>,
-    pub team_name: Option<String>,
-    pub goal: String,
-    pub lead_agent_name: String,
-    pub status: String,
-    pub started_at_ms: i64,
-    pub ended_at_ms: Option<i64>,
-    pub final_summary: Option<String>,
 }
 
 impl Client {
@@ -870,6 +630,15 @@ impl Thread {
     ) -> Result<SessionExportArtifact> {
         self.client.ensure_open()?;
         crate::session_export::render_session_export(&self.client.inner.state, &self.id, options)
+            .await
+    }
+
+    pub async fn stream_export(
+        &self,
+        options: SessionExportOptions,
+    ) -> Result<SessionExportByteStream> {
+        self.client.ensure_open()?;
+        crate::session_export::stream_session_export(&self.client.inner.state, &self.id, options)
             .await
     }
 

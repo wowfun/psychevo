@@ -273,7 +273,10 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
                 "model_metadata": model_metadata.public_json(),
             }),
             cwd: cwd.clone(),
-            workspace_root_capture: crate::WorkspaceRootCapture::capture(&workspace_roots).ok(),
+            workspace_root_capture: crate::application::WorkspaceRootCapture::capture(
+                &workspace_roots,
+            )
+            .ok(),
             workspace_roots,
             mode,
             project_context_mode,
@@ -480,7 +483,7 @@ pub(crate) async fn start_agent_task(
         return Err(Error::Message("agent message is empty".to_string()));
     }
     let workspace_root_capture =
-        crate::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
+        crate::application::WorkspaceRootCapture::capture_async(workspace_roots.clone()).await?;
     let run_options = RunOptions {
         state: state.clone(),
         cwd: cwd.clone(),

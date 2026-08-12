@@ -41,7 +41,6 @@ pub mod workspace_diff;
 pub mod application;
 pub(crate) mod error;
 pub(crate) mod filesystem_identity;
-pub use filesystem_identity::{IDENTITY_BOUND_FILE_MUTATIONS_SUPPORTED, WorkspaceRootCapture};
 pub(crate) mod managed_tools;
 pub(crate) mod messages;
 mod panic_evidence;
@@ -55,60 +54,4 @@ pub(crate) mod tool_surface;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use application::{
-    AgentAdmissionFacts, AgentBindingSnapshot, AgentCapabilitySelection, AgentCoordinationStatus,
-    AgentEnvironmentOverlay, AgentExecutionPolicy, AgentFilesystemAuthorizer, AgentHistoryFidelity,
-    AgentHistoryOwner, AgentImportedHistory, AgentImportedLifecycle, AgentImportedMessage,
-    AgentInputPart, AgentMailboxWaitOutcome, AgentMissionRunStatus, AgentModelSelection,
-    AgentPreparationToken, AgentRelationship, AgentRelationshipAgent, AgentRelationshipStatus,
-    AgentRemoteDeleteState, AgentSessionAdapter, AgentSessionImportToken, AgentSource,
-    AgentTargetSelection, AgentTeamRunStatus, AgentThreadForkRequest, AgentThreadImportRequest,
-    AgentThreadLifecycleAction, AgentThreadLifecycleOutcome, AgentThreadLifecycleRequest,
-    AgentThreadLifecycleSnapshot, AgentThreadPublication, AgentThreadPublicationAbortRequest,
-    AgentTurnInput, AgentTurnInvocation, AgentTurnPersistence, AgentTurnPreparation,
-    AgentTurnPurpose, Application, ApplicationActivitySnapshot, ApplicationBuilder,
-    ApplicationLimits, ApplicationOperationalSnapshot, ApplicationPanicDiagnostic,
-    ApplicationQueuedOperationSnapshot, ApplicationStorageSnapshot, AutoCompactionRequest, Client,
-    CompactThreadRequest, Configuration, ConfigurationQuery, ConfigureProviderRequest,
-    CreateCustomProviderRequest, CustomProviderResult, ForkAgentThreadRequest, ForkThreadRequest,
-    FrameworkTurnTerminalEvidence, FrameworkTurnTerminalOutcome, FrameworkTurnTerminalStatus,
-    GatewayNavigationState, HistoryPage, HistoryReader, HumanThreadBrowserQuery,
-    HumanThreadBrowserWorkspace, HumanThreadListPage, HumanThreadListQuery, HumanThreadSummary,
-    ImportAgentThreadRequest, ImportAgentThreadResult, InitialAgentBinding,
-    InitialThreadSourceAssociation, InteractionResponse, ItemStage, NativeTurnBackend,
-    PendingInteraction, PendingTerminalFailure, PreparedAgentTurn, QueuedSteerId,
-    RefreshThreadContextRequest, RefreshThreadContextResult, SetThreadMainAgentSelection,
-    ShellCommand, ShellCommandControl, ShellCommandEvent, ShellCommandOutcome, ShellCommandRequest,
-    ShellCommandResult, ShutdownAdapterStatus, ShutdownReport, ShutdownStateCloseStatus,
-    SideConversationAgentBindingSnapshot, SideConversationSurface, StartSideConversationRequest,
-    StartThreadRequest, Thread, ThreadActivitySnapshot, ThreadAgentBinding, ThreadCompaction,
-    ThreadConversationEditConflict, ThreadConversationEditRestoreOutcome,
-    ThreadConversationEditStageOutcome, ThreadConversationEditUnavailable, ThreadEditableDraft,
-    ThreadEditableDraftFidelity, ThreadEditableDraftPart, ThreadEditableDraftRead,
-    ThreadEditableDraftReadOutcome, ThreadEditableDraftUnavailable, ThreadExecutionContext,
-    ThreadHistoryEditingEligibility, ThreadHistoryEditingStaged, ThreadHistoryEditingState,
-    ThreadHistoryEditingUnavailable, ThreadItem, ThreadLifecycleActionPresentation,
-    ThreadLifecyclePresentation, ThreadListPage, ThreadListQuery, ThreadMainAgentSelection,
-    ThreadModelSelection, ThreadPresentationBackend, ThreadRedoResult, ThreadSnapshot,
-    ThreadStructuralHistory, ThreadSummary, ThreadTurnStartReceipt, ThreadTurnTerminal,
-    ThreadTurnTerminalStatus, ThreadUndoResult, ThreadUsageSummary, ThreadWorkspaceContext,
-    ThreadWorkspaceRootSource, TurnAdmissionCancellation, TurnControl, TurnEvent, TurnEventSender,
-    TurnEventStream, TurnHandle, TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
-    UpdateThreadAgentControlState, UsageQuery, UserShellDisplay, VoiceAudioFormat, VoiceAudioInput,
-    VoiceAudioOutput, VoiceRealtimeCloseReason, VoiceRealtimeConnection, VoiceRealtimeControl,
-    VoiceRealtimeEvent, VoiceRealtimeEvents, VoiceRealtimeRequest, VoiceRealtimeTransport,
-    VoiceRealtimeVoice, VoiceSpeech, VoiceSpeechRequest, VoiceTranscription,
-    VoiceTranscriptionRequest, Workspace, WorkspaceUpdate,
-};
-pub use compaction::CompactionResult;
-pub use context_usage::ContextSnapshot;
 pub use error::{Error, Result};
-pub use psychevo_agent_core::ControlInputError;
-pub use psychevo_agent_core::ToolBinding as Tool;
-pub use psychevo_ai::Provider;
-pub use skills::SelectedSkill;
-pub use types::{
-    ApprovalHandler, ImageInput, McpServerInput, McpStartupApprovalTarget, PermissionMode,
-    ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata, RunMode,
-    RunSandboxOverride, RunTerminalError, RunWarning, SelectedAgent,
-};

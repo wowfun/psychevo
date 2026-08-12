@@ -548,6 +548,154 @@ async fn exact_gateway_live_snapshot_replay_keeps_its_revision() {
 }
 
 #[tokio::test]
+async fn gateway_live_snapshot_change_pages_advance_without_revision_memory() {
+    let store = StateRuntime::open(":memory:").await.expect("store");
+    let snapshot =
+        |key: &'static str, owner: &'static str, value: &'static str| GatewayLiveSnapshotInput {
+            snapshot_key: key,
+            activity_id: None,
+            owner_id: Some(owner),
+            thread_id: None,
+            turn_id: Some("turn-1"),
+            event_kind: "entryUpdated",
+            event: json!({"type": "entryUpdated", "value": value}),
+        };
+    store
+        .upsert_gateway_live_snapshot(snapshot("local-1", "local", "one"))
+        .await
+        .expect("local snapshot");
+    store
+        .upsert_gateway_live_snapshot(snapshot("foreign-1", "foreign", "one"))
+        .await
+        .expect("foreign snapshot");
+    store
+        .upsert_gateway_live_snapshot(snapshot("foreign-2", "foreign", "two"))
+        .await
+        .expect("second foreign snapshot");
+
+    let first = store
+        .list_gateway_live_snapshot_changes(0, "local", 1)
+        .await
+        .expect("first page");
+    assert_eq!(first.snapshots.len(), 1);
+    assert_eq!(first.snapshots[0].snapshot_key, "foreign-1");
+    assert_eq!(first.next_version, first.snapshots[0].change_version);
+
+    let second = store
+        .list_gateway_live_snapshot_changes(first.next_version, "local", 1)
+        .await
+        .expect("second page");
+    assert_eq!(second.snapshots.len(), 1);
+    assert_eq!(second.snapshots[0].snapshot_key, "foreign-2");
+
+    store
+        .upsert_gateway_live_snapshot(snapshot("foreign-2", "foreign", "two"))
+        .await
+        .expect("exact replay");
+    let replay = store
+        .list_gateway_live_snapshot_changes(second.next_version, "local", 10)
+        .await
+        .expect("replay page");
+    assert!(replay.snapshots.is_empty());
+    assert!(replay.next_version >= second.high_watermark);
+
+    store
+        .upsert_gateway_live_snapshot(snapshot("foreign-2", "foreign", "changed"))
+        .await
+        .expect("changed snapshot");
+    let changed = store
+        .list_gateway_live_snapshot_changes(replay.next_version, "local", 10)
+        .await
+        .expect("changed page");
+    assert_eq!(changed.snapshots.len(), 1);
+    assert_eq!(changed.snapshots[0].event["value"], "changed");
+    assert!(changed.snapshots[0].change_version > replay.next_version);
+}
+
+#[tokio::test]
+async fn gateway_live_snapshot_thread_hydration_uses_one_fixed_high_watermark() {
+    let temp = tempdir().expect("tempdir");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let thread_a = store
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
+        .expect("thread a");
+    let thread_b = store
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
+        .expect("thread b");
+    store
+        .upsert_gateway_live_snapshot(thread_snapshot("thread-a-1", &thread_a, "one"))
+        .await
+        .expect("first thread snapshot");
+    store
+        .upsert_gateway_live_snapshot(thread_snapshot("thread-b-1", &thread_b, "unrelated"))
+        .await
+        .expect("unrelated snapshot");
+    store
+        .upsert_gateway_live_snapshot(thread_snapshot("thread-a-2", &thread_a, "two"))
+        .await
+        .expect("second thread snapshot");
+
+    let first = store
+        .list_gateway_live_snapshot_changes_for_thread(0, None, Some("local"), &thread_a, 1)
+        .await
+        .expect("first hydration page");
+    assert_eq!(first.snapshots[0].snapshot_key, "thread-a-1");
+    assert!(first.next_version < first.high_watermark);
+
+    store
+        .upsert_gateway_live_snapshot(thread_snapshot("thread-a-late", &thread_a, "late"))
+        .await
+        .expect("late snapshot");
+    let second = store
+        .list_gateway_live_snapshot_changes_for_thread(
+            first.next_version,
+            Some(first.high_watermark),
+            Some("local"),
+            &thread_a,
+            1,
+        )
+        .await
+        .expect("second hydration page");
+    assert_eq!(second.high_watermark, first.high_watermark);
+    assert_eq!(second.snapshots[0].snapshot_key, "thread-a-2");
+    assert_eq!(second.next_version, first.high_watermark);
+
+    let incremental = store
+        .list_gateway_live_snapshot_changes_for_thread(
+            first.high_watermark,
+            None,
+            Some("local"),
+            &thread_a,
+            10,
+        )
+        .await
+        .expect("incremental page");
+    assert_eq!(incremental.snapshots.len(), 1);
+    assert_eq!(incremental.snapshots[0].snapshot_key, "thread-a-late");
+}
+
+fn thread_snapshot<'a>(
+    key: &'a str,
+    thread: &'a str,
+    value: &'a str,
+) -> GatewayLiveSnapshotInput<'a> {
+    GatewayLiveSnapshotInput {
+        snapshot_key: key,
+        activity_id: None,
+        owner_id: Some("foreign"),
+        thread_id: Some(thread),
+        turn_id: Some("turn-1"),
+        event_kind: "entryUpdated",
+        event: json!({"type": "entryUpdated", "value": value}),
+    }
+}
+
+#[tokio::test]
 async fn gateway_live_snapshot_batch_rolls_back_every_key_when_a_later_write_fails() {
     let store = StateRuntime::open(":memory:").await.expect("store");
     let inputs = [

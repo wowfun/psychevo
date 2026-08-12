@@ -12,6 +12,7 @@ use crate::types::{CostStatus, MessageAccounting, SessionExportMessageSummary, T
 
 use super::store_context_evidence::{insert_context_evidence_rows, prepare_context_evidence};
 use super::store_message_fields::{message_fields, optional_json_string, parse_optional_json};
+use super::store_metadata::parse_session_revert;
 use super::{
     ContextEvidenceInput, MESSAGE_PRE_SNAPSHOT_KEY, MESSAGE_UNDO_METADATA_KEY, StateRuntime,
 };
@@ -89,6 +90,30 @@ pub(crate) struct StoredHistoryReplayPage {
 }
 
 impl StateRuntime {
+    pub(crate) async fn export_message_before_session_seq(&self, session_id: &str) -> Result<i64> {
+        self.observe_sqlx(async {
+            let mut transaction = self.inner.pool.begin().await?;
+            let metadata_json = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT metadata_json FROM sessions WHERE id = ?1",
+            )
+            .bind(session_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
+            let max_session_seq = sqlx::query_scalar::<_, i64>(
+                "SELECT COALESCE(MAX(session_seq), 0) FROM messages WHERE session_id = ?1",
+            )
+            .bind(session_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            Ok(parse_session_revert(metadata_json.as_deref())?
+                .map(|revert| revert.start_seq)
+                .unwrap_or_else(|| max_session_seq.saturating_add(1)))
+        })
+        .await
+    }
+
     pub async fn resume_session(&self, session_id: &str) -> Result<()> {
         let mut operation = self.begin_sqlx_operation();
         let result = async {
@@ -182,6 +207,33 @@ impl StateRuntime {
             .await?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
+        let mut records = Vec::new();
+        let mut after = 0;
+        loop {
+            let page = self
+                .load_export_message_summaries_page(session_id, after, boundary, 256)
+                .await?;
+            let Some(last) = page.last() else {
+                break;
+            };
+            after = last.session_seq;
+            let page_is_full = page.len() == 256;
+            records.extend(page);
+            if !page_is_full {
+                break;
+            }
+        }
+        Ok(records)
+    }
+
+    pub(crate) async fn load_export_message_summaries_page(
+        &self,
+        session_id: &str,
+        after_session_seq: i64,
+        before_session_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<SessionExportMessageSummary>> {
+        let limit = i64::try_from(limit.max(1)).unwrap_or(i64::MAX);
         let mut operation = self.begin_sqlx_operation();
         let result = async {
             let mut conn = self.acquire_sqlx().await?;
@@ -189,12 +241,17 @@ impl StateRuntime {
                 r#"
                 SELECT session_seq, message_json, usage_json, metadata_json
                 FROM messages
-                WHERE session_id = ?1 AND session_seq < ?2
+                WHERE session_id = ?1
+                  AND session_seq > ?2
+                  AND session_seq < ?3
                 ORDER BY session_seq ASC
+                LIMIT ?4
                 "#,
             )
             .bind(session_id)
-            .bind(boundary)
+            .bind(after_session_seq)
+            .bind(before_session_seq)
+            .bind(limit)
             .fetch_all(&mut *conn)
             .await?;
             rows.into_iter()
@@ -208,6 +265,91 @@ impl StateRuntime {
                     })
                 })
                 .collect()
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
+    pub(crate) async fn load_export_message_summaries_reverse_page(
+        &self,
+        session_id: &str,
+        before_session_seq: i64,
+        limit: usize,
+    ) -> Result<Vec<(SessionExportMessageSummary, u64)>> {
+        let limit = i64::try_from(limit.max(1)).unwrap_or(i64::MAX);
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT session_seq, message_json, usage_json, metadata_json,
+                       length(CAST(message_json AS BLOB))
+                         + length(CAST(COALESCE(usage_json, '') AS BLOB))
+                         + length(CAST(COALESCE(metadata_json, '') AS BLOB))
+                FROM messages
+                WHERE session_id = ?1 AND session_seq < ?2
+                ORDER BY session_seq DESC
+                LIMIT ?3
+                "#,
+            )
+            .bind(session_id)
+            .bind(before_session_seq)
+            .bind(limit)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| {
+                    let message_json: String = row.try_get(1)?;
+                    let source_bytes: i64 = row.try_get(4)?;
+                    Ok((
+                        SessionExportMessageSummary {
+                            session_seq: row.try_get(0)?,
+                            message: serde_json::from_str(&message_json)?,
+                            usage: parse_optional_json(row.try_get(2)?)?,
+                            metadata: parse_optional_json(row.try_get(3)?)?,
+                        },
+                        u64::try_from(source_bytes).unwrap_or(u64::MAX),
+                    ))
+                })
+                .collect()
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
+    pub async fn latest_export_assistant_message_summary(
+        &self,
+        session_id: &str,
+        before_session_seq: i64,
+    ) -> Result<Option<SessionExportMessageSummary>> {
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            let row = sqlx::query(
+                r#"
+                SELECT session_seq, message_json, usage_json, metadata_json
+                FROM messages
+                WHERE session_id = ?1 AND session_seq < ?2 AND role = 'assistant'
+                ORDER BY session_seq DESC
+                LIMIT 1
+                "#,
+            )
+            .bind(session_id)
+            .bind(before_session_seq)
+            .fetch_optional(&mut *conn)
+            .await?;
+            row.map(|row| {
+                let message_json: String = row.try_get(1)?;
+                Ok(SessionExportMessageSummary {
+                    session_seq: row.try_get(0)?,
+                    message: serde_json::from_str(&message_json)?,
+                    usage: parse_optional_json(row.try_get(2)?)?,
+                    metadata: parse_optional_json(row.try_get(3)?)?,
+                })
+            })
+            .transpose()
         }
         .await;
         operation.finish(&result);

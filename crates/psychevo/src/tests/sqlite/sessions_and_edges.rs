@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use tempfile::tempdir;
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v33_rejects_legacy_state_databases_with_reset_guidance() {
+pub(crate) async fn sqlite_schema_v34_rejects_legacy_state_databases_with_reset_guidance() {
     for version in 1..=28 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
@@ -47,7 +47,7 @@ pub(crate) async fn sqlite_schema_v33_rejects_legacy_state_databases_with_reset_
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v33_rejects_unknown_state_database() {
+pub(crate) async fn sqlite_schema_v34_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -67,7 +67,7 @@ pub(crate) async fn sqlite_schema_v33_rejects_unknown_state_database() {
 }
 
 #[tokio::test]
-pub(crate) async fn sqlite_schema_v33_creates_framework_and_gateway_coordination_schema() {
+pub(crate) async fn sqlite_schema_v34_creates_framework_and_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -91,7 +91,7 @@ pub(crate) async fn sqlite_schema_v33_creates_framework_and_gateway_coordination
     let user_version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("user_version");
-    assert_eq!(user_version, 33);
+    assert_eq!(user_version, 34);
     assert!(sqlite_columns(&conn, "timeline_items").is_empty());
     assert!(sqlite_columns(&conn, "timeline_artifacts").is_empty());
     assert!(sqlite_columns(&conn, "timeline_debug_events").is_empty());
@@ -158,6 +158,11 @@ pub(crate) async fn sqlite_schema_v33_creates_framework_and_gateway_coordination
             .any(|name| name == "revision")
     );
     assert!(
+        sqlite_columns(&conn, "gateway_live_snapshots")
+            .iter()
+            .any(|name| name == "change_version")
+    );
+    assert!(
         sqlite_columns(&conn, "gateway_live_events")
             .iter()
             .any(|name| name == "idempotency_key")
@@ -171,6 +176,65 @@ pub(crate) async fn sqlite_schema_v33_creates_framework_and_gateway_coordination
         .expect("gateway live event idempotency index"),
         1
     );
+    for index in [
+        "idx_gateway_live_snapshots_change",
+        "idx_gateway_live_events_created_at",
+        "idx_gateway_live_snapshots_updated_at",
+    ] {
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("live projection index"),
+            1,
+            "missing {index}"
+        );
+    }
+    for index in [
+        "idx_messages_session_seq",
+        "idx_context_evidence_prompt",
+        "idx_gateway_live_events_seq",
+        "idx_gateway_live_snapshots_owner",
+    ] {
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("redundant index absence"),
+            0,
+            "redundant {index} remains"
+        );
+    }
+    for (query, index) in [
+        (
+            "EXPLAIN QUERY PLAN SELECT snapshot_key FROM gateway_live_snapshots WHERE change_version > 0 AND change_version <= 10 AND owner_id IS NOT 'local' ORDER BY change_version LIMIT 1000",
+            "idx_gateway_live_snapshots_change",
+        ),
+        (
+            "EXPLAIN QUERY PLAN DELETE FROM gateway_live_events WHERE created_at_ms < 10",
+            "idx_gateway_live_events_created_at",
+        ),
+        (
+            "EXPLAIN QUERY PLAN DELETE FROM gateway_live_snapshots WHERE updated_at_ms < 10",
+            "idx_gateway_live_snapshots_updated_at",
+        ),
+    ] {
+        let mut statement = conn.prepare(query).expect("query plan");
+        let details = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("plan rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("plan details")
+            .join("\n");
+        assert!(
+            details.contains(index),
+            "{query} did not use {index}: {details}"
+        );
+    }
     assert_eq!(
         conn.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_gateway_turn_terminals_visible_history'",

@@ -89,6 +89,7 @@ pub(crate) mod tests {
     use crate::session_export::{
         SessionArtifactKind, SessionExportFormat, SessionExportInclude, SessionExportIncludeSet,
         SessionExportOptions, default_session_export_filename, render_session_export,
+        write_session_export,
     };
     use crate::state::StateRuntime;
     use crate::store::{AgentMailboxEventInput, PromptPrefixRecord, PromptPrefixSlotRecord};
@@ -108,6 +109,62 @@ pub(crate) mod tests {
         assert_ne!(parent, child);
         assert_eq!(parent, "psychevo-session-019e3716-eeb0.json");
         assert_eq!(child, "psychevo-session-019e3716-fa89.json");
+    }
+
+    #[tokio::test]
+    async fn header_only_export_omits_mailbox_and_atomically_replaces_output() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = StateRuntime::open(tmp.path().join("state.db"))
+            .await
+            .expect("store");
+        let session = store
+            .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .await
+            .expect("session");
+        store
+            .append_agent_mailbox_event(AgentMailboxEventInput {
+                parent_session_id: session.clone(),
+                child_session_id: None,
+                agent_id: "agent-1".to_string(),
+                task_name: Some("worker".to_string()),
+                agent_name: "worker".to_string(),
+                content_text: "mailbox content".to_string(),
+                payload: serde_json::json!({"content": "mailbox content"}),
+                metadata: None,
+            })
+            .await
+            .expect("mailbox event");
+        let output = tmp.path().join("nested/export.json");
+        std::fs::create_dir_all(output.parent().expect("parent")).expect("parent directory");
+        std::fs::write(&output, "old content").expect("existing output");
+
+        let result = write_session_export(
+            &store,
+            &session,
+            &output,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([SessionExportInclude::Header]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .await
+        .expect("write export");
+        let content = std::fs::read_to_string(&output).expect("output");
+        let value: Value = serde_json::from_str(&content).expect("json");
+        assert!(value.get("mailbox_events").is_none());
+        assert!(value.get("messages").is_none());
+        assert!(value.get("header").is_some());
+        assert_eq!(result.bytes, content.len());
+        assert!(
+            std::fs::read_dir(output.parent().expect("parent"))
+                .expect("directory")
+                .all(|entry| !entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp"))
+        );
     }
 
     #[tokio::test]

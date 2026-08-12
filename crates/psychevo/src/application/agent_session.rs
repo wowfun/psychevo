@@ -1198,7 +1198,7 @@ mod filesystem_authorizer_tests {
             None,
         )
         .with_workspace_root_capture(
-            &crate::WorkspaceRootCapture::capture(std::slice::from_ref(&cwd))
+            &crate::application::WorkspaceRootCapture::capture(std::slice::from_ref(&cwd))
                 .expect("Workspace capture"),
         );
         let (_handle, control) = crate::types::run_control();
@@ -1224,8 +1224,11 @@ mod filesystem_authorizer_tests {
         fs::create_dir_all(&secondary).expect("secondary");
         let target = primary.join("visible.txt");
         fs::write(&target, "visible").expect("target");
-        let capture = crate::WorkspaceRootCapture::capture(&[primary.clone(), secondary.clone()])
-            .expect("Workspace capture");
+        let capture = crate::application::WorkspaceRootCapture::capture(&[
+            primary.clone(),
+            secondary.clone(),
+        ])
+        .expect("Workspace capture");
         let runtime = crate::permissions::PermissionRuntime::new(
             primary.clone(),
             primary.join(".psychevo"),

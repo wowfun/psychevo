@@ -96,12 +96,12 @@ fn atomic_replace_impl(path: &Path, contents: &[u8], unix_mode: Option<u32>) -> 
 }
 
 #[cfg(not(windows))]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     std::fs::rename(source, destination)
 }
 
 #[cfg(windows)]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,

@@ -192,7 +192,7 @@ pub(crate) fn load_dotenv_file(path: &Path, env_map: &mut BTreeMap<String, Strin
     Ok(())
 }
 
-pub(crate) fn valid_env_name(name: &str) -> bool {
+pub fn valid_env_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('_' | 'A'..='Z' | 'a'..='z'))
         && chars.all(|ch| matches!(ch, '_' | 'A'..='Z' | 'a'..='z' | '0'..='9'))

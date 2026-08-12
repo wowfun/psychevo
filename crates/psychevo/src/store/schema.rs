@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_first_open_records_complete_v33_migration_history() {
+    async fn concurrent_first_open_records_complete_v34_migration_history() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = Arc::new(temp.path().join("state.db"));
         let barrier = Arc::new(Barrier::new(8));

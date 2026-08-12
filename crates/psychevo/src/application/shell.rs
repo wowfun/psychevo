@@ -284,7 +284,7 @@ impl ShellCommand {
         let workspace_root_capture = workspace_roots
             .as_ref()
             .map(|roots| {
-                crate::WorkspaceRootCapture::capture(
+                crate::application::WorkspaceRootCapture::capture(
                     &roots.iter().map(PathBuf::from).collect::<Vec<_>>(),
                 )
             })

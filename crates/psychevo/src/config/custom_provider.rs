@@ -89,11 +89,7 @@ pub fn create_scoped_custom_provider(
     if name.is_empty() {
         return Err(Error::Config("provider name is required".to_string()));
     }
-    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-        return Err(Error::Config(
-            "provider api must start with http:// or https://".to_string(),
-        ));
-    }
+    let base_url = validate_provider_base_url(&base_url)?;
     if let Some(api_key) = &api_key
         && (api_key.contains('\n') || api_key.contains('\r'))
     {
@@ -240,7 +236,7 @@ pub fn set_provider_model_config(
     write_toml_config_file(&config_path, &parsed)
 }
 
-pub(crate) fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
+pub fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
     if !valid_provider_id(provider_id) {
         return Err(Error::Config(
             "provider id must use lowercase letters, numbers, hyphens, or underscores".to_string(),
@@ -255,10 +251,21 @@ pub(crate) fn validate_custom_provider_id(provider_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn valid_provider_id(provider_id: &str) -> bool {
+pub fn valid_provider_id(provider_id: &str) -> bool {
     let mut chars = provider_id.chars();
     matches!(chars.next(), Some('a'..='z' | '0'..='9'))
         && chars.all(|ch| matches!(ch, 'a'..='z' | '0'..='9' | '-' | '_'))
+}
+
+pub fn validate_provider_base_url(value: &str) -> Result<String> {
+    let value = value.trim().trim_end_matches('/').to_string();
+    if value.starts_with("http://") || value.starts_with("https://") {
+        Ok(value)
+    } else {
+        Err(Error::Config(
+            "provider api must start with http:// or https://".to_string(),
+        ))
+    }
 }
 
 pub(crate) fn write_provider_config(

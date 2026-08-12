@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 #[cfg(windows)]
 use std::ffi::OsString;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::Duration;
 
@@ -45,6 +46,7 @@ pub struct ExtensionRuntime {
     capabilities: HostCapabilities,
     mode: ExtensionHostMode,
     state: Mutex<RuntimeState>,
+    session_transition: Mutex<()>,
 }
 
 struct RuntimeState {
@@ -107,6 +109,7 @@ impl ExtensionRuntime {
                 idle_task: None,
                 stopping: false,
             }),
+            session_transition: Mutex::new(()),
         }))
     }
 
@@ -130,7 +133,10 @@ impl ExtensionRuntime {
         state.leases = state.leases.saturating_add(1);
         Ok(ExtensionLease {
             runtime: Arc::clone(self),
-            active: true,
+            lifetime: Arc::new(ExtensionLeaseLifetime {
+                runtime: Arc::clone(self),
+                active: AtomicBool::new(true),
+            }),
         })
     }
 
@@ -155,21 +161,37 @@ impl ExtensionRuntime {
         if let Some(session) = session {
             session.shutdown().await.map_err(Error::Message)?;
         }
+        let _transition = self.session_transition.lock().await;
         drop(activity_lock);
         Ok(())
     }
 
     async fn session(&self) -> std::result::Result<Arc<ExtensionSession>, String> {
-        let mut state = self.state.lock().await;
-        if state.stopping {
-            return Err(format!("Extension `{}` is shutting down", self.record.id));
-        }
-        if let Some(session) = state.session.as_ref()
-            && !session.is_stopped()
         {
-            return Ok(Arc::clone(session));
+            let state = self.state.lock().await;
+            if state.stopping {
+                return Err(format!("Extension `{}` is shutting down", self.record.id));
+            }
+            if let Some(session) = state.session.as_ref()
+                && !session.is_stopped()
+            {
+                return Ok(Arc::clone(session));
+            }
         }
-        if let Some(session) = state.session.take() {
+        let _transition = self.session_transition.lock().await;
+        let (stale_session, channel_starts) = {
+            let mut state = self.state.lock().await;
+            if state.stopping {
+                return Err(format!("Extension `{}` is shutting down", self.record.id));
+            }
+            if let Some(session) = state.session.as_ref()
+                && !session.is_stopped()
+            {
+                return Ok(Arc::clone(session));
+            }
+            (state.session.take(), state.channel_starts.clone())
+        };
+        if let Some(session) = stale_session {
             session.stop().await;
         }
         let session = ExtensionSession::start(
@@ -179,7 +201,7 @@ impl ExtensionRuntime {
             self.capabilities.clone(),
         )
         .await?;
-        for params in state.channel_starts.values() {
+        for params in channel_starts.values() {
             if let Err(error) = session
                 .call(
                     "channel/start",
@@ -194,8 +216,24 @@ impl ExtensionRuntime {
                 ));
             }
         }
-        state.session = Some(Arc::clone(&session));
-        Ok(session)
+        let publish = {
+            let mut state = self.state.lock().await;
+            if !state.stopping && state.leases > 0 {
+                state.session = Some(Arc::clone(&session));
+                true
+            } else {
+                false
+            }
+        };
+        if publish {
+            Ok(session)
+        } else {
+            let _ = session.shutdown().await;
+            Err(format!(
+                "Extension `{}` session start was cancelled",
+                self.record.id
+            ))
+        }
     }
 
     async fn release_lease(self: &Arc<Self>) -> Result<()> {
@@ -286,7 +324,21 @@ impl Drop for ExtensionRuntime {
 
 pub struct ExtensionLease {
     runtime: Arc<ExtensionRuntime>,
-    active: bool,
+    lifetime: Arc<ExtensionLeaseLifetime>,
+}
+
+struct ExtensionLeaseLifetime {
+    runtime: Arc<ExtensionRuntime>,
+    active: AtomicBool,
+}
+
+impl Clone for ExtensionLease {
+    fn clone(&self) -> Self {
+        Self {
+            runtime: Arc::clone(&self.runtime),
+            lifetime: Arc::clone(&self.lifetime),
+        }
+    }
 }
 
 impl ExtensionLease {
@@ -424,16 +476,15 @@ impl ExtensionLease {
             .map_err(Error::Message)
     }
 
-    pub async fn release(mut self) -> Result<()> {
-        if !self.active {
+    pub async fn release(self) -> Result<()> {
+        if !self.lifetime.active.swap(false, Ordering::AcqRel) {
             return Ok(());
         }
-        self.active = false;
         self.runtime.release_lease().await
     }
 
     fn ensure_active(&self) -> Result<()> {
-        if self.active {
+        if self.lifetime.active.load(Ordering::Acquire) {
             Ok(())
         } else {
             Err(Error::Message("Extension lease is closed".to_string()))
@@ -441,12 +492,11 @@ impl ExtensionLease {
     }
 }
 
-impl Drop for ExtensionLease {
+impl Drop for ExtensionLeaseLifetime {
     fn drop(&mut self) {
-        if !self.active {
+        if !self.active.swap(false, Ordering::AcqRel) {
             return;
         }
-        self.active = false;
         let runtime = Arc::clone(&self.runtime);
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {

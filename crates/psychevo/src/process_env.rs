@@ -3,8 +3,10 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(any(windows, test))]
 use chardetng::EncodingDetector;
-use encoding_rs::{Encoding, GBK, IBM866, WINDOWS_1251, WINDOWS_1252};
+#[cfg(any(windows, test))]
+use encoding_rs::{Encoding, GB18030, GBK, IBM866, WINDOWS_1251, WINDOWS_1252};
 
 use crate::host_paths::HostPlatform;
 use crate::{Error, Result};
@@ -145,6 +147,7 @@ pub fn apply_process_env(
     env_map: &BTreeMap<String, String>,
     options: ProcessEnvOptions<'_>,
 ) -> Result<()> {
+    command.env_clear();
     for (key, value) in effective_process_env(env_map, options)? {
         command.env(key, value);
     }
@@ -156,6 +159,7 @@ pub fn apply_tokio_process_env(
     env_map: &BTreeMap<String, String>,
     options: ProcessEnvOptions<'_>,
 ) -> Result<()> {
+    command.env_clear();
     for (key, value) in effective_process_env(env_map, options)? {
         command.env(key, value);
     }
@@ -167,6 +171,7 @@ pub fn apply_pty_process_env(
     env_map: &BTreeMap<String, String>,
     options: ProcessEnvOptions<'_>,
 ) -> Result<()> {
+    command.env_clear();
     for (key, value) in effective_process_env(env_map, options)? {
         command.env(key, value);
     }
@@ -217,8 +222,6 @@ pub fn combined_path_value(
     let mut paths = path_prefixes.to_vec();
     if let Some(current) = env_value_case_insensitive(env_map, "PATH") {
         paths.extend(std::env::split_paths(current));
-    } else if let Some(current) = std::env::var_os("PATH") {
-        paths.extend(std::env::split_paths(&current));
     }
     if paths.is_empty() {
         return Ok(None);
@@ -308,12 +311,16 @@ pub fn decode_process_output_for_platform(bytes: &[u8], windows_locale_fallback:
     if let Ok(output) = std::str::from_utf8(bytes) {
         return output.to_string();
     }
-    if windows_locale_fallback && let Some(output) = decode_windows_legacy(bytes) {
-        return output;
+    if windows_locale_fallback {
+        #[cfg(any(windows, test))]
+        if let Some(output) = decode_windows_legacy(bytes) {
+            return output;
+        }
     }
     String::from_utf8_lossy(bytes).to_string()
 }
 
+#[cfg(any(windows, test))]
 fn decode_windows_legacy(bytes: &[u8]) -> Option<String> {
     if looks_like_windows_1252_punctuation(bytes) {
         return decode_without_errors(bytes, WINDOWS_1252);
@@ -332,6 +339,7 @@ fn decode_windows_legacy(bytes: &[u8]) -> Option<String> {
     None
 }
 
+#[cfg(any(windows, test))]
 fn detected_legacy_decoding_is_plausible(encoding: &'static Encoding, decoded: &str) -> bool {
     if encoding == GBK {
         return decoded.chars().any(is_cjk_char);
@@ -342,6 +350,7 @@ fn detected_legacy_decoding_is_plausible(encoding: &'static Encoding, decoded: &
     false
 }
 
+#[cfg(any(windows, test))]
 fn detect_encoding(bytes: &[u8]) -> &'static Encoding {
     let mut detector = EncodingDetector::new();
     detector.feed(bytes, true);
@@ -352,16 +361,19 @@ fn detect_encoding(bytes: &[u8]) -> &'static Encoding {
     encoding
 }
 
+#[cfg(any(windows, test))]
 fn decode_without_errors(bytes: &[u8], encoding: &'static Encoding) -> Option<String> {
     let (decoded, _, had_errors) = encoding.decode(bytes);
     (!had_errors).then(|| decoded.into_owned())
 }
 
+#[cfg(any(windows, test))]
 fn decode_gb18030_without_errors(bytes: &[u8]) -> Option<String> {
-    let (decoded, _, had_errors) = encoding_rs2::GB18030.decode(bytes);
+    let (decoded, _, had_errors) = GB18030.decode(bytes);
     (!had_errors).then(|| decoded.into_owned())
 }
 
+#[cfg(any(windows, test))]
 fn is_cjk_char(ch: char) -> bool {
     matches!(
         ch as u32,
@@ -377,12 +389,15 @@ fn is_cjk_char(ch: char) -> bool {
     )
 }
 
+#[cfg(any(windows, test))]
 fn is_cyrillic_char(ch: char) -> bool {
     matches!(ch as u32, 0x0400..=0x052F)
 }
 
+#[cfg(any(windows, test))]
 const WINDOWS_1252_PUNCT_BYTES: [u8; 8] = [0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x99];
 
+#[cfg(any(windows, test))]
 fn looks_like_windows_1252_punctuation(bytes: &[u8]) -> bool {
     let mut saw_extended_punctuation = false;
     let mut saw_ascii_word = false;
@@ -538,6 +553,76 @@ mod tests {
         assert_eq!(key, "Path");
         assert_eq!(entries.first(), Some(&tools));
         assert_eq!(entries.get(1), Some(&inherited));
+    }
+
+    #[test]
+    fn captured_only_path_does_not_read_the_ambient_process() {
+        let temp = tempfile::tempdir().expect("temp");
+        let tools = temp.path().join("tools");
+        let effective = effective_process_env(
+            &BTreeMap::new(),
+            ProcessEnvOptions::new(std::slice::from_ref(&tools)),
+        )
+        .expect("effective environment");
+        let path = effective.get("PATH").expect("managed path");
+        assert_eq!(
+            std::env::split_paths(path).collect::<Vec<_>>(),
+            vec![tools.clone()]
+        );
+    }
+
+    #[test]
+    fn applying_captured_env_clears_command_builder_inheritance() {
+        let captured = BTreeMap::from([("CAPTURED_ONLY".to_string(), "kept".to_string())]);
+
+        let mut command = Command::new("unused");
+        command.env("AMBIENT_ONLY", "discarded");
+        apply_process_env(&mut command, &captured, ProcessEnvOptions::new(&[]))
+            .expect("standard command environment");
+        let std_env = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            std_env.get("CAPTURED_ONLY"),
+            Some(&Some("kept".to_string()))
+        );
+        assert!(!std_env.contains_key("AMBIENT_ONLY"));
+
+        let mut command = tokio::process::Command::new("unused");
+        command.env("AMBIENT_ONLY", "discarded");
+        apply_tokio_process_env(&mut command, &captured, ProcessEnvOptions::new(&[]))
+            .expect("Tokio command environment");
+        let tokio_env = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            tokio_env.get("CAPTURED_ONLY"),
+            Some(&Some("kept".to_string()))
+        );
+        assert!(!tokio_env.contains_key("AMBIENT_ONLY"));
+
+        let mut command = portable_pty::CommandBuilder::new("unused");
+        command.env("AMBIENT_ONLY", "discarded");
+        apply_pty_process_env(&mut command, &captured, ProcessEnvOptions::new(&[]))
+            .expect("PTY command environment");
+        assert_eq!(
+            command.get_env("CAPTURED_ONLY"),
+            Some(std::ffi::OsStr::new("kept"))
+        );
+        assert_eq!(command.get_env("AMBIENT_ONLY"), None);
     }
 
     #[test]

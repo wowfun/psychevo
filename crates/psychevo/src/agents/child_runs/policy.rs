@@ -198,8 +198,10 @@ async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
             capture.clone()
         }
         None => {
-            crate::WorkspaceRootCapture::capture_async(child.context.workspace_roots.clone())
-                .await?
+            crate::application::WorkspaceRootCapture::capture_async(
+                child.context.workspace_roots.clone(),
+            )
+            .await?
         }
     };
     let permission_runtime =

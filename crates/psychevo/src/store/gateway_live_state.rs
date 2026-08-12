@@ -6,10 +6,23 @@ use crate::error::{Error, Result};
 
 use super::{
     GatewayLiveEventCommit, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, StateRuntime,
+    GatewayLiveSnapshotPage, GatewayLiveSnapshotRecord, StateRuntime,
 };
 
 impl StateRuntime {
+    pub async fn latest_gateway_live_snapshot_version(&self) -> Result<i64> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query_scalar(
+                "SELECT current_version FROM gateway_live_snapshot_clock WHERE singleton = 1",
+            )
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(Into::into)
+        })
+        .await
+    }
+
     pub async fn append_gateway_live_event(
         &self,
         activity_id: Option<&str>,
@@ -172,12 +185,23 @@ impl StateRuntime {
             let mut tx = self.begin_sqlx_write().await?;
             let mut revisions = Vec::with_capacity(inputs.len());
             for (input, event_json) in inputs.iter().zip(event_json) {
-                sqlx::query(
+                let change_version = sqlx::query_scalar::<_, i64>(
+                    r#"
+                    UPDATE gateway_live_snapshot_clock
+                    SET current_version = current_version + 1
+                    WHERE singleton = 1
+                    RETURNING current_version
+                    "#,
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+                let revision = sqlx::query_scalar::<_, i64>(
                     r#"
                     INSERT INTO gateway_live_snapshots (
                         snapshot_key, activity_id, owner_id, thread_id, turn_id,
-                        event_kind, event_json, revision, created_at_ms, updated_at_ms
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8)
+                        event_kind, event_json, revision, created_at_ms, updated_at_ms,
+                        change_version
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8, ?9)
                     ON CONFLICT(snapshot_key) DO UPDATE SET
                         activity_id = excluded.activity_id,
                         owner_id = excluded.owner_id,
@@ -186,13 +210,15 @@ impl StateRuntime {
                         event_kind = excluded.event_kind,
                         event_json = excluded.event_json,
                         revision = gateway_live_snapshots.revision + 1,
-                        updated_at_ms = excluded.updated_at_ms
+                        updated_at_ms = excluded.updated_at_ms,
+                        change_version = excluded.change_version
                     WHERE gateway_live_snapshots.activity_id IS NOT excluded.activity_id
                        OR gateway_live_snapshots.owner_id IS NOT excluded.owner_id
                        OR gateway_live_snapshots.thread_id IS NOT excluded.thread_id
                        OR gateway_live_snapshots.turn_id IS NOT excluded.turn_id
                        OR gateway_live_snapshots.event_kind IS NOT excluded.event_kind
                        OR gateway_live_snapshots.event_json IS NOT excluded.event_json
+                    RETURNING revision
                     "#,
                 )
                 .bind(input.snapshot_key)
@@ -203,16 +229,20 @@ impl StateRuntime {
                 .bind(input.event_kind)
                 .bind(event_json)
                 .bind(now)
-                .execute(&mut *tx)
+                .bind(change_version)
+                .fetch_optional(&mut *tx)
                 .await?;
-                revisions.push(
-                    sqlx::query_scalar::<_, i64>(
-                        "SELECT revision FROM gateway_live_snapshots WHERE snapshot_key = ?1",
-                    )
-                    .bind(input.snapshot_key)
-                    .fetch_one(&mut *tx)
-                    .await?,
-                );
+                revisions.push(match revision {
+                    Some(revision) => revision,
+                    None => {
+                        sqlx::query_scalar::<_, i64>(
+                            "SELECT revision FROM gateway_live_snapshots WHERE snapshot_key = ?1",
+                        )
+                        .bind(input.snapshot_key)
+                        .fetch_one(&mut *tx)
+                        .await?
+                    }
+                });
             }
             tx.commit().await?;
             Ok(revisions)
@@ -228,7 +258,8 @@ impl StateRuntime {
             sqlx::query(
                 r#"
                 SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
-                       event_kind, event_json, revision, created_at_ms, updated_at_ms
+                       event_kind, event_json, revision, change_version,
+                       created_at_ms, updated_at_ms
                 FROM gateway_live_snapshots
                 ORDER BY updated_at_ms ASC, snapshot_key ASC
                 LIMIT ?1
@@ -249,7 +280,8 @@ impl StateRuntime {
             sqlx::query(
                 r#"
                 SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
-                       event_kind, event_json, revision, created_at_ms, updated_at_ms
+                       event_kind, event_json, revision, change_version,
+                       created_at_ms, updated_at_ms
                 FROM gateway_live_snapshots
                 WHERE thread_id = ?1
                   AND (?2 IS NULL OR turn_id = ?2)
@@ -261,6 +293,123 @@ impl StateRuntime {
             .bind(turn_id)
             .bind(limit.clamp(1, 1000) as i64),
         )
+        .await
+    }
+
+    pub async fn list_gateway_live_snapshot_changes(
+        &self,
+        after_version: i64,
+        excluding_owner_id: &str,
+        limit: usize,
+    ) -> Result<GatewayLiveSnapshotPage> {
+        let limit = limit.clamp(1, 1000);
+        self.observe_sqlx(async {
+            let mut tx = self.inner.pool.begin().await?;
+            let high_watermark = sqlx::query_scalar::<_, i64>(
+                "SELECT current_version FROM gateway_live_snapshot_clock WHERE singleton = 1",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
+                       event_kind, event_json, revision, change_version,
+                       created_at_ms, updated_at_ms
+                FROM gateway_live_snapshots
+                WHERE change_version > ?1
+                  AND change_version <= ?2
+                  AND owner_id IS NOT ?3
+                ORDER BY change_version ASC
+                LIMIT ?4
+                "#,
+            )
+            .bind(after_version.max(0))
+            .bind(high_watermark)
+            .bind(excluding_owner_id)
+            .bind(limit as i64)
+            .fetch_all(&mut *tx)
+            .await?;
+            let snapshots = rows
+                .into_iter()
+                .map(|row| gateway_live_snapshot_from_row(&row))
+                .collect::<Result<Vec<_>>>()?;
+            let next_version = if snapshots.len() == limit {
+                snapshots
+                    .last()
+                    .map(|snapshot| snapshot.change_version)
+                    .unwrap_or(high_watermark)
+            } else {
+                high_watermark
+            };
+            tx.commit().await?;
+            Ok(GatewayLiveSnapshotPage {
+                high_watermark,
+                next_version,
+                snapshots,
+            })
+        })
+        .await
+    }
+
+    pub async fn list_gateway_live_snapshot_changes_for_thread(
+        &self,
+        after_version: i64,
+        through_version: Option<i64>,
+        excluding_owner_id: Option<&str>,
+        thread_id: &str,
+        limit: usize,
+    ) -> Result<GatewayLiveSnapshotPage> {
+        let limit = limit.clamp(1, 1000);
+        self.observe_sqlx(async {
+            let mut tx = self.inner.pool.begin().await?;
+            let current_version = sqlx::query_scalar::<_, i64>(
+                "SELECT current_version FROM gateway_live_snapshot_clock WHERE singleton = 1",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            let high_watermark = through_version
+                .map(|version| version.clamp(0, current_version))
+                .unwrap_or(current_version);
+            let rows = sqlx::query(
+                r#"
+                SELECT snapshot_key, activity_id, owner_id, thread_id, turn_id,
+                       event_kind, event_json, revision, change_version,
+                       created_at_ms, updated_at_ms
+                FROM gateway_live_snapshots
+                WHERE change_version > ?1
+                  AND change_version <= ?2
+                  AND (?3 IS NULL OR owner_id IS NOT ?3)
+                  AND thread_id = ?4
+                ORDER BY change_version ASC
+                LIMIT ?5
+                "#,
+            )
+            .bind(after_version.max(0))
+            .bind(high_watermark)
+            .bind(excluding_owner_id)
+            .bind(thread_id)
+            .bind(limit as i64)
+            .fetch_all(&mut *tx)
+            .await?;
+            let snapshots = rows
+                .into_iter()
+                .map(|row| gateway_live_snapshot_from_row(&row))
+                .collect::<Result<Vec<_>>>()?;
+            let next_version = if snapshots.len() == limit {
+                snapshots
+                    .last()
+                    .map(|snapshot| snapshot.change_version)
+                    .unwrap_or(high_watermark)
+            } else {
+                high_watermark
+            };
+            tx.commit().await?;
+            Ok(GatewayLiveSnapshotPage {
+                high_watermark,
+                next_version,
+                snapshots,
+            })
+        })
         .await
     }
 
@@ -338,7 +487,8 @@ fn gateway_live_snapshot_from_row(
         event_kind: row.try_get(5)?,
         event: serde_json::from_str(&event_json)?,
         revision: row.try_get(7)?,
-        created_at_ms: row.try_get(8)?,
-        updated_at_ms: row.try_get(9)?,
+        change_version: row.try_get(8)?,
+        created_at_ms: row.try_get(9)?,
+        updated_at_ms: row.try_get(10)?,
     })
 }

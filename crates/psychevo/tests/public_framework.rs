@@ -6,8 +6,9 @@ use psychevo::session_export::{
     SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
 };
 use psychevo::{
-    Application, ConfigurationQuery, RunMode, StartThreadRequest, ThreadListQuery, TurnRequest,
-    UsageQuery,
+    application::Application, application::ConfigurationQuery, application::RunMode,
+    application::StartThreadRequest, application::ThreadListQuery, application::TurnRequest,
+    application::UsageQuery,
 };
 
 #[test]

@@ -452,4 +452,25 @@ mod tests {
         assert_eq!(count.skill_entries[0].name, "alpha");
         assert_eq!(count.encoding, "deepseek_v3");
     }
+
+    #[test]
+    fn product_owned_count_only_path_matches_token_materialization() {
+        let encoding = tiktoken::get_encoding("o200k_base").expect("o200k encoding");
+        let transcript = (0..256)
+            .map(|index| {
+                json!({
+                    "role": "tool",
+                    "call_id": format!("call_read_{index}"),
+                    "content": format!("fixture content {index}\n中文工具结果 — 完成"),
+                })
+            })
+            .collect::<Vec<_>>();
+        let value = Value::Array(transcript);
+        let serialized = serde_json::to_string(&value).expect("serialized transcript");
+
+        assert_eq!(
+            count_value(encoding, &value),
+            encoding.encode(&serialized).len() as u64
+        );
+    }
 }

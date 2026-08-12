@@ -1,5 +1,3 @@
-use std::thread;
-
 use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use serde_json::json;
@@ -9,10 +7,10 @@ use super::provider_http::{
     reasoning_capability_metadata, reasoning_capability_with_interleaved,
 };
 use crate::metadata::{allowlisted_provider_metadata, normalize_usage};
-use crate::openai::request::{count_openai_chat_request, count_text, openai_chat_request_body};
+use crate::openai::request::openai_chat_request_body;
 use crate::stream::chat_chunks::{ChatChunkNormalizer, ChatCompletionChunk};
 use crate::stream::sse::SseParser;
-use crate::types::{GenerationRequest, ModelTarget, Outcome, StreamEvent, ToolDeclaration};
+use crate::types::{GenerationRequest, ModelTarget, Outcome, StreamEvent};
 
 #[test]
 pub(crate) fn chat_request_maps_local_image_blocks_to_content_parts() {
@@ -239,83 +237,6 @@ pub(crate) fn tiny_avif_bytes() -> Vec<u8> {
             "AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZk1BMUIAAAD5bWV0YQAAAAAAAAAvaGRscgAAAAAAAAAAcGljdAAAAAAAAAAAAAAAAFBpY3R1cmVIYW5kbGVyAAAAAA5waXRtAAAAAAABAAAAHmlsb2MAAAAARAAAAQABAAAAAQAAASEAAAAdAAAAKGlpbmYAAAAAAAEAAAAaaW5mZQIAAAAAAQAAYXYwMUNvbG9yAAAAAGppcHJwAAAAS2lwY28AAAAUaXNwZQAAAAAAAAAQAAAAEAAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EADAAAAAATY29scm5jbHgAAgACAAIAAAAAF2lwbWEAAAAAAAAAAQABBAECgwQAAAAlbWRhdAoGGAz/2wCAMhMYAAAAUAAAAACpjmy2qrHGtoVA",
         )
         .expect("tiny avif")
-}
-
-#[test]
-pub(crate) fn openai_chat_token_count_splits_context_categories() {
-    let request = GenerationRequest {
-        model: ModelTarget {
-            provider: "deepseek".to_string(),
-            model: "deepseek-chat".to_string(),
-        },
-        messages: vec![
-            json!({"role":"system","content":"mode","metadata":{"prompt_slot":"base/mode","prompt_semantic_role":"base_policy"}}),
-            json!({"role":"system","content":"<available_skills>\n  <skill>\n    <name>alpha</name>\n    <description>longer helper</description>\n  </skill>\n  <skill>\n    <name>beta</name>\n    <description>short</description>\n  </skill>\n</available_skills>","metadata":{"prompt_slot":"skill_index","prompt_semantic_role":"developer_prompt"}}),
-            json!({"role":"user","content":[{"text":"project instructions"}],"metadata":{"context_category":"project_context"}}),
-            json!({"role":"user","content":[{"text":"previous"}]}),
-            json!({"role":"user","content":[{"text":"selected skill body"}],"metadata":{"context_category":"turn_context"}}),
-            json!({"role":"assistant","content":[{"type":"text","text":"ok"}]}),
-        ],
-        tools: vec![ToolDeclaration::new("read", "read file", json!({"type":"object"})).into()],
-        metadata: json!({
-            "context_counting": {
-                "system_prompt_message_count": 1,
-                "skill_index_message_count": 1,
-                "previous_message_count": 1,
-                "project_instruction_context_message_count": 1,
-                "selected_skill_context_message_count": 1,
-                "skill_names": ["alpha", "beta"]
-            }
-        }),
-    };
-
-    let count = count_openai_chat_request(&request, "https://api.deepseek.com/v1");
-
-    assert!(count.base_policy_tokens > 0);
-    assert!(count.developer_prompt_tokens > 0);
-    assert!(count.system_tools_tokens > 0);
-    assert_eq!(count.skills_tokens, 0);
-    assert!(count.history_tokens > 0);
-    assert!(count.turn_context_tokens > 0);
-    assert!(count.current_prompt_tokens > 0);
-    assert!(count.messages_tokens > 0);
-    assert!(count.project_instruction_context_tokens > 0);
-    assert!(count.selected_skill_context_tokens > 0);
-    assert_eq!(count.tool_count, 1);
-    assert_eq!(count.role_counts["user"].count, 3);
-    assert_eq!(count.role_counts["assistant"].count, 1);
-    assert_eq!(count.selected_skill_context_count, 1);
-    assert_eq!(count.project_instruction_context_count, 1);
-    assert_eq!(count.skill_names, vec!["alpha", "beta"]);
-    assert_eq!(count.skill_entries.len(), 2);
-    assert_eq!(count.skill_entries[0].name, "alpha");
-    assert!(count.skill_entries[0].tokens > count.skill_entries[1].tokens);
-    assert_eq!(count.encoding, "deepseek_v3");
-}
-
-#[test]
-pub(crate) fn token_count_stays_equivalent_for_growing_serialized_transcripts() {
-    let enc = tiktoken::get_encoding("o200k_base").expect("o200k encoding");
-    let mut transcript = String::new();
-    for index in 0..256 {
-        transcript.push_str(&format!(
-            "{{\"role\":\"tool\",\"call_id\":\"call_read_{index}\",\"content\":\"fixture content {index}\\n\"}}\n"
-        ));
-    }
-    let expected = enc.encode(&transcript).len() as u64;
-
-    thread::scope(|scope| {
-        for _ in 0..8 {
-            scope.spawn(|| {
-                for _ in 0..32 {
-                    assert_eq!(count_text(enc, &transcript), expected);
-                }
-            });
-        }
-    });
-
-    let unicode = format!("{transcript}中文工具结果 — 完成");
-    assert_eq!(count_text(enc, &unicode), enc.encode(&unicode).len() as u64);
 }
 
 #[test]

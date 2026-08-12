@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::path::PathBuf;
 
-use psychevo::RunMode;
+use psychevo::application::RunMode;
 use psychevo::application::{
     Application, Configuration, ConfigurationQuery, Message, StartThreadRequest, TurnOutcome,
     TurnRequest,

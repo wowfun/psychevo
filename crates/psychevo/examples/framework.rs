@@ -1,4 +1,7 @@
-use psychevo::{Application, StartThreadRequest, ThreadListQuery, TurnEvent, TurnRequest};
+use psychevo::{
+    application::Application, application::StartThreadRequest, application::ThreadListQuery,
+    application::TurnEvent, application::TurnRequest,
+};
 
 #[tokio::main]
 async fn main() -> psychevo::Result<()> {

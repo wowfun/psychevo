@@ -9,11 +9,10 @@ use psychevo_agent_core::{
 use psychevo_ai::ToolDeclaration;
 use serde_json::{Map, Value};
 
-use super::message_blocks::render_markdown_message;
 use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message};
 use crate::error::Result;
 use crate::session_export::assembly::{
-    ExportDocument, ExportHeaderValue, ExportMessageValue, ExportOptionsValue,
+    ExportEvidenceItem, ExportHeaderValue, ExportMailboxEventValue, ExportOptionsValue,
     ExportPromptPrefixValue, ExportSections, ExportSessionValue, SessionArtifactKind,
     SessionExportInclude, SessionExportOptions,
 };
@@ -563,20 +562,12 @@ pub(crate) fn tool_declarations_hash_from_declarations(declarations: &[ToolDecla
     crate::prompt_assembly::stable_hash_hex(&serde_json::to_string(&values).unwrap_or_default())
 }
 
-pub(crate) fn export_document<'a>(
+pub(crate) fn export_header<'a>(
     summary: &'a SessionSummary,
-    sections: ExportSections,
-    options: SessionExportOptions,
-) -> ExportDocument<'a> {
-    let ExportSections {
-        prompt_prefix,
-        messages,
-        mailbox_events,
-        evidence,
-        last_request,
-        last_response,
-    } = sections;
-    let header = options
+    prompt_prefix: Option<ExportPromptPrefixValue>,
+    options: &SessionExportOptions,
+) -> Option<ExportHeaderValue<'a>> {
+    options
         .include
         .contains(SessionExportInclude::Header)
         .then(|| ExportHeaderValue {
@@ -601,23 +592,7 @@ pub(crate) fn export_document<'a>(
                 include: options.include.values().collect(),
             },
             prompt_prefix,
-        });
-    ExportDocument {
-        header,
-        messages: messages.map(|messages| {
-            messages
-                .iter()
-                .map(|record| ExportMessageValue {
-                    session_seq: record.session_seq,
-                    message: record.message.clone(),
-                })
-                .collect()
-        }),
-        mailbox_events,
-        provider_input_evidence: evidence.filter(|items| !items.is_empty()),
-        last_provider_request: last_request,
-        last_provider_response: last_response,
-    }
+        })
 }
 
 pub(crate) fn render_markdown(
@@ -626,126 +601,7 @@ pub(crate) fn render_markdown(
     options: &SessionExportOptions,
 ) -> String {
     let mut out = String::new();
-    if options.include.contains(SessionExportInclude::Header) {
-        let title = match options.artifact_kind {
-            SessionArtifactKind::Export => "# Psychevo Session Export",
-            SessionArtifactKind::Share => "# Psychevo Session Share",
-        };
-        push_line(&mut out, title);
-        push_line(&mut out, "");
-        if let Some(title) = summary.title.as_deref().filter(|value| !value.is_empty()) {
-            push_line(&mut out, &format!("Title: {}", markdown_inline(title)));
-        }
-        push_line(&mut out, &format!("Session: `{}`", summary.id));
-        push_line(&mut out, &format!("Source: `{}`", summary.source));
-        push_line(&mut out, &format!("Cwd: `{}`", summary.cwd));
-        push_line(
-            &mut out,
-            &format!("Model: `{}/{}`", summary.provider, summary.model),
-        );
-        push_line(&mut out, &format!("Started: `{}`", summary.started_at_ms));
-        push_line(&mut out, &format!("Updated: `{}`", summary.updated_at_ms));
-        push_line(&mut out, "");
-        push_line(&mut out, "Options:");
-        push_line(
-            &mut out,
-            &format!("- artifact: `{}`", options.artifact_kind.as_str()),
-        );
-        push_line(
-            &mut out,
-            &format!("- include: `{}`", options.include.tokens().join(",")),
-        );
-        if let Some(prefix) = sections.prompt_prefix.as_ref() {
-            push_line(&mut out, "");
-            render_markdown_prompt_prefix(&mut out, prefix);
-        }
-    }
-    if let Some(messages) = sections.messages.as_deref() {
-        if !out.is_empty() {
-            push_line(&mut out, "");
-        }
-        push_line(&mut out, "## Transcript");
-        for record in messages {
-            push_line(&mut out, "");
-            render_markdown_message(&mut out, record);
-        }
-    }
-    if let Some(mailbox_events) = sections
-        .mailbox_events
-        .as_deref()
-        .filter(|items| !items.is_empty())
-    {
-        if !out.is_empty() {
-            push_line(&mut out, "");
-        }
-        push_line(&mut out, "## Mailbox Events");
-        for event in mailbox_events {
-            push_line(&mut out, "");
-            push_line(&mut out, &format!("### Mailbox event #{}", event.id));
-            push_line(&mut out, &format!("- agent: `{}`", event.agent_name));
-            push_line(&mut out, &format!("- agent_id: `{}`", event.agent_id));
-            if let Some(seq) = event.delivered_prompt_session_seq {
-                push_line(
-                    &mut out,
-                    &format!("- delivered_prompt_session_seq: `{seq}`"),
-                );
-            }
-            if let Some(seq) = event.delivered_after_session_seq {
-                push_line(&mut out, &format!("- delivered_after_session_seq: `{seq}`"));
-            }
-            push_fenced_json(&mut out, &event.payload);
-        }
-    }
-    if let Some(evidence) = sections.evidence.as_ref().filter(|items| !items.is_empty()) {
-        if !out.is_empty() {
-            push_line(&mut out, "");
-        }
-        push_line(&mut out, "## Provider Input Evidence");
-        for prompt in evidence {
-            push_line(&mut out, "");
-            push_line(
-                &mut out,
-                &format!("### Prompt message #{}", prompt.prompt_session_seq),
-            );
-            for item in &prompt.items {
-                push_line(&mut out, "");
-                push_line(
-                    &mut out,
-                    &format!(
-                        "#### {} / {}",
-                        markdown_inline(&item.role),
-                        markdown_inline(&item.source_kind)
-                    ),
-                );
-                if let Some(name) = &item.source_name {
-                    push_line(&mut out, &format!("- source: `{}`", markdown_inline(name)));
-                }
-                if let Some(path) = &item.source_path {
-                    push_line(&mut out, &format!("- path: `{}`", markdown_inline(path)));
-                }
-                if let Some(group) = &item.provider_group {
-                    push_line(
-                        &mut out,
-                        &format!("- provider_group: `{}`", markdown_inline(group)),
-                    );
-                }
-                if let Some(index) = item.provider_block_index {
-                    push_line(&mut out, &format!("- provider_block_index: `{index}`"));
-                }
-                if let Some(kind) = &item.context_kind {
-                    push_line(
-                        &mut out,
-                        &format!("- context_kind: `{}`", markdown_inline(kind)),
-                    );
-                }
-                if let Some(metadata) = &item.metadata {
-                    push_line(&mut out, "- metadata:");
-                    push_fenced_json(&mut out, metadata);
-                }
-                push_fenced_text(&mut out, &item.content_text);
-            }
-        }
-    }
+    render_markdown_header(&mut out, summary, sections.prompt_prefix.as_ref(), options);
     if options
         .include
         .contains(SessionExportInclude::LastProviderRequest)
@@ -812,6 +668,97 @@ pub(crate) fn render_markdown(
         }
     }
     out
+}
+
+pub(crate) fn render_markdown_mailbox_event(out: &mut String, event: &ExportMailboxEventValue) {
+    push_line(out, "");
+    push_line(out, &format!("### Mailbox event #{}", event.id));
+    push_line(out, &format!("- agent: `{}`", event.agent_name));
+    push_line(out, &format!("- agent_id: `{}`", event.agent_id));
+    if let Some(seq) = event.delivered_prompt_session_seq {
+        push_line(out, &format!("- delivered_prompt_session_seq: `{seq}`"));
+    }
+    if let Some(seq) = event.delivered_after_session_seq {
+        push_line(out, &format!("- delivered_after_session_seq: `{seq}`"));
+    }
+    push_fenced_json(out, &event.payload);
+}
+
+pub(crate) fn render_markdown_evidence_item(out: &mut String, item: &ExportEvidenceItem) {
+    push_line(out, "");
+    push_line(
+        out,
+        &format!(
+            "#### {} / {}",
+            markdown_inline(&item.role),
+            markdown_inline(&item.source_kind)
+        ),
+    );
+    if let Some(name) = &item.source_name {
+        push_line(out, &format!("- source: `{}`", markdown_inline(name)));
+    }
+    if let Some(path) = &item.source_path {
+        push_line(out, &format!("- path: `{}`", markdown_inline(path)));
+    }
+    if let Some(group) = &item.provider_group {
+        push_line(
+            out,
+            &format!("- provider_group: `{}`", markdown_inline(group)),
+        );
+    }
+    if let Some(index) = item.provider_block_index {
+        push_line(out, &format!("- provider_block_index: `{index}`"));
+    }
+    if let Some(kind) = &item.context_kind {
+        push_line(out, &format!("- context_kind: `{}`", markdown_inline(kind)));
+    }
+    if let Some(metadata) = &item.metadata {
+        push_line(out, "- metadata:");
+        push_fenced_json(out, metadata);
+    }
+    push_fenced_text(out, &item.content_text);
+}
+
+pub(crate) fn render_markdown_header(
+    out: &mut String,
+    summary: &SessionSummary,
+    prompt_prefix: Option<&ExportPromptPrefixValue>,
+    options: &SessionExportOptions,
+) {
+    if options.include.contains(SessionExportInclude::Header) {
+        let title = match options.artifact_kind {
+            SessionArtifactKind::Export => "# Psychevo Session Export",
+            SessionArtifactKind::Share => "# Psychevo Session Share",
+        };
+        push_line(out, title);
+        push_line(out, "");
+        if let Some(title) = summary.title.as_deref().filter(|value| !value.is_empty()) {
+            push_line(out, &format!("Title: {}", markdown_inline(title)));
+        }
+        push_line(out, &format!("Session: `{}`", summary.id));
+        push_line(out, &format!("Source: `{}`", summary.source));
+        push_line(out, &format!("Cwd: `{}`", summary.cwd));
+        push_line(
+            out,
+            &format!("Model: `{}/{}`", summary.provider, summary.model),
+        );
+        push_line(out, &format!("Started: `{}`", summary.started_at_ms));
+        push_line(out, &format!("Updated: `{}`", summary.updated_at_ms));
+        push_line(out, "");
+        push_line(out, "Options:");
+        push_line(
+            out,
+            &format!("- artifact: `{}`", options.artifact_kind.as_str()),
+        );
+        push_line(
+            out,
+            &format!("- include: `{}`", options.include.tokens().join(",")),
+        );
+        if let Some(prefix) = prompt_prefix {
+            push_line(out, "");
+            render_markdown_prompt_prefix(out, prefix);
+        }
+    }
 }
 
 pub(crate) fn render_markdown_prompt_prefix(out: &mut String, prefix: &ExportPromptPrefixValue) {
