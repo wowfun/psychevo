@@ -25,6 +25,8 @@ jobs:
       sdk: ${{ steps.changes.outputs.sdk }}
       desktop: ${{ steps.changes.outputs.desktop }}
       web: ${{ steps.changes.outputs.web }}
+      native: ${{ steps.changes.outputs.native }}
+      coverage: ${{ steps.coverage.outputs.coverage }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -34,7 +36,10 @@ jobs:
         id: changes
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
+          list-files: json
           filters: |
+            changed:
+              - '**'
             common:
               - '.github/workflows/ci.yml'
               - '.cargo/**'
@@ -62,6 +67,25 @@ jobs:
               - 'python/**'
             desktop:
               - 'apps/desktop/src-tauri/**'
+            native:
+              - '.github/workflows/ci.yml'
+              - '.cargo/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/psychevo/src/host_paths.rs'
+              - 'crates/psychevo/src/host_process.rs'
+              - 'crates/psychevo/src/process_env.rs'
+              - 'crates/psychevo/src/process_tree.rs'
+              - 'crates/psychevo/src/tools/exec_command/**'
+              - 'crates/psychevo-gateway/src/acp_peer/**'
+              - 'crates/psychevo-gateway/src/acp_peer.rs'
+              - 'crates/psychevo-gateway/src/managed_acp.rs'
+              - 'crates/psychevo-gateway/src/server/terminal.rs'
+              - 'crates/psychevo-channel-adapters/**'
+              - 'crates/psychevo-channel-sidecar/**'
+              - 'crates/psychevo-extension-channel-*/**'
+              - 'crates/psychevo-cli/**'
+              - 'apps/desktop/src-tauri/**'
             web:
               - 'apps/**'
               - 'packages/**'
@@ -71,6 +95,11 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'playwright.config.ts'
               - 'tsconfig.base.json'
+      - name: Classify high-risk coverage changes
+        id: coverage
+        env:
+          PSYCHEVO_CHANGED_FILES_JSON: ${{ steps.changes.outputs.changed_files }}
+        run: python scripts/high_risk_instrumentation.py coverage-required >> "$GITHUB_OUTPUT"
 
   rust_checks:
     name: Rust checks
@@ -148,11 +177,6 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
         with:
           cache-on-failure: true
-
-      - name: Install Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: 24
 
       - name: Run Rust tests
         run: cargo xtask ci run --profile rust-tests
@@ -350,9 +374,128 @@ jobs:
       - name: Run Web gate
         run: cargo xtask ci run --profile web
 
+  native_platform:
+    name: Native host (${{ matrix.os }})
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        (
+          github.event_name == 'push' ||
+          needs.scope.outputs.common == 'true' ||
+          needs.scope.outputs.native == 'true'
+        )
+      }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0 action revision
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Run native Framework contracts
+        run: cargo test -p psychevo --lib
+
+      - name: Run native Gateway contracts
+        run: cargo test -p psychevo-gateway --lib
+
+      - name: Run Channel sidecar lifecycle contracts
+        run: cargo test -p psychevo-channel-sidecar --lib
+
+      - name: Run Channel provider contracts
+        run: cargo test -p psychevo-channel-adapters --all-features --lib
+
+      - name: Check Channel Extension binaries
+        run: >-
+          cargo check --all-targets
+          -p psychevo-extension-channel-feishu-lark
+          -p psychevo-extension-channel-telegram
+          -p psychevo-extension-channel-wechat
+
+      - name: Check CLI native target
+        run: cargo check -p psychevo-cli --all-targets
+
+  risk_coverage:
+    name: High-risk coverage
+    needs: scope
+    if: >-
+      ${{
+        always() &&
+        needs.scope.result == 'success' &&
+        needs.scope.outputs.coverage == 'true'
+      }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Read repository coverage pins
+        id: tools
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import tomllib
+
+          config = tomllib.loads(Path("instrumentation-tools.toml").read_text(encoding="utf-8"))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"nightly={config['nightly']}\n")
+              output.write(f"cargo_llvm_cov={config['cargo-llvm-cov']['version']}\n")
+
+      - name: Install pinned nightly coverage components
+        run: >-
+          rustup toolchain install "${{ steps.tools.outputs.nightly }}"
+          --profile minimal
+          --component llvm-tools-preview
+
+      - name: Install pinned Cargo coverage tool
+        run: >-
+          cargo install --locked cargo-llvm-cov
+          --version "${{ steps.tools.outputs.cargo_llvm_cov }}"
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Run selected high-risk coverage gate
+        run: >-
+          cargo xtask ci run --profile risk-coverage
+          --artifact-root .local/risk-coverage
+
+      - name: Retain high-risk coverage evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: psychevo-risk-coverage-${{ github.sha }}
+          include-hidden-files: true
+          if-no-files-found: error
+          path: .local/risk-coverage
+
   ci_gate:
     name: CI Gate
-    needs: [scope, rust_checks, rust_tests, sdk_contracts, main_artifact_smoke, desktop_rust, web]
+    needs: [scope, rust_checks, rust_tests, sdk_contracts, main_artifact_smoke, desktop_rust, web, native_platform, risk_coverage]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -364,6 +507,8 @@ jobs:
           SDK_SELECTED: ${{ needs.scope.outputs.sdk }}
           DESKTOP_SELECTED: ${{ needs.scope.outputs.desktop }}
           WEB_SELECTED: ${{ needs.scope.outputs.web }}
+          NATIVE_SELECTED: ${{ needs.scope.outputs.native }}
+          COVERAGE_SELECTED: ${{ needs.scope.outputs.coverage }}
           READY: ${{ github.event_name == 'push' || github.event.pull_request.draft == false }}
           RUST_CHECKS_RESULT: ${{ needs.rust_checks.result }}
           RUST_TESTS_RESULT: ${{ needs.rust_tests.result }}
@@ -371,6 +516,8 @@ jobs:
           MAIN_ARTIFACT_SMOKE_RESULT: ${{ needs.main_artifact_smoke.result }}
           DESKTOP_RESULT: ${{ needs.desktop_rust.result }}
           WEB_RESULT: ${{ needs.web.result }}
+          NATIVE_RESULT: ${{ needs.native_platform.result }}
+          COVERAGE_RESULT: ${{ needs.risk_coverage.result }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -395,6 +542,8 @@ jobs:
           main_artifact_expected=skipped
           desktop_expected=skipped
           web_expected=skipped
+          native_expected=skipped
+          coverage_expected=skipped
           if [[ "$READY" == "true" || "$COMMON_SELECTED" == "true" || "$RUST_SELECTED" == "true" ]]; then
             rust_expected=success
           fi
@@ -410,6 +559,12 @@ jobs:
           if [[ "$READY" == "true" || "$COMMON_SELECTED" == "true" || "$WEB_SELECTED" == "true" ]]; then
             web_expected=success
           fi
+          if [[ "$EVENT_NAME" == "push" || "$COMMON_SELECTED" == "true" || "$NATIVE_SELECTED" == "true" ]]; then
+            native_expected=success
+          fi
+          if [[ "$COVERAGE_SELECTED" == "true" ]]; then
+            coverage_expected=success
+          fi
 
           expect_job "Rust checks" "$RUST_CHECKS_RESULT" "$rust_expected"
           expect_job "Rust tests" "$RUST_TESTS_RESULT" "$rust_expected"
@@ -417,3 +572,5 @@ jobs:
           expect_job "Main artifact smoke" "$MAIN_ARTIFACT_SMOKE_RESULT" "$main_artifact_expected"
           expect_job "Desktop Rust" "$DESKTOP_RESULT" "$desktop_expected"
           expect_job "Web" "$WEB_RESULT" "$web_expected"
+          expect_job "Native host matrix" "$NATIVE_RESULT" "$native_expected"
+          expect_job "High-risk coverage" "$COVERAGE_RESULT" "$coverage_expected"

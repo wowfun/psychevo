@@ -30,7 +30,7 @@ def require_linux_x86_64() -> None:
 
 def load_budgets() -> dict[str, Any]:
     budgets = json.loads(BUDGET_PATH.read_text(encoding="utf-8"))
-    if budgets.get("schemaVersion") != 1:
+    if budgets.get("schemaVersion") != 2:
         raise RuntimeError(f"unsupported {BUDGET_PATH.name} schema")
     return budgets
 
@@ -161,34 +161,43 @@ def timed_framework_check() -> tuple[int, int, Path]:
 def framework() -> None:
     budgets = load_budgets()["framework"]
     baseline = budgets["baseline"]
-    maximum = budgets["maximum"]
+    regression_maximum = budgets["regressionMaximum"]
     direct, reachable = normal_dependency_counts()
     clean_ms, noop_ms, target = timed_framework_check()
     ratio_millis = (noop_ms * 1_000) // max(clean_ms, 1)
     failures: list[str] = []
     require_maximum(
-        "direct normal dependencies", direct, maximum["directDependencies"], failures
+        "direct normal dependencies",
+        direct,
+        regression_maximum["directDependencies"],
+        failures,
     )
     require_maximum(
         "reachable normal packages",
         reachable,
-        maximum["reachablePackages"],
+        regression_maximum["reachablePackages"],
         failures,
     )
     require_maximum(
-        "clean Framework check ms", clean_ms, maximum["cleanCheckMs"], failures
+        "clean Framework check ms",
+        clean_ms,
+        regression_maximum["cleanCheckMs"],
+        failures,
     )
     require_maximum(
-        "no-op Framework check ms", noop_ms, maximum["noopCheckMs"], failures
+        "no-op Framework check ms",
+        noop_ms,
+        regression_maximum["noopCheckMs"],
+        failures,
     )
     require_maximum(
         "no-op/clean ratio per thousand",
         ratio_millis,
-        maximum["noopRatioPerThousand"],
+        regression_maximum["noopRatioPerThousand"],
         failures,
     )
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "scope": "framework",
         "observed": {
             "directDependencies": direct,
@@ -198,7 +207,7 @@ def framework() -> None:
             "noopRatioPerThousand": ratio_millis,
         },
         "baseline": baseline,
-        "maximum": maximum,
+        "regressionMaximum": regression_maximum,
         "budgetSource": str(BUDGET_PATH),
         "cargoTarget": str(target),
         "failures": failures,
@@ -231,7 +240,7 @@ def cli_startup() -> None:
         raise RuntimeError(f"release CLI artifact is missing: {cli_path}")
     budgets = load_budgets()["cliStartup"]
     baseline = budgets["baseline"]
-    maximum = budgets["maximum"]
+    regression_maximum = budgets["regressionMaximum"]
     evidence_root = root / "non-functional"
     evidence_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="cli-startup-", dir=evidence_root) as raw_home:
@@ -275,17 +284,17 @@ def cli_startup() -> None:
     require_maximum(
         "release CLI first-process startup ms",
         first_ms,
-        maximum["firstProcessMs"],
+        regression_maximum["firstProcessMs"],
         failures,
     )
     require_maximum(
         "release CLI repeated-process median startup ms",
         repeated_median_ms,
-        maximum["repeatedProcessMedianMs"],
+        regression_maximum["repeatedProcessMedianMs"],
         failures,
     )
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "scope": "release-cli-startup",
         "observed": observed,
         "samples": {
@@ -293,7 +302,7 @@ def cli_startup() -> None:
             "repeatedProcessMs": repeated_ms,
         },
         "baseline": baseline,
-        "maximum": maximum,
+        "regressionMaximum": regression_maximum,
         "budgetSource": str(BUDGET_PATH),
         "command": [str(cli_path), "--version"],
         "cacheSemantics": "first process followed by nine immediate restarts; OS page caches are not evicted",
@@ -309,7 +318,7 @@ def artifacts() -> None:
     root = artifact_root()
     budgets = load_budgets()["linuxArtifacts"]
     baseline = budgets["baseline"]
-    maximum = budgets["maximum"]
+    regression_maximum = budgets["regressionMaximum"]
     smoke_path = root / "package/python/installed-artifact-smoke.json"
     smoke = json.loads(smoke_path.read_text(encoding="utf-8"))
     cli_path = root / "package/cli-target/release/pevo"
@@ -335,13 +344,13 @@ def artifacts() -> None:
         ("appServerWheelBytes", "App Server wheel bytes"),
         ("pythonCliWheelBytes", "Python CLI wheel bytes"),
     ]:
-        require_maximum(label, observed[key], maximum[key], failures)
+        require_maximum(label, observed[key], regression_maximum[key], failures)
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "scope": "linux-artifacts",
         "observed": observed,
         "baseline": baseline,
-        "maximum": maximum,
+        "regressionMaximum": regression_maximum,
         "budgetSource": str(BUDGET_PATH),
         "sources": {
             "releaseCli": str(cli_path),
@@ -387,26 +396,26 @@ def workbench() -> None:
         "optionalPreviewAssetBytes": sum(path.stat().st_size for path in preview_assets),
     }
     budgets = load_budgets()["workbench"]
-    maximum = budgets["maximum"]
+    regression_maximum = budgets["regressionMaximum"]
     failures: list[str] = []
     require_maximum(
         "initial Workbench JavaScript bytes",
         observed["initialJavascriptBytes"],
-        maximum["initialJavascriptBytes"],
+        regression_maximum["initialJavascriptBytes"],
         failures,
     )
     require_maximum(
         "optional Workbench preview asset bytes",
         observed["optionalPreviewAssetBytes"],
-        maximum["optionalPreviewAssetBytes"],
+        regression_maximum["optionalPreviewAssetBytes"],
         failures,
     )
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "scope": "workbench-startup",
         "observed": observed,
         "baseline": budgets["baseline"],
-        "maximum": maximum,
+        "regressionMaximum": regression_maximum,
         "budgetSource": str(BUDGET_PATH),
         "proof": str(proof_path),
         "optionalPreviewAssets": {

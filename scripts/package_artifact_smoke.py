@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import signal
 import shutil
 import subprocess
 import sys
@@ -182,29 +183,20 @@ def ready_handshake(value: dict[str, Any], cli: Path) -> dict[str, Any]:
 
 
 def stop_gateway(cli: Path, environment: dict[str, str]) -> None:
-    command = [str(cli), "gateway", "stop"]
-    try:
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=PROCESS_STOP_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError(
-            f"native artifact cleanup timed out after {PROCESS_STOP_TIMEOUT_SECONDS} "
-            f"seconds: {' '.join(command)}"
-        ) from error
-    if completed.returncode != 0:
-        details = "\n".join(
-            part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
-        )
-        raise RuntimeError(
-            f"native artifact cleanup exited with status {completed.returncode}: {details}"
-        )
+    stopped = run_json(
+        [str(cli), "gateway", "stop"],
+        environment,
+        timeout_seconds=PROCESS_STOP_TIMEOUT_SECONDS,
+    )
+    if stopped.get("ok") is not True:
+        raise RuntimeError(f"native artifact cleanup returned an invalid result: {stopped}")
+    status = run_json(
+        [str(cli), "gateway", "status"],
+        environment,
+        timeout_seconds=PROCESS_STOP_TIMEOUT_SECONDS,
+    )
+    if status.get("running") is not False:
+        raise RuntimeError(f"native artifact managed Gateway is still running: {status}")
 
 
 def smoke_cli(cli: Path) -> dict[str, Any]:
@@ -371,14 +363,43 @@ def wait_for_desktop_handshake(
 
 
 def stop_process(process: subprocess.Popen[Any]) -> None:
-    if process.poll() is not None:
+    if os.name != "posix":
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
         return
-    process.terminate()
+
+    process_group = process.pid
     try:
-        process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=PROCESS_STOP_TIMEOUT_SECONDS)
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + PROCESS_STOP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + PROCESS_STOP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    raise RuntimeError(f"native Desktop process group {process_group} did not exit")
 
 
 def environment_path(environment: dict[str, str], name: str) -> Path:
@@ -418,12 +439,16 @@ def smoke_desktop_with_environment(
     try:
         with log_path.open("w", encoding="utf-8") as log:
             try:
+                process_options: dict[str, Any] = {}
+                if os.name == "posix":
+                    process_options["start_new_session"] = True
                 process = subprocess.Popen(
                     command,
                     cwd=ROOT,
                     env=environment,
                     stdout=log,
                     stderr=subprocess.STDOUT,
+                    **process_options,
                 )
             except FileNotFoundError as error:
                 raise RuntimeError(f"required executable not found: {command[0]}") from error

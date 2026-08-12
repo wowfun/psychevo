@@ -1,5 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [
+    "crates/psychevo-gateway/tests/fixtures/fake_acp_*.js",
+    "crates/psychevo-gateway/tests/fixtures/fake_agent_conformance.js"
+  ],
   "ignoreBinaries": ["ffmpeg", "opencode", "sqlite3"],
   "workspaces": {
     "apps/desktop": {

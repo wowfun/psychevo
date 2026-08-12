@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +16,53 @@ from scripts import write_package_checksums as checksums
 
 
 class PackageArtifactSmokeTests(unittest.TestCase):
+    def test_gateway_cleanup_requires_observed_stopped_status(self) -> None:
+        with patch.object(
+            smoke,
+            "run_json",
+            side_effect=[
+                {"ok": True, "stopped": True},
+                {"ok": True, "running": True},
+            ],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "still running"):
+                smoke.stop_gateway(Path("pevo"), {})
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux process-group behavior")
+    def test_desktop_cleanup_terminates_the_entire_process_group(self) -> None:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import subprocess, sys, time; "
+                    "child = subprocess.Popen(['sleep', '60']); "
+                    "print(child.pid, flush=True); "
+                    "time.sleep(60)"
+                ),
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        assert process.stdout is not None
+        child_pid = int(process.stdout.readline().strip())
+        process.stdout.close()
+        try:
+            smoke.stop_process(process)
+            deadline = time.monotonic() + 1
+            while Path(f"/proc/{child_pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(
+                Path(f"/proc/{child_pid}").exists(),
+                "desktop descendant survived smoke cleanup",
+            )
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
     def test_retained_desktop_log_is_bounded_to_its_tail(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             log = Path(raw) / "desktop.log"

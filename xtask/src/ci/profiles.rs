@@ -60,6 +60,17 @@ const GATEWAY_PROTOCOL_CHECK_STEP: WorkflowStep = WorkflowStep {
     live: false,
 };
 
+const ACP_CAPABILITY_FIXTURES_STEP: WorkflowStep = WorkflowStep {
+    id: "acp-capability-fixtures",
+    description: "Check tracked ACP capability fixtures against their reviewed generator contract",
+    action: WorkflowStepAction::Command(&[
+        "python",
+        "scripts/generate_acp_capability_fixtures.py",
+        "--check-fixtures",
+    ]),
+    live: false,
+};
+
 const RUST_APP_SERVER_CONTRACTS_STEP: WorkflowStep = WorkflowStep {
     id: "rust-app-server-contracts",
     description: "Run the Rust App Server compaction wire contract",
@@ -280,6 +291,7 @@ const RUST_CHECKS_STEPS: &[WorkflowStep] = &[
     SDK_ARCHITECTURE_STEP,
     RUST_SDK_DEFAULT_SURFACE_STEP,
     GATEWAY_PROTOCOL_CHECK_STEP,
+    ACP_CAPABILITY_FIXTURES_STEP,
     RUST_CORE_CHECK_STEP,
     RUST_FORMAT_STEP,
     RUST_CLIPPY_STEP,
@@ -291,6 +303,7 @@ const RUST_BROAD_STEPS: &[WorkflowStep] = &[
     SDK_ARCHITECTURE_STEP,
     RUST_SDK_DEFAULT_SURFACE_STEP,
     GATEWAY_PROTOCOL_CHECK_STEP,
+    ACP_CAPABILITY_FIXTURES_STEP,
     RUST_CORE_CHECK_STEP,
     RUST_FORMAT_STEP,
     RUST_CLIPPY_STEP,
@@ -298,9 +311,6 @@ const RUST_BROAD_STEPS: &[WorkflowStep] = &[
 ];
 
 const SDK_CONTRACTS_STEPS: &[WorkflowStep] = &[
-    SDK_ARCHITECTURE_STEP,
-    RUST_SDK_DEFAULT_SURFACE_STEP,
-    GATEWAY_PROTOCOL_CHECK_STEP,
     RUST_APP_SERVER_CONTRACTS_STEP,
     TYPESCRIPT_SDK_CONTRACTS_STEP,
     PYTHON_SDK_TEST_STEP,
@@ -433,6 +443,8 @@ const NON_FUNCTIONAL_STEPS: &[WorkflowStep] = &[
             "psychevo-gateway",
             "retained_event_ingress_stays_within_the_persistence_budget",
             "--quiet",
+            "--",
+            "--ignored",
         ]),
         live: false,
     },
@@ -458,43 +470,63 @@ const NON_FUNCTIONAL_STEPS: &[WorkflowStep] = &[
     },
 ];
 
+const VERIFY_INSTRUMENTATION_HARNESS_STEP: WorkflowStep = WorkflowStep {
+    id: "verify-instrumentation-harness",
+    description: "Verify clean-output, failure, timeout, and exact-command harness contracts",
+    action: WorkflowStepAction::Command(&[
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "test_high_risk_instrumentation.py",
+        "-v",
+    ]),
+    live: false,
+};
+const VERIFY_INSTRUMENTATION_TOOLS_STEP: WorkflowStep = WorkflowStep {
+    id: "verify-instrumentation-tools",
+    description: "Verify pinned coverage, nightly, and Miri tools",
+    action: WorkflowStepAction::Command(&[
+        "python",
+        "scripts/high_risk_instrumentation.py",
+        "verify",
+    ]),
+    live: false,
+};
+const VERIFY_COVERAGE_TOOLS_STEP: WorkflowStep = WorkflowStep {
+    id: "verify-coverage-tools",
+    description: "Verify pinned coverage and nightly tools without unrelated Miri setup",
+    action: WorkflowStepAction::Command(&[
+        "python",
+        "scripts/high_risk_instrumentation.py",
+        "verify-coverage",
+    ]),
+    live: false,
+};
+const TARGETED_RUST_COVERAGE_STEP: WorkflowStep = WorkflowStep {
+    id: "targeted-rust-coverage",
+    description: "Capture Framework, Gateway, and protocol library coverage",
+    action: WorkflowStepAction::Command(&[
+        "python",
+        "scripts/high_risk_instrumentation.py",
+        "coverage",
+    ]),
+    live: false,
+};
+
+const RISK_COVERAGE_STEPS: &[WorkflowStep] = &[
+    VERIFY_INSTRUMENTATION_HARNESS_STEP,
+    VERIFY_COVERAGE_TOOLS_STEP,
+    TARGETED_RUST_COVERAGE_STEP,
+];
+
 const INSTRUMENTATION_STEPS: &[WorkflowStep] = &[
-    WorkflowStep {
-        id: "verify-instrumentation-harness",
-        description: "Verify clean-output, failure, timeout, and exact-command harness contracts",
-        action: WorkflowStepAction::Command(&[
-            "python",
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "scripts/tests",
-            "-p",
-            "test_high_risk_instrumentation.py",
-            "-v",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "verify-instrumentation-tools",
-        description: "Verify pinned coverage, nightly, and Miri tools",
-        action: WorkflowStepAction::Command(&[
-            "python",
-            "scripts/high_risk_instrumentation.py",
-            "verify",
-        ]),
-        live: false,
-    },
-    WorkflowStep {
-        id: "targeted-rust-coverage",
-        description: "Capture Framework, Gateway, and protocol library coverage",
-        action: WorkflowStepAction::Command(&[
-            "python",
-            "scripts/high_risk_instrumentation.py",
-            "coverage",
-        ]),
-        live: false,
-    },
+    VERIFY_INSTRUMENTATION_HARNESS_STEP,
+    VERIFY_INSTRUMENTATION_TOOLS_STEP,
+    TARGETED_RUST_COVERAGE_STEP,
     WorkflowStep {
         id: "deterministic-boundary-contracts",
         description: "Run finite protocol, stream, UTF-8, and tool-argument boundary matrices",
@@ -594,6 +626,12 @@ const WEB_STEPS: &[WorkflowStep] = &[
         id: "workspace-typecheck",
         description: "Typecheck all JavaScript workspaces",
         action: WorkflowStepAction::Command(&["pnpm", "-r", "typecheck"]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "workspace-unused-surface",
+        description: "Reject dead JavaScript files and avoidable public exports",
+        action: WorkflowStepAction::Command(&["pnpm", "run", "code:check"]),
         live: false,
     },
     WorkflowStep {
@@ -843,6 +881,14 @@ const PROFILES: &[WorkflowProfile] = &[
         steps: NON_FUNCTIONAL_STEPS,
     },
     WorkflowProfile {
+        id: "risk-coverage",
+        description: "PR-selected branch coverage for high-risk lifecycle and persistence modules",
+        kind: ProfileKind::Ci,
+        live: false,
+        artifact_only: false,
+        steps: RISK_COVERAGE_STEPS,
+    },
+    WorkflowProfile {
         id: "instrumentation",
         description: "Scheduled coverage, deterministic boundaries, Miri, and sanitizer diagnostics",
         kind: ProfileKind::Ci,
@@ -990,9 +1036,6 @@ mod tests {
         assert_eq!(
             plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
             vec![
-                "sdk-architecture",
-                "rust-sdk-default-surface",
-                "gateway-protocol-check",
                 "rust-app-server-contracts",
                 "typescript-sdk-contracts",
                 "test-python-sdk-client",
@@ -1143,6 +1186,19 @@ mod tests {
             ]
         );
         assert_eq!(
+            plan.steps[9].command,
+            vec![
+                "cargo",
+                "test",
+                "-p",
+                "psychevo-gateway",
+                "retained_event_ingress_stays_within_the_persistence_budget",
+                "--quiet",
+                "--",
+                "--ignored",
+            ]
+        );
+        assert_eq!(
             plan.steps[10].command,
             vec!["python", "scripts/non_functional_budgets.py", "workbench"]
         );
@@ -1199,6 +1255,21 @@ mod tests {
     }
 
     #[test]
+    fn risk_coverage_profile_is_the_bounded_instrumentation_prefix() {
+        let plan = plan_profile("risk-coverage", None).expect("risk coverage profile");
+        assert_eq!(plan.profile.kind, ProfileKind::Ci);
+        assert!(!plan.profile.live);
+        assert_eq!(
+            plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
+            vec![
+                "verify-instrumentation-harness",
+                "verify-coverage-tools",
+                "targeted-rust-coverage",
+            ]
+        );
+    }
+
+    #[test]
     fn non_functional_and_instrumentation_manifests_are_explicit_and_monotonic() {
         let root = workspace_root();
         let budgets: serde_json::Value = serde_json::from_str(
@@ -1206,7 +1277,7 @@ mod tests {
                 .expect("non-functional budgets"),
         )
         .expect("non-functional budget JSON");
-        assert_eq!(budgets["schemaVersion"].as_u64(), Some(1));
+        assert_eq!(budgets["schemaVersion"].as_u64(), Some(2));
         for scope in [
             "framework",
             "linuxArtifacts",
@@ -1217,27 +1288,34 @@ mod tests {
             let baseline = budgets[scope]["baseline"]
                 .as_object()
                 .unwrap_or_else(|| panic!("{scope} baseline"));
-            let maximum = budgets[scope]["maximum"]
+            let regression_maximum = budgets[scope]["regressionMaximum"]
                 .as_object()
-                .unwrap_or_else(|| panic!("{scope} maximum"));
-            assert_eq!(baseline.len(), maximum.len(), "{scope} metric count");
+                .unwrap_or_else(|| panic!("{scope} regression maximum"));
+            assert_eq!(
+                baseline.len(),
+                regression_maximum.len(),
+                "{scope} metric count"
+            );
             for (name, value) in baseline {
-                let maximum = maximum[name]
+                let regression_maximum = regression_maximum[name]
                     .as_u64()
-                    .unwrap_or_else(|| panic!("{scope}.{name} maximum integer"));
+                    .unwrap_or_else(|| panic!("{scope}.{name} regression maximum integer"));
                 if let Some(baseline) = value.as_u64() {
-                    assert!(maximum >= baseline, "{scope}.{name} budget regressed");
+                    assert!(
+                        regression_maximum >= baseline,
+                        "{scope}.{name} budget regressed"
+                    );
                 } else {
                     assert!(value.is_null(), "{scope}.{name} baseline integer or null");
                 }
             }
         }
         assert_eq!(
-            budgets["gateway"]["maximum"]["idleSqliteOperations"].as_u64(),
+            budgets["gateway"]["regressionMaximum"]["idleSqliteOperations"].as_u64(),
             Some(0)
         );
         assert_eq!(
-            budgets["gateway"]["maximum"]["shellHeartbeatTransactions"].as_u64(),
+            budgets["gateway"]["regressionMaximum"]["shellHeartbeatTransactions"].as_u64(),
             Some(1)
         );
         for metric in [
@@ -1252,16 +1330,18 @@ mod tests {
             "retainedEventSqliteBusyOperations",
         ] {
             assert!(
-                budgets["gateway"]["maximum"][metric].as_u64().is_some(),
-                "missing retained-event maximum for {metric}"
+                budgets["gateway"]["regressionMaximum"][metric]
+                    .as_u64()
+                    .is_some(),
+                "missing retained-event regression maximum for {metric}"
             );
         }
         assert_eq!(
-            budgets["gateway"]["maximum"]["retainedEventPeakIngressQueueDepth"].as_u64(),
+            budgets["gateway"]["regressionMaximum"]["retainedEventPeakIngressQueueDepth"].as_u64(),
             Some(32)
         );
         assert_eq!(
-            budgets["gateway"]["maximum"]["retainedEventSqliteBusyOperations"].as_u64(),
+            budgets["gateway"]["regressionMaximum"]["retainedEventSqliteBusyOperations"].as_u64(),
             Some(0)
         );
 
@@ -1276,6 +1356,10 @@ mod tests {
                 })
         }));
         assert_eq!(tools["target"].as_str(), Some("x86_64-unknown-linux-gnu"));
+        assert_eq!(
+            tools["resources"]["maximum-parallelism"].as_integer(),
+            Some(16)
+        );
         let version = tools["cargo-llvm-cov"]["version"]
             .as_str()
             .expect("coverage tool version");
@@ -1456,6 +1540,10 @@ mod tests {
         assert_eq!(
             package["scripts"]["dependency:check"].as_str(),
             Some("knip --dependencies --treat-config-hints-as-errors")
+        );
+        assert_eq!(
+            package["scripts"]["code:check"].as_str(),
+            Some("knip --include files,exports,types --treat-config-hints-as-errors")
         );
         let knip: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(root.join("knip.json")).expect("Knip configuration"),
@@ -1769,6 +1857,7 @@ mod tests {
             vec![
                 "workspace-tests",
                 "workspace-typecheck",
+                "workspace-unused-surface",
                 "workspace-builds",
                 "critical-browser-pevo-build",
                 "critical-browser-journey",
@@ -1779,7 +1868,7 @@ mod tests {
             vec!["pnpm", "--workspace-concurrency=1", "-r", "test"]
         );
         assert_eq!(
-            plan.steps[3].command,
+            plan.steps[4].command,
             vec![
                 "cargo",
                 "build",
@@ -1791,7 +1880,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            plan.steps[4].command,
+            plan.steps[5].command,
             vec!["xtask-internal", "critical-browser-journey"]
         );
     }

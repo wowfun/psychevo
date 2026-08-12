@@ -4,7 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 from ._callbacks import (
@@ -65,6 +65,7 @@ class Client:
         self._clarify_handler = clarify_handler
         self._request_timeout = request_timeout
         self._close_timeout = close_timeout
+        self._lifecycle_lock = asyncio.Lock()
         self._rpc: _RpcClient | None = None
         self._local = remote_url is None
 
@@ -76,34 +77,38 @@ class Client:
         await self.close()
 
     async def connect(self) -> None:
-        if self._rpc is not None:
-            return
-        if self._remote_url is not None:
-            transport: Transport = await WebSocketTransport.connect(
-                self._remote_url, self._token or ""
+        async with self._lifecycle_lock:
+            if self._rpc is not None:
+                return
+            if self._remote_url is not None:
+                transport: Transport = await WebSocketTransport.connect(
+                    self._remote_url, self._token or ""
+                )
+            else:
+                executable = self._executable or _bundled_app_server()
+                transport = await StdioTransport.start(
+                    executable, self._executable_args
+                )
+            rpc = _RpcClient(
+                transport,
+                tools=self._tools,
+                approval_handler=self._approval_handler,
+                clarify_handler=self._clarify_handler,
+                request_timeout=self._request_timeout,
             )
-        else:
-            executable = self._executable or _bundled_app_server()
-            transport = await StdioTransport.start(executable, self._executable_args)
-        rpc = _RpcClient(
-            transport,
-            tools=self._tools,
-            approval_handler=self._approval_handler,
-            clarify_handler=self._clarify_handler,
-            request_timeout=self._request_timeout,
-        )
-        try:
-            await rpc.start()
-        except BaseException:
-            await self._close_rpc(rpc, shutdown=False)
-            raise
-        self._rpc = rpc
+            try:
+                await rpc.start()
+            except BaseException:
+                await self._close_rpc(rpc, shutdown=False)
+                raise
+            self._rpc = rpc
 
     async def close(self) -> None:
-        rpc, self._rpc = self._rpc, None
-        if rpc is None:
-            return
-        await self._close_rpc(rpc, shutdown=self._local)
+        async with self._lifecycle_lock:
+            rpc, self._rpc = self._rpc, None
+            if rpc is None:
+                return
+            await self._close_rpc(rpc, shutdown=self._local)
 
     async def _close_rpc(self, rpc: _RpcClient, *, shutdown: bool) -> None:
         async def graceful_close() -> None:
@@ -243,9 +248,10 @@ class Client:
         *,
         timeout: float | None | object = _USE_DEFAULT_TIMEOUT,
     ) -> object:
-        if self._rpc is None:
+        rpc = self._rpc
+        if rpc is None:
             raise RuntimeError("Client is not connected; use async with or connect()")
-        return await self._rpc.request(method, params, timeout=timeout)
+        return await rpc.request(method, params, timeout=timeout)
 
 
 class Thread:

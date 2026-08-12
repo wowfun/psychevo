@@ -88,13 +88,51 @@ DETERMINISTIC_CONTRACTS = (
 )
 ASAN_TEST = "shell_scheduler_parks_without_tracked_activity_and_track_wakes_foreign_control"
 HIGH_RISK_COVERAGE_TARGETS = {
-    "frameworkLifecycle": "crates/psychevo/src/application/lifecycle.rs",
-    "turnDeliveryPersistence": "crates/psychevo/src/store/turn_delivery.rs",
-    "gatewayActivityPersistence": (
-        "crates/psychevo-gateway/src/gateway/durable_activity.rs"
-    ),
-    "appServerProtocolProjection": "crates/psychevo-gateway/src/app_server.rs",
+    "frameworkLifecycle": {
+        "path": "crates/psychevo/src/application/lifecycle.rs",
+        "minimum": {"lines": 80, "functions": 85, "branches": 70},
+    },
+    "turnDeliveryPersistence": {
+        "path": "crates/psychevo/src/store/turn_delivery.rs",
+        "minimum": {"lines": 90, "functions": 90, "branches": 65},
+    },
+    "gatewayActivityPersistence": {
+        "path": "crates/psychevo-gateway/src/gateway/durable_activity.rs",
+        "minimum": {"lines": 88, "functions": 88, "branches": 55},
+    },
+    "appServerProtocolProjection": {
+        "path": "crates/psychevo-gateway/src/app_server.rs",
+        "minimum": {"lines": 80, "functions": 78, "branches": 60},
+    },
+    "activeKeyedCoordination": {
+        "path": "crates/psychevo-gateway/src/active_keyed.rs",
+        "minimum": {"lines": 95, "functions": 90, "branches": 65},
+    },
+    "sourceBindingEpochs": {
+        "path": "crates/psychevo-gateway/src/gateway/source_bindings.rs",
+        "minimum": {"lines": 55, "functions": 65, "branches": 40},
+    },
+    "foreignLiveProjection": {
+        "path": "crates/psychevo-gateway/src/gateway/live_projection.rs",
+        "minimum": {"lines": 85, "functions": 75, "branches": 60},
+    },
+    "streamingSessionExport": {
+        "path": "crates/psychevo/src/session_export/assembly/streaming.rs",
+        "minimum": {"lines": 72, "functions": 80, "branches": 55},
+    },
+    "channelSidecarLifecycle": {
+        "path": "crates/psychevo-channel-sidecar/src/lib.rs",
+        "minimum": {"lines": 82, "functions": 80, "branches": 42},
+    },
 }
+HIGH_RISK_COVERAGE_TRIGGER_PATHS = {
+    ".github/workflows/ci.yml",
+    "instrumentation-tools.toml",
+    "scripts/high_risk_instrumentation.py",
+    "scripts/tests/test_high_risk_instrumentation.py",
+    "xtask/src/ci/profiles.rs",
+}
+HIGH_RISK_COVERAGE_TRIGGER_PREFIXES = ("crates/psychevo-channel-sidecar/",)
 
 
 def load_manifest() -> dict[str, Any]:
@@ -116,6 +154,15 @@ def load_manifest() -> dict[str, Any]:
             r"[0-9]+\.[0-9]+\.[0-9]+", version
         ):
             raise RuntimeError(f"{name} must have an exact semantic version")
+    maximum_parallelism = manifest.get("resources", {}).get("maximum-parallelism")
+    if not isinstance(maximum_parallelism, int) or not 1 <= maximum_parallelism <= 16:
+        raise RuntimeError(
+            "instrumentation resources.maximum-parallelism must be an integer from 1 to 16"
+        )
+    for name in ("minimum-available-memory-mib", "minimum-free-scratch-mib"):
+        value = manifest.get("resources", {}).get(name)
+        if not isinstance(value, int) or value < 1024:
+            raise RuntimeError(f"instrumentation resources.{name} must be at least 1024 MiB")
     return manifest
 
 
@@ -134,6 +181,104 @@ def artifact_root() -> Path:
     root = Path(raw).resolve() / "instrumentation"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def instrumentation_target_root(manifest: dict[str, Any]) -> Path:
+    configured = os.environ.get("PSYCHEVO_INSTRUMENTATION_TARGET_ROOT")
+    base = (
+        Path(configured).resolve()
+        if configured
+        else (ROOT / ".local" / ".instrumentation-targets").resolve()
+    )
+    root = base / str(manifest["nightly"])
+    evidence = artifact_root()
+    if root == evidence or root.is_relative_to(evidence):
+        raise RuntimeError(
+            "instrumentation scratch target root must be outside the evidence root"
+        )
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def scratch_target(manifest: dict[str, Any], name: str) -> Path:
+    if re.fullmatch(r"[a-z][a-z0-9-]*", name) is None:
+        raise RuntimeError(f"invalid instrumentation scratch target name: {name!r}")
+    target = instrumentation_target_root(manifest) / name
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def bounded_environment(
+    manifest: dict[str, Any], extra: dict[str, str] | None = None
+) -> dict[str, str]:
+    parallelism = str(manifest["resources"]["maximum-parallelism"])
+    environment = {
+        "CARGO_BUILD_JOBS": parallelism,
+        "RAYON_NUM_THREADS": parallelism,
+        "RUST_TEST_THREADS": parallelism,
+        "TOKIO_WORKER_THREADS": parallelism,
+    }
+    environment.update(extra or {})
+    return environment
+
+
+def write_resource_policy(manifest: dict[str, Any]) -> None:
+    root = artifact_root()
+    target = instrumentation_target_root(manifest)
+    parallelism = manifest["resources"]["maximum-parallelism"]
+    minimum_memory = manifest["resources"]["minimum-available-memory-mib"]
+    minimum_scratch = manifest["resources"]["minimum-free-scratch-mib"]
+    available_memory = available_memory_mib()
+    free_scratch = shutil.disk_usage(target).free // (1024 * 1024)
+    failures = []
+    if available_memory < minimum_memory:
+        failures.append(
+            f"available memory {available_memory} MiB is below the {minimum_memory} MiB reserve"
+        )
+    if free_scratch < minimum_scratch:
+        failures.append(
+            f"free scratch disk {free_scratch} MiB is below the {minimum_scratch} MiB reserve"
+        )
+    (root / "resource-policy.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "maximumParallelism": parallelism,
+                "cargoBuildJobs": parallelism,
+                "rustTestThreads": parallelism,
+                "tokioWorkerThreads": parallelism,
+                "rayonThreads": parallelism,
+                "scratchTargetRoot": str(target),
+                "scratchOutsideEvidenceRoot": not target.is_relative_to(root),
+                "minimumAvailableMemoryMiB": minimum_memory,
+                "observedAvailableMemoryMiB": available_memory,
+                "minimumFreeScratchMiB": minimum_scratch,
+                "observedFreeScratchMiB": free_scratch,
+                "failures": failures,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
+def available_memory_mib() -> int:
+    try:
+        values = {
+            name.rstrip(":"): int(value)
+            for name, value, _unit in (
+                line.split(maxsplit=2)
+                for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
+                if len(line.split(maxsplit=2)) == 3
+            )
+        }
+        return values["MemAvailable"] // 1024
+    except (KeyError, OSError, ValueError) as error:
+        raise RuntimeError("cannot read Linux MemAvailable for instrumentation guard") from error
 
 
 def reset_directory(path: Path) -> None:
@@ -226,18 +371,53 @@ def verify() -> None:
     print(f"verified {nightly} with Miri")
 
 
+def verify_coverage() -> None:
+    manifest = load_manifest()
+    require_linux_x86_64()
+    require_version(
+        ["cargo", "llvm-cov", "--version"],
+        manifest["cargo-llvm-cov"]["version"],
+        "cargo-llvm-cov",
+    )
+    nightly = manifest["nightly"]
+    rustc = command_output(["rustc", f"+{nightly}", "--version", "--verbose"])
+    if "release:" not in rustc or "commit-hash:" not in rustc:
+        raise RuntimeError(f"pinned nightly did not return verbose identity: {rustc}")
+    print(f"verified coverage toolchain {nightly}")
+
+
+def coverage_required() -> None:
+    raw = os.environ.get("PSYCHEVO_CHANGED_FILES_JSON", "[]")
+    changed = json.loads(raw)
+    if not isinstance(changed, list) or not all(isinstance(path, str) for path in changed):
+        raise RuntimeError("PSYCHEVO_CHANGED_FILES_JSON must be a JSON string array")
+    target_paths = {target["path"] for target in HIGH_RISK_COVERAGE_TARGETS.values()}
+    required = any(
+        path in target_paths
+        or path in HIGH_RISK_COVERAGE_TRIGGER_PATHS
+        or path.startswith(HIGH_RISK_COVERAGE_TRIGGER_PREFIXES)
+        for path in changed
+    )
+    print(f"coverage={'true' if required else 'false'}")
+
+
 def coverage() -> None:
     manifest = load_manifest()
     output = artifact_root() / "coverage"
-    target = output / "target"
     reset_directory(output)
+    target = scratch_target(manifest, "coverage")
     llvm_cov = ["cargo", f"+{manifest['nightly']}", "llvm-cov"]
-    environment = {
-        "CARGO_INCREMENTAL": "0",
-        "CARGO_LLVM_COV_TARGET_DIR": str(target),
-    }
+    environment = bounded_environment(
+        manifest,
+        {
+            "CARGO_INCREMENTAL": "0",
+            "CARGO_LLVM_COV_TARGET_DIR": str(target),
+            "CFLAGS": "-O1",
+            "PSYCHEVO_INSTRUMENTED_COVERAGE": "1",
+        },
+    )
     run(
-        [*llvm_cov, "clean", "--workspace"],
+        [*llvm_cov, "clean", "--profraw-only"],
         env=environment,
         timeout_seconds=COVERAGE_TIMEOUT_SECONDS,
     )
@@ -253,6 +433,8 @@ def coverage() -> None:
             "psychevo-gateway",
             "--package",
             "psychevo-gateway-protocol",
+            "--package",
+            "psychevo-channel-sidecar",
             "--lib",
         ],
         env=environment,
@@ -303,7 +485,9 @@ def write_high_risk_coverage_summary(summary_path: Path, output: Path) -> None:
         by_path[normalized] = entry
 
     targets: dict[str, dict[str, Any]] = {}
-    for name, relative_path in HIGH_RISK_COVERAGE_TARGETS.items():
+    for name, target in HIGH_RISK_COVERAGE_TARGETS.items():
+        relative_path = target["path"]
+        minimum = target["minimum"]
         matches = [
             entry
             for path, entry in by_path.items()
@@ -340,7 +524,13 @@ def write_high_risk_coverage_summary(summary_path: Path, output: Path) -> None:
                 "count": count,
                 "covered": covered,
                 "percent": percent,
+                "minimumPercent": minimum[metric],
             }
+            if percent < minimum[metric]:
+                raise RuntimeError(
+                    f"coverage target {relative_path} {metric} {percent:.2f}% "
+                    f"is below {minimum[metric]}%"
+                )
         targets[name] = {
             "path": relative_path,
             "summary": retained,
@@ -349,7 +539,7 @@ def write_high_risk_coverage_summary(summary_path: Path, output: Path) -> None:
     (output / "high-risk-targets.json").write_text(
         json.dumps(
             {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "branchInstrumentation": True,
                 "targets": targets,
             },
@@ -362,9 +552,13 @@ def write_high_risk_coverage_summary(summary_path: Path, output: Path) -> None:
 
 
 def deterministic() -> None:
+    manifest = load_manifest()
     output = artifact_root() / "deterministic-contracts"
     reset_directory(output)
-    target = output / "target"
+    target = scratch_target(manifest, "deterministic")
+    environment = bounded_environment(
+        manifest, {"CARGO_TARGET_DIR": str(target)}
+    )
     results: list[dict[str, Any]] = []
     for name, command_tuple in DETERMINISTIC_CONTRACTS:
         command = list(command_tuple)
@@ -373,7 +567,7 @@ def deterministic() -> None:
         try:
             contract_output = command_output(
                 command,
-                env={"CARGO_TARGET_DIR": str(target)},
+                env=environment,
                 timeout_seconds=DETERMINISTIC_COMMAND_TIMEOUT_SECONDS,
             )
             print(contract_output)
@@ -409,8 +603,7 @@ def write_deterministic_report(output: Path, results: list[dict[str, Any]]) -> N
 
 def miri() -> None:
     manifest = load_manifest()
-    target = artifact_root() / "miri-target"
-    reset_directory(target)
+    target = scratch_target(manifest, "miri")
     run(
         [
             "cargo",
@@ -422,15 +615,14 @@ def miri() -> None:
             "psychevo-gateway-protocol",
             "--lib",
         ],
-        env={"CARGO_TARGET_DIR": str(target)},
+        env=bounded_environment(manifest, {"CARGO_TARGET_DIR": str(target)}),
         timeout_seconds=MIRI_TIMEOUT_SECONDS,
     )
 
 
 def asan() -> None:
     manifest = load_manifest()
-    target = artifact_root() / "asan-target"
-    reset_directory(target)
+    target = scratch_target(manifest, "asan")
     run(
         [
             "cargo",
@@ -447,13 +639,16 @@ def asan() -> None:
             "--",
             "--nocapture",
         ],
-        env={
-            "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
-            "CARGO_INCREMENTAL": "0",
-            "CARGO_TARGET_DIR": str(target),
-            "RUSTDOCFLAGS": "-Zsanitizer=address",
-            "RUSTFLAGS": "-Zsanitizer=address",
-        },
+        env=bounded_environment(
+            manifest,
+            {
+                "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+                "CARGO_INCREMENTAL": "0",
+                "CARGO_TARGET_DIR": str(target),
+                "RUSTDOCFLAGS": "-Zsanitizer=address",
+                "RUSTFLAGS": "-Zsanitizer=address",
+            },
+        ),
         timeout_seconds=ASAN_TIMEOUT_SECONDS,
     )
 
@@ -461,13 +656,26 @@ def asan() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=["verify", "coverage", "deterministic", "miri", "asan"]
+        "command",
+        choices=[
+            "verify",
+            "verify-coverage",
+            "coverage-required",
+            "coverage",
+            "deterministic",
+            "miri",
+            "asan",
+        ],
     )
     args = parser.parse_args()
     try:
         require_linux_x86_64()
+        if args.command not in {"verify", "verify-coverage", "coverage-required"}:
+            write_resource_policy(load_manifest())
         {
             "verify": verify,
+            "verify-coverage": verify_coverage,
+            "coverage-required": coverage_required,
             "coverage": coverage,
             "deterministic": deterministic,
             "miri": miri,

@@ -1,83 +1,83 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "platform": "linux-x86_64",
   "framework": {
     "baseline": {
-      "directDependencies": 34,
-      "reachablePackages": 244,
-      "cleanCheckMs": 19764,
-      "noopCheckMs": 146,
+      "directDependencies": 32,
+      "reachablePackages": 242,
+      "cleanCheckMs": 19641,
+      "noopCheckMs": 141,
       "noopRatioPerThousand": 7
     },
-    "maximum": {
-      "directDependencies": 36,
-      "reachablePackages": 260,
-      "cleanCheckMs": 600000,
-      "noopCheckMs": 60000,
-      "noopRatioPerThousand": 250
+    "regressionMaximum": {
+      "directDependencies": 32,
+      "reachablePackages": 242,
+      "cleanCheckMs": 30000,
+      "noopCheckMs": 300,
+      "noopRatioPerThousand": 20
     }
   },
   "linuxArtifacts": {
     "baseline": {
-      "releaseCliBytes": 81836976,
-      "releaseDesktopBytes": 75972952,
-      "pythonSdkWheelBytes": 22589,
-      "appServerWheelBytes": 42858349,
-      "pythonCliWheelBytes": 206552760
+      "releaseCliBytes": 82829376,
+      "releaseDesktopBytes": 54584784,
+      "pythonSdkWheelBytes": 22630,
+      "appServerWheelBytes": 19276664,
+      "pythonCliWheelBytes": 59506737
     },
-    "maximum": {
-      "releaseCliBytes": 112000000,
-      "releaseDesktopBytes": 160000000,
-      "pythonSdkWheelBytes": 25000,
-      "appServerWheelBytes": 60000000,
-      "pythonCliWheelBytes": 260000000
+    "regressionMaximum": {
+      "releaseCliBytes": 90020674,
+      "releaseDesktopBytes": 60043263,
+      "pythonSdkWheelBytes": 30000,
+      "appServerWheelBytes": 21204331,
+      "pythonCliWheelBytes": 65457411
     }
   },
   "cliStartup": {
     "baseline": {
-      "firstProcessMs": 6,
-      "repeatedProcessMedianMs": 3
+      "firstProcessMs": 4,
+      "repeatedProcessMedianMs": 4
     },
-    "maximum": {
-      "firstProcessMs": 5000,
-      "repeatedProcessMedianMs": 2000
+    "regressionMaximum": {
+      "firstProcessMs": 25,
+      "repeatedProcessMedianMs": 15
     }
   },
   "workbench": {
     "baseline": {
-      "initialJavascriptBytes": 1588199,
-      "optionalPreviewAssetBytes": 29286783
+      "initialJavascriptBytes": 1636124,
+      "optionalPreviewAssetBytes": 10606294
     },
-    "maximum": {
-      "initialJavascriptBytes": 1800000,
-      "optionalPreviewAssetBytes": 35000000
+    "regressionMaximum": {
+      "initialJavascriptBytes": 1747019,
+      "optionalPreviewAssetBytes": 11666924
     }
   },
   "gateway": {
     "baseline": {
-      "initializedGuiOverheadMs": 0,
+      "initializedGuiOverheadMs": 1,
       "idleSqliteOperations": 0,
       "retainedEventBatchCommitLatencyP50Ms": 10,
       "retainedEventBatchCommitLatencyP95Ms": 21,
       "retainedEventBatchCommitLatencyP99Ms": 21,
-      "retainedEventCommitLatencyP50Micros": 6012,
-      "retainedEventCommitLatencyP95Micros": 16489,
-      "retainedEventCommitLatencyP99Micros": 19211,
-      "retainedEventMicrosPerEvent": 369,
+      "retainedEventCommitLatencyP50Micros": 4928,
+      "retainedEventCommitLatencyP95Micros": 9249,
+      "retainedEventCommitLatencyP99Micros": 10722,
+      "retainedEventMicrosPerEvent": 350,
       "retainedEventPeakIngressQueueDepth": 32,
       "retainedEventSqliteBusyOperations": 0,
       "shellHeartbeatTransactions": 1
     },
-    "maximum": {
-      "initializedGuiOverheadMs": 150,
+    "regressionMaximum": {
+      "initializedGuiOverheadMs": 50,
       "idleSqliteOperations": 0,
-      "retainedEventBatchCommitLatencyP50Ms": 5000,
-      "retainedEventBatchCommitLatencyP95Ms": 5000,
-      "retainedEventBatchCommitLatencyP99Ms": 5000,
-      "retainedEventCommitLatencyP50Micros": 5000000,
-      "retainedEventCommitLatencyP95Micros": 5000000,
-      "retainedEventCommitLatencyP99Micros": 5000000,
-      "retainedEventMicrosPerEvent": 100000,
+      "retainedEventBatchCommitLatencyP50Ms": 25,
+      "retainedEventBatchCommitLatencyP95Ms": 50,
+      "retainedEventBatchCommitLatencyP99Ms": 75,
+      "retainedEventCommitLatencyP50Micros": 15000,
+      "retainedEventCommitLatencyP95Micros": 35000,
+      "retainedEventCommitLatencyP99Micros": 45000,
+      "retainedEventMicrosPerEvent": 750,
       "retainedEventPeakIngressQueueDepth": 32,
       "retainedEventSqliteBusyOperations": 0,
       "shellHeartbeatTransactions": 1

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import stat
@@ -42,6 +44,7 @@ class PackageTests(unittest.TestCase):
         (self.assets / "index.html").write_text(
             "<!doctype html><title>Psychevo</title>", encoding="utf-8"
         )
+        self._write_asset_manifest()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -49,6 +52,24 @@ class PackageTests(unittest.TestCase):
     def _write_executable(self, path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def _write_asset_manifest(self) -> None:
+        files = []
+        for path in sorted(self.assets.rglob("*")):
+            if not path.is_file() or path.name == "psychevo-release-assets.json":
+                continue
+            content = path.read_bytes()
+            files.append(
+                {
+                    "path": path.relative_to(self.assets).as_posix(),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "size": len(content),
+                }
+            )
+        (self.assets / "psychevo-release-assets.json").write_text(
+            json.dumps({"schemaVersion": 1, "files": files}, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _build_wheel(self, project: str, env: dict[str, str] | None = None) -> Path:
         before = set(self.wheels.glob("*.whl"))
@@ -137,6 +158,43 @@ class PackageTests(unittest.TestCase):
             self.assertTrue(
                 any(name.endswith("/entry_points.txt") for name in archive.namelist())
             )
+            self.assertTrue(
+                all(info.compress_type == zipfile.ZIP_DEFLATED for info in archive.infolist())
+            )
+
+    def test_binary_wheels_are_reproducible(self) -> None:
+        environment = {
+            "PSYCHEVO_CLI_BINARY": str(self.pevo),
+            "PSYCHEVO_WORKBENCH_DIST": str(self.assets),
+        }
+        first = self._build_wheel("cli-bin", environment).read_bytes()
+        for path in self.wheels.glob("*.whl"):
+            path.unlink()
+        second = self._build_wheel("cli-bin", environment).read_bytes()
+        self.assertEqual(first, second)
+
+    def test_cli_wheel_rejects_unmanifested_assets(self) -> None:
+        (self.assets / "unexpected.bin").write_bytes(b"not selected")
+        result = subprocess.run(
+            [
+                self.uv,
+                "build",
+                "--wheel",
+                "--out-dir",
+                str(self.wheels),
+                str(PYTHON_ROOT / "cli-bin"),
+            ],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PSYCHEVO_CLI_BINARY": str(self.pevo),
+                "PSYCHEVO_WORKBENCH_DIST": str(self.assets),
+            },
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanifested=['unexpected.bin']", result.stderr)
 
     def test_sdk_sdist_rebuilds_and_binary_projects_reject_sdist(self) -> None:
         sdist_dir = self.root / "sdists"

@@ -20,6 +20,7 @@ pub(crate) fn check_sdk_architecture(root: &Path) -> Result<()> {
             .as_str()
             .context("workspace package.name must be a string")?
             .to_string();
+        validate_integration_test_reachability(&name, &member_root, &member)?;
         if manifests.insert(name.clone(), member).is_some() {
             bail!("workspace contains duplicate package name {name}");
         }
@@ -115,6 +116,67 @@ pub(crate) fn check_sdk_architecture(root: &Path) -> Result<()> {
         .map(|name| (name.clone(), member_roots[name].clone()))
         .collect::<BTreeMap<_, _>>();
     validate_source_architecture(root, &production_roots, &workspace_manifests, &graph)?;
+    Ok(())
+}
+
+fn validate_integration_test_reachability(
+    package_name: &str,
+    package_root: &Path,
+    manifest: &Value,
+) -> Result<()> {
+    if value_at_optional(manifest, &["package", "autotests"]) != Some(&Value::Boolean(false)) {
+        return Ok(());
+    }
+
+    let declared = manifest
+        .get("test")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|target| {
+            target
+                .get("path")
+                .and_then(Value::as_str)
+                .with_context(|| format!("{package_name} [[test]] target must declare path"))
+                .map(PathBuf::from)
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
+    for path in &declared {
+        if !package_root.join(path).is_file() {
+            bail!(
+                "{package_name} declares unreachable integration test target {}",
+                path.display()
+            );
+        }
+    }
+
+    let tests_root = package_root.join("tests");
+    if !tests_root.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&tests_root)
+        .with_context(|| format!("read integration tests under {}", tests_root.display()))?
+    {
+        let entry = entry.with_context(|| format!("read entry under {}", tests_root.display()))?;
+        let path = entry.path();
+        if entry
+            .file_type()
+            .with_context(|| format!("read file type for {}", path.display()))?
+            .is_file()
+            && path.extension().is_some_and(|extension| extension == "rs")
+        {
+            let relative = path
+                .strip_prefix(package_root)
+                .expect("test file is under package root")
+                .to_path_buf();
+            if !declared.contains(&relative) {
+                bail!(
+                    "{package_name} disables autotests but {} is not reachable from a [[test]] target",
+                    relative.display()
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -242,6 +304,22 @@ fn validate_source_architecture(
         }
     }
     validate_cli_test_imports(root)?;
+    let store_path = root.join("crates/psychevo/src/store.rs");
+    validate_framework_store_facade(&read_source(&store_path)?)
+        .with_context(|| source_label(root, &store_path))?;
+    let administration_path = root.join("crates/psychevo/src/application/administration.rs");
+    let administration_declarations =
+        top_level_public_type_declarations(&read_source(&administration_path)?);
+    if !administration_declarations.is_empty() {
+        bail!(
+            "{} is a delegation surface and must not regain domain type ownership: {}",
+            source_label(root, &administration_path),
+            administration_declarations
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
     Ok(())
 }
 
@@ -264,7 +342,105 @@ fn validate_crate_root_surface(crate_name: &str, source: &str) -> Result<()> {
     if glob_reexport_statement(source).is_some() {
         bail!("{crate_name} crate root must not expose a glob re-export");
     }
+    if crate_name == "psychevo" {
+        let exports = public_use_statements(source);
+        let expected = ["pubuseerror::{Error,Result};".to_string()];
+        if exports != expected {
+            bail!(
+                "psychevo crate root may re-export only error::{{Error, Result}}; found {}",
+                exports.join(", ")
+            );
+        }
+    }
     Ok(())
+}
+
+fn public_use_statements(source: &str) -> Vec<String> {
+    let tokens = rust_tokens(&rust_code_mask(source));
+    let test_only_ranges = cfg_test_item_ranges(&tokens);
+    let mut statements = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.text != "pub"
+            || test_only_ranges
+                .iter()
+                .any(|(start, end)| (*start..*end).contains(&token.start))
+            || tokens.get(index + 1).is_none_or(|next| next.text != "use")
+        {
+            continue;
+        }
+        let Some(end) = tokens[index + 2..]
+            .iter()
+            .position(|candidate| candidate.text == ";")
+            .map(|offset| index + 2 + offset)
+        else {
+            continue;
+        };
+        statements.push(
+            tokens[index..=end]
+                .iter()
+                .map(|token| token.text.as_str())
+                .collect::<String>(),
+        );
+    }
+    statements
+}
+
+fn validate_framework_store_facade(source: &str) -> Result<()> {
+    let declarations = top_level_public_type_declarations(source);
+    let expected = [
+        "StateRuntime",
+        "StateRuntimeDiagnostics",
+        "StateRuntimeInner",
+        "TurnFilesystemGrantGuard",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<BTreeSet<_>>();
+    let unexpected = declarations
+        .difference(&expected)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        bail!(
+            "store.rs is the StateRuntime facade and must not own domain records: {}",
+            unexpected.join(", ")
+        );
+    }
+    if declarations != expected {
+        let missing = expected
+            .difference(&declarations)
+            .cloned()
+            .collect::<Vec<_>>();
+        bail!(
+            "store.rs facade declarations are missing: {}",
+            missing.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn top_level_public_type_declarations(source: &str) -> BTreeSet<String> {
+    let mut declarations = BTreeSet::new();
+    for line in rust_code_mask(source).lines().map(str::trim) {
+        let rest = if let Some(rest) = line.strip_prefix("pub(crate) ") {
+            rest
+        } else if let Some(rest) = line.strip_prefix("pub ") {
+            rest
+        } else {
+            continue;
+        };
+        for kind in ["struct ", "enum ", "type "] {
+            if let Some(name) = rest.strip_prefix(kind).and_then(|value| {
+                value
+                    .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                    .next()
+            }) && !name.is_empty()
+            {
+                declarations.insert(name.to_string());
+            }
+        }
+    }
+    declarations
 }
 
 fn validate_no_glob_reexport(source: &str) -> Result<()> {
@@ -1424,6 +1600,32 @@ mod tests {
             "#,
         )
         .expect("comments and strings are not Rust symbols");
+
+        validate_crate_root_surface("psychevo", "pub use error::{Error, Result};")
+            .expect("Framework root primitives");
+        let flat = validate_crate_root_surface(
+            "psychevo",
+            "pub use application::{Application, Client};\npub use error::{Error, Result};",
+        )
+        .expect_err("Framework item facade");
+        assert!(flat.to_string().contains("may re-export only"), "{flat:#}");
+    }
+
+    #[test]
+    fn framework_store_facade_rejects_new_domain_record_declarations() {
+        let facade = r#"
+            pub struct StateRuntime {}
+            pub(crate) struct StateRuntimeInner {}
+            pub struct StateRuntimeDiagnostics {}
+            pub(crate) struct TurnFilesystemGrantGuard {}
+        "#;
+        validate_framework_store_facade(facade).expect("small StateRuntime facade");
+
+        let error = validate_framework_store_facade(&format!(
+            "{facade}\npub struct GatewayHistoricalRecord {{}}"
+        ))
+        .expect_err("domain record in central store facade");
+        assert!(error.to_string().contains("GatewayHistoricalRecord"));
     }
 
     #[test]
@@ -1456,7 +1658,7 @@ mod tests {
     fn adapter_boundary_rejects_framework_implementation_modules() {
         for source in [
             "use psychevo::state::StateRuntime;",
-            "use psychevo::{Application, run::RunOptions};",
+            "use psychevo::{application::Application, run::RunOptions};",
             "fn raw() { let _ = psychevo::store::open(); }",
         ] {
             let error = validate_adapter_source(source).expect_err("implementation import");
@@ -1466,8 +1668,10 @@ mod tests {
                     .contains("Framework implementation module")
             );
         }
-        validate_adapter_source("use psychevo::{Application, Client, Thread};")
-            .expect("semantic Framework interface");
+        validate_adapter_source(
+            "use psychevo::{application::Application, application::Client, application::Thread};",
+        )
+        .expect("semantic Framework interface");
     }
 
     #[test]
@@ -1707,5 +1911,43 @@ mod tests {
         }
 
         fs::remove_dir_all(&root).expect("remove architecture fixture");
+    }
+
+    #[test]
+    fn autotests_false_requires_every_integration_test_to_be_declared_and_present() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-test-reachability-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("tests")).expect("tests directory");
+        fs::write(root.join("tests/contract.rs"), "fn main() {}\n").expect("test source");
+
+        let omitted = toml::from_str::<Value>("[package]\nname = \"example\"\nautotests = false\n")
+            .expect("manifest");
+        let error = validate_integration_test_reachability("example", &root, &omitted)
+            .expect_err("omitted test must fail");
+        assert!(error.to_string().contains("not reachable"), "{error:#}");
+
+        let declared = toml::from_str::<Value>(
+            "[package]\nname = \"example\"\nautotests = false\n\n[[test]]\nname = \"contract\"\npath = \"tests/contract.rs\"\n",
+        )
+        .expect("manifest");
+        validate_integration_test_reachability("example", &root, &declared)
+            .expect("declared test is reachable");
+
+        fs::remove_file(root.join("tests/contract.rs")).expect("remove test source");
+        let error = validate_integration_test_reachability("example", &root, &declared)
+            .expect_err("missing declared target must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unreachable integration test target"),
+            "{error:#}"
+        );
+        fs::remove_dir_all(&root).expect("remove reachability fixture");
     }
 }

@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
@@ -518,6 +519,97 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop("PATH", None)
             else:
                 os.environ["PATH"] = old_path
+
+    async def test_concurrent_connects_create_one_transport(self) -> None:
+        release = asyncio.Event()
+        started = asyncio.Event()
+        transports: list[_FailingTransport] = []
+
+        async def connect(_uri: str, _token: str) -> Transport:
+            transport = _FailingTransport()
+            transports.append(transport)
+            started.set()
+            await release.wait()
+            return transport
+
+        client = Client(remote_url="ws://example.test/app-server", token="test")
+        with (
+            patch(
+                "psychevo._client.WebSocketTransport.connect",
+                side_effect=connect,
+            ),
+            patch.object(_RpcClient, "start", return_value=None),
+        ):
+            connects = [asyncio.create_task(client.connect()) for _ in range(100)]
+            await asyncio.wait_for(started.wait(), timeout=1)
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(*connects)
+            self.assertEqual(len(transports), 1)
+            await client.close()
+
+        self.assertTrue(transports[0].closed)
+
+    async def test_close_waits_for_in_progress_connect_and_leaves_no_rpc(self) -> None:
+        release = asyncio.Event()
+        started = asyncio.Event()
+        transport = _FailingTransport()
+
+        async def connect(_uri: str, _token: str) -> Transport:
+            started.set()
+            await release.wait()
+            return transport
+
+        client = Client(remote_url="ws://example.test/app-server", token="test")
+        with (
+            patch(
+                "psychevo._client.WebSocketTransport.connect",
+                side_effect=connect,
+            ),
+            patch.object(_RpcClient, "start", return_value=None),
+        ):
+            connecting = asyncio.create_task(client.connect())
+            await asyncio.wait_for(started.wait(), timeout=1)
+            closing = asyncio.create_task(client.close())
+            await asyncio.sleep(0)
+            self.assertFalse(closing.done())
+            release.set()
+            await asyncio.gather(connecting, closing)
+
+        self.assertIsNone(client._rpc)
+        self.assertTrue(transport.closed)
+
+    async def test_failed_initialization_closes_transport_and_remains_retryable(self) -> None:
+        transports: list[_FailingTransport] = []
+
+        async def connect(_uri: str, _token: str) -> Transport:
+            transport = _FailingTransport()
+            transports.append(transport)
+            return transport
+
+        client = Client(remote_url="ws://example.test/app-server", token="test")
+        with (
+            patch(
+                "psychevo._client.WebSocketTransport.connect",
+                side_effect=connect,
+            ),
+            patch.object(
+                _RpcClient,
+                "start",
+                side_effect=[TransportError("initialize failed"), None],
+            ),
+        ):
+            with self.assertRaisesRegex(TransportError, "initialize failed"):
+                await client.connect()
+            self.assertIsNone(client._rpc)
+            self.assertTrue(transports[0].closed)
+
+            await client.connect()
+            self.assertIsNotNone(client._rpc)
+            await asyncio.gather(*(client.close() for _ in range(10)))
+
+        self.assertEqual(len(transports), 2)
+        self.assertTrue(transports[1].closed)
 
 
 class _FailingTransport(Transport):
