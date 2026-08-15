@@ -334,7 +334,14 @@ impl CapturedDirectoryIdentity {
             } else {
                 libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC
             };
-            let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, mode) };
+            let fd = unsafe {
+                libc::openat(
+                    directory.as_raw_fd(),
+                    name.as_ptr(),
+                    flags,
+                    mode as libc::c_uint,
+                )
+            };
             if fd < 0 {
                 return Err(std::io::Error::last_os_error().into());
             }

@@ -826,7 +826,9 @@ mod prompt_usage_tests {
 
     use serde_json::json;
 
-    use super::{acp_workspace_roots, cumulative_usage_delta};
+    #[cfg(windows)]
+    use super::acp_workspace_roots;
+    use super::cumulative_usage_delta;
 
     #[cfg(windows)]
     #[test]

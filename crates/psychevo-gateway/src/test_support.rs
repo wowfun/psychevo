@@ -81,8 +81,10 @@ pub(crate) fn toml_path(path: &Path) -> String {
 }
 
 pub(crate) fn native_process_fixture_env(
-    mut env: BTreeMap<String, String>,
+    env: BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
+    #[cfg(windows)]
+    let mut env = env;
     #[cfg(windows)]
     {
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();

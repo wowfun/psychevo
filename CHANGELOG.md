@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-16
+
+- Restored cross-platform pull-request validation by isolating hosted native
+  paths and prompt assets, fixing Linux and macOS compilation, and making
+  browser and deadline fixtures independent of checkout and instrumentation
+  timing.
+
 ## 2026-08-14
 
 - Hardened managed-local Extension installation with rollback-safe publication,

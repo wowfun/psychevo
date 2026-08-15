@@ -1,1 +1,2 @@
 crates/psychevo/migrations/*.sql text eol=lf
+crates/psychevo/templates/*.md text eol=lf

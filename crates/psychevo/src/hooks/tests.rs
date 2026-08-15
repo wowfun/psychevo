@@ -630,7 +630,7 @@ async fn command_deadline_terminates_descendant_that_holds_output_open() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"hooks": [{
         "type": "command",
-        "command": "python3 -c 'import os,time; p=os.fork(); time.sleep(30) if p == 0 else print(\"ready\", flush=True)'",
+        "command": "printf 'ready\\n'; sleep 30",
         "timeout": 1
     }]}]});
     let started = Instant::now();
