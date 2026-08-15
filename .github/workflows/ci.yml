@@ -406,29 +406,24 @@ jobs:
         with:
           cache-on-failure: true
 
+      - name: Bind canonical Windows temporary directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "TEMP=${{ runner.temp }}" >> $env:GITHUB_ENV
+          "TMP=${{ runner.temp }}" >> $env:GITHUB_ENV
+
       - name: Run native Framework contracts
         run: cargo test -p psychevo --lib
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
       - name: Run native Gateway contracts
         run: cargo test -p psychevo-gateway --lib
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
       - name: Run Channel sidecar lifecycle contracts
         run: cargo test -p psychevo-channel-sidecar --lib
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
       - name: Run Channel provider contracts
         run: cargo test -p psychevo-channel-adapters --all-features --lib
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
       - name: Check Channel Extension binaries
         run: >-
@@ -436,15 +431,9 @@ jobs:
           -p psychevo-extension-channel-feishu-lark
           -p psychevo-extension-channel-telegram
           -p psychevo-extension-channel-wechat
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
       - name: Check CLI native target
         run: cargo check -p psychevo-cli --all-targets
-        env:
-          TEMP: ${{ runner.temp }}
-          TMP: ${{ runner.temp }}
 
   risk_coverage:
     name: High-risk coverage
