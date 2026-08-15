@@ -136,6 +136,8 @@ Supported verbatim inputs such as `\\?\C:\repo` and
 non-verbatim drive or UNC forms. Verbatim prefixes must not appear in stored cwd
 identity, Gateway cwd identity, Workbench cwd display, or model-visible tool
 metadata unless an explicit low-level diagnostic is showing raw host API output.
+Runtime must likewise remove a verbatim prefix before passing a command-script
+path to `cmd.exe`, which does not accept that filesystem spelling.
 
 ## Storage and Wire
 
@@ -168,6 +170,8 @@ Deterministic validation must cover:
   as the same path
 - UTF-8 environment defaults, including `LC_CTYPE`, without overriding explicit
   caller values
+- isolated managed-process fixtures preserving Windows runtime essentials such
+  as `SystemRoot` in their explicitly captured environment
 - Windows legacy output decoding and bounded lossy fallback for invalid bytes
 - Windows process-tree termination command construction
 - executable discovery deduplicating `PATHEXT` case-insensitively without a

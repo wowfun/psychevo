@@ -1,5 +1,8 @@
-use std::io::{ErrorKind, Read, Seek, Write};
+use std::io::{ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::io::Write;
 
 use crate::error::{Error, Result};
 
@@ -9,6 +12,8 @@ pub(crate) struct CapturedDirectoryIdentity {
     object: FilesystemObjectIdentity,
     #[cfg(unix)]
     handle: std::sync::Arc<std::fs::File>,
+    #[cfg(windows)]
+    _handle: std::sync::Arc<std::fs::File>,
 }
 
 impl PartialEq for CapturedDirectoryIdentity {
@@ -27,8 +32,10 @@ pub struct WorkspaceRootCapture {
 #[derive(Debug)]
 pub(crate) struct CapturedFileTarget {
     target: PathBuf,
+    #[cfg(unix)]
     parent: CapturedDirectoryIdentity,
     existing: Option<(FilesystemObjectIdentity, std::fs::File)>,
+    #[cfg(unix)]
     writable: bool,
 }
 
@@ -114,36 +121,74 @@ enum FilesystemObjectIdentity {
     #[cfg(unix)]
     Unix { device: u64, inode: u64 },
     #[cfg(windows)]
-    Windows { volume: u32, file_index: u64 },
+    Windows { volume: u64, file_id: [u8; 16] },
 }
 
 impl CapturedDirectoryIdentity {
     pub(crate) fn capture(path: &Path) -> Result<Self> {
-        let path = crate::host_paths::normalized_native_path(&std::fs::canonicalize(path)?);
-        #[cfg(unix)]
-        let handle = {
-            use std::os::unix::fs::OpenOptionsExt as _;
-
-            std::fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-                .open(&path)?
-        };
-        #[cfg(unix)]
-        let metadata = handle.metadata()?;
-        #[cfg(not(unix))]
-        let metadata = std::fs::metadata(&path)?;
+        let path = crate::host_paths::normalized_native_path(
+            &std::fs::canonicalize(path).map_err(|error| {
+                workspace_root_identity_error("Workspace root could not be resolved", error)
+            })?,
+        );
+        #[cfg(any(unix, windows))]
+        let handle = open_directory_identity_handle(&path).map_err(|error| {
+            workspace_root_identity_error("Workspace root could not be opened", error)
+        })?;
+        #[cfg(any(unix, windows))]
+        let metadata = handle.metadata().map_err(|error| {
+            workspace_root_identity_error("Workspace root metadata is unavailable", error)
+        })?;
+        #[cfg(not(any(unix, windows)))]
+        let metadata = std::fs::metadata(&path).map_err(|error| {
+            workspace_root_identity_error("Workspace root metadata is unavailable", error)
+        })?;
         if !metadata.is_dir() {
             return Err(Error::Message(format!(
-                "captured Workspace root is not a directory: {}",
+                "path_identity_changed: captured Workspace root is not a directory: {}",
                 path.display()
             )));
         }
-        let object = filesystem_object_identity(&metadata)?;
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
+        let object = directory_object_identity(&handle).map_err(|error| {
+            workspace_root_identity_error("Workspace root identity is unavailable", error)
+        })?;
+        #[cfg(not(any(unix, windows)))]
+        let object = filesystem_object_identity(&metadata).map_err(|error| {
+            workspace_root_identity_error("Workspace root identity is unavailable", error)
+        })?;
+        #[cfg(any(unix, windows))]
         {
-            let current = std::fs::metadata(&path)?;
-            if !current.is_dir() || filesystem_object_identity(&current)? != object {
+            let current_path = crate::host_paths::normalized_native_path(
+                &std::fs::canonicalize(&path).map_err(|error| {
+                    workspace_root_identity_error(
+                        "Workspace root changed while its identity was captured",
+                        error,
+                    )
+                })?,
+            );
+            let current_handle =
+                open_directory_identity_handle(&current_path).map_err(|error| {
+                    workspace_root_identity_error(
+                        "Workspace root changed while its identity was captured",
+                        error,
+                    )
+                })?;
+            let current = current_handle.metadata().map_err(|error| {
+                workspace_root_identity_error(
+                    "Workspace root changed while its identity was captured",
+                    error,
+                )
+            })?;
+            if current_path != path
+                || !current.is_dir()
+                || directory_object_identity(&current_handle).map_err(|error| {
+                    workspace_root_identity_error(
+                        "Workspace root changed while its identity was captured",
+                        error,
+                    )
+                })? != object
+            {
                 return Err(Error::Message(
                     "path_identity_changed: Workspace root changed while its identity was captured"
                         .to_string(),
@@ -152,10 +197,13 @@ impl CapturedDirectoryIdentity {
             Ok(Self {
                 path,
                 object,
+                #[cfg(unix)]
                 handle: std::sync::Arc::new(handle),
+                #[cfg(windows)]
+                _handle: std::sync::Arc::new(handle),
             })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         Ok(Self { path, object })
     }
 
@@ -164,31 +212,53 @@ impl CapturedDirectoryIdentity {
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
-        #[cfg(unix)]
+        let current_path = std::fs::canonicalize(&self.path).map_err(|error| {
+            workspace_root_identity_error("captured Workspace root is unavailable", error)
+        })?;
+        let current_path = crate::host_paths::normalized_native_path(&current_path);
+        #[cfg(any(unix, windows))]
         {
-            let captured = self.handle.metadata()?;
-            if !captured.is_dir() || filesystem_object_identity(&captured)? != self.object {
+            let current_handle =
+                open_directory_identity_handle(&current_path).map_err(|error| {
+                    workspace_root_identity_error("captured Workspace root is unavailable", error)
+                })?;
+            let metadata = current_handle.metadata().map_err(|error| {
+                workspace_root_identity_error("captured Workspace root is unavailable", error)
+            })?;
+            if current_path != self.path
+                || !metadata.is_dir()
+                || directory_object_identity(&current_handle).map_err(|error| {
+                    workspace_root_identity_error(
+                        "captured Workspace root identity is unavailable",
+                        error,
+                    )
+                })? != self.object
+            {
                 return Err(Error::Message(
-                    "path_identity_changed: captured Workspace root handle changed after Turn admission"
+                    "path_identity_changed: captured Workspace root object changed after Turn admission"
                         .to_string(),
                 ));
             }
         }
-        let current_path = std::fs::canonicalize(&self.path).map_err(|error| {
-            Error::Message(format!(
-                "path_identity_changed: captured Workspace root is unavailable: {error}"
-            ))
-        })?;
-        let current_path = crate::host_paths::normalized_native_path(&current_path);
-        let metadata = std::fs::metadata(&current_path)?;
-        if current_path != self.path
-            || !metadata.is_dir()
-            || filesystem_object_identity(&metadata)? != self.object
+        #[cfg(not(any(unix, windows)))]
         {
-            return Err(Error::Message(
-                "path_identity_changed: captured Workspace root object changed after Turn admission"
-                    .to_string(),
-            ));
+            let metadata = std::fs::metadata(&current_path).map_err(|error| {
+                workspace_root_identity_error("captured Workspace root is unavailable", error)
+            })?;
+            if current_path != self.path
+                || !metadata.is_dir()
+                || filesystem_object_identity(&metadata).map_err(|error| {
+                    workspace_root_identity_error(
+                        "captured Workspace root identity is unavailable",
+                        error,
+                    )
+                })? != self.object
+            {
+                return Err(Error::Message(
+                    "path_identity_changed: captured Workspace root object changed after Turn admission"
+                        .to_string(),
+                ));
+            }
         }
         Ok(())
     }
@@ -208,13 +278,6 @@ impl CapturedDirectoryIdentity {
             libc::O_RDONLY
         };
         self.open_descendant_with_flags(target, flags, 0o666)
-    }
-
-    #[cfg(not(unix))]
-    fn open_descendant(&self, _target: &Path, _writable: bool) -> Result<std::fs::File> {
-        Err(Error::Message(
-            "identity-bound filesystem callbacks are unsupported on this platform".to_string(),
-        ))
     }
 
     #[cfg(unix)]
@@ -287,6 +350,10 @@ impl CapturedDirectoryIdentity {
     }
 }
 
+fn workspace_root_identity_error(context: &str, error: impl std::fmt::Display) -> Error {
+    Error::Message(format!("path_identity_changed: {context}: {error}"))
+}
+
 impl CapturedFileTarget {
     #[cfg(unix)]
     pub(crate) fn capture(target: &Path, writable: bool) -> Result<Self> {
@@ -338,6 +405,7 @@ impl CapturedFileTarget {
         &self.target
     }
 
+    #[cfg(unix)]
     pub(crate) fn revalidate(&self) -> Result<()> {
         self.parent.validate()?;
         match &self.existing {
@@ -364,6 +432,13 @@ impl CapturedFileTarget {
             None => {}
         }
         Ok(())
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn revalidate(&self) -> Result<()> {
+        Err(Error::Message(
+            "identity-bound filesystem callbacks are unsupported on this platform".to_string(),
+        ))
     }
 
     pub(crate) fn read_bytes(&mut self) -> Result<Vec<u8>> {
@@ -395,6 +470,7 @@ impl CapturedFileTarget {
             })
     }
 
+    #[cfg(unix)]
     pub(crate) fn replace_bytes(&mut self, content: &[u8]) -> Result<()> {
         let Some((captured_object, existing_file)) = self.existing.as_ref() else {
             return Err(Error::Message(format!(
@@ -405,28 +481,28 @@ impl CapturedFileTarget {
         let captured_object = captured_object.clone();
         let captured_permissions = existing_file.metadata()?.permissions();
         self.revalidate()?;
-        #[cfg(unix)]
-        {
-            let (parent, target_name) = self.parent.open_descendant_parent(&self.target, false)?;
-            let mut temporary = TemporaryFileAt::create(&parent)?;
-            temporary.file_mut().set_permissions(captured_permissions)?;
-            temporary.file_mut().write_all(content)?;
-            temporary.file_mut().flush()?;
-            self.revalidate()?;
-            temporary.exchange_with(&target_name)?;
-            let displaced = open_file_at(&parent, temporary.name(), libc::O_RDONLY)?;
-            if filesystem_object_identity(&displaced.metadata()?)? != captured_object {
-                return Err(Error::Message(
-                    "path_identity_changed: approved filesystem target object changed before atomic replacement"
-                        .to_string(),
-                ));
-            }
-            let replacement = temporary.commit_exchange()?;
-            let replacement_object = filesystem_object_identity(&replacement.metadata()?)?;
-            self.existing = Some((replacement_object, replacement));
-            self.revalidate()
+        let (parent, target_name) = self.parent.open_descendant_parent(&self.target, false)?;
+        let mut temporary = TemporaryFileAt::create(&parent)?;
+        temporary.file_mut().set_permissions(captured_permissions)?;
+        temporary.file_mut().write_all(content)?;
+        temporary.file_mut().flush()?;
+        self.revalidate()?;
+        temporary.exchange_with(&target_name)?;
+        let displaced = open_file_at(&parent, temporary.name(), libc::O_RDONLY)?;
+        if filesystem_object_identity(&displaced.metadata()?)? != captured_object {
+            return Err(Error::Message(
+                "path_identity_changed: approved filesystem target object changed before atomic replacement"
+                    .to_string(),
+            ));
         }
-        #[cfg(not(unix))]
+        let replacement = temporary.commit_exchange()?;
+        let replacement_object = filesystem_object_identity(&replacement.metadata()?)?;
+        self.existing = Some((replacement_object, replacement));
+        self.revalidate()
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn replace_bytes(&mut self, _content: &[u8]) -> Result<()> {
         Err(Error::Message(
             "identity-bound atomic filesystem replacement is unsupported on this platform"
                 .to_string(),
@@ -838,6 +914,42 @@ fn unlink_at(parent: &std::fs::File, name: &std::ffi::CStr) -> Result<()> {
 }
 
 #[cfg(unix)]
+fn open_directory_identity_handle(path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    Ok(std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?)
+}
+
+#[cfg(windows)]
+fn open_directory_identity_handle(path: &Path) -> Result<std::fs::File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let handle = options.open(path)?;
+    if handle.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(Error::Message(format!(
+            "captured Workspace root is a reparse point: {}",
+            path.display()
+        )));
+    }
+    Ok(handle)
+}
+
+#[cfg(unix)]
+fn directory_object_identity(file: &std::fs::File) -> Result<FilesystemObjectIdentity> {
+    filesystem_object_identity(&file.metadata()?)
+}
+
+#[cfg(unix)]
 fn filesystem_object_identity(metadata: &std::fs::Metadata) -> Result<FilesystemObjectIdentity> {
     use std::os::unix::fs::MetadataExt;
 
@@ -853,16 +965,34 @@ fn filesystem_object_identity(metadata: &std::fs::Metadata) -> Result<Filesystem
 }
 
 #[cfg(windows)]
-fn filesystem_object_identity(metadata: &std::fs::Metadata) -> Result<FilesystemObjectIdentity> {
-    use std::os::windows::fs::MetadataExt;
+fn directory_object_identity(file: &std::fs::File) -> Result<FilesystemObjectIdentity> {
+    use std::mem::size_of;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+    };
 
-    let volume = metadata.volume_serial_number().ok_or_else(|| {
-        Error::Message("filesystem object has no stable volume identity".to_string())
-    })?;
-    let file_index = metadata.file_index().ok_or_else(|| {
-        Error::Message("filesystem object has no stable file identity".to_string())
-    })?;
-    Ok(FilesystemObjectIdentity::Windows { volume, file_index })
+    let mut info = FILE_ID_INFO::default();
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle() as _,
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast(),
+            size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    if info.FileId.Identifier == [0; 16] {
+        return Err(Error::Message(
+            "filesystem object has no stable Windows file identity".to_string(),
+        ));
+    }
+    Ok(FilesystemObjectIdentity::Windows {
+        volume: info.VolumeSerialNumber,
+        file_id: info.FileId.Identifier,
+    })
 }
 
 #[cfg(not(any(unix, windows)))]

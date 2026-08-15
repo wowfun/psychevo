@@ -78,6 +78,14 @@ name = "public_framework"
 path = "tests/public_framework.rs"
 
 [[test]]
+name = "windows_filesystem_identity"
+path = "tests/windows_filesystem_identity.rs"
+
+[[test]]
+name = "sqlite_migration_compatibility"
+path = "tests/sqlite_migration_compatibility.rs"
+
+[[test]]
 name = "host_process"
 path = "tests/host_process.rs"
 
