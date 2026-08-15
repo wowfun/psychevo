@@ -74,12 +74,12 @@ process APIs, and cross-platform command fixtures must select an executable
 harness for the current host. Platform-specific implementations of one
 cross-platform fixture must expose the same tested protocol capabilities and
 state transitions.
-Hosted Windows native tests must bind temporary-file APIs to one runner-owned
-canonical path spelling. Its 8.3 user-profile alias must not make the same
-temporary directory appear as two different Workspace identities. Other hosts
-retain their native temporary-directory environment. Repository text consumed
-as compiled or runtime data must likewise declare its semantic line ending at
-the checkout boundary; prompt templates use LF on every host.
+Hosted native tests must bind each host's temporary-file APIs to one
+runner-owned canonical path spelling. A Windows 8.3 user-profile alias and the
+macOS `/var` to `/private/var` alias must not make the same temporary directory
+appear as two different Workspace identities. Repository text consumed as
+compiled or runtime data must likewise declare its semantic line ending at the
+checkout boundary; prompt templates use LF on every host.
 Repository Cargo configuration gives Rust test worker threads a host-neutral
 8 MiB minimum stack while preserving an explicit caller override. This keeps
 large async Gateway contract tests independent of the native Windows default

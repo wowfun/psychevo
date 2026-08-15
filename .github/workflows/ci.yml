@@ -413,6 +413,11 @@ jobs:
           "TEMP=${{ runner.temp }}" >> $env:GITHUB_ENV
           "TMP=${{ runner.temp }}" >> $env:GITHUB_ENV
 
+      - name: Bind canonical macOS temporary directory
+        if: runner.os == 'macOS'
+        shell: bash
+        run: printf '%s\n' 'TMPDIR=${{ runner.temp }}' >> "$GITHUB_ENV"
+
       - name: Run native Framework contracts
         run: cargo test -p psychevo --lib
 
