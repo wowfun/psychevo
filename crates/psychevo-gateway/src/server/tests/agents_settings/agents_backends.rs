@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(windows)]
+use psychevo::agents::{AgentBackendConfig, AgentEntrypoint};
 use psychevo::application::RunMode;
 use psychevo::application::ThreadAgentBinding;
 use psychevo::application::{

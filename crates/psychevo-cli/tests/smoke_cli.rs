@@ -345,6 +345,7 @@ pub(crate) fn assert_starter_config_template(config: &str) {
 mod smoke_cli_admin;
 #[path = "smoke_cli/agent.rs"]
 mod smoke_cli_agent;
+#[cfg(unix)]
 #[path = "smoke_cli/extensions.rs"]
 mod smoke_cli_extensions;
 #[path = "smoke_cli/hooks.rs"]

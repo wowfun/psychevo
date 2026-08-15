@@ -1520,16 +1520,18 @@ model = "lmstudio/test-model"
             command: command.to_string(),
             execution: ShellExecutionIntent::new("test")
                 .continue_latest(["test".to_string()])
-                .inherited_environment(BTreeMap::from([
-                    (
-                        "HOME".to_string(),
-                        temp.path().to_string_lossy().into_owned(),
-                    ),
-                    (
-                        "PSYCHEVO_HOME".to_string(),
-                        home.to_string_lossy().into_owned(),
-                    ),
-                ])),
+                .inherited_environment(crate::test_support::native_process_fixture_env(
+                    BTreeMap::from([
+                        (
+                            "HOME".to_string(),
+                            temp.path().to_string_lossy().into_owned(),
+                        ),
+                        (
+                            "PSYCHEVO_HOME".to_string(),
+                            home.to_string_lossy().into_owned(),
+                        ),
+                    ]),
+                )),
             event_sink: None,
             lineage: None,
         }

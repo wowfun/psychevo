@@ -265,6 +265,12 @@ Outbound ACP advertises read and terminal callbacks only where the
 directory-handle identity backend exists, and advertises write callbacks only
 where the atomic mutation backend exists. A configured tool policy cannot
 advertise a callback that every invocation must reject on that host.
+Typed callback handlers remain registered even when a host does not advertise
+the capability, so a non-conforming peer receives a deterministic
+`invalid_request` response instead of an unhandled-method transport failure.
+Unsupported-host rejection is separated at the platform function boundary;
+process execution and other supported-backend internals compile only on hosts
+that can execute them.
 Root-identity validation in async Turn and ACP admission uses the blocking-worker
 seam; Tokio workers do not synchronously canonicalize a maximum-size Workspace.
 

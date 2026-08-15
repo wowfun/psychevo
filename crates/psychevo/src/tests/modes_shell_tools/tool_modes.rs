@@ -1,15 +1,20 @@
+#[cfg(unix)]
+use super::exec_sessions::{configured_user_shell_context, configured_user_shell_environment};
+#[cfg(unix)]
 use super::exec_sessions::{
-    configured_user_shell_context, configured_user_shell_environment, process_exists,
-    shell_quote_path, wait_for_pid_file, wait_for_process_exit,
+    process_exists, shell_quote_path, wait_for_pid_file, wait_for_process_exit,
 };
 use crate::state::StateRuntime;
 use crate::tests::assert_first_party_tool_declaration_quality;
 use crate::tools::tool_names_for_mode;
+#[cfg(unix)]
+use crate::types::USER_SHELL_METADATA_KEY;
 use crate::types::{
     ClarifyAnswer, ClarifyResponse, ClarifyResult, RunMode, RunStreamEvent, RunStreamSink,
-    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, run_control,
+    UserShellContextOptions, UserShellOptions, run_control,
 };
 use crate::user_shell::run_user_shell_command_streaming_controlled;
+#[cfg(unix)]
 use psychevo_agent_core::Message;
 use psychevo_ai::Outcome;
 use serde_json::{Value, json};
@@ -782,6 +787,7 @@ pub(crate) async fn user_shell_abort_returns_aborted_result() {
     assert_eq!(result.result["error"], "aborted");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn user_shell_context_persists_user_xml_record() {
     let temp = tempdir().expect("temp");
@@ -875,6 +881,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn user_shell_reports_injection_failure_without_failing_completed_command() {
     let temp = tempdir().expect("temp");
@@ -976,6 +983,7 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
     assert!(!marker.exists());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn user_shell_context_records_bounded_truncated_output() {
     let temp = tempdir().expect("temp");

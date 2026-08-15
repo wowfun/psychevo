@@ -214,7 +214,7 @@ impl AgentFilesystemAuthorizer {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn capture_runtime(
         thread: &ThreadExecutionContext,
         execution: &AgentExecutionPolicy,
@@ -1054,7 +1054,7 @@ impl FrameworkExternalAgentDelegate {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod filesystem_authorizer_tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;

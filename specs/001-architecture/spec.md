@@ -105,9 +105,12 @@ assemble implementation fragments, inherit a shared wildcard parent prelude,
 preserve old item paths through a compatibility facade, or suppress
 `dead_code`/`unused_imports` to keep a shared namespace compiling. Generated
 code may use `include!` only from `OUT_DIR`. Platform-specific items use target
-reachability instead of broad lint suppression. Test files are reachable only
-through an exact `#[cfg(test)] mod ...;` declaration and import the seams they
-exercise explicitly instead of relying on production textual assembly.
+reachability instead of broad lint suppression. Target-gated tests apply the
+same target predicate to imports of target-gated helpers and import any
+platform-only production types at the narrowest matching test boundary. Test
+files are reachable only through an exact `#[cfg(test)] mod ...;` declaration
+and import the seams they exercise explicitly instead of relying on production
+textual assembly.
 
 For ordinary source and specification files under `apps/`, `crates/`,
 `packages/`, and `specs/`, production modules should normally remain below 900

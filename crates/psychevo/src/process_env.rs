@@ -44,7 +44,10 @@ pub(crate) fn host_process_launch(
             OsString::from("/V:OFF"),
             OsString::from("/C"),
         ],
-        windows_raw_arg: Some(OsString::from(windows_command_script_line(program, args)?)),
+        windows_raw_arg: Some(OsString::from(windows_command_script_line(
+            &crate::host_paths::normalized_native_path(program),
+            args,
+        )?)),
     })
 }
 
@@ -673,6 +676,22 @@ mod tests {
             Some(OsString::from(
                 r#"""C:\Program Files\nodejs\npm.cmd" "ci" "--omit=dev"""#,
             ))
+        );
+    }
+
+    #[test]
+    fn windows_command_scripts_remove_verbatim_prefix_before_cmd_launch() {
+        let launch = host_process_launch(
+            Path::new(r"\\?\C:\Extensions\example\sidecar.cmd"),
+            &[],
+            HostPlatform::Windows,
+            &BTreeMap::new(),
+        )
+        .expect("Windows command-script launch");
+
+        assert_eq!(
+            launch.windows_raw_arg,
+            Some(OsString::from(r#"""C:\Extensions\example\sidecar.cmd"""#,))
         );
     }
 

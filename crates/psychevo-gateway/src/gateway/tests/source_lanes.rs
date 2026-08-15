@@ -461,7 +461,6 @@ async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
         })
         .await
         .expect("shell");
-
     let session_id = result.result.thread_id.expect("shell session");
     assert_eq!(result.thread.id, session_id);
     assert_eq!(
@@ -600,7 +599,7 @@ model = "lmstudio/test-model"
 "#,
     )
     .expect("config");
-    BTreeMap::from([
+    crate::test_support::native_process_fixture_env(BTreeMap::from([
         ("HOME".to_string(), root.to_string_lossy().to_string()),
         (
             "PSYCHEVO_HOME".to_string(),
@@ -610,7 +609,7 @@ model = "lmstudio/test-model"
             "PSYCHEVO_SHELL_MARKER".to_string(),
             "intent-env".to_string(),
         ),
-    ])
+    ]))
 }
 
 #[tokio::test]

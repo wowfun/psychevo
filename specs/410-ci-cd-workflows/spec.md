@@ -71,7 +71,9 @@ runtimes for platform-neutral behavior. POSIX-only filesystem or process
 semantics compile only on Unix, while Windows-only semantics compile only on
 Windows. Tests must not pass POSIX fixtures through native Windows path or
 process APIs, and cross-platform command fixtures must select an executable
-harness for the current host.
+harness for the current host. Platform-specific implementations of one
+cross-platform fixture must expose the same tested protocol capabilities and
+state transitions.
 Repository Cargo configuration gives Rust test worker threads a host-neutral
 8 MiB minimum stack while preserving an explicit caller override. This keeps
 large async Gateway contract tests independent of the native Windows default

@@ -19,6 +19,7 @@ use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
 use crate::gateway::peer_runtime::ResolvedPeerTurn;
 use psychevo_gateway_protocol as wire;
 
+#[cfg(unix)]
 use super::acp_backend_effective_env;
 use super::capability_packs::project_codex_prompt_quota;
 use super::lifecycle::{
@@ -26,9 +27,9 @@ use super::lifecycle::{
     remove_acp_context, require_acp_additional_directories, safe_acp_error,
 };
 use super::mcp_handoff;
-use super::metadata_permissions::{
-    emit_runtime_event, peer_allows_fs_read, peer_allows_fs_write, peer_allows_terminal,
-};
+#[cfg(unix)]
+use super::metadata_permissions::peer_allows_terminal;
+use super::metadata_permissions::{emit_runtime_event, peer_allows_fs_read, peer_allows_fs_write};
 use super::process_pool::{
     ACP_PROCESS_FORCE_SHUTDOWN_MESSAGE, AcpDeliveryMarker, AcpProcessGeneration, AcpProcessPool,
     AcpSessionReadyCallback, acp_unknown_delivery_error,
@@ -265,11 +266,12 @@ async fn revoke_failed_acp_attachment(
     contexts: &std::sync::Arc<
         std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<AcpClientContext>>>,
     >,
-    terminals: &super::terminal_callbacks::AcpTerminalRegistry,
-    force_shutdown: &tokio::sync::watch::Sender<bool>,
+    #[cfg(unix)] terminals: &super::terminal_callbacks::AcpTerminalRegistry,
+    #[cfg(unix)] force_shutdown: &tokio::sync::watch::Sender<bool>,
     native_session_id: &str,
 ) {
     let _ = remove_acp_context(contexts, native_session_id);
+    #[cfg(unix)]
     if terminals
         .terminate_session_and_wait(native_session_id)
         .await
@@ -287,7 +289,9 @@ async fn revoke_failed_acp_turn_attachment(
     process.sessions.lock().await.remove(&turn.local_session_id);
     revoke_failed_acp_attachment(
         &process.contexts,
+        #[cfg(unix)]
         &process.terminals,
+        #[cfg(unix)]
         &process.force_shutdown,
         native_session_id,
     )
@@ -359,14 +363,18 @@ async fn ensure_resident_acp_session(
     };
     let workspace_roots = workspace_root_capture.paths();
     let client_context = Arc::new(AcpClientContext {
+        #[cfg(unix)]
         cwd: cwd.to_path_buf(),
+        #[cfg(unix)]
         workspace_roots: workspace_roots.clone(),
         fs_read: peer_allows_fs_read(peer),
         fs_write: peer_allows_fs_write(peer),
         approval_handler,
         filesystem_authorizer,
         turn_control: turn_control.clone(),
+        #[cfg(unix)]
         terminal: peer_allows_terminal(peer),
+        #[cfg(unix)]
         terminal_env: acp_backend_effective_env(peer),
         attachment: Default::default(),
     });
@@ -395,6 +403,7 @@ async fn ensure_resident_acp_session(
             if workspace_identity_changed {
                 sessions.lock().await.remove(local_session_id);
                 remove_acp_context(contexts, &session.native_session_id)?;
+                #[cfg(unix)]
                 process
                     .terminals
                     .terminate_session_and_wait(&session.native_session_id)
@@ -413,6 +422,7 @@ async fn ensure_resident_acp_session(
             if !initialized.agent_capabilities.load_session {
                 sessions.lock().await.remove(local_session_id);
                 remove_acp_context(contexts, &session.native_session_id)?;
+                #[cfg(unix)]
                 process
                     .terminals
                     .terminate_session_and_wait(&session.native_session_id)
@@ -429,6 +439,7 @@ async fn ensure_resident_acp_session(
             native_session_id_for_attach = Some(session.native_session_id.clone());
             sessions.lock().await.remove(local_session_id);
             remove_acp_context(contexts, &session.native_session_id)?;
+            #[cfg(unix)]
             process
                 .terminals
                 .terminate_session_and_wait(&session.native_session_id)
@@ -497,7 +508,9 @@ async fn ensure_resident_acp_session(
             Some(Err(error)) => {
                 revoke_failed_acp_attachment(
                     contexts,
+                    #[cfg(unix)]
                     &process.terminals,
+                    #[cfg(unix)]
                     &process.force_shutdown,
                     native_session_id,
                 )
@@ -1323,6 +1336,7 @@ mod cancellation_boundary_tests {
         assert_eq!(task.await.expect("transition task").expect("commit"), 7);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn failed_reload_revokes_session_terminals() {
         let contexts = Arc::new(std::sync::Mutex::new(BTreeMap::<
@@ -1333,7 +1347,9 @@ mod cancellation_boundary_tests {
         contexts.lock().expect("contexts").insert(
             "native-session".to_string(),
             Arc::new(AcpClientContext {
+                #[cfg(unix)]
                 cwd: PathBuf::from("/workspace"),
+                #[cfg(unix)]
                 workspace_roots: vec![PathBuf::from("/workspace")],
                 fs_read: true,
                 fs_write: true,
@@ -1341,6 +1357,7 @@ mod cancellation_boundary_tests {
                 filesystem_authorizer: None,
                 turn_control: None,
                 terminal: true,
+                #[cfg(unix)]
                 terminal_env: BTreeMap::new(),
                 attachment: attachment.clone(),
             }),

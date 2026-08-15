@@ -58,7 +58,7 @@ pub(crate) enum SandboxBackend {
     Disabled,
     #[cfg(target_os = "macos")]
     Seatbelt,
-    #[cfg(any(target_os = "linux", test))]
+    #[cfg(target_os = "linux")]
     Landlock,
     #[cfg(any(windows, test))]
     WindowsRestricted,
@@ -72,7 +72,7 @@ impl SandboxBackend {
             Self::Disabled => "disabled",
             #[cfg(target_os = "macos")]
             Self::Seatbelt => "seatbelt",
-            #[cfg(any(target_os = "linux", test))]
+            #[cfg(target_os = "linux")]
             Self::Landlock => "landlock",
             #[cfg(any(windows, test))]
             Self::WindowsRestricted => "windows-restricted-token-advisory",

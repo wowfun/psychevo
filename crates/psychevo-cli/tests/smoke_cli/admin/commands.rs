@@ -2,17 +2,23 @@ use super::fixtures::{
     CatalogJsonServer, insert_export_fixture_messages, insert_session,
     set_export_fixture_session_metadata,
 };
+use crate::pevo_cmd;
+#[cfg(unix)]
+use crate::read_http_request;
 use crate::smoke_cli_skills::init_skill_home;
-use crate::{pevo_cmd, read_http_request};
 use psychevo::extensions::{ExtensionScope, ExtensionStore};
 use rusqlite::Connection;
 use serde_json::Value;
+#[cfg(unix)]
 use std::collections::VecDeque;
 use std::io::Write;
+#[cfg(unix)]
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::sync::{Arc, Mutex};
+#[cfg(unix)]
 use std::thread;
 use tempfile::tempdir;
 
@@ -38,11 +44,13 @@ pub(crate) fn run_with_stdin(mut command: Command, input: &str) -> std::process:
     child.wait_with_output().expect("command output")
 }
 
+#[cfg(unix)]
 struct MockJsonServer {
     base_url: String,
     requests: Arc<Mutex<Vec<String>>>,
 }
 
+#[cfg(unix)]
 impl MockJsonServer {
     fn start(responses: Vec<Value>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
