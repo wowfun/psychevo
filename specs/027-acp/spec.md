@@ -141,7 +141,10 @@ cwd default. Relative executables such as `./script` are resolved from the
 captured cwd directory object after approval; a renamed/recreated pathname
 cannot supply an executable that runs inside the former root. ACP filesystem
 writes retain their identity-bound handle but perform open, write, and flush on
-a blocking worker rather than the async protocol worker.
+a blocking worker rather than the async protocol worker. Unix terminal launch
+switches to the captured directory object before invoking a forced-relative
+program path; it does not depend on `/proc` or `/dev` exposing directory file
+descriptors as executable paths.
 
 The durable transition to unknown delivery is a non-droppable boundary. Gateway
 checks cancellation before entering it, then owns the persistence future through

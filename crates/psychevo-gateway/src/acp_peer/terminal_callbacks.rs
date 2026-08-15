@@ -272,8 +272,7 @@ pub(super) async fn create_terminal(
             request.command
         ))
     })?;
-    let program = executable_from_captured_cwd(&cwd_handle, &cwd, &resolved_program)
-        .map_err(acp_internal_error)?;
+    let program = executable_from_captured_cwd(&cwd, &resolved_program);
     let args = request.args.iter().map(OsString::from).collect::<Vec<_>>();
     let mut command = psychevo::process_env::tokio_host_process_command(
         &program,
@@ -293,22 +292,7 @@ pub(super) async fn create_terminal(
         psychevo::process_env::ProcessEnvOptions::new(&[]),
     )
     .map_err(acp_internal_error)?;
-    {
-        use std::os::fd::AsRawFd as _;
-        use std::os::unix::process::CommandExt as _;
-
-        let cwd_fd = cwd_handle.as_raw_fd();
-        command.as_std_mut().process_group(0);
-        unsafe {
-            command.as_std_mut().pre_exec(move || {
-                if libc::fchdir(cwd_fd) == 0 {
-                    Ok(())
-                } else {
-                    Err(std::io::Error::last_os_error())
-                }
-            });
-        }
-    }
+    bind_command_to_captured_cwd(command.as_std_mut(), &cwd_handle);
     context.attachment.ensure_active()?;
     let mut child = command.spawn().map_err(acp_internal_error)?;
     if let Err(error) = context.attachment.ensure_active() {
@@ -637,30 +621,32 @@ fn guarded_terminal_cwd(
 }
 
 #[cfg(unix)]
-fn executable_from_captured_cwd(
-    cwd_handle: &std::fs::File,
-    cwd: &Path,
-    resolved_program: &Path,
-) -> std::io::Result<PathBuf> {
-    use std::os::fd::AsRawFd as _;
-
+fn executable_from_captured_cwd(cwd: &Path, resolved_program: &Path) -> PathBuf {
     let Ok(relative) = resolved_program.strip_prefix(cwd) else {
-        return Ok(resolved_program.to_path_buf());
+        return resolved_program.to_path_buf();
     };
     if relative.as_os_str().is_empty() {
-        return Ok(resolved_program.to_path_buf());
+        return resolved_program.to_path_buf();
     }
-    let fd = cwd_handle.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
-        return Err(std::io::Error::last_os_error());
+    Path::new(".").join(relative)
+}
+
+#[cfg(unix)]
+fn bind_command_to_captured_cwd(command: &mut std::process::Command, cwd_handle: &std::fs::File) {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::process::CommandExt as _;
+
+    let cwd_fd = cwd_handle.as_raw_fd();
+    command.process_group(0);
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fchdir(cwd_fd) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
     }
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    let mut anchored = PathBuf::from(format!("/proc/self/fd/{fd}"));
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    let mut anchored = PathBuf::from(format!("/dev/fd/{fd}"));
-    anchored.push(relative);
-    Ok(anchored)
 }
 
 #[cfg(unix)]
@@ -704,9 +690,9 @@ mod tests {
 
     use tokio::sync::watch;
 
-    #[cfg(unix)]
-    use super::executable_from_captured_cwd;
     use super::{AcpTerminalRecord, AcpTerminalRegistry, AcpTerminalState, guarded_terminal_cwd};
+    #[cfg(unix)]
+    use super::{bind_command_to_captured_cwd, executable_from_captured_cwd};
 
     #[test]
     fn terminal_callbacks_accept_secondary_workspace_roots() {
@@ -748,11 +734,10 @@ mod tests {
         std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755))
             .expect("replacement mode");
 
-        let program = executable_from_captured_cwd(&cwd_handle, &root, &replacement)
-            .expect("anchored executable");
-        let output = std::process::Command::new(program)
-            .output()
-            .expect("run anchored executable");
+        let program = executable_from_captured_cwd(&root, &replacement);
+        let mut command = std::process::Command::new(program);
+        bind_command_to_captured_cwd(&mut command, &cwd_handle);
+        let output = command.output().expect("run anchored executable");
 
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "original");
     }

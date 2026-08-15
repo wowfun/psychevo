@@ -6,6 +6,8 @@
   paths and prompt assets, fixing Linux and macOS compilation, and making
   browser and deadline fixtures independent of checkout and instrumentation
   timing.
+- Kept Unix ACP relative terminal launches bound to their captured directory
+  objects without relying on platform-specific file-descriptor paths.
 
 ## 2026-08-14
 
