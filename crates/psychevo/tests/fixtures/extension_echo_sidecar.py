@@ -30,7 +30,7 @@ def handle(request):
     method = request.get("method")
     if method == "initialize":
         marker.parent.mkdir(parents=True, exist_ok=True)
-        with marker.open("a", encoding="utf-8") as handle:
+        with marker.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write("initialize\n")
         respond(request, {
             "protocol": "psychevo-extension/1",
@@ -106,7 +106,7 @@ def handle(request):
     elif method == "channel/test/hang":
         return
     elif method == "shutdown":
-        with marker.open("a", encoding="utf-8") as handle:
+        with marker.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write("shutdown\n")
         respond(request, {})
     else:

@@ -13,6 +13,8 @@ pub(crate) struct ExtensionInstallArgs {
         help = "Install for the current workspace"
     )]
     pub(crate) local: bool,
+    #[arg(long, hide = true)]
+    pub(crate) managed_local: bool,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
 }

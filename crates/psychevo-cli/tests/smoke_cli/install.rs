@@ -38,6 +38,21 @@ fn write_fake_pevo(home: &Path) {
     write_fake_command(&home.join(".cargo/bin"), pevo_executable_name(), "exit 0");
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn write_recording_fake_pevo(home: &Path, log: &Path) {
+    let log = shell_quote(&shell_path(log));
+    write_fake_command(
+        &home.join(".cargo/bin"),
+        pevo_executable_name(),
+        &format!(
+            "printf '%s\\n' \"$*\" >> {log}\nif [ \"${{1:-}}\" = install ] && [ \"${{2:-}}\" = --managed-local ]; then\n  [ -f \"$3/psychevo.extension.json\" ] || exit 41\n  /usr/bin/grep -q '^  \"version\": \"local\"' \"$3/psychevo.extension.json\" || exit 42\n  /usr/bin/grep -q '^      \"version\": \"nested\"' \"$3/psychevo.extension.json\" || exit 44\n  /usr/bin/grep -q '^      \"executable\": \"metadata-only\"' \"$3/psychevo.extension.json\" || exit 45\n  [ \"$(/usr/bin/find \"$3\" -type f | /usr/bin/wc -l)\" -ge 2 ] || exit 43\nfi"
+        ),
+    );
+}
+
 fn write_fake_web_install_prerequisites(bin_dir: &Path, home: &Path, pnpm_body: &str) {
     write_fake_pevo(home);
     write_fake_command(bin_dir, "cargo", "exit 0");
@@ -54,7 +69,7 @@ fn install_shell() -> PathBuf {
 
 #[cfg(windows)]
 fn install_shell() -> PathBuf {
-    let runtime = psychevo::host_process::GitBashRuntime::discover(
+    let runtime = psychevo::host_paths::GitBashRuntime::discover(
         &std::env::vars().collect::<std::collections::BTreeMap<_, _>>(),
     )
     .unwrap_or_else(|error| panic!("native Windows install tests require Git Bash: {error}"));
@@ -107,6 +122,131 @@ fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
     command
 }
 
+fn successful_install_command(checkout: &Path, bin_dir: &Path, home: &Path, log: &Path) -> Command {
+    std::fs::create_dir_all(checkout.join("crates/psychevo-cli")).expect("cli crate");
+    std::fs::write(
+        checkout.join("Cargo.toml"),
+        "[workspace.package]\nrust-version = \"1.97.0\"\n",
+    )
+    .expect("workspace manifest");
+    std::fs::write(
+        checkout.join("crates/psychevo-cli/Cargo.toml"),
+        "[package]\nname = \"psychevo-cli\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("cli manifest");
+    std::fs::write(
+        checkout.join("package.json"),
+        "{\n  \"packageManager\": \"pnpm@11.8.0\"\n}\n",
+    )
+    .expect("package manifest");
+    for (id, package, binary, channel) in [
+        (
+            "psychevo.channel.wechat",
+            "psychevo-extension-channel-wechat",
+            "psychevo-channel-wechat",
+            "wechat",
+        ),
+        (
+            "psychevo.channel.telegram",
+            "psychevo-extension-channel-telegram",
+            "psychevo-channel-telegram",
+            "telegram",
+        ),
+        (
+            "psychevo.channel.feishu-lark",
+            "psychevo-extension-channel-feishu-lark",
+            "psychevo-channel-feishu-lark",
+            "feishu",
+        ),
+    ] {
+        let crate_root = checkout.join("crates").join(package);
+        std::fs::create_dir_all(&crate_root).expect("Channel Extension crate");
+        std::fs::write(
+            crate_root.join("psychevo.extension.json"),
+            format!(
+                "{{\n  \"schemaVersion\": 1,\n  \"id\": \"{id}\",\n  \"version\": \"0.1.0\",\n  \"runtime\": {{\n    \"protocol\": \"psychevo-extension/1\",\n    \"executable\": \"./{binary}\"\n  }},\n  \"contributions\": {{\n    \"channels\": [{{\n      \"channel\": \"{channel}\",\n      \"version\": \"nested\",\n      \"executable\": \"metadata-only\"\n    }}]\n  }}\n}}\n"
+            ),
+        )
+        .expect("Channel Extension manifest");
+    }
+
+    write_native_platform_commands(bin_dir);
+    write_recording_fake_pevo(home, log);
+    let executable_suffix = if cfg!(windows) { ".exe" } else { "" };
+    write_fake_command(
+        bin_dir,
+        "cargo",
+        &format!(
+            "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n' ;;\n  build) /usr/bin/mkdir -p target/release; for binary in psychevo-channel-wechat psychevo-channel-telegram psychevo-channel-feishu-lark; do printf 'fake Channel Extension\\n' > \"target/release/$binary{executable_suffix}\"; /usr/bin/chmod +x \"target/release/$binary{executable_suffix}\"; done ;;\n  *) exit 0 ;;\nesac"
+        ),
+    );
+    write_fake_command(bin_dir, "rustc", "printf 'rustc 1.97.0\\n'");
+    write_fake_command(bin_dir, "cc", "exit 0");
+    write_fake_command(bin_dir, "node", "printf 'v24.0.0\\n'");
+    write_fake_command(
+        bin_dir,
+        "pnpm",
+        "case \"$1\" in\n  --version) printf '11.8.0\\n' ;;\n  --filter) /usr/bin/mkdir -p apps/workbench/dist; printf '<html></html>\\n' > apps/workbench/dist/index.html ;;\n  *) exit 0 ;;\nesac",
+    );
+
+    let runtime_tmp = home.join("tmp");
+    std::fs::create_dir_all(&runtime_tmp).expect("runtime temp");
+    let mut command = install_command();
+    command
+        .current_dir(checkout)
+        .env_clear()
+        .env("HOME", shell_path(home))
+        .env("TEMP", shell_path(&runtime_tmp))
+        .env("TMP", shell_path(&runtime_tmp))
+        .env("TMPDIR", shell_path(&runtime_tmp))
+        .env("PATH", format!("{}:/usr/bin:/bin", shell_path(bin_dir)));
+    command
+}
+
+fn recorded_pevo_commands(log: &Path) -> Vec<String> {
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn expected_pevo_commands(commands: &[&str]) -> Vec<String> {
+    let mut expected = Vec::new();
+    if cfg!(windows) {
+        expected.push("gateway stop".to_owned());
+    }
+    expected.extend(commands.iter().map(|command| (*command).to_owned()));
+    expected
+}
+
+fn assert_managed_channel_install_command(command: &str, id: &str) {
+    assert!(
+        command.starts_with("install --managed-local "),
+        "unexpected install command: {command}"
+    );
+    assert!(
+        command.contains("/share/psychevo/.extension-install-stage-"),
+        "install must use private staging: {command}"
+    );
+    assert!(
+        command.ends_with(&format!("/{id}")),
+        "install must target {id}: {command}"
+    );
+}
+
+fn assert_channel_staging_removed(home: &Path) {
+    let share = home.join(".cargo/share/psychevo");
+    let remaining = std::fs::read_dir(share)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(".extension-install-stage-"))
+        .collect::<Vec<_>>();
+    assert!(remaining.is_empty(), "stale staging roots: {remaining:?}");
+}
+
 #[tokio::test]
 pub(crate) async fn install_rejects_removed_options() {
     for flag in [
@@ -129,6 +269,242 @@ pub(crate) async fn install_rejects_removed_options() {
         assert!(
             stderr.contains(&format!("unknown option: {flag}")),
             "{stderr}"
+        );
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn install_non_interactive_skips_optional_channel_extensions() {
+    let temp = tempdir().expect("temp");
+    let checkout = temp.path().join("checkout");
+    let bin = temp.path().join("bin");
+    let home = temp.path().join("home");
+    let log = temp.path().join("pevo.log");
+    let output = successful_install_command(&checkout, &bin, &home, &log)
+        .output()
+        .expect("install");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("non-interactive input; skipping optional Channel integrations"),
+        "{stderr}"
+    );
+    assert_eq!(
+        recorded_pevo_commands(&log),
+        expected_pevo_commands(&["--help", "init"])
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn install_channels_flag_selects_all_subset_or_none() {
+    let cases = [
+        (
+            "all",
+            vec![
+                ("psychevo.channel.wechat", "psychevo-channel-wechat"),
+                ("psychevo.channel.telegram", "psychevo-channel-telegram"),
+                (
+                    "psychevo.channel.feishu-lark",
+                    "psychevo-channel-feishu-lark",
+                ),
+            ],
+        ),
+        (
+            "wechat,feishu-lark",
+            vec![
+                ("psychevo.channel.wechat", "psychevo-channel-wechat"),
+                (
+                    "psychevo.channel.feishu-lark",
+                    "psychevo-channel-feishu-lark",
+                ),
+            ],
+        ),
+        ("none", vec![]),
+        ("-1", vec![]),
+    ];
+
+    for (selection, selected_channels) in cases {
+        let temp = tempdir().expect("temp");
+        let checkout = temp.path().join("checkout");
+        let bin = temp.path().join("bin");
+        let home = temp.path().join("home");
+        let log = temp.path().join("pevo.log");
+        let output = successful_install_command(&checkout, &bin, &home, &log)
+            .args(["--channels", selection])
+            .output()
+            .expect("install");
+
+        assert!(
+            output.status.success(),
+            "selection {selection}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = expected_pevo_commands(&["--help", "init"]);
+        let commands = recorded_pevo_commands(&log);
+        assert_eq!(&commands[..expected.len()], expected, "{selection}");
+        let installs = &commands[expected.len()..];
+        assert_eq!(installs.len(), selected_channels.len(), "{selection}");
+        for (command, (id, _binary)) in installs.iter().zip(selected_channels) {
+            assert_managed_channel_install_command(command, id);
+        }
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.starts_with("install psychevo.channel.")),
+            "source install must not resolve remote Extension ids: {commands:?}"
+        );
+        assert_channel_staging_removed(&home);
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn install_channels_flag_rejects_invalid_or_check_combinations() {
+    for args in [
+        vec!["--channels", "discord"],
+        vec!["--channels", "wechat*"],
+        vec!["--channels=all", "--check"],
+        vec!["--channels"],
+    ] {
+        let output = install_command()
+            .current_dir(install_workspace_root())
+            .args(&args)
+            .output()
+            .expect("install options");
+
+        assert!(!output.status.success(), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("invalid --channels value")
+                || stderr.contains("--channels cannot be combined with --check")
+                || stderr.contains("--channels requires a value"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("checking Cargo"), "{stderr}");
+    }
+}
+
+#[tokio::test]
+pub(crate) async fn install_rejects_invalid_channels_before_checkout_discovery() {
+    let temp = tempdir().expect("temp");
+    let output = install_command()
+        .current_dir(temp.path())
+        .args(["--channels", "discord"])
+        .output()
+        .expect("install options");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid --channels value"), "{stderr}");
+    assert!(!stderr.contains("Run this script from inside"), "{stderr}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn install_interactive_channel_menu_selects_all_subset_or_none() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let cases = [
+        (
+            "\n",
+            vec![
+                "psychevo.channel.wechat",
+                "psychevo.channel.telegram",
+                "psychevo.channel.feishu-lark",
+            ],
+            false,
+        ),
+        (
+            "1 3\n",
+            vec!["psychevo.channel.wechat", "psychevo.channel.feishu-lark"],
+            false,
+        ),
+        ("invalid\n2\n", vec!["psychevo.channel.telegram"], true),
+        ("-1\n", vec![], false),
+    ];
+
+    for (input, selected_channels, expects_retry) in cases {
+        let temp = tempdir().expect("temp");
+        let checkout = temp.path().join("checkout");
+        let bin = temp.path().join("bin");
+        let home = temp.path().join("home");
+        let log = temp.path().join("pevo.log");
+        let install = successful_install_command(&checkout, &bin, &home, &log);
+        let program = install.get_program().to_string_lossy();
+        let arguments = install
+            .get_args()
+            .map(|argument| shell_quote(&argument.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let child_command = format!("{} {arguments}", shell_quote(&program));
+
+        let mut command = Command::new("script");
+        command
+            .args([
+                "--quiet",
+                "--return",
+                "--command",
+                &child_command,
+                "/dev/null",
+            ])
+            .current_dir(install.get_current_dir().expect("checkout"))
+            .env_clear()
+            .envs(
+                install.get_envs().filter_map(|(key, value)| {
+                    value.map(|value| (key.to_owned(), value.to_owned()))
+                }),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("interactive install");
+        child
+            .stdin
+            .take()
+            .expect("interactive stdin")
+            .write_all(input.as_bytes())
+            .expect("selection input");
+        let output = child.wait_with_output().expect("interactive output");
+
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = expected_pevo_commands(&["--help", "init"]);
+        let commands = recorded_pevo_commands(&log);
+        assert_eq!(&commands[..expected.len()], expected, "input {input:?}");
+        let installs = &commands[expected.len()..];
+        assert_eq!(installs.len(), selected_channels.len(), "input {input:?}");
+        for (command, id) in installs.iter().zip(selected_channels) {
+            assert_managed_channel_install_command(command, id);
+        }
+        assert_channel_staging_removed(&home);
+        let terminal_output = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            terminal_output.contains(
+                "Selection (Enter installs all; use numbers like 1 3; -1 installs none):"
+            ),
+            "{terminal_output}"
+        );
+        assert!(
+            terminal_output.contains("-1) Do not install Channel integrations"),
+            "{terminal_output}"
+        );
+        assert!(
+            !terminal_output.contains("Select integrations [all]"),
+            "{terminal_output}"
+        );
+        assert_eq!(
+            terminal_output.contains("Invalid selection."),
+            expects_retry,
+            "{terminal_output}"
         );
     }
 }

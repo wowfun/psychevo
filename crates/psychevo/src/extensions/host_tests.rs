@@ -459,9 +459,28 @@ fn write_sidecar_extension(root: &Path, id: &str) {
         fs::set_permissions(script, permissions).expect("chmod");
     }
     #[cfg(windows)]
-    fs::write(
-        root.join("sidecar.cmd"),
-        "@echo off\r\npython \"%~dp0sidecar.py\" %*\r\n",
-    )
-    .expect("windows sidecar");
+    {
+        let output = std::process::Command::new("python")
+            .args([
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.executable.encode('utf-8'))",
+            ])
+            .output()
+            .expect("resolve Python fixture interpreter");
+        assert!(
+            output.status.success(),
+            "resolve Python fixture interpreter: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python = String::from_utf8(output.stdout)
+            .expect("Python interpreter path is UTF-8")
+            .trim()
+            .to_string();
+        assert!(!python.is_empty(), "Python interpreter path");
+        fs::write(
+            root.join("sidecar.cmd"),
+            format!("@echo off\r\n\"{python}\" \"%~dp0sidecar.py\" %*\r\n"),
+        )
+        .expect("windows sidecar");
+    }
 }

@@ -230,6 +230,125 @@ fn local_install_is_in_place_enabled_and_fingerprint_trusted() {
 }
 
 #[test]
+fn managed_local_install_atomically_replaces_and_reclaims_the_package() {
+    let profile = TempDir::new().expect("profile");
+    let first = TempDir::new().expect("first source");
+    write_manifest(
+        first.path(),
+        r#"{
+          "schemaVersion": 1,
+          "id": "example.managed-local",
+          "version": "local",
+          "runtime": {
+            "protocol": "psychevo-extension/1",
+            "executable": "./sidecar"
+          }
+        }"#,
+    );
+    fs::write(first.path().join("sidecar"), b"first").expect("first sidecar");
+    let store = ExtensionStore::new(profile.path(), profile.path().join("workspace"));
+
+    let first_record = store
+        .install_managed_local(first.path(), ExtensionScope::Profile)
+        .expect("install first managed package");
+    assert_eq!(first_record.source_kind, "managed_local");
+    assert!(
+        first_record
+            .package_root
+            .starts_with(store.cache_root(ExtensionScope::Profile))
+    );
+    assert_ne!(
+        first_record.package_root,
+        first.path().canonicalize().expect("first source root")
+    );
+    fs::write(first.path().join("sidecar"), b"mutated source").expect("mutate source");
+    assert_eq!(
+        fs::read(first_record.package_root.join("sidecar")).expect("installed first sidecar"),
+        b"first"
+    );
+
+    let invalid = TempDir::new().expect("invalid source");
+    write_manifest(
+        invalid.path(),
+        r#"{
+          "schemaVersion": 1,
+          "id": "example.managed-local",
+          "version": "local",
+          "runtime": {
+            "protocol": "psychevo-extension/1",
+            "executable": "./missing"
+          }
+        }"#,
+    );
+    store
+        .install_managed_local(invalid.path(), ExtensionScope::Profile)
+        .expect_err("invalid replacement must fail");
+    assert_eq!(
+        store
+            .read_record("example.managed-local", ExtensionScope::Profile)
+            .expect("read retained record")
+            .expect("retained record"),
+        first_record
+    );
+    assert!(first_record.package_root.is_dir());
+
+    let second = TempDir::new().expect("second source");
+    write_manifest(
+        second.path(),
+        r#"{
+          "schemaVersion": 1,
+          "id": "example.managed-local",
+          "version": "local",
+          "runtime": {
+            "protocol": "psychevo-extension/1",
+            "executable": "./sidecar"
+          }
+        }"#,
+    );
+    fs::write(second.path().join("sidecar"), b"second").expect("second sidecar");
+    let second_record = store
+        .install_managed_local(second.path(), ExtensionScope::Profile)
+        .expect("replace managed package");
+
+    assert_ne!(second_record.package_root, first_record.package_root);
+    assert_eq!(
+        fs::read(second_record.package_root.join("sidecar")).expect("installed second sidecar"),
+        b"second"
+    );
+    assert!(
+        !first_record.package_root.exists(),
+        "the exclusive mutation lease makes the retired cache generation reclaimable"
+    );
+    let error = super::package::acquire_extension_activity_lock(&first_record)
+        .err()
+        .expect("a stale record must not acquire a sidecar lease after replacement");
+    assert!(error.to_string().contains("installation changed"));
+}
+
+#[test]
+fn managed_package_publication_rolls_back_a_new_cache_root_when_record_write_fails() {
+    let temp = TempDir::new().expect("temp");
+    let package = temp.path().join("staged-package");
+    let destination = temp.path().join("cache/example/local-fingerprint");
+    fs::create_dir_all(&package).expect("staged package");
+    fs::write(package.join("sidecar"), b"fixture").expect("staged sidecar");
+
+    let error = super::package::publish_package_and_record(&package, &destination, |_| {
+        Err::<(), _>(crate::error::Error::Config(
+            "injected record publication failure".to_string(),
+        ))
+    })
+    .expect_err("record publication failure");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected record publication failure")
+    );
+    assert!(!destination.exists(), "new cache root must be rolled back");
+}
+
+#[test]
 fn channel_resolution_is_static_unique_trusted_and_actionable_when_missing() {
     let profile = TempDir::new().expect("profile");
     let workspace = profile.path().join("workspace");
@@ -521,7 +640,7 @@ fn remote_archive_update_preserves_disabled_policy() {
         "1.0.0",
         &format!("{:x}", Sha256::digest(&first)),
     );
-    store
+    let first_record = store
         .install_remote_archive_for_test(
             &first_descriptor,
             "https://extensions.example/release.json",
@@ -552,6 +671,7 @@ fn remote_archive_update_preserves_disabled_policy() {
 
     assert_eq!(updated.version, "2.0.0");
     assert!(!updated.enabled);
+    assert!(!first_record.package_root.exists());
     assert_eq!(
         store
             .read_record("example.remote-disabled", ExtensionScope::Profile)

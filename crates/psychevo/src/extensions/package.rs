@@ -502,6 +502,112 @@ impl ExtensionStore {
         Ok(record)
     }
 
+    pub fn install_managed_local(
+        &self,
+        source: &Path,
+        scope: ExtensionScope,
+    ) -> Result<ExtensionInstallRecord> {
+        let source = source.canonicalize().map_err(|err| {
+            Error::Config(format!(
+                "failed to resolve managed local Extension source {}: {err}",
+                source.display()
+            ))
+        })?;
+        let source_manifest = load_extension_manifest(&source)?;
+        if source_manifest.version != "local" {
+            return Err(Error::Config(format!(
+                "managed local Extension `{}` must declare version `local`",
+                source_manifest.id
+            )));
+        }
+        validate_materialized_executable(&source_manifest)?;
+        let _activity_lock = self.mutation_lock(&source_manifest.id, scope)?;
+        let previous = self.read_record(&source_manifest.id, scope)?;
+        let enabled = previous.as_ref().is_none_or(|record| record.enabled);
+        let cache_root = self.cache_root(scope);
+        let data_root = self.data_root(scope).join(&source_manifest.id);
+        let record_root = self.scope_root(scope).join("records");
+        fs::create_dir_all(&cache_root)?;
+
+        let staging = tempfile::Builder::new()
+            .prefix(".extension-managed-stage-")
+            .tempdir_in(&cache_root)?;
+        let package = staging.path().join("package");
+        crate::plugins::copy_tree_bounded(&source, &package)?;
+        let manifest = load_extension_manifest(&package)?;
+        if manifest.id != source_manifest.id || manifest.version != source_manifest.version {
+            return Err(Error::Config(
+                "managed local Extension identity changed while it was copied".to_string(),
+            ));
+        }
+        validate_materialized_executable(&manifest)?;
+        let fingerprint = crate::plugins::external_plugin_fingerprint(
+            Some(&package),
+            &manifest.id,
+            Some(&manifest.version),
+        )?;
+        let destination = cache_root
+            .join(&manifest.id)
+            .join(format!("local-{fingerprint}"));
+        let staged_record = ExtensionInstallRecord {
+            id: manifest.id.clone(),
+            version: manifest.version.clone(),
+            scope,
+            source: source.display().to_string(),
+            source_kind: "managed_local".to_string(),
+            package_root: package.clone(),
+            data_root: data_root.clone(),
+            fingerprint: fingerprint.clone(),
+            trusted_fingerprint: fingerprint.clone(),
+            enabled,
+            manifest_path: manifest.manifest_path.clone(),
+            plugin_manifest: manifest.plugin_manifest.clone(),
+        };
+        self.validate_enabled_catalog_state_with_verified_candidate(
+            Some((&staged_record, &manifest)),
+            None,
+        )?;
+        fs::create_dir_all(&data_root)?;
+        fs::create_dir_all(&record_root)?;
+        let record = publish_package_and_record(&package, &destination, |published_new| {
+            let destination_manifest = load_extension_manifest(&destination)?;
+            validate_materialized_executable(&destination_manifest)?;
+            let destination_fingerprint = if published_new {
+                fingerprint.clone()
+            } else {
+                crate::plugins::external_plugin_fingerprint(
+                    Some(&destination),
+                    &destination_manifest.id,
+                    Some(&destination_manifest.version),
+                )?
+            };
+            if destination_fingerprint != fingerprint {
+                return Err(Error::Config(format!(
+                    "Extension `{}` managed package fingerprint changed during publication",
+                    manifest.id
+                )));
+            }
+            let record = ExtensionInstallRecord {
+                id: destination_manifest.id.clone(),
+                version: destination_manifest.version.clone(),
+                scope,
+                source: source.display().to_string(),
+                source_kind: "managed_local".to_string(),
+                package_root: destination.clone(),
+                data_root: data_root.clone(),
+                fingerprint: destination_fingerprint.clone(),
+                trusted_fingerprint: destination_fingerprint,
+                enabled,
+                manifest_path: destination_manifest.manifest_path.clone(),
+                plugin_manifest: destination_manifest.plugin_manifest.clone(),
+            };
+            write_record_atomic(&record_root.join(format!("{}.json", record.id)), &record)?;
+            Ok(record)
+        })?;
+        reclaim_extension_cache_generations(&cache_root, &record.id, &destination)?;
+        Ok(record)
+    }
+
     pub async fn install_remote(
         &self,
         descriptor_url: &str,
@@ -638,12 +744,15 @@ impl ExtensionStore {
         id: &str,
         scope: ExtensionScope,
     ) -> Result<Option<ExtensionInstallRecord>> {
+        if self.read_record(id, scope)?.is_none() {
+            return Ok(None);
+        }
+        let _activity_lock = self.mutation_lock(id, scope)?;
         let Some(record) = self.read_record(id, scope)? else {
             return Ok(None);
         };
-        let _activity_lock = self.mutation_lock(id, scope)?;
-        if record.source_kind == "https" && !record.package_root.starts_with(self.cache_root(scope))
-        {
+        let managed_package = matches!(record.source_kind.as_str(), "https" | "managed_local");
+        if managed_package && !record.package_root.starts_with(self.cache_root(scope)) {
             return Err(Error::Config(format!(
                 "Extension `{id}` cache path is outside the selected store; nothing was removed"
             )));
@@ -654,8 +763,9 @@ impl ExtensionStore {
             .join("records")
             .join(format!("{id}.json"));
         fs::remove_file(record_path)?;
-        if record.source_kind == "https" {
-            match fs::remove_dir_all(&record.package_root) {
+        if managed_package {
+            let extension_cache = self.cache_root(scope).join(id);
+            match fs::remove_dir_all(extension_cache) {
                 Ok(()) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
                 Err(err) => return Err(err.into()),
@@ -670,13 +780,19 @@ impl ExtensionStore {
         scope: ExtensionScope,
         enabled: bool,
     ) -> Result<ExtensionInstallRecord> {
-        let mut record = self.read_record(id, scope)?.ok_or_else(|| {
+        self.read_record(id, scope)?.ok_or_else(|| {
             Error::Config(format!(
                 "Extension `{id}` is not installed in {} scope",
                 scope.as_str()
             ))
         })?;
         let _activity_lock = self.mutation_lock(id, scope)?;
+        let mut record = self.read_record(id, scope)?.ok_or_else(|| {
+            Error::Config(format!(
+                "Extension `{id}` is no longer installed in {} scope",
+                scope.as_str()
+            ))
+        })?;
         record.enabled = enabled;
         if enabled {
             let manifest = load_extension_manifest(&record.package_root)?;
@@ -790,45 +906,50 @@ impl ExtensionStore {
             manifest_path: manifest.manifest_path.clone(),
             plugin_manifest: manifest.plugin_manifest.clone(),
         };
-        self.validate_enabled_catalog_state(Some((&staged_record, &manifest)), None)?;
-        if !destination.exists() {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::rename(&package, &destination)?;
-        }
-        let destination_fingerprint = crate::plugins::external_plugin_fingerprint(
-            Some(&destination),
-            &manifest.id,
-            Some(&manifest.version),
+        self.validate_enabled_catalog_state_with_verified_candidate(
+            Some((&staged_record, &manifest)),
+            None,
         )?;
-        if destination_fingerprint != fingerprint {
-            return Err(Error::Config(format!(
-                "Extension `{}` cached package fingerprint does not match the verified artifact",
-                manifest.id
-            )));
-        }
-        let record = ExtensionInstallRecord {
-            id: descriptor.id.clone(),
-            version: descriptor.version.clone(),
-            scope,
-            source: redact_url(descriptor_url),
-            source_kind: "https".to_string(),
-            package_root: destination.clone(),
-            data_root: data_root.clone(),
-            fingerprint: destination_fingerprint.clone(),
-            trusted_fingerprint: destination_fingerprint,
-            enabled,
-            manifest_path: destination.join(EXTENSION_MANIFEST),
-            plugin_manifest: manifest.plugin_manifest.as_ref().and_then(|path| {
-                path.strip_prefix(&package)
-                    .ok()
-                    .map(|relative| destination.join(relative))
-            }),
-        };
         fs::create_dir_all(&data_root)?;
         fs::create_dir_all(&record_root)?;
-        write_record_atomic(&record_root.join(format!("{}.json", record.id)), &record)?;
+        let record = publish_package_and_record(&package, &destination, |published_new| {
+            let destination_fingerprint = if published_new {
+                fingerprint.clone()
+            } else {
+                crate::plugins::external_plugin_fingerprint(
+                    Some(&destination),
+                    &manifest.id,
+                    Some(&manifest.version),
+                )?
+            };
+            if destination_fingerprint != fingerprint {
+                return Err(Error::Config(format!(
+                    "Extension `{}` cached package fingerprint does not match the verified artifact",
+                    manifest.id
+                )));
+            }
+            let record = ExtensionInstallRecord {
+                id: descriptor.id.clone(),
+                version: descriptor.version.clone(),
+                scope,
+                source: redact_url(descriptor_url),
+                source_kind: "https".to_string(),
+                package_root: destination.clone(),
+                data_root: data_root.clone(),
+                fingerprint: destination_fingerprint.clone(),
+                trusted_fingerprint: destination_fingerprint,
+                enabled,
+                manifest_path: destination.join(EXTENSION_MANIFEST),
+                plugin_manifest: manifest.plugin_manifest.as_ref().and_then(|path| {
+                    path.strip_prefix(&package)
+                        .ok()
+                        .map(|relative| destination.join(relative))
+                }),
+            };
+            write_record_atomic(&record_root.join(format!("{}.json", record.id)), &record)?;
+            Ok(record)
+        })?;
+        reclaim_extension_cache_generations(&cache_root, &record.id, &destination)?;
         Ok(record)
     }
 
@@ -836,6 +957,23 @@ impl ExtensionStore {
         &self,
         replacement: Option<(&ExtensionInstallRecord, &ExtensionManifest)>,
         removed: Option<(&str, ExtensionScope)>,
+    ) -> Result<()> {
+        self.validate_enabled_catalog_state_inner(replacement, removed, false)
+    }
+
+    fn validate_enabled_catalog_state_with_verified_candidate(
+        &self,
+        replacement: Option<(&ExtensionInstallRecord, &ExtensionManifest)>,
+        removed: Option<(&str, ExtensionScope)>,
+    ) -> Result<()> {
+        self.validate_enabled_catalog_state_inner(replacement, removed, true)
+    }
+
+    fn validate_enabled_catalog_state_inner(
+        &self,
+        replacement: Option<(&ExtensionInstallRecord, &ExtensionManifest)>,
+        removed: Option<(&str, ExtensionScope)>,
+        candidate_fingerprint_verified: bool,
     ) -> Result<()> {
         let mut effective = BTreeMap::<String, ExtensionInstallRecord>::new();
         for record in self
@@ -872,12 +1010,17 @@ impl ExtensionStore {
             let is_candidate = replacement.is_some_and(|(candidate, _)| {
                 record.id == candidate.id && record.scope == candidate.scope
             });
-            let fingerprint = crate::plugins::external_plugin_fingerprint(
-                Some(&record.package_root),
-                &record.id,
-                Some(&record.version),
-            )?;
-            if fingerprint != record.fingerprint || fingerprint != record.trusted_fingerprint {
+            let fingerprint_matches = if is_candidate && candidate_fingerprint_verified {
+                record.fingerprint == record.trusted_fingerprint
+            } else {
+                let fingerprint = crate::plugins::external_plugin_fingerprint(
+                    Some(&record.package_root),
+                    &record.id,
+                    Some(&record.version),
+                )?;
+                fingerprint == record.fingerprint && fingerprint == record.trusted_fingerprint
+            };
+            if !fingerprint_matches {
                 if is_candidate {
                     return Err(Error::Config(format!(
                         "Extension `{}` package no longer matches its trusted fingerprint",
@@ -962,7 +1105,53 @@ pub(super) fn acquire_extension_activity_lock(
         )),
         std::fs::TryLockError::Error(err) => Error::Io(err),
     })?;
+    validate_managed_record_is_current(record)?;
     Ok(ExtensionActivityLock(lock))
+}
+
+fn validate_managed_record_is_current(record: &ExtensionInstallRecord) -> Result<()> {
+    if !matches!(record.source_kind.as_str(), "https" | "managed_local") {
+        return Ok(());
+    }
+    let extension_root = record
+        .data_root
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "Extension `{}` has an invalid managed data root",
+                record.id
+            ))
+        })?;
+    let record_path = extension_root
+        .join("records")
+        .join(format!("{}.json", record.id));
+    let current: ExtensionInstallRecord = fs::read(&record_path)
+        .map_err(|err| {
+            Error::Config(format!(
+                "Extension `{}` installation changed before its sidecar lease was acquired; retry the invocation: {err}",
+                record.id
+            ))
+        })
+        .and_then(|bytes| {
+            serde_json::from_slice(&bytes).map_err(|err| {
+                Error::Config(format!(
+                    "failed to parse Extension record {} while acquiring its sidecar lease: {err}",
+                    record_path.display()
+                ))
+            })
+        })?;
+    if current.scope != record.scope
+        || current.package_root != record.package_root
+        || current.fingerprint != record.fingerprint
+        || current.trusted_fingerprint != record.trusted_fingerprint
+    {
+        return Err(Error::Config(format!(
+            "Extension `{}` installation changed before its sidecar lease was acquired; retry the invocation",
+            record.id
+        )));
+    }
+    Ok(())
 }
 
 async fn download_bounded(response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
@@ -1132,6 +1321,51 @@ fn write_record_atomic(path: &Path, record: &ExtensionInstallRecord) -> Result<(
     serde_json::to_writer_pretty(file.as_file_mut(), record)?;
     file.as_file_mut().sync_all()?;
     file.persist(path).map_err(|err| Error::Io(err.error))?;
+    Ok(())
+}
+
+pub(super) fn publish_package_and_record<T>(
+    package: &Path,
+    destination: &Path,
+    publish_record: impl FnOnce(bool) -> Result<T>,
+) -> Result<T> {
+    let published_new = !destination.exists();
+    if published_new {
+        let parent = destination.parent().ok_or_else(|| {
+            Error::Config(format!(
+                "Extension cache path has no parent: {}",
+                destination.display()
+            ))
+        })?;
+        fs::create_dir_all(parent)?;
+        fs::rename(package, destination)?;
+    }
+    match publish_record(published_new) {
+        Ok(value) => Ok(value),
+        Err(publication_error) if published_new => match fs::remove_dir_all(destination) {
+            Ok(()) => Err(publication_error),
+            Err(cleanup_error) if cleanup_error.kind() == std::io::ErrorKind::NotFound => {
+                Err(publication_error)
+            }
+            Err(cleanup_error) => Err(Error::Config(format!(
+                "{publication_error}; additionally failed to roll back newly published Extension cache {}: {cleanup_error}",
+                destination.display()
+            ))),
+        },
+        Err(publication_error) => Err(publication_error),
+    }
+}
+
+fn reclaim_extension_cache_generations(cache_root: &Path, id: &str, keep: &Path) -> Result<()> {
+    let extension_cache = cache_root.join(id);
+    for entry in fs::read_dir(&extension_cache)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path == keep || !entry.file_type()?.is_dir() {
+            continue;
+        }
+        fs::remove_dir_all(path)?;
+    }
     Ok(())
 }
 

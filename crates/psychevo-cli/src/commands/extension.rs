@@ -23,7 +23,9 @@ pub(crate) async fn run_install_command(args: ExtensionInstallArgs) -> Result<Ex
     let (store, _) = open_store()?;
     let scope = scope(args.local);
     let source_path = PathBuf::from(&args.source);
-    let record = if source_path.is_dir() {
+    let record = if args.managed_local {
+        store.install_managed_local(&source_path, scope)?
+    } else if source_path.is_dir() {
         store.install_local(&source_path, scope)?
     } else {
         let descriptor =
@@ -130,7 +132,7 @@ pub(crate) async fn run_update_command(args: ExtensionUpdateArgs) -> Result<Exit
         store.effective_records()?
     };
     for record in records {
-        if record.source_kind == "local" {
+        if matches!(record.source_kind.as_str(), "local" | "managed_local") {
             results.push(json!({
                 "kind": "extension",
                 "id": record.id,
