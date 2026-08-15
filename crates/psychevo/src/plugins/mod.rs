@@ -37,7 +37,7 @@ pub use types::{
 };
 pub use util::external_plugin_fingerprint;
 
-pub(crate) use materialization::extract_tar_gz_bounded;
+pub(crate) use materialization::{copy_tree_bounded, extract_tar_gz_bounded};
 
 #[cfg(test)]
 pub(crate) use store::PluginStore;

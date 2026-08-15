@@ -26,7 +26,7 @@ struct AuthorizationIdentityCheck<'a> {
 }
 
 impl PermissionRuntime {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn has_smart_approval_handler(&self) -> bool {
         self.inner.smart_approval_handler.is_some()
     }

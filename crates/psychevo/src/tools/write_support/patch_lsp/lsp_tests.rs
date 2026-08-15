@@ -5,21 +5,26 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(unix)]
+use serde_json::json;
 
+#[cfg(unix)]
 use super::super::text_edit::LspBaseline;
-use super::lsp_manager::{
-    LspManager, LspServerCommand, LspServerResolution, lsp_diagnostics_after,
-};
+#[cfg(unix)]
+use super::lsp_manager::lsp_diagnostics_after;
+use super::lsp_manager::{LspManager, LspServerCommand, LspServerResolution};
 use super::lsp_runtime::{
     command_available, format_lsp_diagnostics, lsp_diagnostics_with_command,
     resolve_lsp_server_with_env,
 };
 use crate::config::LspConfig;
+#[cfg(unix)]
 use crate::error::Error;
 use crate::sandbox::SandboxPolicy;
 use crate::tools::ToolRuntimeContext;
 use crate::tools::cwd::CwdTool;
+#[cfg(unix)]
 use crate::tools::write::write_tool_impl_for_call;
 use crate::types::{RunStreamEvent, RunStreamSink};
 

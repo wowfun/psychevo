@@ -889,8 +889,16 @@ mod tests {
             .expect("partial file");
         drop(TemporaryExportPath::new(path.clone()));
         tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while tokio::fs::try_exists(&path).await.expect("temp existence") {
-                tokio::task::yield_now().await;
+            loop {
+                match tokio::fs::try_exists(&path).await {
+                    Ok(false) => break,
+                    Ok(true) => tokio::task::yield_now().await,
+                    #[cfg(windows)]
+                    Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                        tokio::task::yield_now().await;
+                    }
+                    Err(error) => panic!("temp existence: {error}"),
+                }
             }
         })
         .await

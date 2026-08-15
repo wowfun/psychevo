@@ -85,6 +85,7 @@ pub(crate) fn render_composer(frame: &mut Frame<'_>, area: Rect, ui: &mut Fullsc
         );
     }
     if ui.focus == FocusMode::Composer
+        && ui.diff_overlay.is_none()
         && ui.pending_input_edit.is_none()
         && let Some((x, y)) = ui.composer_terminal_cursor_position(input_area)
     {
@@ -137,6 +138,7 @@ pub(crate) fn render_pending_input_preview(
     if area.width == 0 || area.height == 0 || !ui.has_pending_input_preview() {
         return;
     }
+    let cursor_enabled = ui.diff_overlay.is_none();
     let theme = tui_theme();
     frame.render_widget(Block::default(), area);
     let entries = ui.pending_input_entries();
@@ -145,7 +147,7 @@ pub(crate) fn render_pending_input_preview(
     let mut edit_rendered = false;
     for entry in entries {
         if y >= bottom {
-            return;
+            break;
         }
         if ui
             .pending_input_edit
@@ -163,6 +165,14 @@ pub(crate) fn render_pending_input_preview(
         && let Some(kind) = ui.pending_input_edit.as_ref().map(|edit| edit.kind)
     {
         render_pending_input_editor(frame, area, y, ui, kind);
+    }
+    if cursor_enabled
+        && let Some(input_area) = ui.last_pending_input_edit_area
+        && let Some(edit) = ui.pending_input_edit.as_mut()
+        && let Some((x, y)) =
+            composer_terminal_cursor_position(&edit.textarea, input_area, &mut edit.cursor_top_row)
+    {
+        frame.set_cursor_position((x, y));
     }
 }
 
@@ -305,11 +315,6 @@ pub(crate) fn render_pending_input_editor(
     edit.textarea.set_style(theme.surface_style());
     edit.textarea.set_selection_style(text_selection_style());
     frame.render_widget(&edit.textarea, input_area);
-    if let Some((x, y)) =
-        composer_terminal_cursor_position(&edit.textarea, input_area, &mut edit.cursor_top_row)
-    {
-        frame.set_cursor_position((x, y));
-    }
     let hint_y = input_y.saturating_add(edit_height);
     if hint_y < bottom {
         frame.render_widget(

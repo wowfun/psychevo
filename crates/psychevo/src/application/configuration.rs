@@ -683,6 +683,8 @@ mod tests {
         let home = temp.path().join("home");
         let cwd = temp.path().join("workspace");
         let workspace_root = temp.path().join("shared-workspaces");
+        let workspace_root_toml =
+            toml::Value::String(workspace_root.display().to_string()).to_string();
         std::fs::create_dir_all(&home).expect("home");
         std::fs::create_dir_all(&cwd).expect("cwd");
         std::fs::write(
@@ -690,7 +692,7 @@ mod tests {
             format!(
                 r#"
 [workspaces]
-root = "{}"
+root = {}
 
 [[channels.connections]]
 id = "release"
@@ -730,7 +732,7 @@ command = "/definitely/missing/psychevo-mcp-test"
 [audit]
 owner = "global"
 "#,
-                workspace_root.display()
+                workspace_root_toml
             ),
         )
         .expect("config");

@@ -307,7 +307,7 @@ pub(crate) async fn active_thinking_row_uses_activity_marker_and_elapsed() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "working");
     row.tool_started = Some(
         Instant::now()
-            .checked_sub(Duration::from_millis(2_500))
+            .checked_sub(Duration::from_millis(2_400))
             .expect("instant"),
     );
 

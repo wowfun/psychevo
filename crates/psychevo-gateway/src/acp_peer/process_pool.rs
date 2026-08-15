@@ -7,10 +7,13 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, CreateElicitationRequest, CreateTerminalRequest,
-    KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionRequest,
-    Response as AcpJsonRpcResponse, SessionNotification, TerminalOutputRequest,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    CancelNotification, CloseSessionRequest, CreateElicitationRequest, ReadTextFileRequest,
+    RequestPermissionRequest, Response as AcpJsonRpcResponse, SessionNotification,
+    WriteTextFileRequest,
+};
+use agent_client_protocol::schema::v1::{
+    CreateTerminalRequest, KillTerminalRequest, ReleaseTerminalRequest, TerminalOutputRequest,
+    WaitForTerminalExitRequest,
 };
 use agent_client_protocol::{
     Agent, BoxFuture, ByteStreams, Channel, Client, ConnectTo, ConnectionTo, Dispatch, Handled,
@@ -1307,7 +1310,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
     let (notification_ingress, notification_rx) = AcpNotificationIngress::channel();
     let peer_for_connection = peer.clone();
     let connection_startup_tx = startup_tx.clone();
-    let connection = Client
+    let client = Client
         .builder()
         .name("psychevo-gateway-acp-peer")
         .on_receive_dispatch(
@@ -1428,7 +1431,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                 }
             },
             agent_client_protocol::on_receive_request!(),
-        )
+        );
+    let client = client
         .on_receive_request(
             {
                 let contexts = Arc::clone(&contexts);
@@ -1515,8 +1519,8 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                 }
             },
             agent_client_protocol::on_receive_request!(),
-        )
-        .connect_with(transport, async move |cx| {
+        );
+    let connection = client.connect_with(transport, async move |cx| {
             let initialized = match initialize_acp_v1(
                 &cx,
                 &peer_for_connection,

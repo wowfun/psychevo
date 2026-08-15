@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -323,6 +324,10 @@ async function startJourneyRuntime(
 async function startJourneyServer(runtime: JourneyRuntime, scratch: string) {
   const cwd = path.join(scratch, "cwd");
   mkdirSync(cwd, { recursive: true });
+  execFileSync("git", ["init", "--quiet", "--initial-branch=journey"], {
+    cwd,
+    stdio: "pipe"
+  });
   return startPevoWeb({
     configAppend: runtime.configAppend,
     cwd,

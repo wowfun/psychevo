@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -10,7 +11,9 @@ use crate::server::binding::{AuthContext, WebState};
 use crate::server::rpc_dispatch::handle_rpc;
 use crate::server::rpc_json::RpcRequest;
 use crate::server::scope_session::default_resolved_scope;
-use crate::server::tests::helpers::{web_state, web_state_with_env};
+use crate::server::tests::helpers::web_state;
+#[cfg(unix)]
+use crate::server::tests::helpers::web_state_with_env;
 
 fn assert_wire_result<T>(value: &Value)
 where

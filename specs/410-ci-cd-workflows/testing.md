@@ -111,6 +111,14 @@ cargo xtask ci run --profile rust-broad
   inventory. Draft pull requests select those jobs by change domain; ready pull
   requests run all four in parallel. The always-run `CI Gate` verifies that
   selected jobs succeeded and unselected jobs were skipped.
+- Native hosted coverage uses one canonical runner-owned temporary root on
+  Windows and macOS, and byte-verified runtime assets such as prompt templates
+  and managed dependency locks retain LF bytes on every checkout.
+- The critical first-Turn browser journey creates its own Git repository and
+  named branch, so the branch projection is independent of whether the parent
+  checkout is attached or detached.
+- Process-deadline coverage proves descendant cleanup and captured pre-timeout
+  output without placing interpreter startup inside the configured deadline.
 - Scope selection covers common CI infrastructure plus Rust, Web, and Desktop
   domains. Desktop native changes also select Web; protocol and root pnpm
   changes select both Rust shards and Web. Ready-for-review and

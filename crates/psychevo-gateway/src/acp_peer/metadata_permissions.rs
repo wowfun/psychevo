@@ -352,6 +352,7 @@ pub(super) fn acp_internal_error(err: impl std::fmt::Display) -> agent_client_pr
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -365,14 +366,18 @@ mod tests {
         let file = temp.path().join("visible.txt");
         std::fs::write(&file, "secret").expect("file");
         let context = Arc::new(AcpClientContext {
+            #[cfg(unix)]
             cwd: temp.path().to_path_buf(),
+            #[cfg(unix)]
             workspace_roots: vec![temp.path().to_path_buf()],
             fs_read: true,
             fs_write: true,
             approval_handler: None,
             filesystem_authorizer: None,
             turn_control: None,
+            #[cfg(unix)]
             terminal: false,
+            #[cfg(unix)]
             terminal_env: BTreeMap::new(),
             attachment: Default::default(),
         });

@@ -107,10 +107,22 @@ different object. On hosts with directory-handle support, the capture retains an
 open handle for its complete lifetime; this prevents a deleted object's stable
 number from being recycled into an indistinguishable replacement and lets
 permission, sandbox, and ACP operations remain relative to the accepted object.
+Windows obtains the volume and file identity from that opened handle through a
+stable operating-system API; workspace admission must compile on the workspace's
+declared stable Rust toolchain and must not depend on unstable standard-library
+filesystem extensions. A Windows reparse-point root, or a volume that reports no
+stable nonzero file identity (including unsupported FAT/exFAT configurations),
+is not admitted because it cannot satisfy the immutable-root contract. This is
+an explicit current limitation for a selected OneDrive directory when that
+directory itself is represented as a reparse point; selecting a non-reparse
+ancestor or local materialized directory is required.
 Revalidation requires the pathname to resolve to the same opened directory and
 rejects a missing root, a non-directory replacement, or a different object. A
 shell sandbox either installs its rule from that verified handle or revalidates
 immediately before rule installation.
+Every capture/revalidation failure at this boundary uses the
+`path_identity_changed` error code while retaining the underlying diagnostic;
+raw platform I/O errors never escape as an unclassified authorization failure.
 Identity capture is part of Turn admission and completes before asynchronous
 Agent preparation, the durable accepted receipt, or a wait in the Thread lane.
 Preparation, Native and ACP dispatch, and delegated child admission consume the

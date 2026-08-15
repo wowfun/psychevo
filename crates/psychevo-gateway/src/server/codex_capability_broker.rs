@@ -3173,10 +3173,15 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(unix)]
     use crate::composition::GatewayApplication;
+    #[cfg(unix)]
     use crate::server::GatewayWebServerConfig;
+    #[cfg(unix)]
     use crate::server::binding::{AuthContext, WebState};
+    #[cfg(unix)]
     use crate::server::rpc_dispatch::handle_rpc;
+    #[cfg(unix)]
     use crate::server::rpc_json::RpcRequest;
 
     #[test]

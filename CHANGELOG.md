@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-08-16
+
+- Restored cross-platform pull-request validation by isolating hosted native
+  paths and byte-verified runtime assets, fixing Linux and macOS compilation,
+  and making browser and deadline fixtures independent of checkout and
+  instrumentation timing.
+- Kept Unix ACP relative terminal launches bound to their captured directory
+  objects without relying on platform-specific file-descriptor paths.
+- Kept fake-provider Gateway contracts offline by provisioning an isolated
+  managed ripgrep fixture instead of falling through to GitHub downloads.
+
+## 2026-08-14
+
+- Hardened managed-local Extension installation with rollback-safe publication,
+  stale-record rejection, cache cleanup, and leaner verification.
+- Made SQLite migration checksums portable across LF/CRLF while still
+  rejecting content changes, and tightened Windows Workspace-root validation.
+- Made unsupported ACP terminal callbacks deterministic on Windows, stabilized
+  synchronized TUI cursor updates, and made setup/source Channel installation
+  cancellation-safe and atomic.
+
+## 2026-08-13
+
+- Improved `pevo setup` API-key defaults, cancellation, and reliable hidden
+  input on Windows.
+- Stabilized fullscreen TUI cursor rendering while preserving input and IME
+  anchoring.
+- Hardened Windows execution and ACP behavior, including normalized Workspace
+  roots and deterministic unsupported terminal capabilities.
+- Made source Channel installation build locally with explicit selection and
+  atomic publication, and restored Windows/test compilation.
+
 ## 2026-08-12
 
 - Kept Workbench terminal and observability state fresh and settled across delayed

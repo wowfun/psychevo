@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::ffi::OsString;
+#[cfg(any(unix, test))]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -9,21 +12,29 @@ use agent_client_protocol::schema::v1::{
     ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalExitStatus, TerminalOutputRequest,
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
 };
+use psychevo::Error;
+#[cfg(unix)]
 use psychevo::{
-    Error,
     application::{PermissionApprovalOutcome, PermissionApprovalRequest},
     host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path},
 };
+#[cfg(unix)]
 use tokio::io::AsyncReadExt as _;
 use tokio::sync::watch;
 
+#[cfg(any(unix, test))]
 use super::metadata_permissions::acp_internal_error;
 use super::turn::AcpClientContext;
 
+#[cfg(unix)]
 const ACP_TERMINAL_DEFAULT_OUTPUT_LIMIT: usize = 1024 * 1024;
+#[cfg(unix)]
 const ACP_TERMINAL_MAX_OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
+#[cfg(unix)]
 const ACP_TERMINAL_MAX_ARGS: usize = 1024;
+#[cfg(unix)]
 const ACP_TERMINAL_MAX_ENV: usize = 128;
+#[cfg(unix)]
 const ACP_TERMINAL_MAX_FIELD_CHARS: usize = 65_536;
 
 #[derive(Clone, Default)]
@@ -40,8 +51,11 @@ struct AcpTerminalRecord {
 }
 
 struct AcpTerminalState {
+    #[cfg(unix)]
     output: String,
+    #[cfg(unix)]
     output_byte_limit: usize,
+    #[cfg(unix)]
     truncated: bool,
     exit_status: Option<TerminalExitStatus>,
 }
@@ -141,7 +155,7 @@ impl AcpTerminalRegistry {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn insert_test_terminal(
         &self,
         terminal_id: &str,
@@ -171,15 +185,22 @@ impl AcpTerminalRegistry {
 }
 
 impl AcpTerminalState {
+    #[cfg(any(unix, test))]
     fn new(output_byte_limit: usize) -> Self {
+        #[cfg(not(unix))]
+        let _ = output_byte_limit;
         Self {
+            #[cfg(unix)]
             output: String::new(),
+            #[cfg(unix)]
             output_byte_limit,
+            #[cfg(unix)]
             truncated: false,
             exit_status: None,
         }
     }
 
+    #[cfg(unix)]
     fn append(&mut self, chunk: &[u8]) {
         self.output.push_str(&String::from_utf8_lossy(chunk));
         if self.output.len() <= self.output_byte_limit {
@@ -198,6 +219,7 @@ impl AcpTerminalState {
     }
 }
 
+#[cfg(unix)]
 pub(super) async fn create_terminal(
     registry: AcpTerminalRegistry,
     context: Arc<AcpClientContext>,
@@ -250,11 +272,7 @@ pub(super) async fn create_terminal(
             request.command
         ))
     })?;
-    #[cfg(unix)]
-    let program = executable_from_captured_cwd(&cwd_handle, &cwd, &resolved_program)
-        .map_err(acp_internal_error)?;
-    #[cfg(not(unix))]
-    let program = resolved_program;
+    let program = executable_from_captured_cwd(&cwd, &resolved_program);
     let args = request.args.iter().map(OsString::from).collect::<Vec<_>>();
     let mut command = psychevo::process_env::tokio_host_process_command(
         &program,
@@ -274,29 +292,7 @@ pub(super) async fn create_terminal(
         psychevo::process_env::ProcessEnvOptions::new(&[]),
     )
     .map_err(acp_internal_error)?;
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsRawFd as _;
-        use std::os::unix::process::CommandExt as _;
-
-        let cwd_fd = cwd_handle.as_raw_fd();
-        command.as_std_mut().process_group(0);
-        unsafe {
-            command.as_std_mut().pre_exec(move || {
-                if libc::fchdir(cwd_fd) == 0 {
-                    Ok(())
-                } else {
-                    Err(std::io::Error::last_os_error())
-                }
-            });
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        drop(cwd_handle);
-        return Err(agent_client_protocol::Error::invalid_request()
-            .data("identity-bound ACP terminal cwd is unsupported on this platform"));
-    }
+    bind_command_to_captured_cwd(command.as_std_mut(), &cwd_handle);
     context.attachment.ensure_active()?;
     let mut child = command.spawn().map_err(acp_internal_error)?;
     if let Err(error) = context.attachment.ensure_active() {
@@ -366,6 +362,18 @@ pub(super) async fn create_terminal(
     Ok(CreateTerminalResponse::new(terminal_id))
 }
 
+#[cfg(not(unix))]
+pub(super) async fn create_terminal(
+    _registry: AcpTerminalRegistry,
+    context: Arc<AcpClientContext>,
+    _request: CreateTerminalRequest,
+) -> Result<CreateTerminalResponse, agent_client_protocol::Error> {
+    context.attachment.ensure_active()?;
+    Err(agent_client_protocol::Error::invalid_request()
+        .data("identity-bound ACP terminal cwd is unsupported on this platform"))
+}
+
+#[cfg(unix)]
 async fn finish_acp_terminal_reader(mut task: tokio::task::JoinHandle<()>) {
     if tokio::time::timeout(std::time::Duration::from_secs(2), &mut task)
         .await
@@ -375,6 +383,7 @@ async fn finish_acp_terminal_reader(mut task: tokio::task::JoinHandle<()>) {
     }
 }
 
+#[cfg(unix)]
 async fn read_acp_terminal_output(
     mut reader: impl tokio::io::AsyncRead + Unpin,
     state: Arc<Mutex<AcpTerminalState>>,
@@ -393,6 +402,7 @@ async fn read_acp_terminal_output(
     }
 }
 
+#[cfg(unix)]
 pub(super) async fn terminal_output(
     registry: AcpTerminalRegistry,
     request: TerminalOutputRequest,
@@ -411,6 +421,15 @@ pub(super) async fn terminal_output(
     )
 }
 
+#[cfg(not(unix))]
+pub(super) async fn terminal_output(
+    _registry: AcpTerminalRegistry,
+    _request: TerminalOutputRequest,
+) -> Result<TerminalOutputResponse, agent_client_protocol::Error> {
+    Err(unsupported_terminal_callback())
+}
+
+#[cfg(unix)]
 pub(super) async fn wait_for_terminal_exit(
     registry: AcpTerminalRegistry,
     request: WaitForTerminalExitRequest,
@@ -438,6 +457,15 @@ pub(super) async fn wait_for_terminal_exit(
     }
 }
 
+#[cfg(not(unix))]
+pub(super) async fn wait_for_terminal_exit(
+    _registry: AcpTerminalRegistry,
+    _request: WaitForTerminalExitRequest,
+) -> Result<WaitForTerminalExitResponse, agent_client_protocol::Error> {
+    Err(unsupported_terminal_callback())
+}
+
+#[cfg(unix)]
 pub(super) async fn kill_terminal(
     registry: AcpTerminalRegistry,
     request: KillTerminalRequest,
@@ -461,6 +489,15 @@ pub(super) async fn kill_terminal(
     Ok(KillTerminalResponse::new())
 }
 
+#[cfg(not(unix))]
+pub(super) async fn kill_terminal(
+    _registry: AcpTerminalRegistry,
+    _request: KillTerminalRequest,
+) -> Result<KillTerminalResponse, agent_client_protocol::Error> {
+    Err(unsupported_terminal_callback())
+}
+
+#[cfg(unix)]
 pub(super) async fn release_terminal(
     registry: AcpTerminalRegistry,
     request: ReleaseTerminalRequest,
@@ -485,6 +522,21 @@ pub(super) async fn release_terminal(
     Ok(ReleaseTerminalResponse::new())
 }
 
+#[cfg(not(unix))]
+pub(super) async fn release_terminal(
+    _registry: AcpTerminalRegistry,
+    _request: ReleaseTerminalRequest,
+) -> Result<ReleaseTerminalResponse, agent_client_protocol::Error> {
+    Err(unsupported_terminal_callback())
+}
+
+#[cfg(not(unix))]
+fn unsupported_terminal_callback() -> agent_client_protocol::Error {
+    agent_client_protocol::Error::invalid_request()
+        .data("identity-bound ACP terminal callbacks are unsupported on this platform")
+}
+
+#[cfg(unix)]
 fn acp_terminal_record(
     registry: &AcpTerminalRegistry,
     session_id: &str,
@@ -510,6 +562,7 @@ fn acp_terminal_record(
     Ok(record)
 }
 
+#[cfg(unix)]
 fn validate_acp_terminal_request(
     request: &CreateTerminalRequest,
 ) -> Result<(), agent_client_protocol::Error> {
@@ -537,6 +590,7 @@ fn validate_acp_terminal_request(
     Ok(())
 }
 
+#[cfg(any(unix, test))]
 fn guarded_terminal_cwd(
     default_cwd: &Path,
     workspace_roots: &[PathBuf],
@@ -567,32 +621,35 @@ fn guarded_terminal_cwd(
 }
 
 #[cfg(unix)]
-fn executable_from_captured_cwd(
-    cwd_handle: &std::fs::File,
-    cwd: &Path,
-    resolved_program: &Path,
-) -> std::io::Result<PathBuf> {
-    use std::os::fd::AsRawFd as _;
-
+fn executable_from_captured_cwd(cwd: &Path, resolved_program: &Path) -> PathBuf {
     let Ok(relative) = resolved_program.strip_prefix(cwd) else {
-        return Ok(resolved_program.to_path_buf());
+        return resolved_program.to_path_buf();
     };
     if relative.as_os_str().is_empty() {
-        return Ok(resolved_program.to_path_buf());
+        return resolved_program.to_path_buf();
     }
-    let fd = cwd_handle.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    let mut anchored = PathBuf::from(format!("/proc/self/fd/{fd}"));
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    let mut anchored = PathBuf::from(format!("/dev/fd/{fd}"));
-    anchored.push(relative);
-    Ok(anchored)
+    Path::new(".").join(relative)
 }
 
+#[cfg(unix)]
+fn bind_command_to_captured_cwd(command: &mut std::process::Command, cwd_handle: &std::fs::File) {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::process::CommandExt as _;
+
+    let cwd_fd = cwd_handle.as_raw_fd();
+    command.process_group(0);
+    unsafe {
+        command.pre_exec(move || {
+            if libc::fchdir(cwd_fd) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+}
+
+#[cfg(unix)]
 async fn approve_acp_terminal_create(
     context: &AcpClientContext,
     request: &CreateTerminalRequest,
@@ -633,9 +690,9 @@ mod tests {
 
     use tokio::sync::watch;
 
-    #[cfg(unix)]
-    use super::executable_from_captured_cwd;
     use super::{AcpTerminalRecord, AcpTerminalRegistry, AcpTerminalState, guarded_terminal_cwd};
+    #[cfg(unix)]
+    use super::{bind_command_to_captured_cwd, executable_from_captured_cwd};
 
     #[test]
     fn terminal_callbacks_accept_secondary_workspace_roots() {
@@ -677,11 +734,10 @@ mod tests {
         std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755))
             .expect("replacement mode");
 
-        let program = executable_from_captured_cwd(&cwd_handle, &root, &replacement)
-            .expect("anchored executable");
-        let output = std::process::Command::new(program)
-            .output()
-            .expect("run anchored executable");
+        let program = executable_from_captured_cwd(&root, &replacement);
+        let mut command = std::process::Command::new(program);
+        bind_command_to_captured_cwd(&mut command, &cwd_handle);
+        let output = command.output().expect("run anchored executable");
 
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "original");
     }

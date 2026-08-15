@@ -16,9 +16,12 @@ use sha2::Digest as _;
 use crate::gateway::agent_session::{AgentErrorStage, agent_session_error};
 use crate::gateway::peer_runtime::ResolvedPeerTurn;
 
-use super::metadata_permissions::{
-    peer_allows_fs_read, peer_allows_fs_write, peer_allows_terminal,
-};
+#[cfg(unix)]
+use super::acp_backend_effective_env;
+use super::mcp_handoff;
+#[cfg(unix)]
+use super::metadata_permissions::peer_allows_terminal;
+use super::metadata_permissions::{peer_allows_fs_read, peer_allows_fs_write};
 use super::process_pool::AcpProcessGeneration;
 use super::session_projection::{
     ACP_MAX_AGENT_NAME_CHARS, ACP_MAX_SESSION_TITLE_CHARS, ACP_MAX_UPDATED_AT_CHARS,
@@ -29,7 +32,6 @@ use super::session_projection::{
 };
 use super::terminal_callbacks::AcpTerminalRegistry;
 use super::turn::{AcpClientContext, acp_workspace_roots};
-use super::{acp_backend_effective_env, mcp_handoff};
 
 const ACP_MAX_LISTED_SESSIONS: usize = 512;
 const ACP_MAX_LIFECYCLE_CURSOR_CHARS: usize = 16_384;
@@ -180,6 +182,7 @@ pub(super) fn acp_lifecycle_error(code: &str, message: impl Into<String>) -> Err
     )
 }
 
+#[cfg(unix)]
 fn lifecycle_client_context(
     peer: &ResolvedPeerTurn,
     cwd: PathBuf,
@@ -195,6 +198,22 @@ fn lifecycle_client_context(
         turn_control: None,
         terminal: peer_allows_terminal(peer),
         terminal_env: acp_backend_effective_env(peer),
+        attachment: Default::default(),
+    })
+}
+
+#[cfg(not(unix))]
+fn lifecycle_client_context(
+    peer: &ResolvedPeerTurn,
+    _cwd: PathBuf,
+    _additional_directories: &[PathBuf],
+) -> Arc<AcpClientContext> {
+    Arc::new(AcpClientContext {
+        fs_read: peer_allows_fs_read(peer),
+        fs_write: peer_allows_fs_write(peer),
+        approval_handler: None,
+        filesystem_authorizer: None,
+        turn_control: None,
         attachment: Default::default(),
     })
 }

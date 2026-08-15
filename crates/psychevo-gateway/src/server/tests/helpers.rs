@@ -37,23 +37,29 @@ pub(in crate::server::tests) async fn web_state_with_native_test_executor(
 pub(in crate::server::tests) fn install_wechat_test_extension(state: &WebState) {
     let root = state.inner.home.join("test-extensions").join("wechat");
     std::fs::create_dir_all(&root).expect("WeChat Extension root");
+    #[cfg(windows)]
+    let executable = "./sidecar.cmd";
+    #[cfg(unix)]
+    let executable = "./sidecar.py";
     std::fs::write(
         root.join("psychevo.extension.json"),
-        r#"{
+        format!(
+            r#"{{
           "schemaVersion": 1,
           "id": "psychevo.channel.wechat",
           "version": "local",
-          "runtime": {
+          "runtime": {{
             "protocol": "psychevo-extension/1",
-            "executable": "./sidecar.py"
-          },
-          "contributions": {
-            "channels": [{
+            "executable": "{executable}"
+          }},
+          "contributions": {{
+            "channels": [{{
               "channel": "wechat",
               "deliveryCapabilities": ["poll", "text", "qr_setup"]
-            }]
-          }
-        }"#,
+            }}]
+          }}
+        }}"#,
+        ),
     )
     .expect("WeChat Extension manifest");
     let sidecar = root.join("sidecar.py");
@@ -62,6 +68,31 @@ pub(in crate::server::tests) fn install_wechat_test_extension(state: &WebState) 
         include_str!("../../../tests/fixtures/channel_wechat_test_sidecar.py"),
     )
     .expect("WeChat Extension sidecar");
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("python")
+            .args([
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.executable.encode('utf-8'))",
+            ])
+            .output()
+            .expect("resolve Python for WeChat Extension fixture");
+        assert!(
+            output.status.success(),
+            "resolve Python for WeChat Extension fixture: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let python = String::from_utf8(output.stdout)
+            .expect("Python executable path is UTF-8")
+            .trim()
+            .to_string();
+        assert!(!python.is_empty(), "Python executable path");
+        std::fs::write(
+            root.join("sidecar.cmd"),
+            format!("@echo off\r\n\"{python}\" \"%~dp0sidecar.py\" %*\r\n"),
+        )
+        .expect("WeChat Extension Windows launcher");
+    }
     #[cfg(unix)]
     {
         let mut permissions = std::fs::metadata(&sidecar)
@@ -158,8 +189,14 @@ async fn web_state_with_composition(
             home.to_string_lossy().to_string(),
         ),
     ]);
+    #[cfg(windows)]
+    env.insert(
+        "SystemRoot".to_string(),
+        std::env::var("SystemRoot").expect("SystemRoot for Windows process fixtures"),
+    );
     env.extend(inherited_env);
     std::fs::create_dir_all(&home).expect("home");
+    crate::test_support::install_managed_rg_fixture(&home);
     let database_path = temp.path().join("state.db");
     let runtime = match native_test_executor {
         Some(executor) => {

@@ -1,3 +1,4 @@
+use crate::tui::app_loop::draw_fullscreen_frame;
 use crate::tui::tests::fixtures::{
     buffer_text, draw_fullscreen_for_test, test_app, test_context_snapshot,
 };
@@ -615,9 +616,10 @@ pub(crate) async fn prompt_block_uses_full_width_background_without_left_rail() 
     ui.push_user("inspect prompt styling".to_string());
     let backend = TestBackend::new(48, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer();
 
     assert_eq!(buffer.cell((0, 0)).expect("cell").symbol(), "›");
@@ -634,9 +636,10 @@ pub(crate) async fn composer_and_prompt_share_full_width_surface() {
     ui.push_user("match the composer surface".to_string());
     let backend = TestBackend::new(48, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer();
     let composer_y = 8;
 
@@ -684,9 +687,10 @@ pub(crate) async fn wrapped_prompt_rows_keep_full_width_background_for_wide_text
     ui.push_user("中文测试中文测试中文测试中文测试".to_string());
     let backend = TestBackend::new(24, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer();
 
     assert_eq!(buffer.cell((0, 0)).expect("first marker").symbol(), "›");
@@ -715,9 +719,10 @@ pub(crate) async fn empty_composer_uses_one_surface_row() {
     let mut ui = FullscreenUi::new(&app);
     let backend = TestBackend::new(48, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer();
     let composer_y = 8;
 

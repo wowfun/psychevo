@@ -64,12 +64,23 @@ new public Gateway protocol or product UI.
 ## Schema Migration
 
 SQLx migrations are the canonical schema entry point. The first migration is an
-idempotent v28 baseline; v29 adds durable Framework pending-interaction facts;
-v30 adds expression indexes for bounded Agent relationship lookup by Agent id
-or task name. `PRAGMA user_version` remains the compatibility marker. A fresh
-version-zero database runs all migrations and is initialized to v30. Because
-Psychevo is pre-release, versions older than v29 and versions newer than v30
-are rejected with explicit reset/new-database guidance before ordinary queries.
+idempotent v28 baseline, and a fresh version-zero database runs every migration
+through the current schema version. `PRAGMA user_version` remains the
+compatibility marker. Because Psychevo is pre-release, versions outside the
+declared supported schema range are rejected with explicit reset/new-database
+guidance before ordinary queries.
+
+Committed migration SQL is immutable and uses repository-enforced LF line
+endings so its SQLx checksum is independent of checkout platform. During open,
+the applied migration version/checksum set is fetched once inside the migration
+transaction and compared with the compiled migration set in memory. An applied
+checksum produced from the exact embedded migration with LF or CRLF line
+endings may be transactionally rewritten to the checksum of the currently
+embedded form before SQLx validation. Reconciliation is bidirectional so a
+binary compiled from either checkout representation can open the same database;
+writes are issued only for hashes derived from those two exact representations.
+No other checksum mismatch is repaired or skipped; content changes continue to
+fail closed as a modified migration.
 
 Concurrent first open is serialized by SQLite and must produce one valid
 migration history. Because SQLite's busy handler does not wait for the

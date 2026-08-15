@@ -20,6 +20,7 @@ source paths, install release binaries, or model package-manager workflows.
 - Rust/Cargo, native compiler, Node.js, and pnpm dependency detection
 - Workbench asset build and install
 - post-install `pevo` verification and global home initialization
+- interactive selection of optional first-party Channel Extensions
 - Git Bash/MSYS/MINGW script compatibility boundaries
 
 Out of scope:
@@ -40,6 +41,10 @@ Accepted flags:
 - `--check` prints dependency, version, and environment-readiness diagnostics
   without installing, building Web assets, copying files, initializing, or
   attempting toolchain repairs.
+- `--channels <LIST>` bypasses the interactive menu and installs `all`, `none`
+  (also accepted as `-1` to match the menu), or a comma-separated subset of
+  `wechat`, `telegram`, and `feishu-lark`.
+  It cannot be combined with `--check`.
 - `-h, --help` prints usage.
 
 The script has no installer-owned environment variables. It may use standard
@@ -50,8 +55,10 @@ The script finds the source checkout by walking upward from the process cwd and
 requires a workspace root containing `Cargo.toml` and
 `crates/psychevo-cli/Cargo.toml`. If no checkout is found, it must fail before
 any install action with a short `git clone ... && cd psychevo` style hint.
+Explicit option shape and values are validated before checkout discovery so an
+invalid invocation reports the actionable option error from any cwd.
 
-Normal installation always runs the same full product path:
+Normal installation always runs the same core product path:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
@@ -59,6 +66,37 @@ pnpm install --frozen-lockfile
 pnpm --filter @psychevo/workbench build
 pevo init
 ```
+
+When stdin and stderr are terminals, normal installation asks once which
+optional first-party Channel integrations to install. The compact menu offers
+WeChat, Telegram, and Feishu/Lark, accepts a space-separated subset, uses `-1`
+to skip all integrations, and states that Enter installs all three. The
+interactive prompt does not use square-bracket default shorthand or `none`.
+The non-interactive `--channels` flag accepts `none` or the menu's `-1`. Each selected
+item is built from the current checkout as a release sidecar and assembled with
+a `local` manifest in a collision-safe private install-share staging directory.
+Manifest materialization changes only the root `version` and runtime
+`executable` fields; unrelated nested keys remain byte-for-byte unchanged.
+After `pevo
+init`, the script publishes that complete package into profile scope through
+the atomic managed-local copy path defined by
+[058 Extensions](../058-extensions/spec.md), then removes its private staging
+directory. The live install record never points at staging or at a package that
+the script overwrites in place.
+The checkout-local installer must not resolve a selected item through the
+published first-party Extension index: a source version may legitimately have
+no matching release descriptor or artifact. A selected Extension build or
+install failure fails the installer with a `scripts/install.sh --channels ...`
+retry command rather than a remote `pevo install <id>` command.
+
+An explicit `--channels <LIST>` selection bypasses terminal detection and uses
+the same validated selection model, making optional Extension installation
+deterministic for automation. Without that flag, when either stdin or stderr is
+not a terminal, the installer does not prompt and does not install optional
+Channel Extensions. This preserves a deterministic non-interactive core install
+without silently adding release downloads. Skipping an item controls only this
+installer run; it never removes an Extension already present in the profile
+store.
 
 After the Workbench build, the script copies `apps/workbench/dist` into
 `$(dirname pevo)/../share/psychevo/web`. This install-share location is the

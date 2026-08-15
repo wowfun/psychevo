@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use sha2::{Digest as _, Sha384};
 use sqlx::Connection;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePoolOptions, SqliteSynchronous};
@@ -67,6 +69,64 @@ async fn bootstrap_persistent_wal(options: &SqliteConnectOptions) -> Result<()> 
     }
 }
 
+fn checksum_matches_line_ending_variant(applied_checksum: &[u8], sql: &str) -> bool {
+    let lf = sql.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    applied_checksum == Sha384::digest(lf.as_bytes()).as_slice()
+        || applied_checksum == Sha384::digest(crlf.as_bytes()).as_slice()
+}
+
+async fn reconcile_line_ending_migration_checksums(
+    connection: &mut SqliteConnection,
+) -> Result<()> {
+    let migration_table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_one(&mut *connection)
+    .await?
+        > 0;
+    if !migration_table_exists {
+        return Ok(());
+    }
+
+    let applied_checksums = sqlx::query_as::<_, (i64, Vec<u8>)>(
+        "SELECT version, checksum FROM _sqlx_migrations WHERE success = 1",
+    )
+    .fetch_all(&mut *connection)
+    .await?
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+
+    for migration in STATE_MIGRATOR.iter() {
+        let Some(applied_checksum) = applied_checksums.get(&migration.version) else {
+            continue;
+        };
+        if applied_checksum.as_slice() == migration.checksum.as_ref() {
+            continue;
+        }
+
+        if !checksum_matches_line_ending_variant(applied_checksum, migration.sql.as_str()) {
+            continue;
+        }
+
+        let updated = sqlx::query(
+            "UPDATE _sqlx_migrations SET checksum = ? WHERE version = ? AND success = 1 AND checksum = ?",
+        )
+        .bind(migration.checksum.as_ref())
+        .bind(migration.version)
+        .bind(applied_checksum.as_slice())
+        .execute(&mut *connection)
+        .await?;
+        if updated.rows_affected() != 1 {
+            return Err(Error::Message(format!(
+                "sqlite migration {} checksum changed while line endings were reconciled",
+                migration.version
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl StateRuntime {
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_connection_limit(path, DEFAULT_STATE_CONNECTION_LIMIT).await
@@ -128,6 +188,7 @@ impl StateRuntime {
                 "state database has an unknown schema version; run `pevo init --reset-state` or set PSYCHEVO_DB to a new state database".to_string(),
             ));
         }
+        reconcile_line_ending_migration_checksums(&mut migration).await?;
         STATE_MIGRATOR
             .run_direct(None, &mut *migration, false)
             .await?;
@@ -177,6 +238,21 @@ mod tests {
         assert_eq!(options.get_max_connections(), 1);
         assert_eq!(options.get_idle_timeout(), None);
         assert_eq!(options.get_max_lifetime(), None);
+    }
+
+    #[test]
+    fn migration_line_ending_compatibility_is_bidirectional_and_content_exact() {
+        let lf = "CREATE TABLE example (id INTEGER);\n-- migration\n";
+        let crlf = lf.replace('\n', "\r\n");
+        let lf_checksum = Sha384::digest(lf.as_bytes());
+        let crlf_checksum = Sha384::digest(crlf.as_bytes());
+
+        assert!(checksum_matches_line_ending_variant(&crlf_checksum, lf));
+        assert!(checksum_matches_line_ending_variant(&lf_checksum, &crlf));
+        assert!(!checksum_matches_line_ending_variant(
+            &Sha384::digest(b"CREATE TABLE changed (id INTEGER);\n"),
+            lf
+        ));
     }
 
     #[tokio::test]

@@ -56,14 +56,18 @@ pub(crate) struct AcpPeerTurnRequest {
 
 #[derive(Clone)]
 pub(super) struct AcpClientContext {
+    #[cfg(unix)]
     pub(super) cwd: PathBuf,
+    #[cfg(unix)]
     pub(super) workspace_roots: Vec<PathBuf>,
     pub(super) fs_read: bool,
     pub(super) fs_write: bool,
     pub(super) approval_handler: Option<Arc<dyn psychevo::application::ApprovalHandler>>,
     pub(super) filesystem_authorizer: Option<psychevo::application::AgentFilesystemAuthorizer>,
     pub(super) turn_control: Option<psychevo::application::TurnControl>,
+    #[cfg(unix)]
     pub(super) terminal: bool,
+    #[cfg(unix)]
     pub(super) terminal_env: BTreeMap<String, String>,
     pub(super) attachment: AcpAttachmentGuard,
 }
@@ -89,7 +93,8 @@ impl AcpAttachmentGuard {
 pub(super) fn acp_workspace_roots(cwd: &std::path::Path, additional: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for root in std::iter::once(cwd.to_path_buf()).chain(additional.iter().cloned()) {
-        let root = root.canonicalize().unwrap_or(root);
+        let root =
+            psychevo::host_paths::normalized_native_path(&root.canonicalize().unwrap_or(root));
         if !roots.contains(&root) {
             roots.push(root);
         }
@@ -816,9 +821,24 @@ fn acp_peer_turn_controls(
 
 #[cfg(test)]
 mod prompt_usage_tests {
+    #[cfg(windows)]
+    use std::path::Path;
+
     use serde_json::json;
 
+    #[cfg(windows)]
+    use super::acp_workspace_roots;
     use super::cumulative_usage_delta;
+
+    #[cfg(windows)]
+    #[test]
+    fn acp_workspace_roots_use_the_same_native_identity_as_admission_capture() {
+        let temp = tempfile::tempdir().expect("temp");
+        let roots = acp_workspace_roots(temp.path(), &[]);
+
+        assert_eq!(roots.len(), 1);
+        assert!(!roots[0].starts_with(Path::new(r"\\?\")));
+    }
 
     #[test]
     fn cumulative_prompt_usage_becomes_a_non_double_counted_turn_delta() {

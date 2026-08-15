@@ -2,8 +2,11 @@ use std::process::Command;
 
 #[test]
 fn root_help_matches_compiled_feature_surface() {
+    let home = tempfile::tempdir().expect("isolated home");
     let output = Command::new(env!("CARGO_BIN_EXE_pevo"))
         .arg("--help")
+        .env("HOME", home.path())
+        .env("PSYCHEVO_HOME", home.path())
         .output()
         .expect("pevo --help");
     assert!(

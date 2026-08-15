@@ -419,16 +419,28 @@ mod state_runtime_tests {
             .expect("child session grant");
 
         let child_roots = child.scoped_roots();
-        assert!(child_roots.contains(&turn_root.canonicalize().expect("turn identity")));
-        assert!(child_roots.contains(&child_session_root.canonicalize().expect("child identity")));
         assert!(
-            !child_roots.contains(&parent_session_root.canonicalize().expect("parent identity"))
+            child_roots.contains(&crate::host_paths::normalized_native_path(
+                &turn_root.canonicalize().expect("turn identity")
+            ))
+        );
+        assert!(
+            child_roots.contains(&crate::host_paths::normalized_native_path(
+                &child_session_root.canonicalize().expect("child identity")
+            ))
+        );
+        assert!(
+            !child_roots.contains(&crate::host_paths::normalized_native_path(
+                &parent_session_root.canonicalize().expect("parent identity")
+            ))
         );
 
         state.clear_turn_filesystem_grants("parent");
         assert_eq!(
             child.scoped_roots(),
-            vec![child_session_root.canonicalize().expect("child identity")]
+            vec![crate::host_paths::normalized_native_path(
+                &child_session_root.canonicalize().expect("child identity")
+            )]
         );
     }
 }

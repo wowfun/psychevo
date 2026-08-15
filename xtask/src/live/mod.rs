@@ -1977,10 +1977,12 @@ mod tests {
         assert_eq!(json["id"], "web-composer-live@deepseek");
         assert_eq!(json["check_id"], "web-composer-live");
         assert_eq!(json["provider"]["id"], "deepseek");
+        let artifact_path = json["artifact_path"]
+            .as_str()
+            .map(Path::new)
+            .expect("artifact path");
         assert!(
-            json["artifact_path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with("/live/web-composer-live/deepseek"))
+            artifact_path.ends_with(Path::new("live").join("web-composer-live").join("deepseek"))
         );
     }
 

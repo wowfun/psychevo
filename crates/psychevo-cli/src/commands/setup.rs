@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use psychevo::{
     application::Configuration, application::ConfigureProviderRequest, config::ConfigScope,
@@ -126,17 +126,32 @@ async fn configure_provider_with_io<I: SetupIo>(
     let provider = choose_provider(io)?;
     let base_url = choose_base_url(io, &provider)?;
     let default_api_key_env = default_api_key_env(&provider, env_map);
-    let api_key_env = prompt_api_key_env(io, &default_api_key_env)?;
-    let secret_prompt = if env_map
+    let detected_api_key_env = env_map
+        .get(&default_api_key_env)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let api_key_env = if detected_api_key_env {
+        prompt_api_key_env(io, &default_api_key_env)?
+    } else {
+        default_api_key_env
+    };
+    let has_api_key = env_map
         .get(&api_key_env)
         .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
-    {
-        format!("API key [found in {api_key_env}; Enter to reuse]: ")
+        .unwrap_or(false);
+    let api_key = if has_api_key {
+        io.prompt_secret(&format!(
+            "API key [found in {api_key_env}; Enter to reuse]: "
+        ))?
     } else {
-        "API key [Enter to set later]: ".to_string()
+        let value = io.prompt_secret("API key [hidden]: ")?;
+        if value.trim().is_empty() {
+            return Err(anyhow!(
+                "setup stopped because no API key was entered; rerun `pevo setup`, or use `pevo auth setup --provider <id> --model <model> --base-url <url> --api-key-stdin`"
+            ));
+        }
+        value
     };
-    let api_key = io.prompt_secret(&secret_prompt)?;
     let context = CommandConfiguration::open(env_map, home, cwd).await?;
     let result: Result<()> = async {
         let configuration = context.configuration();
@@ -245,9 +260,8 @@ fn prompt_api_key_env<I: SetupIo>(io: &mut I, default: &str) -> Result<String> {
     loop {
         io.print_line("")?;
         io.print_line("API key env var")?;
-        io.print_line(&format!("  Using {default}."))?;
         io.print_line("  The API key itself is entered next and will be hidden.")?;
-        if !confirm_default_io(io, "change env var name", false)? {
+        if confirm_default_io(io, &format!("use {default}"), true)? {
             return Ok(default.to_string());
         }
 
@@ -466,19 +480,10 @@ fn read_hidden(prompt: &str) -> Result<String> {
     let mut value = String::new();
     let result = loop {
         match event::read() {
-            Ok(Event::Key(key))
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c') =>
-            {
-                break Err(anyhow!("secret input interrupted"));
-            }
-            Ok(Event::Key(key)) => match key.code {
-                KeyCode::Enter => break Ok(value),
-                KeyCode::Char(ch) => value.push(ch),
-                KeyCode::Backspace => {
-                    value.pop();
-                }
-                _ => {}
+            Ok(Event::Key(key)) => match handle_hidden_input_key(&mut value, key) {
+                Ok(true) => break Ok(value),
+                Ok(false) => {}
+                Err(err) => break Err(err),
             },
             Ok(_) => {}
             Err(err) => break Err(err.into()),
@@ -487,6 +492,24 @@ fn read_hidden(prompt: &str) -> Result<String> {
     let _ = disable_raw_mode();
     eprintln!();
     result
+}
+
+fn handle_hidden_input_key(value: &mut String, key: KeyEvent) -> Result<bool> {
+    if key.kind == KeyEventKind::Release {
+        return Ok(false);
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        return Err(anyhow!("secret input interrupted"));
+    }
+    match key.code {
+        KeyCode::Enter => return Ok(true),
+        KeyCode::Char(ch) => value.push(ch),
+        KeyCode::Backspace => {
+            value.pop();
+        }
+        _ => {}
+    }
+    Ok(false)
 }
 
 fn command_exists(name: &str) -> bool {
@@ -676,17 +699,48 @@ mod tests {
         assert!(!looks_like_api_key("XIAOMI_TOKEN_PLAN_API_KEY"));
     }
 
+    #[test]
+    fn hidden_input_ignores_enter_release_before_pressed_keys() {
+        use crossterm::event::{KeyEvent, KeyEventKind};
+
+        let mut value = String::new();
+        assert!(
+            !handle_hidden_input_key(
+                &mut value,
+                KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Release),
+            )
+            .expect("release event")
+        );
+        assert!(value.is_empty());
+
+        assert!(
+            !handle_hidden_input_key(
+                &mut value,
+                KeyEvent::new_with_kind(
+                    KeyCode::Char('s'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Press,
+                ),
+            )
+            .expect("character press")
+        );
+        assert_eq!(value, "s");
+
+        assert!(
+            handle_hidden_input_key(
+                &mut value,
+                KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::NONE, KeyEventKind::Press),
+            )
+            .expect("enter press")
+        );
+    }
+
     #[tokio::test]
     async fn deepseek_setup_fetches_models_and_hides_secret() {
         let (_temp, home, cwd, env_map) = setup_workspace();
         let server = SetupCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
         let mut io = TestIo::new(
-            vec![
-                "1".to_string(),
-                server.base_url.clone(),
-                String::new(),
-                "1".to_string(),
-            ],
+            vec!["1".to_string(), server.base_url.clone(), String::new()],
             vec!["secret-key".to_string()],
         );
 
@@ -700,10 +754,9 @@ mod tests {
         assert!(config.contains("model = \"deepseek/remote-model\""));
         let env = fs::read_to_string(home.join(".env")).expect("env");
         assert_eq!(env, "DEEPSEEK_API_KEY=secret-key\n");
-        assert!(
-            io.output
-                .contains("API key env var\n  Using DEEPSEEK_API_KEY.")
-        );
+        assert!(!io.output.contains("API key env var"));
+        assert!(io.output.contains("API key [hidden]: "));
+        assert!(!io.output.contains("change env var name"));
         assert!(!io.output.contains("API key env var [DEEPSEEK_API_KEY]:"));
         assert!(!io.output.contains("secret-key"));
         let requests = server.requests.lock().expect("requests");
@@ -717,46 +770,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zai_setup_defaults_to_general_and_allows_coding_plan() {
+    async fn setup_silently_selects_missing_api_key_env_and_stops_on_empty_key() {
+        let (_temp, home, cwd, env_map) = setup_workspace();
+        let server = SetupCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
+        let mut io = TestIo::new(
+            vec!["1".to_string(), server.base_url.clone()],
+            vec![String::new()],
+        );
+
+        let error = configure_provider_with_io(&home, &cwd, &env_map, &mut io)
+            .await
+            .expect_err("empty API key stops setup");
+
+        assert!(!io.output.contains("API key env var"));
+        assert!(io.output.contains("API key [hidden]: "));
+        assert_eq!(io.output.matches("API key [hidden]: ").count(), 1);
+        assert!(!io.output.contains("API key is required"));
+        assert!(!io.output.contains("Enter to set later"));
+        assert!(
+            error
+                .to_string()
+                .contains("setup stopped because no API key was entered; rerun `pevo setup`")
+        );
+        assert!(error.to_string().contains("--api-key-stdin"));
+        assert_eq!(fs::read_to_string(home.join(".env")).expect("env"), "");
+        let requests = server.requests.lock().expect("requests");
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn zai_selection_defaults_to_general_and_allows_coding_plan() {
         for (choice, expected) in [
             ("", "https://api.z.ai/api/paas/v4"),
             ("2", "https://api.z.ai/api/coding/paas/v4"),
         ] {
-            let (_temp, home, cwd, env_map) = setup_workspace();
-            let mut io = TestIo::new(
-                vec![
-                    "2".to_string(),
-                    choice.to_string(),
-                    String::new(),
-                    String::new(),
-                ],
-                vec![String::new()],
+            let mut io = TestIo::new(vec!["2".to_string(), choice.to_string()], Vec::new());
+
+            let provider = choose_provider(&mut io).expect("provider");
+            assert_eq!(provider.provider_id, "zai");
+            assert_eq!(provider.default_model, "glm-5.2");
+            assert_eq!(
+                choose_base_url(&mut io, &provider).expect("base URL"),
+                expected
             );
-
-            configure_provider_with_io(&home, &cwd, &env_map, &mut io)
-                .await
-                .expect("setup");
-
-            let config = fs::read_to_string(home.join("config.toml")).expect("config");
-            assert!(config.contains(&format!("api = \"{expected}\"")));
-            assert!(config.contains("api_key_env = \"GLM_API_KEY\""));
-            assert!(config.contains("model = \"zai/glm-5.2\""));
-            assert!(io.output.contains("Could not fetch models: GLM_API_KEY"));
         }
     }
 
     #[tokio::test]
     async fn setup_allows_explicit_api_key_env_override() {
-        let (_temp, home, cwd, env_map) = setup_workspace();
+        let (_temp, home, cwd, mut env_map) = setup_workspace();
+        env_map.insert("DEEPSEEK_API_KEY".to_string(), "existing-key".to_string());
+        let base_url = unused_loopback_base_url();
         let mut io = TestIo::new(
             vec![
-                "2".to_string(),
-                String::new(),
-                "y".to_string(),
+                "1".to_string(),
+                base_url,
+                "n".to_string(),
                 "CUSTOM_API_KEY".to_string(),
-                String::new(),
+                "manual-model".to_string(),
             ],
-            vec![String::new()],
+            vec!["secret-key".to_string()],
         );
 
         configure_provider_with_io(&home, &cwd, &env_map, &mut io)
@@ -765,20 +838,26 @@ mod tests {
 
         let config = fs::read_to_string(home.join("config.toml")).expect("config");
         assert!(config.contains("api_key_env = \"CUSTOM_API_KEY\""));
-        assert!(config.contains("model = \"zai/glm-5.2\""));
-        assert!(io.output.contains("env var name [GLM_API_KEY]: "));
-        assert!(io.output.contains("Could not fetch models: CUSTOM_API_KEY"));
+        assert!(config.contains("model = \"deepseek/manual-model\""));
+        assert!(io.output.contains("use DEEPSEEK_API_KEY [Y/n]: "));
+        assert!(io.output.contains("env var name [DEEPSEEK_API_KEY]: "));
+        assert!(io.output.contains("Could not fetch models:"));
+        assert_eq!(
+            fs::read_to_string(home.join(".env")).expect("env"),
+            "CUSTOM_API_KEY=secret-key\n"
+        );
     }
 
     #[tokio::test]
     async fn setup_rejects_pasted_api_key_as_env_var_without_echoing_it() {
-        let (_temp, home, cwd, env_map) = setup_workspace();
+        let (_temp, home, cwd, mut env_map) = setup_workspace();
+        env_map.insert("DEEPSEEK_API_KEY".to_string(), "existing-key".to_string());
         let pasted_key = "sk-pasted-secret-value";
         let mut io = TestIo::new(
             vec![
                 "1".to_string(),
                 unused_loopback_base_url(),
-                "y".to_string(),
+                "n".to_string(),
                 pasted_key.to_string(),
                 String::new(),
                 "manual-model".to_string(),
@@ -800,28 +879,22 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn xiaomi_token_plan_setup_selects_region_with_canonical_provider_id() {
-        let (_temp, home, cwd, env_map) = setup_workspace();
-        let mut io = TestIo::new(
-            vec![
-                "3".to_string(),
-                "2".to_string(),
-                String::new(),
-                String::new(),
-            ],
-            vec![String::new()],
+    #[test]
+    fn xiaomi_token_plan_selection_uses_region_and_canonical_provider_id() {
+        let mut io = TestIo::new(vec!["3".to_string(), "2".to_string()], Vec::new());
+
+        let provider = choose_provider(&mut io).expect("provider");
+        assert_eq!(provider.provider_id, "xiaomi-token-plan");
+        assert_eq!(provider.default_model, "mimo-v2.5-pro");
+        assert_eq!(
+            choose_base_url(&mut io, &provider).expect("base URL"),
+            "https://token-plan-sgp.xiaomimimo.com/v1"
         );
-
-        configure_provider_with_io(&home, &cwd, &env_map, &mut io)
-            .await
-            .expect("setup");
-
-        let config = fs::read_to_string(home.join("config.toml")).expect("config");
-        assert!(config.contains("xiaomi-token-plan"));
-        assert!(config.contains("api = \"https://token-plan-sgp.xiaomimimo.com/v1\""));
-        assert!(config.contains("api_key_env = \"XIAOMI_TOKEN_PLAN_API_KEY\""));
-        assert!(config.contains("model = \"xiaomi-token-plan/mimo-v2.5-pro\""));
+        assert_eq!(
+            default_api_key_env(&provider, &BTreeMap::new()),
+            "XIAOMI_TOKEN_PLAN_API_KEY"
+        );
+        assert!(!io.output.contains("API key env var"));
     }
 
     #[tokio::test]
@@ -829,12 +902,7 @@ mod tests {
         let (_temp, home, cwd, env_map) = setup_workspace();
         let base_url = unused_loopback_base_url();
         let mut io = TestIo::new(
-            vec![
-                "1".to_string(),
-                base_url,
-                String::new(),
-                "manual-model".to_string(),
-            ],
+            vec!["1".to_string(), base_url, "manual-model".to_string()],
             vec!["secret-key".to_string()],
         );
 
@@ -856,10 +924,9 @@ mod tests {
                 "5".to_string(),
                 "mock-custom".to_string(),
                 server.base_url.clone(),
-                String::new(),
                 "custom-model".to_string(),
             ],
-            vec![String::new()],
+            vec!["secret-key".to_string()],
         );
 
         configure_provider_with_io(&home, &cwd, &env_map, &mut io)
@@ -872,8 +939,16 @@ mod tests {
         assert!(config.contains("api_key_env = \"MOCK_CUSTOM_API_KEY\""));
         assert!(config.contains("model = \"mock-custom/custom-model\""));
         assert!(io.output.contains("No models returned"));
+        assert_eq!(
+            fs::read_to_string(home.join(".env")).expect("env"),
+            "MOCK_CUSTOM_API_KEY=secret-key\n"
+        );
         let requests = server.requests.lock().expect("requests");
         assert_eq!(requests.len(), 1);
-        assert!(!requests[0].to_lowercase().contains("authorization:"));
+        assert!(
+            requests[0]
+                .to_lowercase()
+                .contains("authorization: bearer secret-key")
+        );
     }
 }

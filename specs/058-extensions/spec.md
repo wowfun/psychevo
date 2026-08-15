@@ -134,6 +134,19 @@ line-oriented mode) and registers TUI-capable commands as `/name`; the
 sidecar still starts only when that command is invoked and is shut down when
 the TUI exits.
 
+The first-party source installer may use its hidden managed-local publication
+path for a package it just built. The Extension store bounded-copies that
+complete package into a new immutable cache root, validates the copied package,
+and atomically switches the install record while holding the normal exclusive
+activity lock. A failed copy, validation, conflict check, or record publication
+leaves the previous record and package intact. After a successful switch, the
+store reclaims superseded managed-local cache roots before releasing the
+exclusive activity lock. A reader lease acquired before publication keeps the
+old package alive by blocking the switch; a reader that captured an old record
+but did not yet acquire its lease must reject that stale record after acquiring
+the shared lock. Failed record publication rolls back a newly published cache
+root. Reclamation never deletes ordinary local development roots.
+
 Profile Extensions live under:
 
 ```text
@@ -239,7 +252,8 @@ pevo -e <local-path> [command...]
 The default scope is the active profile; `-l/--local` selects the current
 workspace. `list --local` selects project records rather than overlaying both
 scopes. Selectors are scope-qualified when ambiguous. `remove` deletes the
-install record and materialized cache but retains the data root.
+install record and every cache generation owned by that Extension in the
+selected scope, but retains the data root.
 
 Bare `pevo update` updates the `pevo` product when its installation method has
 a supported updater; a source checkout or unknown installation returns exact

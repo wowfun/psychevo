@@ -1,0 +1,3 @@
+crates/psychevo/migrations/*.sql text eol=lf
+crates/psychevo/templates/*.md text eol=lf
+crates/psychevo-gateway/assets/codex-acp-package-lock.json text eol=lf

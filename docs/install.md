@@ -18,7 +18,21 @@ sh scripts/install.sh
 
 `--check` is read-only. It reports the tools, versions, platform, and network
 settings the installer will use. It does not build, install, initialize, repair,
-or copy files.
+or copy files. In a terminal, the normal installer also offers one compact menu
+for the optional WeChat, Telegram, and Feishu/Lark integrations; press Enter to
+install all, choose a subset, or enter `-1` to install none.
+
+For deterministic non-interactive installation, pass the selection explicitly:
+
+```bash
+sh scripts/install.sh --channels wechat,telegram
+sh scripts/install.sh --channels none
+sh scripts/install.sh --channels -1
+```
+
+Accepted values are `all`, `none` (also `-1`), or a comma-separated subset of `wechat`,
+`telegram`, and `feishu-lark`. A non-interactive run without `--channels` skips
+all optional Channel integrations.
 
 After installation, run the first-run wizard and local diagnostics:
 
@@ -72,14 +86,16 @@ tools and exits.
 
 ## Install Contract
 
-The installer has only two user-facing options:
+The installer exposes dependency checking, optional Channel selection, and
+help:
 
 ```bash
 sh scripts/install.sh --check
+sh scripts/install.sh --channels all
 sh scripts/install.sh --help
 ```
 
-Normal installation runs the equivalent of:
+Every normal installation runs the equivalent core path:
 
 ```bash
 cargo install --locked --path crates/psychevo-cli --force
@@ -87,6 +103,11 @@ pnpm install --frozen-lockfile
 pnpm --filter @psychevo/workbench build
 pevo init
 ```
+
+Selected Channel integrations are compiled from the checkout and installed as
+local first-party Extensions after initialization. The source installer does
+not require matching GitHub release assets. Skipping a Channel does not remove
+a copy that was already installed by an earlier run.
 
 It copies `apps/workbench/dist` into the install-share directory beside the
 Cargo binary, normally `~/.cargo/share/psychevo/web`.

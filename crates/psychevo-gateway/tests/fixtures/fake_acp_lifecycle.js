@@ -93,7 +93,7 @@ function handle(message) {
     const isCodex = MODE.startsWith("codex-auth-");
     const sessionCapabilities = ["none", "process-ephemeral"].includes(MODE)
       ? {}
-      : { list: {}, delete: {}, fork: {}, resume: {}, close: {} };
+      : { list: {}, delete: {}, fork: {}, resume: {}, close: {}, additionalDirectories: {} };
     if (MODE === "no-delete") delete sessionCapabilities.delete;
     respond(id, {
       protocolVersion: MODE === "protocol-v2" ? 2 : 1,

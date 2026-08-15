@@ -1,11 +1,19 @@
+#[cfg(unix)]
 use crate::state::StateRuntime;
+#[cfg(unix)]
 use crate::tests::home_dir;
+#[cfg(unix)]
 use crate::tests::modes_shell_tools::tool_modes::{assert_event_type, wait_for_event_type};
+#[cfg(unix)]
 use crate::types::{RunMode, UserShellContextOptions};
-use serde_json::{Value, json};
+#[cfg(unix)]
+use serde_json::Value;
+use serde_json::json;
+#[cfg(unix)]
+use std::collections::BTreeMap;
+use std::fs;
+#[cfg(unix)]
 use std::{
-    collections::BTreeMap,
-    fs,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -626,6 +634,7 @@ pub(crate) async fn plan_write_stdin_cannot_mutate_a_default_turn_session() {
     );
 }
 
+#[cfg(unix)]
 pub(crate) async fn configured_user_shell_context(
     temp: &tempfile::TempDir,
     _cwd: &std::path::Path,
@@ -660,6 +669,7 @@ model = "lmstudio/test-model"
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn configured_user_shell_environment(
     temp: &tempfile::TempDir,
 ) -> BTreeMap<String, String> {

@@ -228,6 +228,15 @@ come from the focused command and smoke tests below.
   without reaching a real package registry.
 - Workbench install coverage distinguishes the dependency-install breadcrumb
   from the subsequent asset-build breadcrumb.
+- Interactive Channel-selection coverage verifies the single menu's Enter-for-all,
+  subset, invalid-input retry, and `-1` skip behavior without contacting release
+  services. Non-interactive coverage verifies both explicit `--channels`
+  `none`/`-1` spellings, rejects shell-glob syntax without expanding cwd files,
+  selections and the no-flag default that skips optional Channel Extensions
+  while the core install still completes. Selected-Channel coverage verifies
+  source sidecars are built and installed from materialized local package paths,
+  never from first-party ids that would require published release descriptors;
+  the staged manifest rewrite is anchored to the intended root/runtime fields.
 - `--check` coverage verifies dependency and version diagnostics without
   installing `pevo` or mutating global Psychevo state, and reports mismatched
   `pnpm` as a warning rather than a failure. It reports `pnpm --version`

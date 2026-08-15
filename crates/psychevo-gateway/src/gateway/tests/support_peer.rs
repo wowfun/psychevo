@@ -331,6 +331,7 @@ async fn harness_with_native_test_executor(
     let db_path = temp.path().join("state.db");
     let home = temp.path().join("home");
     std::fs::create_dir_all(&home).expect("home");
+    crate::test_support::install_managed_rg_fixture(&home);
     let inherited_env = if native_test_executor.is_some() {
         BTreeMap::new()
     } else {

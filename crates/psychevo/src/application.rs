@@ -1664,6 +1664,7 @@ mod tests {
         second_thread: Arc<Mutex<Option<ThreadExecutionContext>>>,
     }
 
+    #[cfg(unix)]
     #[derive(Debug)]
     struct CapturedThreadAgentSessionAdapter {
         threads: Arc<Mutex<Vec<ThreadExecutionContext>>>,
@@ -1687,6 +1688,7 @@ mod tests {
         second_denied: Arc<Mutex<Option<bool>>>,
     }
 
+    #[cfg(unix)]
     #[derive(Debug)]
     struct PreparationRootReplacementAgentSessionAdapter {
         root: PathBuf,
@@ -2741,6 +2743,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl TestAgentSession for CapturedThreadAgentSessionAdapter {
         fn admission_facts(&self, request: &AgentTurnPreparation) -> AgentAdmissionFacts {
             test_acp_admission(request)
@@ -2825,6 +2828,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl TestAgentSession for PreparationRootReplacementAgentSessionAdapter {
         fn observe_preparation(&self) {
             std::fs::rename(&self.root, &self.original).expect("retain accepted root");
@@ -7256,6 +7260,7 @@ mod tests {
         application.shutdown().await.expect("shutdown");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn delegated_child_inherits_the_running_parent_turn_root_snapshot() {
         let temp = tempfile::tempdir().expect("tempdir");

@@ -71,7 +71,17 @@ runtimes for platform-neutral behavior. POSIX-only filesystem or process
 semantics compile only on Unix, while Windows-only semantics compile only on
 Windows. Tests must not pass POSIX fixtures through native Windows path or
 process APIs, and cross-platform command fixtures must select an executable
-harness for the current host.
+harness for the current host. Platform-specific implementations of one
+cross-platform fixture must expose the same tested protocol capabilities and
+state transitions.
+Hosted native tests must bind each host's temporary-file APIs to one
+runner-owned canonical path spelling. A Windows 8.3 user-profile alias and the
+macOS `/var` to `/private/var` alias must not make the same temporary directory
+appear as two different Workspace identities. Windows derives the long system
+temporary path from the runner account's local application-data directory;
+macOS binds `TMPDIR` to the canonical Actions temporary root. Repository text
+consumed as compiled or runtime data must likewise declare its semantic line
+ending at the checkout boundary; prompt templates use LF on every host.
 Repository Cargo configuration gives Rust test worker threads a host-neutral
 8 MiB minimum stack while preserving an explicit caller override. This keeps
 large async Gateway contract tests independent of the native Windows default
@@ -251,6 +261,17 @@ Initial profiles:
   assertions are not evaluated against instrumented code; those tests still
   execute their functional and persistence invariants, while the uninstrumented
   `non-functional` profile remains the sole owner of latency budgets.
+  Functional deadline fixtures establish any pre-timeout observation with an
+  immediate local primitive or explicit barrier. A descendant-pipe fixture has
+  the direct shell emit that observation and exit while only its descendant
+  retains the pipe. Fixtures must not require a new language runtime to start
+  inside the product deadline, because coverage instrumentation may delay
+  test-worker scheduling without changing the process-tree contract under
+  test. Functional concurrency assertions remain active under instrumentation,
+  but wall-clock performance ceilings do not. A deadline fixture may use a
+  wider configured deadline only in the instrumented run so its observation
+  point is reached; the ordinary deterministic test retains the nominal
+  product deadline and cleanup ceiling.
   Native C dependencies in this profile compile with a fixed low optimization
   level (`CFLAGS=-O1`): this avoids host-GCC pathologies in large bundled C
   sources without optimizing the instrumented Rust code or depending on the
@@ -327,8 +348,10 @@ Initial profiles:
   suite discovers no tests instead of using `--passWithNoTests`. After the
   production build, this ordinary gate runs the deterministic desktop-Chromium
   critical first-Turn journey against the real managed Gateway with Native and
-  ACP fake runtimes; the broader screenshot and profiling inventory remains in
-  `visual`.
+  ACP fake runtimes. The journey cwd owns an isolated Git repository with an
+  explicit symbolic branch; it must not inherit the parent checkout's branch,
+  detached pull-request merge ref, index, or worktree state. The broader
+  screenshot and profiling inventory remains in `visual`.
 - `visual`: deterministic visual diagnostics using fake/local providers. It
   owns the TUI/VHS capture workflow, the complete non-live Workbench
   Playwright inventory in desktop and mobile Chromium, and the native

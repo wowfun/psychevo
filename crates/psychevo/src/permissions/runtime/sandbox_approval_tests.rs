@@ -1,6 +1,8 @@
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, VecDeque},
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -9,7 +11,9 @@ use psychevo_agent_core::ToolBinding;
 use psychevo_ai::AbortSignal;
 use serde_json::json;
 
-use super::state::{PermissionDecisionView as PermissionDecision, PermissionRuntime};
+#[cfg(unix)]
+use super::state::PermissionDecisionView as PermissionDecision;
+use super::state::PermissionRuntime;
 use crate::types::{ApprovalPolicy, PermissionApprovalRequest, PermissionConfig, PermissionMode};
 
 #[derive(Debug)]

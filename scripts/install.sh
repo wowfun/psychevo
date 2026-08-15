@@ -3,6 +3,14 @@ set -eu
 
 check_only=0
 current_step="starting"
+selected_channel_extensions=""
+channel_selection_explicit=0
+channel_selection_value=""
+channel_extension_staging_root=""
+
+wechat_extension_id="psychevo.channel.wechat"
+telegram_extension_id="psychevo.channel.telegram"
+feishu_lark_extension_id="psychevo.channel.feishu-lark"
 
 usage() {
   cat <<'EOF'
@@ -11,8 +19,10 @@ usage: install.sh [options]
 Install pevo from the current Psychevo source checkout.
 
 Options:
-  --check     Check dependencies and environment readiness only
-  -h, --help  Show this help
+  --check            Check dependencies and environment readiness only
+  --channels <list>  Install all, none, or a comma-separated subset of:
+                     wechat, telegram, feishu-lark
+  -h, --help         Show this help
 EOF
 }
 
@@ -122,7 +132,33 @@ candidate_pevo_bin() {
 
 web_asset_target_for_bin() {
   bin_dir=$(dirname "$1")
-  printf '%s/../share/psychevo/web\n' "$bin_dir"
+  install_root=$(dirname "$bin_dir")
+  printf '%s/share/psychevo/web\n' "$install_root"
+}
+
+prepare_channel_extension_staging() {
+  bin_dir=$(dirname "$1")
+  install_root=$(dirname "$bin_dir")
+  staging_parent="$install_root/share/psychevo"
+  mkdir -p "$staging_parent"
+  channel_extension_staging_root=$(mktemp -d "$staging_parent/.extension-install-stage-XXXXXX") \
+    || die "failed to create private Channel Extension staging directory"
+}
+
+channel_extension_stage_for_bin() {
+  [ -n "$channel_extension_staging_root" ] \
+    || die "Channel Extension staging was not prepared"
+  printf '%s/%s\n' "$channel_extension_staging_root" "$2"
+}
+
+cleanup_channel_extension_staging() {
+  [ -n "$channel_extension_staging_root" ] || return 0
+  case "$channel_extension_staging_root" in
+    */share/psychevo/.extension-install-stage-*)
+      rm -rf "$channel_extension_staging_root"
+      channel_extension_staging_root=""
+      ;;
+  esac
 }
 
 path_contains_dir() {
@@ -742,10 +778,202 @@ Add that line to your shell profile if you want installed commands available in 
 EOF
 }
 
+parse_channel_selection() {
+  case "$1" in
+    *'*'*|*'?'*|*'['*) return 1 ;;
+  esac
+  normalized_channel_selection=$(printf '%s\n' "$1" | tr ',' ' ')
+  set -f
+  set -- $normalized_channel_selection
+  set +f
+  [ "$#" -gt 0 ] || return 1
+  if [ "$#" -eq 1 ]; then
+    case "$1" in
+      all)
+        selected_channel_extensions="$wechat_extension_id $telegram_extension_id $feishu_lark_extension_id"
+        return 0
+        ;;
+      none|-1)
+        selected_channel_extensions=""
+        return 0
+        ;;
+    esac
+  fi
+
+  selected_channel_extensions=""
+  for channel_choice do
+    case "$channel_choice" in
+      1|wechat) channel_extension_id=$wechat_extension_id ;;
+      2|telegram) channel_extension_id=$telegram_extension_id ;;
+      3|feishu|lark|feishu-lark) channel_extension_id=$feishu_lark_extension_id ;;
+      *) return 1 ;;
+    esac
+    case " $selected_channel_extensions " in
+      *" $channel_extension_id "*) ;;
+      *) selected_channel_extensions="$selected_channel_extensions $channel_extension_id" ;;
+    esac
+  done
+  selected_channel_extensions=${selected_channel_extensions# }
+}
+
+print_channel_selection() {
+  if [ -n "$selected_channel_extensions" ]; then
+    info "pevo install: selected optional Channel Extensions: $selected_channel_extensions"
+  else
+    info "pevo install: no optional Channel integrations selected."
+  fi
+}
+
+select_channel_extension_metadata() {
+  case "$1" in
+    "$wechat_extension_id")
+      channel_extension_package="psychevo-extension-channel-wechat"
+      channel_extension_binary="psychevo-channel-wechat"
+      channel_extension_selection="wechat"
+      ;;
+    "$telegram_extension_id")
+      channel_extension_package="psychevo-extension-channel-telegram"
+      channel_extension_binary="psychevo-channel-telegram"
+      channel_extension_selection="telegram"
+      ;;
+    "$feishu_lark_extension_id")
+      channel_extension_package="psychevo-extension-channel-feishu-lark"
+      channel_extension_binary="psychevo-channel-feishu-lark"
+      channel_extension_selection="feishu-lark"
+      ;;
+    *)
+      die "unsupported selected Channel Extension: $1"
+      ;;
+  esac
+}
+
+build_selected_channel_extensions() {
+  [ -n "$selected_channel_extensions" ] || return 0
+  set -- build --locked --release --target-dir "$source_dir/target"
+  retry_channel_selection=""
+  for channel_extension_id in $selected_channel_extensions; do
+    select_channel_extension_metadata "$channel_extension_id"
+    set -- "$@" -p "$channel_extension_package" --bin "$channel_extension_binary"
+    if [ -n "$retry_channel_selection" ]; then
+      retry_channel_selection="$retry_channel_selection,$channel_extension_selection"
+    else
+      retry_channel_selection=$channel_extension_selection
+    fi
+  done
+  step "building selected Channel Extensions from $source_dir"
+  if ! (CDPATH= cd "$source_dir" && cargo "$@"); then
+    die "failed to build selected Channel Extensions. Retry with: sh scripts/install.sh --channels $retry_channel_selection"
+  fi
+}
+
+materialize_local_channel_extension() {
+  channel_extension_id=$1
+  select_channel_extension_metadata "$channel_extension_id"
+  executable_name="$channel_extension_binary$(pevo_bin_suffix)"
+  source_manifest="$source_dir/crates/$channel_extension_package/psychevo.extension.json"
+  source_executable="$source_dir/target/release/$executable_name"
+  materialized_channel_package=$(channel_extension_stage_for_bin "$pevo_bin" "$channel_extension_id")
+  manifest_target="$materialized_channel_package/psychevo.extension.json"
+  executable_target="$materialized_channel_package/$executable_name"
+  manifest_temp="$materialized_channel_package/.psychevo.extension.json.$$"
+  executable_temp="$materialized_channel_package/.$executable_name.$$"
+
+  [ -f "$source_manifest" ] || die "missing Channel Extension manifest: $source_manifest"
+  [ -f "$source_executable" ] || die "Channel Extension build did not produce $source_executable"
+  mkdir -p "$materialized_channel_package"
+  if ! sed \
+    -e 's/^  "version"[[:space:]]*:[[:space:]]*"[^"]*"/  "version": "local"/' \
+    -e "s|^    \"executable\"[[:space:]]*:[[:space:]]*\"[^\"]*\"|    \"executable\": \"./$executable_name\"|" \
+    "$source_manifest" >"$manifest_temp"; then
+    rm -f "$manifest_temp"
+    die "failed to materialize Channel Extension manifest for $channel_extension_id"
+  fi
+  if ! cp "$source_executable" "$executable_temp"; then
+    rm -f "$manifest_temp" "$executable_temp"
+    die "failed to stage Channel Extension executable for $channel_extension_id"
+  fi
+  chmod +x "$executable_temp"
+  if ! mv -f "$executable_temp" "$executable_target"; then
+    rm -f "$manifest_temp" "$executable_temp"
+    die "failed to install Channel Extension executable for $channel_extension_id"
+  fi
+  if ! mv -f "$manifest_temp" "$manifest_target"; then
+    rm -f "$manifest_temp"
+    die "failed to install Channel Extension manifest for $channel_extension_id"
+  fi
+}
+
+select_channel_extensions() {
+  if [ "$channel_selection_explicit" -eq 1 ]; then
+    print_channel_selection
+    return 0
+  fi
+  selected_channel_extensions=""
+  if [ ! -t 0 ] || [ ! -t 2 ]; then
+    info "pevo install: non-interactive input; skipping optional Channel integrations."
+    return 0
+  fi
+
+  cat >&2 <<'EOF'
+
+Optional Channel integrations:
+ -1) Do not install Channel integrations
+  1) WeChat
+  2) Telegram
+  3) Feishu / Lark
+EOF
+
+  while :; do
+    printf 'Selection (Enter installs all; use numbers like 1 3; -1 installs none): ' >&2
+    if ! IFS= read -r channel_selection; then
+      info ""
+      info "pevo install: input closed; skipping optional Channel integrations."
+      return 0
+    fi
+    [ -n "$channel_selection" ] || channel_selection="all"
+    [ "$channel_selection" != "-1" ] || channel_selection="none"
+
+    if parse_channel_selection "$channel_selection"; then
+      break
+    fi
+    info "Invalid selection. Press Enter for all, enter -1 for none, or use 1, 2, and 3."
+  done
+
+  print_channel_selection
+}
+
+install_selected_channel_extensions() {
+  [ -n "$selected_channel_extensions" ] || return 0
+  prepare_channel_extension_staging "$pevo_bin"
+  for channel_extension_id in $selected_channel_extensions; do
+    select_channel_extension_metadata "$channel_extension_id"
+    step "installing locally built Channel Extension $channel_extension_id"
+    materialize_local_channel_extension "$channel_extension_id"
+    if ! "$pevo_bin" install --managed-local "$materialized_channel_package"; then
+      die "failed to install optional Channel Extension $channel_extension_id. Retry with: sh scripts/install.sh --channels $channel_extension_selection"
+    fi
+  done
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check)
       check_only=1
+      shift
+      ;;
+    --channels)
+      [ "$channel_selection_explicit" -eq 0 ] || die "--channels may only be provided once"
+      [ "$#" -ge 2 ] || die "--channels requires a value"
+      [ -n "$2" ] || die "--channels requires a value"
+      channel_selection_explicit=1
+      channel_selection_value=$2
+      shift 2
+      ;;
+    --channels=*)
+      [ "$channel_selection_explicit" -eq 0 ] || die "--channels may only be provided once"
+      channel_selection_value=${1#--channels=}
+      [ -n "$channel_selection_value" ] || die "--channels requires a value"
+      channel_selection_explicit=1
       shift
       ;;
     -h|--help)
@@ -758,6 +986,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$check_only" -eq 1 ] && [ "$channel_selection_explicit" -eq 1 ]; then
+  die "--channels cannot be combined with --check"
+fi
+if [ "$channel_selection_explicit" -eq 1 ]; then
+  parse_channel_selection "$channel_selection_value" || die "invalid --channels value. Use all, none, or a comma-separated subset of wechat, telegram, and feishu-lark."
+fi
+
 source_dir=$(find_source_from_cwd 2>/dev/null) || die "$(checkout_required_hint)"
 
 if [ "$check_only" -eq 1 ]; then
@@ -768,6 +1003,9 @@ fi
 trap 'handle_interrupt HUP' HUP
 trap 'handle_interrupt INT' INT
 trap 'handle_interrupt TERM' TERM
+trap 'cleanup_channel_extension_staging' EXIT
+
+select_channel_extensions
 
 step "using $(platform_name) source checkout at $source_dir"
 step "validating source checkout"
@@ -799,6 +1037,8 @@ pevo_bin=$(resolve_pevo_bin) || die "pevo was installed, but the binary could no
 step "verifying pevo"
 "$pevo_bin" --help >/dev/null
 
+build_selected_channel_extensions
+
 step "installing Workbench dependencies"
 if ! (CDPATH= cd "$source_dir" && run_pnpm install --frozen-lockfile); then
   print_network_diagnostics "pnpm install failed"
@@ -820,6 +1060,8 @@ cp -R "$web_source/." "$web_target/"
 
 step "initializing Psychevo home"
 "$pevo_bin" init
+
+install_selected_channel_extensions
 
 print_path_hint_if_needed
 
