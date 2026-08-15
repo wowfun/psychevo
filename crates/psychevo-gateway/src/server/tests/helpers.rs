@@ -196,6 +196,7 @@ async fn web_state_with_composition(
     );
     env.extend(inherited_env);
     std::fs::create_dir_all(&home).expect("home");
+    crate::test_support::install_managed_rg_fixture(&home);
     let database_path = temp.path().join("state.db");
     let runtime = match native_test_executor {
         Some(executor) => {

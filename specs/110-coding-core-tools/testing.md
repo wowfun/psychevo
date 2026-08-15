@@ -35,6 +35,9 @@ should cover `psychevo` tool assembly and exec-session behavior.
 Real provider and live service validation remain opt-in. Managed ripgrep tests
 must not perform real GitHub downloads; download behavior should be covered with
 an injectable fake resolver/client or an equivalent deterministic harness.
+Gateway fixtures that start fake-provider agent Turns must provision an isolated
+managed `rg` executable before runtime startup, so unrelated contract tests never
+fall through to the production GitHub downloader when the host has no `rg`.
 Managed LSP tests must not perform real npm installs or contact a package
 registry. Language-server resolution, install scheduling, process reuse, and
 failure isolation should be covered with fake installers and fake LSP servers.

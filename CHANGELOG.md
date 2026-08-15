@@ -8,6 +8,8 @@
   instrumentation timing.
 - Kept Unix ACP relative terminal launches bound to their captured directory
   objects without relying on platform-specific file-descriptor paths.
+- Kept fake-provider Gateway contracts offline by provisioning an isolated
+  managed ripgrep fixture instead of falling through to GitHub downloads.
 
 ## 2026-08-14
 

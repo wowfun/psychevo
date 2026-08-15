@@ -426,6 +426,7 @@ pub(in crate::server::tests) async fn web_state_with_automation_framework_provid
     let home = temp.path().join("home");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
+    crate::test_support::install_managed_rg_fixture(&home);
     let config_path = home.join("config.toml");
     std::fs::write(
         &config_path,

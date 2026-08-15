@@ -15,6 +15,36 @@ pub(crate) struct AcpFixture {
     pub(crate) script: PathBuf,
 }
 
+pub(crate) fn install_managed_rg_fixture(home: &Path) {
+    let tools = home.join("tools");
+    std::fs::create_dir_all(&tools).expect("managed tool fixture directory");
+    #[cfg(windows)]
+    let executable = tools.join("rg.exe");
+    #[cfg(unix)]
+    let executable = tools.join("rg");
+    #[cfg(windows)]
+    std::fs::write(
+        &executable,
+        "@echo off\r\necho test rg fixture must not be invoked 1^>^&2\r\nexit /b 70\r\n",
+    )
+    .expect("managed rg fixture");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' 'test rg fixture must not be invoked' >&2\nexit 70\n",
+        )
+        .expect("managed rg fixture");
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("managed rg fixture metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).expect("chmod managed rg fixture");
+    }
+}
+
 pub(crate) fn acp_fixture(cwd: &Path, name: &str) -> AcpFixture {
     let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     #[cfg(windows)]
