@@ -272,7 +272,7 @@ pub(crate) async fn tui_snapshot_history_pending_write_call() {
         if row.title.starts_with("write ") || row.title == "write" {
             row.tool_started = Some(
                 Instant::now()
-                    .checked_sub(Duration::from_millis(2_500))
+                    .checked_sub(Duration::from_millis(2_400))
                     .expect("instant"),
             );
         }
@@ -331,7 +331,7 @@ pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
         if row.title.starts_with("write ") || row.title == "write" {
             row.tool_started = Some(
                 Instant::now()
-                    .checked_sub(Duration::from_millis(2_500))
+                    .checked_sub(Duration::from_millis(2_400))
                     .expect("instant"),
             );
         }

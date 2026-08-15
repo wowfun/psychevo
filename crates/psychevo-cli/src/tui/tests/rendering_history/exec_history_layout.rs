@@ -1,3 +1,4 @@
+use crate::tui::app_loop::draw_fullscreen_frame;
 use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
 use crate::tui::tests::{line_text, runtime_turn_event};
 use crate::tui::{
@@ -215,17 +216,19 @@ pub(crate) async fn transcript_render_clears_stale_cells_after_shorter_redraw() 
     ));
     let backend = TestBackend::new(72, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("first draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("first draw");
     assert!(buffer_text(terminal.backend().buffer()).contains("TAILMARK"));
 
     ui.transcript.clear();
     ui.transcript
         .push(TranscriptRow::simple(TranscriptKind::Status, "short"));
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("second draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("second draw");
 
     let text = buffer_text(terminal.backend().buffer());
     assert!(!text.contains("TAILMARK"), "{text}");

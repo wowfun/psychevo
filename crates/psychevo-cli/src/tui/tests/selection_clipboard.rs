@@ -1,6 +1,9 @@
-use crate::tui::tests::fixtures::{buffer_text, draw_fullscreen_for_test, test_app};
+use crate::tui::app_loop::{FullscreenFrameBackend, StableCursorBackend, draw_fullscreen_frame};
+use crate::tui::tests::fixtures::{
+    attach_no_steer_running, buffer_text, draw_fullscreen_for_test, test_app,
+};
 use crate::tui::{
-    ClipboardCommand, ClipboardEnvironment, FULLSCREEN_EVENT_POLL_INTERVAL,
+    ClipboardCommand, ClipboardEnvironment, DiffOverlay, FULLSCREEN_EVENT_POLL_INTERVAL,
     FULLSCREEN_PASSIVE_REDRAW_INTERVAL, FullscreenUi, KeyCode, KeyEvent, KeyModifiers, Line,
     ManagedTerminalTitle, Modifier, MouseButton, MouseEvent, MouseEventKind, NO_ARGS, Paragraph,
     Rect, RunMode, ScreenLine, SelectableRegion, SelectionState, TUI_MOUSE_CAPTURE_DISABLE_ANSI,
@@ -8,14 +11,354 @@ use crate::tui::{
     TuiApp, base64_encode, copy_text_to_clipboard_with, is_probably_wsl_from,
     local_clipboard_commands_for, mouse_event_needs_redraw, osc52_sequence_with_passthrough,
     passive_redraw_due, schedule_next_passive_redraw, screen_cells_from_text,
-    selected_text_from_lines, tmux_clipboard_copy_ready, write_fullscreen_enter_commands,
-    write_fullscreen_exit_commands,
+    selected_text_from_lines, textarea_with_text, tmux_clipboard_copy_ready,
+    write_fullscreen_enter_commands, write_fullscreen_exit_commands,
 };
-use ratatui::backend::TestBackend;
+use ratatui::{
+    backend::{Backend, ClearType, CrosstermBackend, TestBackend, WindowSize},
+    buffer::Cell,
+    layout::{Position, Size},
+};
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FullscreenBackendEvent {
+    BeginSynchronizedUpdate,
+    HideCursor,
+    Clear,
+    Paint,
+    SetCursor(Position),
+    ShowCursor,
+    EndSynchronizedUpdate,
+    Flush,
+}
+
+struct RecordingBackend {
+    inner: TestBackend,
+    events: Vec<FullscreenBackendEvent>,
+    fail_next_end: bool,
+}
+
+#[derive(Default)]
+struct FlushCountingWriter {
+    bytes: Vec<u8>,
+    flushes: usize,
+}
+
+impl io::Write for FlushCountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flushes += 1;
+        Ok(())
+    }
+}
+
+impl RecordingBackend {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            inner: TestBackend::new(width, height),
+            events: Vec::new(),
+            fail_next_end: false,
+        }
+    }
+
+    fn take_semantic_events(&mut self) -> Vec<FullscreenBackendEvent> {
+        std::mem::take(&mut self.events)
+            .into_iter()
+            .filter(|event| *event != FullscreenBackendEvent::Flush)
+            .collect()
+    }
+}
+
+fn assert_flicker_free_cursor_frame(
+    events: &[FullscreenBackendEvent],
+    expected_position: Position,
+) {
+    assert_eq!(
+        events.first(),
+        Some(&FullscreenBackendEvent::BeginSynchronizedUpdate)
+    );
+    assert!(events.contains(&FullscreenBackendEvent::Paint));
+    assert_eq!(
+        events.last(),
+        Some(&FullscreenBackendEvent::EndSynchronizedUpdate)
+    );
+    let cursor_index = events
+        .iter()
+        .rposition(|event| *event == FullscreenBackendEvent::SetCursor(expected_position))
+        .expect("final cursor anchor");
+    assert!(cursor_index < events.len() - 1);
+    assert!(!events[..cursor_index].contains(&FullscreenBackendEvent::ShowCursor));
+    assert!(
+        events
+            .iter()
+            .filter(|event| **event == FullscreenBackendEvent::ShowCursor)
+            .count()
+            <= 1
+    );
+}
+
+impl Backend for RecordingBackend {
+    type Error = io::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        self.events.push(FullscreenBackendEvent::Paint);
+        self.inner.draw(content).map_err(|never| match never {})
+    }
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.events.push(FullscreenBackendEvent::HideCursor);
+        self.inner.hide_cursor().map_err(|never| match never {})
+    }
+
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.events.push(FullscreenBackendEvent::ShowCursor);
+        self.inner.show_cursor().map_err(|never| match never {})
+    }
+
+    fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+        self.inner
+            .get_cursor_position()
+            .map_err(|never| match never {})
+    }
+
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> Result<(), Self::Error> {
+        let position = position.into();
+        self.events
+            .push(FullscreenBackendEvent::SetCursor(position));
+        self.inner
+            .set_cursor_position(position)
+            .map_err(|never| match never {})
+    }
+
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.events.push(FullscreenBackendEvent::Clear);
+        self.inner.clear().map_err(|never| match never {})
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        self.inner
+            .clear_region(clear_type)
+            .map_err(|never| match never {})
+    }
+
+    fn size(&self) -> Result<Size, Self::Error> {
+        self.inner.size().map_err(|never| match never {})
+    }
+
+    fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+        self.inner.window_size().map_err(|never| match never {})
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.events.push(FullscreenBackendEvent::Flush);
+        self.inner.flush().map_err(|never| match never {})
+    }
+}
+
+impl FullscreenFrameBackend for RecordingBackend {
+    fn begin_synchronized_update(&mut self) -> Result<(), Self::Error> {
+        self.events
+            .push(FullscreenBackendEvent::BeginSynchronizedUpdate);
+        Ok(())
+    }
+
+    fn end_synchronized_update(&mut self) -> Result<(), Self::Error> {
+        self.events
+            .push(FullscreenBackendEvent::EndSynchronizedUpdate);
+        if std::mem::take(&mut self.fail_next_end) {
+            return Err(io::Error::other("injected synchronized commit failure"));
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn crossterm_backend_emits_synchronized_output_markers() {
+    let mut output = FlushCountingWriter::default();
+    {
+        let mut backend = CrosstermBackend::new(&mut output);
+        backend
+            .begin_synchronized_update()
+            .expect("begin synchronized update");
+        backend
+            .queue_cursor_visibility(true)
+            .expect("queue cursor visibility");
+        backend
+            .end_synchronized_update()
+            .expect("end synchronized update");
+    }
+
+    assert_eq!(output.bytes, b"\x1b[?2026h\x1b[?25h\x1b[?2026l");
+    assert_eq!(output.flushes, 1, "one frame commit must flush once");
+}
+
+#[test]
+fn fullscreen_frame_commit_paints_before_anchoring_and_showing_cursor() {
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(12, 4));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    draw_fullscreen_frame(&mut terminal, true, |frame| {
+        frame.render_widget(Paragraph::new("changed"), frame.area());
+        frame.set_cursor_position(Position::new(7, 3));
+    })
+    .expect("draw fullscreen frame");
+
+    let events = terminal.backend_mut().inner_mut().take_semantic_events();
+    assert_flicker_free_cursor_frame(&events, Position::new(7, 3));
+    assert!(events.ends_with(&[
+        FullscreenBackendEvent::SetCursor(Position::new(7, 3)),
+        FullscreenBackendEvent::ShowCursor,
+        FullscreenBackendEvent::EndSynchronizedUpdate,
+    ]));
+}
+
+#[test]
+fn fullscreen_frame_without_editor_keeps_cursor_hidden() {
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(12, 4));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        frame.render_widget(Paragraph::new("read only"), frame.area());
+    })
+    .expect("draw fullscreen frame");
+
+    let events = terminal.backend_mut().inner_mut().take_semantic_events();
+    assert_eq!(
+        events.first(),
+        Some(&FullscreenBackendEvent::BeginSynchronizedUpdate)
+    );
+    assert!(events.contains(&FullscreenBackendEvent::Paint));
+    assert!(!events.contains(&FullscreenBackendEvent::HideCursor));
+    assert!(!events.contains(&FullscreenBackendEvent::ShowCursor));
+    assert_eq!(
+        events.last(),
+        Some(&FullscreenBackendEvent::EndSynchronizedUpdate)
+    );
+}
+
+#[test]
+fn consecutive_editable_frames_do_not_restart_cursor_visibility() {
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(12, 4));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    for label in ["first", "second"] {
+        draw_fullscreen_frame(&mut terminal, false, |frame| {
+            frame.render_widget(Paragraph::new(label), frame.area());
+            frame.set_cursor_position(Position::new(7, 3));
+        })
+        .expect("draw fullscreen frame");
+        if label == "first" {
+            terminal.backend_mut().inner_mut().take_semantic_events();
+        }
+    }
+
+    let events = terminal.backend_mut().inner_mut().take_semantic_events();
+    assert!(!events.contains(&FullscreenBackendEvent::HideCursor));
+    assert!(!events.contains(&FullscreenBackendEvent::ShowCursor));
+    assert!(events.ends_with(&[
+        FullscreenBackendEvent::SetCursor(Position::new(7, 3)),
+        FullscreenBackendEvent::EndSynchronizedUpdate,
+    ]));
+}
+
+#[test]
+fn failed_frame_commit_retries_unconfirmed_cursor_visibility() {
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(12, 4));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal.backend_mut().inner_mut().fail_next_end = true;
+
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        frame.set_cursor_position(Position::new(7, 3));
+    })
+    .expect_err("injected commit failure");
+    terminal.backend_mut().inner_mut().take_semantic_events();
+
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        frame.set_cursor_position(Position::new(7, 3));
+    })
+    .expect("retry frame");
+    let events = terminal.backend_mut().inner_mut().take_semantic_events();
+    assert!(
+        events.contains(&FullscreenBackendEvent::ShowCursor),
+        "a failed synchronized commit must not suppress the next visibility command"
+    );
+}
+
+#[tokio::test]
+async fn composer_and_spinner_redraws_keep_cursor_hidden_until_anchored() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(80, 12));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    for text in ["", "x", ""] {
+        ui.textarea = textarea_with_text(text);
+        draw_fullscreen_frame(&mut terminal, false, |frame| {
+            app.render_fullscreen(frame, &mut ui)
+        })
+        .expect("draw composer transition");
+        let input = ui.last_composer_input_area.expect("composer input area");
+        let expected_x = input.x.saturating_add(text.len() as u16);
+        let events = terminal.backend_mut().inner_mut().take_semantic_events();
+        assert_flicker_free_cursor_frame(&events, Position::new(expected_x, input.y));
+    }
+
+    attach_no_steer_running(&app, &mut ui);
+    let mut spinner_frames = Vec::new();
+    for elapsed in [Duration::ZERO, Duration::from_millis(120)] {
+        ui.running_elapsed_override = Some(elapsed);
+        draw_fullscreen_frame(&mut terminal, false, |frame| {
+            app.render_fullscreen(frame, &mut ui)
+        })
+        .expect("draw spinner frame");
+        let input = ui.last_composer_input_area.expect("composer input area");
+        let events = terminal.backend_mut().inner_mut().take_semantic_events();
+        assert_flicker_free_cursor_frame(&events, Position::new(input.x, input.y));
+        spinner_frames.push(buffer_text(terminal.backend().inner().inner.buffer()));
+    }
+    assert!(spinner_frames[0].contains('⠋'));
+    assert!(spinner_frames[1].contains('⠙'));
+
+    if let Some(running) = ui.running.take() {
+        running.task.abort();
+    }
+}
+
+#[tokio::test]
+async fn diff_overlay_suppresses_the_composer_cursor_anchor() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let backend = StableCursorBackend::hidden(RecordingBackend::new(80, 12));
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("initial composer frame");
+    terminal.backend_mut().inner_mut().take_semantic_events();
+
+    ui.diff_overlay = Some(DiffOverlay::from_lines(vec![Line::from("diff")]));
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("diff overlay frame");
+
+    let events = terminal.backend_mut().inner_mut().take_semantic_events();
+    assert!(events.contains(&FullscreenBackendEvent::HideCursor));
+    assert!(!events.contains(&FullscreenBackendEvent::ShowCursor));
+}
 #[tokio::test]
 pub(crate) async fn tui_mouse_capture_avoids_any_motion_tracking() {
     assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1000h"));
@@ -48,6 +391,8 @@ pub(crate) async fn fullscreen_enter_commands_enable_clean_alternate_screen() {
     assert!(!output.contains("?1007l"));
     assert!(output.contains("\x1b[2J"));
     assert!(output.contains("\x1b[1;1H"));
+    assert!(output.contains("\x1b[6 q"));
+    assert!(output.ends_with("\x1b[?25l"));
 }
 
 #[tokio::test]
@@ -55,11 +400,15 @@ pub(crate) async fn fullscreen_exit_commands_restore_terminal_modes() {
     let mut output = Vec::new();
     write_fullscreen_exit_commands(&mut output).expect("exit commands");
     let output = String::from_utf8(output).expect("utf8");
+    assert!(output.starts_with("\x1b[?2026l"));
     assert!(output.contains("?1007l"));
     assert!(output.contains("?1006l"));
     assert!(output.contains("?1002l"));
     assert!(output.contains("?1000l"));
     assert!(output.contains("?1049l"));
+    let default_cursor = output.rfind("\x1b[0 q").expect("default cursor shape");
+    let show_cursor = output.rfind("?25h").expect("show cursor");
+    assert!(default_cursor < show_cursor);
     assert!(output.contains("?25h"));
 }
 
@@ -294,9 +643,10 @@ pub(crate) async fn sidebar_render_clears_stale_terminal_cells() {
         })
         .expect("pollute frame");
 
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer().clone();
     let text = buffer_text(&buffer);
     let sidebar_x = 120 - 42;

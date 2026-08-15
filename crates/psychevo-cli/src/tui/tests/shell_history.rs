@@ -1,10 +1,12 @@
+#[cfg(unix)]
+use crate::tui::tests::fixtures::drain_fullscreen_until_idle;
 use crate::tui::tests::fixtures::{
-    attach_pending_framework_agent_running_for_session, buffer_text, drain_fullscreen_until_idle,
-    draw_fullscreen_for_test, test_app, test_shell_running_control,
+    attach_pending_framework_agent_running_for_session, buffer_text, draw_fullscreen_for_test,
+    test_app, test_shell_running_control,
 };
-use crate::tui::tests::{
-    insert_tui_message, runtime_turn_event, start_thread_fixture, test_app_with_models,
-};
+#[cfg(unix)]
+use crate::tui::tests::test_app_with_models;
+use crate::tui::tests::{insert_tui_message, runtime_turn_event, start_thread_fixture};
 use crate::tui::{
     ComposerHistoryKind, CrosstermEvent, CursorMove, FullscreenUi, KeyCode, KeyEvent, KeyModifiers,
     Modifier, PresentedShellEvent, RunningTask, RunningTurn, RunningTurnEvents, ShellCommandEvent,
@@ -386,6 +388,7 @@ pub(crate) async fn pasted_bang_input_imports_shell_mode_without_literal_bang() 
     assert_eq!(textarea_text(&ui.textarea), "printf pasted");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
     let temp = tempdir().expect("temp");
@@ -461,6 +464,7 @@ pub(crate) async fn user_shell_transcript_row_uses_prompt_surface_command_line()
     assert!(text.contains("└ feeds"), "{text}");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
     let temp = tempdir().expect("temp");
@@ -501,6 +505,7 @@ pub(crate) async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_e
     assert!(!app.had_error);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts_auxiliary_task()
  {
@@ -640,6 +645,7 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn persisted_user_shell_history_reloads_as_ran_evidence() {
     let temp = tempdir().expect("temp");

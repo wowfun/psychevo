@@ -1,3 +1,4 @@
+use crate::tui::app_loop::draw_fullscreen_frame;
 use crate::tui::{
     AuxiliaryAgentTask, BTreeMap, BottomRowStyle, BottomSelectionPanel, BottomSelectionRow,
     BottomSelectionValue, Color, EffectiveSlashConfig, FocusMode, FullscreenUi, GatewayApplication,
@@ -30,9 +31,10 @@ pub(crate) fn draw_fullscreen_for_test(
 ) -> ratatui::buffer::Buffer {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, ui)
+    })
+    .expect("draw");
     terminal.backend().buffer().clone()
 }
 
@@ -128,9 +130,10 @@ pub(crate) fn draw_fullscreen_with_cursor_for_test(
 ) -> (ratatui::buffer::Buffer, (u16, u16)) {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, ui)
+    })
+    .expect("draw");
     let cursor = {
         let Position { x, y } = terminal
             .backend_mut()
@@ -141,6 +144,7 @@ pub(crate) fn draw_fullscreen_with_cursor_for_test(
     (terminal.backend().buffer().clone(), cursor)
 }
 
+#[cfg(unix)]
 pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut FullscreenUi<'_>) {
     for _ in 0..200 {
         app.drain_fullscreen_events(ui).await.expect("drain events");
@@ -979,9 +983,10 @@ pub(crate) fn assert_tui_snapshot(
 ) {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("terminal");
-    terminal
-        .draw(|frame| app.render_fullscreen(frame, &mut ui))
-        .expect("draw");
+    draw_fullscreen_frame(&mut terminal, false, |frame| {
+        app.render_fullscreen(frame, &mut ui)
+    })
+    .expect("draw");
     let buffer = terminal.backend().buffer();
     let text = buffer_text(buffer);
     let styles = buffer_style_text(buffer);

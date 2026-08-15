@@ -338,6 +338,7 @@ impl TuiApp {
             let running_session_ids =
                 ui.background_running_session_ids(self.current_session.as_deref());
             let activity_elapsed = ui.bottom_panel_activity_elapsed();
+            let cursor_enabled = ui.diff_overlay.is_none();
             if let Some(panel) = &mut ui.bottom_panel {
                 if let BottomPanel::Sessions(selection) = panel {
                     selection.running_session_ids = running_session_ids;
@@ -348,6 +349,7 @@ impl TuiApp {
                     panel,
                     &mut ui.last_bottom_panel_areas,
                     activity_elapsed,
+                    cursor_enabled,
                 );
             }
             render_status(frame, vertical[2], self, ui);

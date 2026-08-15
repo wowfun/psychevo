@@ -62,6 +62,27 @@ Empty input uses one visible row. Non-empty input grows from explicit logical
 lines and terminal soft-wrapped rows, and remains capped at six visible rows
 before the textarea scrolls internally.
 
+Fullscreen mode starts with the hardware cursor hidden and selects a steady
+thin bar for editable surfaces, restoring the user's default cursor shape on
+shutdown. Every frame commit is enclosed in a synchronized terminal update.
+Rendering selects at most one active input cursor anchor; after painting
+completes, the terminal moves the cursor to that anchor and atomically publishes
+the completed update. Renderers nominate that anchor through Ratatui's single
+frame cursor contract; they do not propagate or merge a parallel cursor return
+channel through the fullscreen render tree. Cursor visibility commands are
+emitted only when transitioning between an active
+editor and no active editor: consecutive editable frames keep the cursor shown
+without reissuing hide/show, while frames without an active editor keep it
+hidden. A cursor visibility transition is queued inside the synchronized update
+and the end marker performs the frame's single flush; visibility state becomes
+confirmed only after that commit succeeds, so a failed commit is retried by the
+next frame. This ordering applies to the composer, pending-input editor, and clarify
+text inputs, including while foreground work is running, so incremental redraws
+cannot expose the cursor at spinner or other changed cells or restart its blink
+cadence on every passive frame, while IME candidate windows remain anchored to
+the active editor. Terminal recovery must end any pending synchronized update
+before restoring normal modes and showing the cursor.
+
 The bottom status line is compact and must degrade without overlap at narrow
 widths. While foreground work is running, it appends the shared activity marker
 and elapsed/interrupt hint to the stable status line instead of replacing

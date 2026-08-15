@@ -1,7 +1,8 @@
 use super::constants::{FULLSCREEN_EVENT_POLL_INTERVAL, MAX_READY_EVENTS_PER_FRAME};
 use crate::tui::app_loop::{
-    fullscreen_has_passive_motion, mouse_event_needs_redraw, normalize_bracketed_paste_text,
-    passive_redraw_due, schedule_next_passive_redraw,
+    StableCursorBackend, draw_fullscreen_frame, fullscreen_has_passive_motion,
+    mouse_event_needs_redraw, normalize_bracketed_paste_text, passive_redraw_due,
+    schedule_next_passive_redraw,
 };
 use crate::tui::ui_types::FocusMode;
 use crate::tui::{
@@ -36,7 +37,7 @@ impl TuiApp {
     pub(crate) async fn run_fullscreen_loop(&mut self, initial_prompt: String) -> Result<()> {
         let mut stdout = io::stdout();
         let mut terminal_guard = FullscreenTerminalGuard::enter(&mut stdout)?;
-        let backend = CrosstermBackend::new(stdout);
+        let backend = StableCursorBackend::hidden(CrosstermBackend::new(stdout));
         let mut terminal = Terminal::new(backend)?;
         let result = self
             .run_fullscreen_loop_inner(&mut terminal, &mut terminal_guard, initial_prompt)
@@ -51,7 +52,7 @@ impl TuiApp {
 
     pub(crate) async fn run_fullscreen_loop_inner(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        terminal: &mut Terminal<StableCursorBackend<CrosstermBackend<io::Stdout>>>,
         terminal_guard: &mut FullscreenTerminalGuard,
         initial_prompt: String,
     ) -> Result<()> {
@@ -73,12 +74,14 @@ impl TuiApp {
             loop {
                 needs_draw |= self.drain_fullscreen_events(&mut ui).await?;
                 terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
-                if ui.take_terminal_clear_request() {
-                    terminal.clear()?;
+                let clear_requested = ui.take_terminal_clear_request();
+                if clear_requested {
                     needs_draw = true;
                 }
                 if needs_draw {
-                    terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
+                    draw_fullscreen_frame(terminal, clear_requested, |frame| {
+                        self.render_fullscreen(frame, &mut ui)
+                    })?;
                     let send_feedback_ready = ui.foreground_turn_active()
                         && ui.visible_turn_started.is_some()
                         && ui

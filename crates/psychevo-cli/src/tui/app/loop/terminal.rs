@@ -3,9 +3,19 @@ use crate::tui::{
     short_session,
 };
 use crossterm::{
+    cursor::{Hide, Show},
     event::{DisableBracketedPaste, EnableBracketedPaste, MouseEventKind},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    execute, queue,
+    terminal::{
+        BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode,
+    },
+};
+use ratatui::{
+    Frame, Terminal,
+    backend::{Backend, ClearType, CrosstermBackend, WindowSize},
+    buffer::Cell,
+    layout::{Position, Size},
 };
 use std::{
     io::{self, Write},
@@ -147,6 +157,217 @@ pub(crate) fn passive_redraw_due(now: Instant, next_due: &mut Instant) -> bool {
     true
 }
 
+pub(crate) trait FullscreenFrameBackend: Backend {
+    fn begin_synchronized_update(&mut self) -> std::result::Result<(), Self::Error>;
+
+    fn queue_cursor_visibility(&mut self, visible: bool) -> std::result::Result<(), Self::Error> {
+        if visible {
+            Backend::show_cursor(self)
+        } else {
+            Backend::hide_cursor(self)
+        }
+    }
+
+    fn end_synchronized_update(&mut self) -> std::result::Result<(), Self::Error>;
+}
+
+impl<W: Write> FullscreenFrameBackend for CrosstermBackend<W> {
+    fn begin_synchronized_update(&mut self) -> io::Result<()> {
+        queue!(self, BeginSynchronizedUpdate)
+    }
+
+    fn queue_cursor_visibility(&mut self, visible: bool) -> io::Result<()> {
+        if visible {
+            queue!(self, Show)
+        } else {
+            queue!(self, Hide)
+        }
+    }
+
+    fn end_synchronized_update(&mut self) -> io::Result<()> {
+        execute!(self, EndSynchronizedUpdate)
+    }
+}
+
+pub(crate) struct StableCursorBackend<B> {
+    inner: B,
+    cursor_visible: bool,
+    synchronized_update: bool,
+    requested_cursor_visibility: Option<bool>,
+}
+
+impl<B> StableCursorBackend<B> {
+    pub(crate) const fn hidden(inner: B) -> Self {
+        Self {
+            inner,
+            cursor_visible: false,
+            synchronized_update: false,
+            requested_cursor_visibility: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn inner(&self) -> &B {
+        &self.inner
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn inner_mut(&mut self) -> &mut B {
+        &mut self.inner
+    }
+
+    fn apply_cursor_visibility(&mut self, visible: bool) -> Result<(), B::Error>
+    where
+        B: Backend,
+    {
+        if self.cursor_visible == visible {
+            return Ok(());
+        }
+        if visible {
+            self.inner.show_cursor()?;
+        } else {
+            self.inner.hide_cursor()?;
+        }
+        self.cursor_visible = visible;
+        Ok(())
+    }
+}
+
+impl<B: Write> Write for StableCursorBackend<B> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<B: Backend> Backend for StableCursorBackend<B> {
+    type Error = B::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        self.inner.draw(content)
+    }
+
+    fn append_lines(&mut self, n: u16) -> Result<(), Self::Error> {
+        self.inner.append_lines(n)
+    }
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        if self.synchronized_update {
+            self.requested_cursor_visibility = Some(false);
+            return Ok(());
+        }
+        self.apply_cursor_visibility(false)
+    }
+
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        if self.synchronized_update {
+            self.requested_cursor_visibility = Some(true);
+            return Ok(());
+        }
+        self.apply_cursor_visibility(true)
+    }
+
+    fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear_type)
+    }
+
+    fn size(&self) -> Result<Size, Self::Error> {
+        self.inner.size()
+    }
+
+    fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+        self.inner.window_size()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush()
+    }
+}
+
+impl<B: FullscreenFrameBackend> FullscreenFrameBackend for StableCursorBackend<B> {
+    fn begin_synchronized_update(&mut self) -> Result<(), Self::Error> {
+        self.inner.begin_synchronized_update()?;
+        self.synchronized_update = true;
+        self.requested_cursor_visibility = None;
+        Ok(())
+    }
+
+    fn end_synchronized_update(&mut self) -> Result<(), Self::Error> {
+        let requested_visibility = self.requested_cursor_visibility.take();
+        let visibility_result = match requested_visibility {
+            Some(visible) if self.cursor_visible != visible => {
+                self.inner.queue_cursor_visibility(visible)
+            }
+            _ => Ok(()),
+        };
+        let end_result = self.inner.end_synchronized_update();
+        self.synchronized_update = false;
+        match (visibility_result, end_result) {
+            (Err(err), _) => Err(err),
+            (Ok(()), Err(err)) => Err(err),
+            (Ok(()), Ok(())) => {
+                if let Some(visible) = requested_visibility {
+                    self.cursor_visible = visible;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl FullscreenFrameBackend for ratatui::backend::TestBackend {
+    fn begin_synchronized_update(&mut self) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn end_synchronized_update(&mut self) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+pub(crate) fn draw_fullscreen_frame<B, F>(
+    terminal: &mut Terminal<B>,
+    clear_requested: bool,
+    render: F,
+) -> std::result::Result<(), B::Error>
+where
+    B: FullscreenFrameBackend,
+    F: FnOnce(&mut Frame<'_>),
+{
+    terminal.backend_mut().begin_synchronized_update()?;
+    let frame_result = (|| {
+        if clear_requested {
+            terminal.clear()?;
+        }
+        terminal.draw(render)?;
+        Ok(())
+    })();
+    let end_result = terminal.backend_mut().end_synchronized_update();
+    match (frame_result, end_result) {
+        (Err(err), _) => Err(err),
+        (Ok(()), result) => result,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EnableTuiMouseCapture;
 
@@ -241,15 +462,23 @@ pub(crate) fn write_fullscreen_enter_commands(out: &mut impl Write) -> io::Resul
     )?;
     execute!(out, EnableBracketedPaste)?;
     execute!(out, EnableTuiMouseCapture)?;
+    execute!(out, crossterm::cursor::SetCursorStyle::SteadyBar)?;
+    execute!(out, crossterm::cursor::Hide)?;
     Ok(())
 }
 
 pub(crate) fn write_fullscreen_exit_commands(out: &mut impl Write) -> io::Result<()> {
-    let mut first_error = execute!(out, DisableBracketedPaste).err();
+    let mut first_error = execute!(out, EndSynchronizedUpdate).err();
+    if let Err(err) = execute!(out, DisableBracketedPaste) {
+        first_error.get_or_insert(err);
+    }
     if let Err(err) = execute!(out, DisableTuiMouseCapture) {
         first_error.get_or_insert(err);
     }
     if let Err(err) = execute!(out, LeaveAlternateScreen) {
+        first_error.get_or_insert(err);
+    }
+    if let Err(err) = execute!(out, crossterm::cursor::SetCursorStyle::DefaultUserShape) {
         first_error.get_or_insert(err);
     }
     if let Err(err) = execute!(out, crossterm::cursor::Show) {

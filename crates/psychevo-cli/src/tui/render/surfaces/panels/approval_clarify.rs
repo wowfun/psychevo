@@ -16,6 +16,7 @@ pub(crate) fn render_bottom_panel(
     panel: &mut BottomPanel,
     row_areas: &mut Vec<(usize, Rect)>,
     activity_elapsed: Duration,
+    cursor_enabled: bool,
 ) {
     let theme = tui_theme();
     row_areas.clear();
@@ -32,7 +33,7 @@ pub(crate) fn render_bottom_panel(
         return;
     }
     if let BottomPanel::Clarify(panel) = panel {
-        render_clarify_panel(frame, area, panel, row_areas);
+        render_clarify_panel(frame, area, panel, row_areas, cursor_enabled);
         return;
     }
     if let BottomPanel::AgentRunPrompt(panel) = panel {
@@ -345,6 +346,7 @@ pub(crate) fn render_clarify_panel(
     area: Rect,
     panel: &mut ClarifyPanel,
     row_areas: &mut Vec<(usize, Rect)>,
+    cursor_enabled: bool,
 ) {
     let theme = tui_theme();
     frame.render_widget(Block::default().style(theme.menu_style()), area);
@@ -488,7 +490,8 @@ pub(crate) fn render_clarify_panel(
     )));
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
-    if let Some((x, y)) = cursor_position
+    if cursor_enabled
+        && let Some((x, y)) = cursor_position
         && rect_contains(inner, x, y)
     {
         frame.set_cursor_position((x, y));

@@ -34,7 +34,9 @@ Define acceptance expectations and validation scenarios for the concrete
   a transcript turn is being submitted.
 - Deterministic terminal visual captures keep running-agent, clarification,
   permission, and tool states observable without depending on real provider
-  latency. The running-agent proof is captured from `/agents` while the child
+  latency. Animated fixture timestamps stay at the beginning of a spinner frame
+  with a complete frame interval of scheduling margin; snapshots must not sit
+  near a time-derived frame boundary. The running-agent proof is captured from `/agents` while the child
   is still active; a filename that says `agents-running` cannot be produced
   from the later empty Running tab after the parent has completed.
 
@@ -106,8 +108,9 @@ Manual real-provider validation is opt-in only.
   aggregate only the visible branch, preserve partial/unavailable state, and
   compute cache read percentage against context input including cache writes.
 - Terminal palette fallback, adaptive prompt/composer surfaces, passive redraw
-  cadence, active elapsed labels, deterministic reduced-motion behavior, and
-  VHS capture of running/permission/clarify/tool states.
+  cadence, active elapsed labels, deterministic reduced-motion behavior,
+  hardware-cursor commit ordering across composer and spinner redraws, and VHS
+  capture of running/permission/clarify/tool states.
 - Composer behavior for submit, newline insertion, history recall, shell mode,
   local selection, bracketed paste, file/image completion, transcript focus,
   mouse routing, clipboard fallback, and contextual help.
