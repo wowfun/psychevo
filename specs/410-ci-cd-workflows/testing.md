@@ -112,8 +112,8 @@ cargo xtask ci run --profile rust-broad
   requests run all four in parallel. The always-run `CI Gate` verifies that
   selected jobs succeeded and unselected jobs were skipped.
 - Native hosted coverage uses one canonical runner-owned temporary root on
-  Windows and macOS, and compiled prompt templates retain LF bytes on every
-  checkout.
+  Windows and macOS, and byte-verified runtime assets such as prompt templates
+  and managed dependency locks retain LF bytes on every checkout.
 - The critical first-Turn browser journey creates its own Git repository and
   named branch, so the branch projection is independent of whether the parent
   checkout is attached or detached.

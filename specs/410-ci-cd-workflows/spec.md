@@ -268,7 +268,10 @@ Initial profiles:
   inside the product deadline, because coverage instrumentation may delay
   test-worker scheduling without changing the process-tree contract under
   test. Functional concurrency assertions remain active under instrumentation,
-  but wall-clock performance ceilings do not.
+  but wall-clock performance ceilings do not. A deadline fixture may use a
+  wider configured deadline only in the instrumented run so its observation
+  point is reached; the ordinary deterministic test retains the nominal
+  product deadline and cleanup ceiling.
   Native C dependencies in this profile compile with a fixed low optimization
   level (`CFLAGS=-O1`): this avoids host-GCC pathologies in large bundled C
   sources without optimizing the instrumented Rust code or depending on the

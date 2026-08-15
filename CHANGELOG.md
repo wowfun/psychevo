@@ -3,9 +3,9 @@
 ## 2026-08-16
 
 - Restored cross-platform pull-request validation by isolating hosted native
-  paths and prompt assets, fixing Linux and macOS compilation, and making
-  browser and deadline fixtures independent of checkout and instrumentation
-  timing.
+  paths and byte-verified runtime assets, fixing Linux and macOS compilation,
+  and making browser and deadline fixtures independent of checkout and
+  instrumentation timing.
 - Kept Unix ACP relative terminal launches bound to their captured directory
   objects without relying on platform-specific file-descriptor paths.
 
