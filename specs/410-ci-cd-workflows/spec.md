@@ -77,9 +77,11 @@ state transitions.
 Hosted native tests must bind each host's temporary-file APIs to one
 runner-owned canonical path spelling. A Windows 8.3 user-profile alias and the
 macOS `/var` to `/private/var` alias must not make the same temporary directory
-appear as two different Workspace identities. Repository text consumed as
-compiled or runtime data must likewise declare its semantic line ending at the
-checkout boundary; prompt templates use LF on every host.
+appear as two different Workspace identities. Windows derives the long system
+temporary path from the runner account's local application-data directory;
+macOS binds `TMPDIR` to the canonical Actions temporary root. Repository text
+consumed as compiled or runtime data must likewise declare its semantic line
+ending at the checkout boundary; prompt templates use LF on every host.
 Repository Cargo configuration gives Rust test worker threads a host-neutral
 8 MiB minimum stack while preserving an explicit caller override. This keeps
 large async Gateway contract tests independent of the native Windows default
@@ -260,10 +262,13 @@ Initial profiles:
   execute their functional and persistence invariants, while the uninstrumented
   `non-functional` profile remains the sole owner of latency budgets.
   Functional deadline fixtures establish any pre-timeout observation with an
-  immediate local primitive or explicit barrier. They must not require a new
-  language runtime to start inside the product deadline, because coverage
-  instrumentation may delay test-worker scheduling without changing the
-  process-tree contract under test.
+  immediate local primitive or explicit barrier. A descendant-pipe fixture has
+  the direct shell emit that observation and exit while only its descendant
+  retains the pipe. Fixtures must not require a new language runtime to start
+  inside the product deadline, because coverage instrumentation may delay
+  test-worker scheduling without changing the process-tree contract under
+  test. Functional concurrency assertions remain active under instrumentation,
+  but wall-clock performance ceilings do not.
   Native C dependencies in this profile compile with a fixed low optimization
   level (`CFLAGS=-O1`): this avoids host-GCC pathologies in large bundled C
   sources without optimizing the instrumented Rust code or depending on the

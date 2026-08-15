@@ -981,7 +981,10 @@ mod tests {
 
         let status = inspect_managed_codex_acp(temp.path(), HostPlatform::Posix);
 
-        assert!(matches!(status, ManagedCodexAcpStatus::Ready(_)));
+        assert!(
+            matches!(&status, ManagedCodexAcpStatus::Ready(_)),
+            "{status:?}"
+        );
     }
 
     #[test]
@@ -989,10 +992,11 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp");
         write_fake_install(temp.path(), CODEX_ACP_VERSION, HostPlatform::Windows);
 
-        assert!(matches!(
-            inspect_managed_codex_acp(temp.path(), HostPlatform::Windows),
-            ManagedCodexAcpStatus::Ready(_)
-        ));
+        let status = inspect_managed_codex_acp(temp.path(), HostPlatform::Windows);
+        assert!(
+            matches!(&status, ManagedCodexAcpStatus::Ready(_)),
+            "{status:?}"
+        );
     }
 
     #[test]
@@ -1179,10 +1183,11 @@ mod tests {
             .expect_err("invalid promoted install");
 
         assert!(error.to_string().contains("@9.9.9"), "{error}");
-        assert!(matches!(
-            inspect_managed_codex_acp(temp.path(), HostPlatform::Posix),
-            ManagedCodexAcpStatus::Ready(_)
-        ));
+        let status = inspect_managed_codex_acp(temp.path(), HostPlatform::Posix);
+        assert!(
+            matches!(&status, ManagedCodexAcpStatus::Ready(_)),
+            "{status:?}"
+        );
         assert!(!backup.exists());
     }
 

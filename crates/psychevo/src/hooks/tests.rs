@@ -542,10 +542,12 @@ async fn hook_runtime_caps_matching_handlers_at_eight() {
         elapsed >= Duration::from_millis(1800),
         "nine one-second handlers exceeded the eight-handler cap too quickly: {elapsed:?}"
     );
-    assert!(
-        elapsed < Duration::from_secs(4),
-        "handlers did not retain bounded concurrency: {elapsed:?}"
-    );
+    if std::env::var_os("PSYCHEVO_INSTRUMENTED_COVERAGE").is_none() {
+        assert!(
+            elapsed < Duration::from_secs(4),
+            "handlers did not retain bounded concurrency: {elapsed:?}"
+        );
+    }
 }
 
 #[test]
@@ -630,7 +632,7 @@ async fn command_deadline_terminates_descendant_that_holds_output_open() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"hooks": [{
         "type": "command",
-        "command": "printf 'ready\\n'; sleep 30",
+        "command": "sleep 30 & printf 'ready\\n'",
         "timeout": 1
     }]}]});
     let started = Instant::now();

@@ -410,8 +410,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          "TEMP=${{ runner.temp }}" >> $env:GITHUB_ENV
-          "TMP=${{ runner.temp }}" >> $env:GITHUB_ENV
+          $localAppData = [Environment]::GetFolderPath(
+            [Environment+SpecialFolder]::LocalApplicationData
+          )
+          $canonicalTemp = Join-Path $localAppData 'Temp'
+          if (-not (Test-Path -LiteralPath $canonicalTemp -PathType Container)) {
+            throw "Windows temporary directory is unavailable: $canonicalTemp"
+          }
+          "TEMP=$canonicalTemp" >> $env:GITHUB_ENV
+          "TMP=$canonicalTemp" >> $env:GITHUB_ENV
 
       - name: Bind canonical macOS temporary directory
         if: runner.os == 'macOS'

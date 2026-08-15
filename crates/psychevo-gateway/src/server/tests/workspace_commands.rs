@@ -480,9 +480,15 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         root_result["parent"].as_str(),
         Some(temp.path().to_string_lossy().as_ref())
     );
-    assert_eq!(
-        root_result["roots"][0]["path"],
-        json!(root.ancestors().last().expect("filesystem root"))
+    let filesystem_root = json!(root.ancestors().last().expect("filesystem root"));
+    assert!(
+        root_result["roots"]
+            .as_array()
+            .expect("filesystem roots")
+            .iter()
+            .any(|entry| entry["path"] == filesystem_root),
+        "current filesystem root is absent from host roots: {}",
+        root_result["roots"]
     );
     let root_folders = root_result["folders"].as_array().expect("folder array");
     assert!(root_folders.iter().any(|folder| folder["name"] == ".local"));
