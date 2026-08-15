@@ -319,11 +319,19 @@ a custom OpenAI-compatible provider. Z.AI defaults to the general OpenAI-
 compatible endpoint while offering its Coding Plan endpoint as a base URL
 shortcut. Xiaomi Token Plan prompts for the official CN, SGP, or AMS OpenAI-
 compatible regional URL, defaulting to CN, and persists the canonical
-`xiaomi-token-plan` provider id. Setup shows the recommended API-key environment
-variable name and uses it by default; users edit the env var name only after
-explicitly choosing to change it, and raw API keys are accepted only through the
-following hidden API-key prompt. After credentials are captured or referenced,
-setup attempts one provider `/models` fetch; on success users may select a
+`xiaomi-token-plan` provider id. When none of a provider's recommended API-key
+environment variables contains a credential, setup silently selects the
+canonical default name and creates its `.env` entry from the following hidden
+API-key input. When a recommended variable already contains a credential,
+setup asks whether to use it with yes as the default; answering no enables a
+custom variable name. Enter at the hidden API-key prompt reuses an existing
+credential. Without an existing credential, empty hidden input stops setup
+before provider configuration or a `/models` fetch instead of printing a
+validation message and prompting again. The stop error tells the user to rerun
+`pevo setup`, or to use `pevo auth setup ... --api-key-stdin` for an explicit
+non-interactive retry. Hidden input ignores key-release
+events, including an Enter release left by the preceding line prompt, and
+submits only on an Enter press or repeat. On fetch success users may select a
 numbered fetched model or choose the custom model-id row, and on failure or an
 empty catalog setup falls back to custom model-id entry.
 
